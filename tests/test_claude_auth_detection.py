@@ -8,8 +8,6 @@ into ``invoke_claude`` / ``invoke_claude_text``. Root cause context is in
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -19,7 +17,6 @@ from portfolio.claude_gate import (
     detect_auth_failure,
     record_critical_error,
 )
-
 
 # ---------------------------------------------------------------------------
 # detect_auth_failure — pure function

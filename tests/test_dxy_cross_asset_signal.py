@@ -152,6 +152,7 @@ class TestMacroContextIntradayDxy:
     @patch("yfinance.download")
     def test_primary_source_used_when_available(self, mock_dl):
         import pandas as pd
+
         from portfolio.macro_context import _fetch_dxy_intraday
         # Generate 5 hours of DX-Y.NYB bars
         idx = pd.date_range("2026-04-13 09:00", periods=5, freq="h")
@@ -170,6 +171,7 @@ class TestMacroContextIntradayDxy:
     @patch("yfinance.download")
     def test_falls_back_to_eurusd_synth_on_empty(self, mock_dl):
         import pandas as pd
+
         from portfolio.macro_context import _fetch_dxy_intraday
 
         idx = pd.date_range("2026-04-13 09:00", periods=5, freq="h")
@@ -188,6 +190,7 @@ class TestMacroContextIntradayDxy:
     @patch("yfinance.download")
     def test_all_sources_fail_returns_none(self, mock_dl):
         import pandas as pd
+
         from portfolio.macro_context import _fetch_dxy_intraday
         mock_dl.return_value = pd.DataFrame()  # both DX-Y.NYB and EURUSD empty
         result = _fetch_dxy_intraday()

@@ -4,7 +4,6 @@ Verifies that the overconfidence problem (60-90% reported → ~50% actual)
 is addressed by compressing high-confidence predictions.
 """
 
-import pytest
 
 from portfolio.signal_engine import apply_confidence_penalties
 

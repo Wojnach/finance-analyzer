@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from portfolio.accuracy_stats import blend_accuracy_data
 from portfolio.signal_engine import _weighted_consensus
 

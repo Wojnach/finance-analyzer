@@ -23,6 +23,7 @@ One-shot (single cycle, no sleep):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import logging
@@ -62,55 +63,61 @@ def _now_iso() -> str:
 # ---------------------------------------------------------------------------
 # Singleton lock (matches metals_loop pattern)
 # ---------------------------------------------------------------------------
+def _pid_alive(pid: int) -> bool:
+    """Check if *pid* is running. Windows: tasklist; POSIX: kill(0)."""
+    try:
+        if os.name == "nt":
+            import subprocess
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return str(pid) in out.stdout
+        os.kill(pid, 0)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def acquire_singleton_lock(lock_path: str = SINGLETON_LOCK_FILE) -> Any:
     """Try to grab a per-process lock. Returns lock handle or None on conflict.
 
-    Mirrors metals_loop.acquire_singleton_lock — file-based on Windows since
-    fcntl/flock isn't available, falls back to PID-stale-check.
+    Uses O_CREAT|O_EXCL for atomic creation (no TOCTOU race). On stale lock
+    (dead PID), removes and retries once.
     """
     Path(os.path.dirname(lock_path) or ".").mkdir(parents=True, exist_ok=True)
-    if os.path.exists(lock_path):
-        try:
-            with open(lock_path) as f:
-                old_pid = int(f.read().strip() or "0")
-        except (ValueError, OSError):
-            old_pid = 0
 
-        if old_pid > 0:
-            # Check if pid still exists
-            try:
-                if os.name == "nt":
-                    import subprocess
-                    out = subprocess.run(
-                        ["tasklist", "/FI", f"PID eq {old_pid}"],
-                        capture_output=True, text=True, timeout=5,
-                    )
-                    alive = str(old_pid) in out.stdout
-                else:
-                    os.kill(old_pid, 0)
-                    alive = True
-            except (OSError, subprocess.SubprocessError):
-                alive = False
-            if alive:
+    for attempt in range(2):
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return lock_path
+        except FileExistsError:
+            # Lock file exists — check if owner PID is still alive
+            old_pid = 0
+            with contextlib.suppress(ValueError, OSError), open(lock_path) as f:
+                old_pid = int(f.read().strip() or "0")
+            if old_pid > 0 and _pid_alive(old_pid):
                 logger.warning("singleton lock held by pid %d", old_pid)
                 return None
-
-    try:
-        with open(lock_path, "w") as f:
-            f.write(str(os.getpid()))
-        return lock_path
-    except OSError as exc:
-        logger.warning("acquire_singleton_lock: %s", exc)
-        return None
+            # Stale lock — remove and retry once
+            if attempt == 0:
+                with contextlib.suppress(OSError):
+                    os.remove(lock_path)
+                continue
+            return None
+        except OSError as exc:
+            logger.warning("acquire_singleton_lock: %s", exc)
+            return None
+    return None
 
 
 def release_singleton_lock(lock_path: str | None) -> None:
     if not lock_path:
         return
-    try:
+    with contextlib.suppress(OSError):
         os.remove(lock_path)
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +196,9 @@ def fast_tick_check(reference_prices: dict[str, dict[str, float]],
                      "change_pct": round(change_pct, 3)}
             alerts[ticker] = alert
             if notify:
-                try:
+                with contextlib.suppress(Exception):
                     notify(f"⚠️ {ticker} dip {change_pct:.2f}% "
                            f"(ref={ref_price:.2f} -> {price:.2f})")
-                except Exception:  # noqa: BLE001
-                    pass
             # Reset reference so we don't spam the same dip
             reference_prices[ticker] = {"price": price, "ts": now}
         elif (change_pct >= cfg.FAST_TICK_FLUSH_PCT
@@ -203,11 +208,9 @@ def fast_tick_check(reference_prices: dict[str, dict[str, float]],
                      "change_pct": round(change_pct, 3)}
             alerts[ticker] = alert
             if notify:
-                try:
+                with contextlib.suppress(Exception):
                     notify(f"🚀 {ticker} flush +{change_pct:.2f}% "
                            f"in {(now-ref_ts):.0f}s")
-                except Exception:  # noqa: BLE001
-                    pass
             reference_prices[ticker] = {"price": price, "ts": now}
     return alerts
 
@@ -225,7 +228,7 @@ def run_one_cycle(trader: CryptoSwingTrader,
     summary = trader.evaluate_and_execute(prices, signal_data)
 
     # Track value history for the dashboard
-    try:
+    with contextlib.suppress(Exception):
         from portfolio.file_utils import atomic_append_jsonl
         atomic_append_jsonl(cfg.VALUE_HISTORY_LOG, {
             "ts": _now_iso(),
@@ -233,8 +236,6 @@ def run_one_cycle(trader: CryptoSwingTrader,
             "n_positions": len(trader.state.get("positions", {})),
             "prices": prices,
         })
-    except Exception:  # noqa: BLE001
-        pass
 
     return {"ok": True, "summary": summary, "prices": prices,
             "n_positions": len(trader.state.get("positions", {}))}
@@ -254,10 +255,8 @@ def run_loop(notify: Any = None) -> None:
 
     try:
         signal.signal(signal.SIGINT, _sigterm)
-        try:
+        with contextlib.suppress(AttributeError, ValueError):
             signal.signal(signal.SIGTERM, _sigterm)
-        except (AttributeError, ValueError):
-            pass
 
         trader = CryptoSwingTrader(page=None, executor=None)
         logger.info("crypto_loop start. DRY_RUN=%s instruments=%s",
@@ -329,8 +328,8 @@ def main() -> int:
         snap = load_signal_snapshot()
         print(json.dumps({
             "prices": prices,
-            "n_signal_tickers": len((snap.get("per_ticker")
-                                     or snap.get("tickers") or {})),
+            "n_signal_tickers": len(snap.get("per_ticker")
+                                     or snap.get("tickers") or {}),
             "dry_run": cfg.DRY_RUN,
             "warrant_catalog_file": cfg.WARRANT_CATALOG_FILE,
             "state_file": cfg.STATE_FILE,

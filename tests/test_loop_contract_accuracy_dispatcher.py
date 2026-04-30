@@ -368,8 +368,8 @@ class TestVerifyAndActDispatchAfterTracker:
         from unittest.mock import patch
 
         from portfolio.loop_contract import (
-            CycleReport,
             ESCALATION_THRESHOLD,
+            CycleReport,
             ViolationTracker,
             verify_and_act,
         )

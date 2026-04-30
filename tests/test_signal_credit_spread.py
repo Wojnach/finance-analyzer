@@ -1,7 +1,6 @@
 """Tests for credit_spread signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.credit_spread import (
     _crisis_level_signal,

@@ -10,8 +10,6 @@ reviewers. Groups:
 
 from __future__ import annotations
 
-import pytest
-
 from portfolio.accuracy_stats import blend_accuracy_data
 from portfolio.signal_engine import (
     _count_active_voters_at_gate,

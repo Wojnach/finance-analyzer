@@ -13,7 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from portfolio.mstr_loop import config
 from portfolio.mstr_loop.state import (
-    BotState, Position, default_state, load_state, save_state,
+    BotState,
+    Position,
+    default_state,
+    load_state,
+    save_state,
 )
 
 

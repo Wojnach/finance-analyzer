@@ -1,7 +1,6 @@
 """Tests for realized_skewness signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.realized_skewness import compute_realized_skewness_signal
 

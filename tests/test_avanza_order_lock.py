@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
 import time
 from pathlib import Path
 
@@ -14,7 +13,6 @@ from portfolio.avanza_order_lock import (
     OrderLockBusyError,
     avanza_order_lock,
 )
-
 
 # Use a repo-local lock file for tests to avoid WSL/Windows tmp perms issues
 # (same class of issue seen in other test files using tmp_path). The lock
@@ -144,9 +142,8 @@ def test_exception_body_still_releases(lock_path):
     class _BadThing(Exception):
         pass
 
-    with pytest.raises(_BadThing):
-        with avanza_order_lock(lock_file=lock_path, op="body-raises"):
-            raise _BadThing("boom")
+    with pytest.raises(_BadThing), avanza_order_lock(lock_file=lock_path, op="body-raises"):
+        raise _BadThing("boom")
 
     # Should be able to acquire again.
     with avanza_order_lock(lock_file=lock_path, op="after-raise"):

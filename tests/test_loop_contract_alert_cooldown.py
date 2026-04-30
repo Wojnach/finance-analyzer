@@ -101,7 +101,7 @@ class TestAlertCooldown:
             # Rewind every persisted ts by more than the default cooldown.
             # The cooldown reads recent_hashes[*].ts now (multi-hash dedup);
             # last_sent_ts is a legacy mirror for human inspection.
-            from portfolio.file_utils import load_json, atomic_write_json
+            from portfolio.file_utils import atomic_write_json, load_json
             state = load_json(cooldown_state_file, default={}) or {}
             forged_ts = time.time() - 5 * 3600  # 5 h ago > 4 h default
             for entry in (state.get("telegram_alert_state") or {}).values():

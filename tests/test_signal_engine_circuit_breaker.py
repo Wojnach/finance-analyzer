@@ -9,7 +9,6 @@ It does NOT relax the directional or correlation gates.
 import pytest
 
 from portfolio.signal_engine import (
-    ACCURACY_GATE_THRESHOLD,
     _GATE_RELAXATION_MAX,
     _GATE_RELAXATION_STEP,
     _MIN_ACTIVE_VOTERS_SOFT,
@@ -26,10 +25,10 @@ class TestCircuitBreakerConstants:
         assert _MIN_ACTIVE_VOTERS_SOFT == 5
 
     def test_relaxation_step_at_2pp(self):
-        assert _GATE_RELAXATION_STEP == pytest.approx(0.02)
+        assert pytest.approx(0.02) == _GATE_RELAXATION_STEP
 
     def test_relaxation_max_at_6pp(self):
-        assert _GATE_RELAXATION_MAX == pytest.approx(0.06)
+        assert pytest.approx(0.06) == _GATE_RELAXATION_MAX
 
     def test_max_is_multiple_of_step(self):
         """Step must divide max cleanly so iteration reaches the exact cap.
@@ -52,7 +51,7 @@ class TestCircuitBreakerConstants:
     def test_high_sample_threshold_at_050(self):
         """Companion pin: the tiered gate at the high-sample tier stays 0.50."""
         from portfolio.signal_engine import _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
-        assert _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD == pytest.approx(0.50)
+        assert pytest.approx(0.50) == _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
 
 
 class TestCountActiveVotersAtGate:
@@ -582,10 +581,10 @@ class TestBug227PostFilterGates:
 
     def test_confidence_penalty_reads_post_filter_voters(self):
         """Stage 4 dynamic_min_voters should use _voters_post_filter."""
-        from portfolio.signal_engine import apply_confidence_penalties
-
         import numpy as np
         import pandas as pd
+
+        from portfolio.signal_engine import apply_confidence_penalties
         df = pd.DataFrame({"close": np.linspace(100, 105, 50)})
 
         # Pre-filter: 6 voters (would pass min_voters=5 for ranging).
@@ -612,10 +611,10 @@ class TestBug227PostFilterGates:
 
     def test_confidence_penalty_passes_with_enough_post_filter_voters(self):
         """When post-filter voters meet the threshold, action should survive."""
-        from portfolio.signal_engine import apply_confidence_penalties
-
         import numpy as np
         import pandas as pd
+
+        from portfolio.signal_engine import apply_confidence_penalties
         df = pd.DataFrame({"close": np.linspace(100, 105, 50)})
 
         extra_info = {
@@ -639,10 +638,10 @@ class TestBug227PostFilterGates:
 
     def test_confidence_penalty_fallback_to_voters_key(self):
         """Backward compat: if _voters_post_filter is missing, use _voters."""
-        from portfolio.signal_engine import apply_confidence_penalties
-
         import numpy as np
         import pandas as pd
+
+        from portfolio.signal_engine import apply_confidence_penalties
         df = pd.DataFrame({"close": np.linspace(100, 105, 50)})
 
         # Only _voters (pre-filter), no post-filter key → use it as fallback

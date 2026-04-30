@@ -1,14 +1,14 @@
 """Tests for agreement rate correlation and expanded macro_external group."""
 
-import numpy as np
-import pytest
+
+from datetime import UTC
 
 from portfolio.signal_engine import (
-    CORRELATION_GROUPS,
     _CLUSTER_CORRELATION_PENALTIES,
+    _STATIC_CORRELATION_GROUPS,
+    CORRELATION_GROUPS,
     _compute_agreement_rate,
     _compute_dynamic_correlation_groups,
-    _STATIC_CORRELATION_GROUPS,
 )
 
 
@@ -114,11 +114,12 @@ class TestDynamicCorrelationAgreementRate:
 
     def test_high_agreement_signals_grouped(self, monkeypatch):
         """Signals with >85% agreement rate on non-HOLD votes should be grouped."""
+        from datetime import datetime
+
         import portfolio.accuracy_stats as acc_mod
-        from datetime import datetime, timezone
 
         # Create entries where sig_a and sig_b always agree when non-HOLD
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         entries = []
         for i in range(50):
             vote = "BUY" if i % 3 == 0 else ("SELL" if i % 3 == 1 else "HOLD")

@@ -34,11 +34,11 @@ import datetime
 import logging
 import time
 from collections import defaultdict, deque
-from typing import Any, Callable
-
-from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
+from collections.abc import Callable
+from typing import Any
 
 from data import crypto_swing_config as cfg
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 
 logger = logging.getLogger("crypto_swing_trader")
 
@@ -451,11 +451,12 @@ class CryptoSwingTrader:
         entry_ts = pos.get("entry_ts")
         if entry_ts:
             try:
-                ts = datetime.datetime.fromisoformat(entry_ts)
+                ts = datetime.datetime.fromisoformat(
+                    entry_ts.replace("Z", "+00:00"))
                 age_h = (_now_utc() - ts).total_seconds() / 3600.0
                 if age_h >= cfg.MAX_HOLD_HOURS:
                     return True, f"MAX_HOLD {age_h:.1f}h"
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, TypeError):
                 pass
 
         return False, "no exit"
@@ -468,9 +469,9 @@ class CryptoSwingTrader:
         if not last:
             return True
         try:
-            ts = datetime.datetime.fromisoformat(last)
+            ts = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
             age_min = (_now_utc() - ts).total_seconds() / 60.0
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, TypeError):
             return True
         consec = self.state.get("consecutive_losses", 0)
         mult = cfg.LOSS_ESCALATION.get(min(consec, 3), 8)
@@ -672,9 +673,9 @@ class CryptoSwingTrader:
         if not ts_str:
             return False
         try:
-            ts = datetime.datetime.fromisoformat(ts_str)
+            ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             age = (_now_utc() - ts).total_seconds()
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, TypeError):
             return False
         return age <= cfg.MOMENTUM_CANDIDATE_TTL_SEC
 

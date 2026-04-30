@@ -311,6 +311,7 @@ class TestGetCrossAssetContextHealth:
         """When 3 of 4 intraday sources are healthy, the missing one should
         be logged at WARNING so operators see the quiet vote loss."""
         import logging as _logging
+
         from portfolio.signals.metals_cross_asset import _get_cross_asset_context
         mock_intraday.return_value = {
             "copper": {"change_3h_pct": 0.5},

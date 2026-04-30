@@ -1,7 +1,5 @@
 """Tests for IC computation module."""
 
-import math
-import pytest
 
 from portfolio.ic_computation import (
     _spearman_rank_correlation,

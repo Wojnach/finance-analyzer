@@ -1,7 +1,6 @@
 """Tests for vol_ratio_regime signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.vol_ratio_regime import (
     MIN_ROWS,

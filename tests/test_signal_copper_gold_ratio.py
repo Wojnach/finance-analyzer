@@ -1,16 +1,17 @@
 """Tests for copper_gold_ratio signal module."""
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import patch
 
 from portfolio.signals.copper_gold_ratio import (
-    compute_copper_gold_ratio_signal,
-    _ratio_zscore,
-    _ratio_trend,
-    _ratio_momentum,
-    _copper_gold_spread,
     _CACHE,
+    _copper_gold_spread,
+    _ratio_momentum,
+    _ratio_trend,
+    _ratio_zscore,
+    compute_copper_gold_ratio_signal,
 )
 
 

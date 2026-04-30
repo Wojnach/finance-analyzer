@@ -2,8 +2,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from portfolio.trigger import (
     RANGING_CONSENSUS_MIN_CONFIDENCE,
     SUSTAINED_CHECKS,

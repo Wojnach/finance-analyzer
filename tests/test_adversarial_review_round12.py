@@ -17,8 +17,6 @@ This test file pins the corrected behavior.
 
 from __future__ import annotations
 
-import pytest
-
 from portfolio.signal_engine import _weighted_consensus
 
 

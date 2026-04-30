@@ -723,14 +723,14 @@ class TestPlaywrightLockSerialization:
         """The lock must be an RLock so api_get can acquire it and then
         call _get_playwright_context which also acquires it."""
         import threading
+
         from portfolio.avanza_session import _pw_lock
         # threading.RLock is a factory, not a class — check via behavior:
         # RLock allows the same thread to acquire twice without blocking.
         acquired_twice = [False]
         def double_acquire():
-            with _pw_lock:
-                with _pw_lock:
-                    acquired_twice[0] = True
+            with _pw_lock, _pw_lock:
+                acquired_twice[0] = True
         t = threading.Thread(target=double_acquire)
         t.start()
         t.join(timeout=1.0)
@@ -741,6 +741,7 @@ class TestPlaywrightLockSerialization:
         """Run 10 api_get calls concurrently and verify they never overlap."""
         import threading
         import time
+
         from portfolio.avanza_session import api_get
 
         active = [0]
@@ -785,6 +786,7 @@ class TestPlaywrightLockSerialization:
         """Same invariant for api_post."""
         import threading
         import time
+
         from portfolio.avanza_session import api_post
 
         active = [0]
@@ -827,7 +829,8 @@ class TestPlaywrightLockSerialization:
         (one ticker reads positions while another places an order)."""
         import threading
         import time
-        from portfolio.avanza_session import api_get, api_post, api_delete
+
+        from portfolio.avanza_session import api_delete, api_get, api_post
 
         active = [0]
         max_active = [0]

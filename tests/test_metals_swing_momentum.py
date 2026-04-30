@@ -11,7 +11,6 @@ import datetime
 import json
 import os
 import sys
-from typing import Any
 
 import pytest
 

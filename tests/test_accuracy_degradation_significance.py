@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from portfolio import accuracy_degradation as deg
 
 

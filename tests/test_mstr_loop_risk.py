@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from portfolio.mstr_loop import config, risk
 from portfolio.mstr_loop.data_provider import MstrBundle
-from portfolio.mstr_loop.state import BotState, Position
+from portfolio.mstr_loop.state import BotState
 
 
 def _mk_bundle(btc_regime="trending-up", **overrides):

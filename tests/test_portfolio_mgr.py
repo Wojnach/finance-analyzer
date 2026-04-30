@@ -4,18 +4,16 @@ Covers: load/save roundtrip, backup rotation, corruption recovery,
 atomic read-modify-write, and validated state defaults."""
 
 import json
-import shutil
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from portfolio.portfolio_mgr import (
     INITIAL_CASH_SEK,
-    _rotate_backups,
-    _validated_state,
     _load_state_from,
+    _rotate_backups,
     _save_state_to,
+    _validated_state,
     portfolio_value,
     update_state,
 )

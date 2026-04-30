@@ -405,3 +405,12 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-233 (P3): `fish_monitor_live.py` CANCEL_HOUR/CANCEL_MIN undefined — **fixed 2026-04-28** (defined constants)
 - BUG-234 (P3): `signal_engine.py` unused variable `recent_horizon` — **fixed 2026-04-28** (removed)
 - BUG-235 (P3): Dashboard 500 errors expose internal exception messages — **fixed 2026-04-28** (generic error, server-side logging)
+- BUG-236 (P1): `crypto_swing_trader.py:675` TypeError on naive datetime subtraction — **fixed 2026-04-30** (Z-suffix normalization + TypeError catch)
+- BUG-237 (P2): `accuracy_stats.py` unused `import json` (F401) — **fixed 2026-04-30** (removed)
+- BUG-238 (P2): `crypto_swing_trader.py:454,471` fragile timezone in exit/cooldown — **fixed 2026-04-30** (Z-suffix normalization)
+- BUG-239 (P2): `crypto_loop.py` singleton lock TOCTOU race — **fixed 2026-04-30** (O_CREAT|O_EXCL atomic create)
+- BUG-240 (P3): `crypto_swing_trader.py` ruff I001+UP035 — **fixed 2026-04-30** (sorted imports, collections.abc.Callable)
+- BUG-241 (P3): `crypto_cross_asset.py` unsorted import block — **fixed 2026-04-30** (ruff fix)
+- BUG-242 (P3): `crypto_loop.py` 4x try-except-pass → contextlib.suppress — **fixed 2026-04-30**
+- REF-54 (P2): `trade_guards.py` loss escalation has no time-based decay — **fixed 2026-04-30** (geometric halving every 24h)
+- REF-55 (P3): 179 auto-fixable ruff violations in tests/ — **fixed 2026-04-30** (F401, I001, SIM117, UP017, SIM300)

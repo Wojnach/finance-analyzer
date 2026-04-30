@@ -1,15 +1,15 @@
 """Tests for vix_term_structure signal module."""
-import numpy as np
-import pandas as pd
-import pytest
 from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
+
 from portfolio.signals.vix_term_structure import (
-    compute_vix_term_structure_signal,
     _backwardation_flag,
     _contango_depth,
-    _ratio_zscore,
     _ratio_slope_5d,
+    _ratio_zscore,
+    compute_vix_term_structure_signal,
 )
 
 

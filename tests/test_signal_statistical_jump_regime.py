@@ -1,12 +1,11 @@
 """Tests for statistical_jump_regime signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.statistical_jump_regime import (
-    compute_statistical_jump_regime_signal,
-    _detect_jumps,
     _compute_regime_with_persistence,
+    _detect_jumps,
+    compute_statistical_jump_regime_signal,
 )
 
 

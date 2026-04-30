@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.drift_regime_gate import (
     MIN_ROWS,

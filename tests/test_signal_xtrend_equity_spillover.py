@@ -1,18 +1,18 @@
 """Tests for xtrend_equity_spillover signal module."""
-import numpy as np
-import pandas as pd
-import pytest
 from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
+
 from portfolio.signals.xtrend_equity_spillover import (
-    compute_xtrend_equity_spillover_signal,
-    _compute_rsi,
-    _compute_macd_hist,
-    _sub_spy_rsi,
-    _sub_spy_macd,
-    _sub_qqq_rsi,
-    _sub_spy_trend,
     _SAFE_HAVEN_TICKERS,
+    _compute_macd_hist,
+    _compute_rsi,
+    _sub_qqq_rsi,
+    _sub_spy_macd,
+    _sub_spy_rsi,
+    _sub_spy_trend,
+    compute_xtrend_equity_spillover_signal,
 )
 
 

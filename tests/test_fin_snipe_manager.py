@@ -985,6 +985,7 @@ def test_no_hardcoded_usdsek_one_in_fin_snipe_manager():
     pattern textually."""
     import ast
     from pathlib import Path
+
     from portfolio import fin_snipe_manager
 
     src = Path(fin_snipe_manager.__file__).read_text(encoding="utf-8")

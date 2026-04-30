@@ -26,7 +26,6 @@ import pytest
 
 from portfolio import loop_contract
 
-
 # ---------------------------------------------------------------------------
 # Helpers — build tmp fixture layouts (matches test_layer2_journal_contract.py)
 # ---------------------------------------------------------------------------
@@ -89,8 +88,8 @@ def test_grace_default_is_t3():
     default would re-introduce the false-positive problem for any tier
     whose invocation pre-dates the new health_state field."""
     assert (
-        loop_contract.LAYER2_JOURNAL_GRACE_S_DEFAULT
-        == loop_contract.LAYER2_JOURNAL_GRACE_S_BY_TIER[3]
+        loop_contract.LAYER2_JOURNAL_GRACE_S_BY_TIER[3]
+        == loop_contract.LAYER2_JOURNAL_GRACE_S_DEFAULT
     )
 
 

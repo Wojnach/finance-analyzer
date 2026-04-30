@@ -288,8 +288,8 @@ class TestCachedOrEnqueueExceptionSafety:
 
     def test_enqueue_exception_releases_loading_key(self):
         from portfolio.shared_state import (
-            _cached_or_enqueue,
             _cache_lock,
+            _cached_or_enqueue,
             _loading_keys,
             _loading_timestamps,
         )
@@ -308,8 +308,8 @@ class TestCachedOrEnqueueExceptionSafety:
 
     def test_enqueue_success_keeps_loading_key(self):
         from portfolio.shared_state import (
-            _cached_or_enqueue,
             _cache_lock,
+            _cached_or_enqueue,
             _loading_keys,
             _loading_timestamps,
         )

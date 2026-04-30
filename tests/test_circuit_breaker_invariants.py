@@ -35,9 +35,9 @@ class TestModuleLoadAssertions:
         directional gate - otherwise 'directional gate is never relaxed'
         becomes meaningless."""
         from portfolio.signal_engine import (
-            ACCURACY_GATE_THRESHOLD,
             _DIRECTIONAL_GATE_THRESHOLD,
             _GATE_RELAXATION_MAX,
+            ACCURACY_GATE_THRESHOLD,
         )
         relaxed_floor = ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX
         assert relaxed_floor > _DIRECTIONAL_GATE_THRESHOLD, (
@@ -52,11 +52,11 @@ class TestModuleLoadAssertions:
 
     def test_lone_signal_floor_matches_min_voters_base(self):
         from portfolio.signal_engine import (
+            _LONE_SIGNAL_FLOOR,
             MIN_VOTERS_CRYPTO,
             MIN_VOTERS_STOCK,
-            _LONE_SIGNAL_FLOOR,
         )
-        assert _LONE_SIGNAL_FLOOR == max(MIN_VOTERS_CRYPTO, MIN_VOTERS_STOCK)
+        assert max(MIN_VOTERS_CRYPTO, MIN_VOTERS_STOCK) == _LONE_SIGNAL_FLOOR
 
 
 class TestTickerDisabledByHorizonShape:

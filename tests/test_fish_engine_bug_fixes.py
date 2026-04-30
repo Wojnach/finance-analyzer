@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # --- Bug 1: signal-age guard -----------------------------------------------
 
 

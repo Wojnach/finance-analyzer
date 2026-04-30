@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.shannon_entropy import (
     MIN_ROWS,

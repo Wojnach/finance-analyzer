@@ -2,10 +2,8 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.hurst_regime import (
-    MIN_ROWS,
     _compute_hurst,
     _hurst_regime,
     _mr_extreme,

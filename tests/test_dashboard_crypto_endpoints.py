@@ -17,9 +17,8 @@ def client():
     """
     from dashboard.app import app
     app.config["TESTING"] = True
-    with patch("dashboard.app._get_dashboard_token", return_value=None):
-        with app.test_client() as c:
-            yield c
+    with patch("dashboard.app._get_dashboard_token", return_value=None), app.test_client() as c:
+        yield c
 
 
 class TestCryptoEndpoint:
