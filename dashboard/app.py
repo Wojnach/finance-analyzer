@@ -1294,6 +1294,44 @@ def api_eth():
     })
 
 
+@app.route("/api/oil")
+@require_auth
+def api_oil():
+    """Oil swing-trader state (mirror of /api/crypto and /api/metals).
+
+    Reads:
+      - data/oil_swing_state.json (positions, cash, cycle counter)
+      - data/oil_deep_context.json (WTI/Brent/COT/OVX/crack-spread context
+        from portfolio/oil_precompute.py)
+      - data/oil_swing_decisions.jsonl (last 50)
+      - data/oil_swing_trades.jsonl (last 50)
+      - data/oil_warrant_catalog.json (live OLJA warrant universe)
+      - data/oil_risk.json (per-position barrier checks, drawdown)
+
+    Ships in DRY_RUN=True; the trades log will be empty until the loop
+    is wired live via data/oil_swing_config.py.
+    """
+    state = _read_json(DATA_DIR / "oil_swing_state.json") or {}
+    context = _read_json(DATA_DIR / "oil_deep_context.json") or {}
+    catalog = _read_json(DATA_DIR / "oil_warrant_catalog.json") or {}
+    risk = _read_json(DATA_DIR / "oil_risk.json") or {}
+    decisions = list(_iter_latest_dict_entries(
+        DATA_DIR / "oil_swing_decisions.jsonl", read_limit=50))
+    trades = list(_iter_latest_dict_entries(
+        DATA_DIR / "oil_swing_trades.jsonl", read_limit=50))
+    # Heartbeat reflects liveness even when no trades have fired
+    heartbeat = _read_json(DATA_DIR / "oil_loop.heartbeat") or {}
+    return jsonify({
+        "state": state,
+        "context": context,
+        "warrant_catalog": catalog,
+        "risk": risk,
+        "decisions": decisions,
+        "trades": trades,
+        "heartbeat": heartbeat,
+    })
+
+
 @app.route("/api/mstr")
 @require_auth
 def api_mstr():
