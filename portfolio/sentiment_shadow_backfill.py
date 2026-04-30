@@ -69,6 +69,34 @@ _HORIZON_HOURS = {
     "10d": 240,
 }
 
+# 2026-05-01 (fix/missing-backfill-outcomes): mirror the per-asset tolerance
+# policy from llm_outcome_backfill so the shadow-sentiment backfill recovers
+# the same set of rows that the LLM probability backfill does. See
+# docs/PLAN_missing_backfills_20260501.md and llm_outcome_backfill.py for the
+# full rationale.
+_CRYPTO_METALS_TICKERS = frozenset({
+    "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
+})
+_STOCK_TICKERS = frozenset({
+    "MSTR",
+})
+
+
+def _tolerance_for(ticker: str) -> float:
+    """Per-asset price-lookup tolerance in hours.
+
+    Crypto/metals (24/7): 8h covers loop-downtime gaps up to ~7.5h.
+    Stocks: 72h covers MSTR's overnight + Fri-close-to-Mon-open windows.
+    Other tickers: 2h default (preserves prior behavior; protects
+    decommissioned tickers from matching multi-week-stale snapshots).
+    """
+    if ticker in _CRYPTO_METALS_TICKERS:
+        return 8.0
+    if ticker in _STOCK_TICKERS:
+        return 72.0
+    return 2.0
+
+
 # Sentiment labels → BUY/HOLD/SELL class.
 _SENTIMENT_TO_CLASS = {
     "positive": "BUY",
@@ -195,8 +223,17 @@ def backfill(
             stats["skipped_too_recent"] += 1
             continue
 
-        entry_price = _lookup_price_at_time(ticker, entry_time, snapshot_file=snapshot_path)
-        target_price = _lookup_price_at_time(ticker, target_time, snapshot_file=snapshot_path)
+        tolerance = _tolerance_for(ticker)
+        entry_price = _lookup_price_at_time(
+            ticker, entry_time,
+            snapshot_file=snapshot_path,
+            tolerance_hours=tolerance,
+        )
+        target_price = _lookup_price_at_time(
+            ticker, target_time,
+            snapshot_file=snapshot_path,
+            tolerance_hours=tolerance,
+        )
         if entry_price is None or target_price is None or entry_price == 0:
             stats["skipped_missing_price"] += 1
             continue

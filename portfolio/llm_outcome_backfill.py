@@ -52,6 +52,45 @@ _HORIZON_HOURS = {
     "10d": 240,
 }
 
+# 2026-05-01 (fix/missing-backfill-outcomes): per-asset tolerance for the
+# price-snapshot lookup. The default 2h tolerance in
+# forecast_accuracy._lookup_price_at_time was silently dropping ~2,200 LLM
+# probability rows whose target_time fell into either a loop-downtime gap
+# (4-8h, affecting all tickers symmetrically) or MSTR's structural
+# after-hours gap (12-72h, US stock only).
+#
+# Distance distribution observed in production (2026-04-30 unmatched rows):
+#   crypto/metals: median 4.84h, p90 6.84h, max 7.34h  -> 8h tolerance
+#   MSTR (stock):  median 16.5h, p90 22.8h, max 24.3h  -> 72h tolerance
+#                  (24h covers 88% of MSTR rows; 72h covers the remaining
+#                  ~12% which are Fri-close-to-Mon-open weekend-spans —
+#                  the legitimate 1d-ahead horizon for a stock prediction
+#                  made after-hours Friday is the next-trading-day close).
+# Tickers not in the map fall back to the default (2h) — keeps NVDA-style
+# decommissioned tickers from being matched to multi-week-stale snapshots.
+# Documented in docs/PLAN_missing_backfills_20260501.md.
+_CRYPTO_METALS_TICKERS = frozenset({
+    "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
+})
+_STOCK_TICKERS = frozenset({
+    "MSTR",
+})
+
+
+def _tolerance_for(ticker: str) -> float:
+    """Return the snapshot-lookup tolerance in hours for the given ticker.
+
+    24/7 markets (crypto/metals) tolerate up to an 8h gap — covers
+    loop-downtime windows up to ~7.5h observed in production. Stocks
+    tolerate up to 72h, since a 1d-ahead prediction made after-hours
+    Friday legitimately resolves at the following Monday's close (~60h).
+    """
+    if ticker in _CRYPTO_METALS_TICKERS:
+        return 8.0
+    if ticker in _STOCK_TICKERS:
+        return 72.0
+    return 2.0
+
 
 def _row_key(row: dict) -> tuple[str, str, str, str]:
     """Compute the dedup key for a probability/outcome row.
@@ -178,8 +217,17 @@ def backfill(
             stats["skipped_bad_row"] += 1
             continue
 
-        entry_price = _lookup_price_at_time(ticker, entry_time, snapshot_file=snapshot_path)
-        target_price = _lookup_price_at_time(ticker, target_time, snapshot_file=snapshot_path)
+        tolerance = _tolerance_for(ticker)
+        entry_price = _lookup_price_at_time(
+            ticker, entry_time,
+            snapshot_file=snapshot_path,
+            tolerance_hours=tolerance,
+        )
+        target_price = _lookup_price_at_time(
+            ticker, target_time,
+            snapshot_file=snapshot_path,
+            tolerance_hours=tolerance,
+        )
         if entry_price is None or target_price is None or entry_price == 0:
             stats["skipped_missing_price"] += 1
             continue

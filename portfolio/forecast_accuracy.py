@@ -350,18 +350,32 @@ def backfill_forecast_outcomes(max_entries=500, predictions_file=None,
     return updated
 
 
-def _lookup_price_at_time(ticker, target_time, snapshot_file=None):
+def _lookup_price_at_time(ticker, target_time, snapshot_file=None,
+                           tolerance_hours: float = 2.0):
     """Look up the actual price for a ticker at a specific time.
 
     Uses hourly price snapshots from data/price_snapshots_hourly.jsonl
-    and finds the closest entry within 2 hours of target_time.
+    and finds the closest entry within `tolerance_hours` of target_time.
+
+    The default `tolerance_hours=2.0` preserves the original behavior used
+    by `forecast_accuracy.compute_forecast_accuracy` and any other consumer
+    that expects tight tolerance. Callers backfilling LLM/sentiment outcomes
+    can pass a wider value (8h for crypto/metals' 24/7 markets, 24-72h for
+    stocks where after-hours and weekend gaps are structural).
+
+    2026-05-01 (deferred research / fix/missing-backfill-outcomes): added
+    tolerance_hours parameter. Previously hardcoded to 2h, which silently
+    dropped 2,200+ LLM probability rows whose target_time fell into either:
+      - a loop-downtime gap (4-8h, all tickers symmetrically), or
+      - the structural MSTR overnight gap (12-72h, US stock only).
+    Documented in docs/PLAN_missing_backfills_20260501.md.
     """
     path = snapshot_file or (DATA_DIR / "price_snapshots_hourly.jsonl")
     if not path.exists():
         return None
 
     best_price = None
-    best_delta = timedelta(hours=2)  # max 2h tolerance
+    best_delta = timedelta(hours=tolerance_hours)
 
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
