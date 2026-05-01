@@ -174,7 +174,21 @@ TAKE_PROFIT_UNDERLYING_PCT = 3.0   # 2026-04-14 raised from 2.0 — was exiting 
                                    # always buy in again" — rebuy on pullback after exit.
 TRAILING_START_PCT = 1.5           # start trailing after 1.5% underlying gain
 TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
-HARD_STOP_UNDERLYING_PCT = 2.0     # -2% underlying = hard exit
+# P1-8 (2026-05-02): widened from 2.0 → 3.0. The previous 2.0% underlying
+# stop translated to only 10% on a 5x certificate, which the user's
+# 'Wider stop-losses' memory explicitly rejects: '5x certs need -15%+
+# stops, not -8%, to survive intraday wicks'. 3.0% × 5x = 15% cert stop,
+# matching the documented user preference. See also STOP_LOSS_UNDERLYING_PCT
+# below — the hardware stop must stay >= this value (MC-P1-2) so the
+# software exit logic always fires first; the broker stop is a safety
+# net for process-down scenarios only.
+#
+# Risk note: per-position dollar-loss ceiling is now 50% larger
+# (15% vs 10% on 5x). POSITION_SIZE_PCT=30 of cash is unchanged so the
+# absolute worst-case loss per trade is bounded. Revert to 2.0 +
+# STOP_LOSS_UNDERLYING_PCT=2.5 if intraday wicks are not the dominant
+# loss mode.
+HARD_STOP_UNDERLYING_PCT = 3.0     # -3% underlying = hard exit (15% on 5x cert)
 SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTERS
 
 # 2026-04-20: warrant-side exit rules. Added after MINI L SILVER AVA 331
@@ -261,7 +275,14 @@ LOSS_ESCALATION = {0: 1, 1: 2, 2: 4, 3: 8}  # consecutive losses -> cooldown mul
 # ---------------------------------------------------------------------------
 # Stop-loss (hardware, on Avanza)
 # ---------------------------------------------------------------------------
-STOP_LOSS_UNDERLYING_PCT = 2.5     # stop at -2.5% underlying from entry
+# MC-P1-2 + P1-8 (2026-05-02): hardware stop MUST be >= software
+# HARD_STOP_UNDERLYING_PCT (line 177). The HW stop is a safety net for
+# process-down scenarios — it should only ever fire when the SW exit
+# logic can't run. Widened from 2.5 → 3.5 in lockstep with the SW stop
+# (3.0%). The 0.5% gap keeps the HW above SW so SW reliably wins the
+# race during a normal down-tick sweep, while still catching catastrophic
+# moves if the loop process is dead. On 5x cert: 3.5% × 5x = 17.5% stop.
+STOP_LOSS_UNDERLYING_PCT = 3.5     # stop at -3.5% underlying from entry (HW safety net)
 STOP_LOSS_VALID_DAYS = 8           # stop order validity (calendar days)
 
 # ---------------------------------------------------------------------------

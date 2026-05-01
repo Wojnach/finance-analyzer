@@ -427,8 +427,8 @@ def test_set_stop_loss_uses_anchor_when_provided(monkeypatch):
     # Anchor at current bid 80 (20% below entry).
     trader._set_stop_loss("pos1", anchor_price=80.0)
 
-    # Expected: trigger = 80 * (1 - 0.025*5) = 80 * 0.875 = 70.0
-    # (STOP_LOSS_UNDERLYING_PCT defaults to 2.5, leverage=5.0)
+    # Expected: trigger = 80 * (1 - STOP_LOSS_UNDERLYING_PCT/100 * 5)
+    # (post P1-8 STOP_LOSS_UNDERLYING_PCT=3.5 → 80 * (1-0.175) = 66.0)
     expected_drop = mst.STOP_LOSS_UNDERLYING_PCT / 100 * 5.0
     expected_trigger = real_round(80.0 * (1 - expected_drop), 2)
     assert captured.get("trigger") == expected_trigger, (
@@ -533,6 +533,34 @@ def test_ingest_orphan_falls_back_when_bid_fetch_fails(monkeypatch):
     assert captured_kwargs[pos_id].get("anchor_price") is None, (
         f"Expected anchor_price=None on fetch failure, got "
         f"{captured_kwargs[pos_id]!r}"
+    )
+
+
+def test_hard_stop_widened_per_user_5x_cert_preference():
+    """P1-8 (2026-05-02): user feedback memory 'Wider stop-losses' explicitly
+    states '5x certs need -15%+ stops, not -8%, to survive intraday wicks'.
+    HARD_STOP_UNDERLYING_PCT * 5 must produce a 15%+ certificate stop.
+    Pin the value so a future tune-down silently regressing to 2.0% is
+    caught at test time, not in production after a wick stop-out."""
+    import metals_swing_config as cfg
+    assert cfg.HARD_STOP_UNDERLYING_PCT >= 3.0, (
+        f"HARD_STOP_UNDERLYING_PCT={cfg.HARD_STOP_UNDERLYING_PCT} too tight; "
+        f"on 5x lev that's only {cfg.HARD_STOP_UNDERLYING_PCT * 5}% cert stop. "
+        f"User memory: '5x certs need -15%+ stops to survive intraday wicks'."
+    )
+
+
+def test_hardware_stop_at_least_as_loose_as_software_stop():
+    """MC-P1-2 (2026-05-02): the hardware (Avanza) stop is a safety net
+    for process-down scenarios. It must NOT trigger before the software
+    HARD_STOP. STOP_LOSS_UNDERLYING_PCT (HW) must be >= HARD_STOP_UNDERLYING_PCT
+    (SW). If HW < SW, the broker fires first and pre-empts SW's
+    smarter exit logic."""
+    import metals_swing_config as cfg
+    assert cfg.STOP_LOSS_UNDERLYING_PCT >= cfg.HARD_STOP_UNDERLYING_PCT, (
+        f"HW stop {cfg.STOP_LOSS_UNDERLYING_PCT}% tighter than SW stop "
+        f"{cfg.HARD_STOP_UNDERLYING_PCT}% — Avanza will fire before "
+        f"in-process logic, defeating the safety-net design."
     )
 
 
