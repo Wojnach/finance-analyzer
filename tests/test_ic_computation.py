@@ -1,5 +1,6 @@
 """Tests for IC computation module."""
 
+from pathlib import Path
 
 from portfolio.ic_computation import (
     _spearman_rank_correlation,
@@ -154,3 +155,41 @@ class TestGetSignalICRanking:
         assert names[0] == "rsi"
         assert names[1] == "macd"
         assert names[2] == "ema"
+
+
+class TestDataDirIsAbsolute:
+    """Regression for adversarial review 05-01 P0-2: DATA_DIR was a relative
+    `Path("data")` which silently broke when the scheduled task CWD differed
+    from the repo root. Every other module uses
+    `Path(__file__).resolve().parent.parent / "data"`.
+    """
+
+    def test_data_dir_is_absolute(self):
+        """DATA_DIR must be an absolute path."""
+        from portfolio.ic_computation import DATA_DIR
+        assert DATA_DIR.is_absolute(), (
+            f"DATA_DIR must be absolute, got {DATA_DIR!r}. If you reverted to "
+            "Path('data'), please re-read adversarial review 05-01 P0-2."
+        )
+
+    def test_data_dir_matches_repo_data_dir(self):
+        """DATA_DIR must point at the repo's `data` directory regardless of CWD."""
+        from portfolio.ic_computation import DATA_DIR
+        # Resolve repo root from this test file's location: tests/.. == repo root
+        repo_root = Path(__file__).resolve().parent.parent
+        expected = repo_root / "data"
+        assert DATA_DIR == expected, (
+            f"DATA_DIR={DATA_DIR!r} doesn't match expected repo data dir {expected!r}."
+        )
+
+    def test_ic_cache_file_under_data_dir(self):
+        """IC_CACHE_FILE must live under DATA_DIR (absolute)."""
+        from portfolio.ic_computation import DATA_DIR, IC_CACHE_FILE
+        assert IC_CACHE_FILE.is_absolute()
+        assert IC_CACHE_FILE.parent == DATA_DIR
+
+    def test_signal_log_file_under_data_dir(self):
+        """SIGNAL_LOG_FILE must live under DATA_DIR (absolute)."""
+        from portfolio.ic_computation import DATA_DIR, SIGNAL_LOG_FILE
+        assert SIGNAL_LOG_FILE.is_absolute()
+        assert SIGNAL_LOG_FILE.parent == DATA_DIR
