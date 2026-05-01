@@ -367,3 +367,28 @@ class TestCoerceEpoch:
         monkeypatch.setattr(od, "_load_config_token", lambda: None)
         # This must not raise TypeError anymore:
         od.get_onchain_data()
+
+    def test_unparseable_value_emits_debug_log(self, caplog):
+        """P1-14 (2026-05-02): When _coerce_epoch can't parse a value, it
+        falls through to return 0.0. Operators previously had no signal
+        that this was happening — a corrupt cache.ts silently forces a
+        cache miss on every restart, burning the BGeometrics 15 req/day
+        budget. Verify the defensive failure now emits a debug log."""
+        import logging
+
+        from portfolio.onchain_data import _coerce_epoch
+        caplog.set_level(logging.DEBUG, logger="portfolio.onchain_data")
+
+        # Numeric-typed pass-throughs MUST NOT log (no defensive fallback fired)
+        caplog.clear()
+        assert _coerce_epoch(1712345678) == 1712345678.0
+        assert not any("_coerce_epoch" in r.message for r in caplog.records)
+
+        # Unparseable values MUST log + return 0.0
+        for bad in ("not a date", None, {"weird": "shape"}, [], ""):
+            caplog.clear()
+            assert _coerce_epoch(bad) == 0.0
+            assert any(
+                "_coerce_epoch" in r.message and r.levelname == "DEBUG"
+                for r in caplog.records
+            ), f"Expected debug log for {bad!r}, got {[r.message for r in caplog.records]}"
