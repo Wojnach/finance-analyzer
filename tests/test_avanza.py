@@ -576,3 +576,176 @@ class TestDeleteOrder:
             result = mod.delete_order("ORD-1")
         assert result["orderRequestStatus"] == "SUCCESS"
         mock_client.delete_order.assert_called_once_with("1625505", "ORD-1")
+
+
+# ---------------------------------------------------------------------------
+# P0-4: TOTP order paths must hold avanza_order_lock
+# ---------------------------------------------------------------------------
+
+class TestOrderLockOnTotpPath:
+    """The TOTP `_place_order` and `delete_order` mutating paths must hold
+    `avanza_order_lock` so they cannot race against the page-session paths
+    in `metals_avanza_helpers` / `avanza_session` / `avanza_control` (all of
+    which already lock). Without the lock, two processes observing the same
+    `buying_power` snapshot can both fire orders and overdraw the ISK.
+
+    Verified by patching `portfolio.avanza_client.avanza_order_lock` to a
+    spy that records its `op` label and asserts it was used while the
+    upstream `client.place_order` / `client.delete_order` was being invoked.
+    """
+
+    def test_place_buy_holds_lock_around_api_call(self, config_file):
+        mock_client = _make_client_with_isk(config_file)
+        mock_client.place_order.return_value = {
+            "orderId": "X", "orderRequestStatus": "SUCCESS", "message": "",
+        }
+
+        from contextlib import contextmanager
+        events = []
+
+        @contextmanager
+        def fake_lock(*, op="order", **kw):
+            events.append(("acquire", op))
+            try:
+                yield None
+            finally:
+                events.append(("release", op))
+
+        # Capture the order in which lock+API call happen.
+        original_place = mock_client.place_order
+        def _spying_place(*a, **kw):
+            events.append(("api_call", "place_order"))
+            return original_place(*a, **kw)
+        mock_client.place_order = _spying_place
+
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             patch.object(mod, "avanza_order_lock", fake_lock):
+            mod.place_buy_order("5533", price=245.0, volume=50)
+
+        # Lock must be acquired BEFORE API call and released AFTER.
+        assert ("acquire", "place_order_totp/BUY/5533") in events
+        assert ("release", "place_order_totp/BUY/5533") in events
+        idx_acquire = events.index(("acquire", "place_order_totp/BUY/5533"))
+        idx_call = events.index(("api_call", "place_order"))
+        idx_release = events.index(("release", "place_order_totp/BUY/5533"))
+        assert idx_acquire < idx_call < idx_release
+
+    def test_place_sell_holds_lock_around_api_call(self, config_file):
+        mock_client = _make_client_with_isk(config_file)
+        mock_client.place_order.return_value = {
+            "orderId": "Y", "orderRequestStatus": "SUCCESS", "message": "",
+        }
+
+        from contextlib import contextmanager
+        events = []
+
+        @contextmanager
+        def fake_lock(*, op="order", **kw):
+            events.append(("acquire", op))
+            try:
+                yield None
+            finally:
+                events.append(("release", op))
+
+        original_place = mock_client.place_order
+        def _spying_place(*a, **kw):
+            events.append(("api_call", "place_order"))
+            return original_place(*a, **kw)
+        mock_client.place_order = _spying_place
+
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             patch.object(mod, "avanza_order_lock", fake_lock):
+            mod.place_sell_order("9001", price=99.5, volume=10)
+
+        assert ("acquire", "place_order_totp/SELL/9001") in events
+        assert ("release", "place_order_totp/SELL/9001") in events
+        idx_acquire = events.index(("acquire", "place_order_totp/SELL/9001"))
+        idx_call = events.index(("api_call", "place_order"))
+        idx_release = events.index(("release", "place_order_totp/SELL/9001"))
+        assert idx_acquire < idx_call < idx_release
+
+    def test_delete_order_holds_lock_around_api_call(self, config_file):
+        mock_client = _make_client_with_isk(config_file)
+        mock_client.delete_order.return_value = {
+            "orderId": "ORD-1", "orderRequestStatus": "SUCCESS", "messages": "",
+        }
+
+        from contextlib import contextmanager
+        events = []
+
+        @contextmanager
+        def fake_lock(*, op="order", **kw):
+            events.append(("acquire", op))
+            try:
+                yield None
+            finally:
+                events.append(("release", op))
+
+        original_delete = mock_client.delete_order
+        def _spying_delete(*a, **kw):
+            events.append(("api_call", "delete_order"))
+            return original_delete(*a, **kw)
+        mock_client.delete_order = _spying_delete
+
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             patch.object(mod, "avanza_order_lock", fake_lock):
+            mod.delete_order("ORD-1")
+
+        assert ("acquire", "delete_order_totp/ORD-1") in events
+        assert ("release", "delete_order_totp/ORD-1") in events
+        idx_acquire = events.index(("acquire", "delete_order_totp/ORD-1"))
+        idx_call = events.index(("api_call", "delete_order"))
+        idx_release = events.index(("release", "delete_order_totp/ORD-1"))
+        assert idx_acquire < idx_call < idx_release
+
+    def test_lock_busy_propagates(self, config_file):
+        """If the lock is busy (peer holds it), the OrderLockBusyError must
+        propagate so the caller can decide whether to retry. We must NOT
+        silently fire the order."""
+        from portfolio.avanza_order_lock import OrderLockBusyError
+
+        mock_client = _make_client_with_isk(config_file)
+        mock_client.place_order.return_value = {
+            "orderId": "Z", "orderRequestStatus": "SUCCESS", "message": "",
+        }
+
+        from contextlib import contextmanager
+        @contextmanager
+        def busy_lock(*, op="order", **kw):
+            raise OrderLockBusyError(f"busy (op={op})")
+            yield None  # pragma: no cover
+
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             patch.object(mod, "avanza_order_lock", busy_lock), \
+             pytest.raises(OrderLockBusyError):
+            mod.place_buy_order("5533", price=245.0, volume=50)
+
+        # The API must NOT have been called when the lock could not be acquired.
+        mock_client.place_order.assert_not_called()
+
+    def test_lock_released_on_api_exception(self, config_file):
+        """If the API call raises mid-flight, the lock must still be
+        released (context-manager guarantee). A leaked lock would block
+        the next 60s loop iteration and silently disable trading."""
+        mock_client = _make_client_with_isk(config_file)
+        mock_client.place_order.side_effect = RuntimeError("Avanza API down")
+
+        from contextlib import contextmanager
+        events = []
+
+        @contextmanager
+        def fake_lock(*, op="order", **kw):
+            events.append(("acquire", op))
+            try:
+                yield None
+            finally:
+                events.append(("release", op))
+
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             patch.object(mod, "avanza_order_lock", fake_lock), \
+             pytest.raises(RuntimeError, match="Avanza API down"):
+            mod.place_buy_order("5533", price=245.0, volume=50)
+
+        # Both acquire and release must be present, even though the body raised.
+        assert any(e[0] == "acquire" for e in events)
+        assert any(e[0] == "release" for e in events)
