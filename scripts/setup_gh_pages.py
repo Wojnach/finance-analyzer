@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""Set up the /bets/ path on the GitHub Pages site as a redirect to the tunnel.
+"""DEPRECATED 2026-04-30 — architecture pivoted to apex-direct, no GH Pages.
 
-The architecture (see docs/TUNNEL_SETUP.md):
-    Browser -> raanman.lol/bets  -> GitHub Pages (this script) -> redirect ->
-    Browser -> bets.raanman.lol -> Cloudflare Tunnel -> localhost:5055
+This script was designed for a path-based architecture:
+    Browser -> raanman.lol/bets -> GitHub Pages -> redirect -> bets.raanman.lol
 
-Why redirect instead of cloning dashboard/static/index.html into gh-pages
-(2026-04-28 rewrite — see git history for the prior clone-based version):
-  1. The cloned SPA has no `dashboard_token` baked in, so every API call from
-     it returns 401. We'd be serving a permanently-broken page.
-  2. The clone would also need dashboard/static/api-data/*.json copied to be
-     even half-functional, exposing stale public snapshots — defeating the
-     point of having a live tunnel as the source of truth.
-  3. Single source of truth: one URL (bets.raanman.lol), one auth model.
+The deployment instead pivoted to apex-direct:
+    Browser -> raanman.lol -> Cloudflare tunnel -> http://localhost:5055
 
-We deliberately do NOT touch:
-  - The apex index.html — the existing game lives there.
-  - The CNAME file — already configured for raanman.lol.
-Only /bets/index.html and .nojekyll are written.
+The apex GH Pages records (4 A + 4 AAAA + www CNAME + wildcard CNAME) were
+deleted from Cloudflare DNS, so GitHub Pages no longer serves any content
+under raanman.lol. Running this script today writes files to a gh-pages
+worktree that nobody reads — the redirect would never be reached.
+
+DO NOT RUN. Kept in the repo only as a paper trail of the original design;
+delete in a future cleanup pass once it is clear the apex-direct path is
+permanent.
+
+If you ever revive GH Pages serving (e.g., to add a personal homepage at
+the apex), the redirect logic here is still correct — but you'd also need
+to re-add the GH Pages DNS records and reroute the tunnel to a subdomain.
+See docs/TUNNEL_SETUP.md for the live architecture.
 """
 
 from pathlib import Path

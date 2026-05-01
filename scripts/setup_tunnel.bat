@@ -161,13 +161,27 @@ echo [6/6] Installing cloudflared as a Windows service...
 echo       This requires Administrator privileges.
 echo.
 
-REM Check if already installed
+REM Uninstall any existing service so the ImagePath patch below applies to a
+REM fresh registration (ImagePath isn't preserved on uninstall+install).
 sc query cloudflared >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo Service already exists. Stopping and updating...
     net stop cloudflared >nul 2>&1
     cloudflared service uninstall >nul 2>&1
 )
+
+REM Copy config + credentials to LocalSystem's profile. Cloudflare's docs
+REM require this; their `service install` does NOT do it automatically. The
+REM service runs as LocalSystem, whose %USERPROFILE% is the systemprofile
+REM directory (not the human user's profile), so without this copy the service
+REM has no config to load and silently exits.
+REM (Discovered 2026-04-30: bat shipped without this for ~5 weeks before it bit us.)
+REM https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/configure-tunnels/local-management/as-a-service/windows/
+set SYSPROFILE_DIR=%SystemRoot%\System32\config\systemprofile\.cloudflared
+if not exist "%SYSPROFILE_DIR%" mkdir "%SYSPROFILE_DIR%"
+copy /Y "%CONFIG_FILE%" "%SYSPROFILE_DIR%\config.yml" >nul
+copy /Y "%CRED_FILE%" "%SYSPROFILE_DIR%\%TUNNEL_ID%.json" >nul
+echo       Config + creds copied to %SYSPROFILE_DIR%
 
 cloudflared service install
 if %ERRORLEVEL% neq 0 (
@@ -176,10 +190,25 @@ if %ERRORLEVEL% neq 0 (
     echo          Alternatively, run the tunnel manually:
     echo            cloudflared tunnel run %TUNNEL_NAME%
     echo.
-) else (
-    net start cloudflared
-    echo Service installed and started.
+    goto :eof
 )
+
+REM Patch the service's ImagePath to include the tunnel-run command.
+REM `cloudflared service install` registers the binary with NO arguments, so
+REM the service starts cloudflared with no command and it exits immediately
+REM ("process terminated unexpectedly"). This patch is undocumented in
+REM Cloudflare's Windows guide. Idempotent — safe to re-apply on every reinstall.
+REM (Discovered 2026-04-30 during initial deployment.)
+echo       Patching service ImagePath to include 'tunnel run %TUNNEL_NAME%'...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fix_cloudflared_imagepath.ps1" -TunnelName "%TUNNEL_NAME%"
+if %ERRORLEVEL% neq 0 (
+    echo WARNING: ImagePath patch failed. Service may not start automatically.
+    echo          Manual fix:
+    echo            powershell -File "%~dp0fix_cloudflared_imagepath.ps1" -TunnelName "%TUNNEL_NAME%"
+)
+
+net start cloudflared
+echo Service installed and started.
 
 REM --- Done ---
 echo.

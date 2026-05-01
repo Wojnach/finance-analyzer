@@ -7,12 +7,22 @@
 tunnel: TUNNEL_ID_HERE
 credentials-file: CREDENTIALS_PATH_HERE
 
+# noTLSVerify is intentionally omitted — origin is plain HTTP, so TLS
+# verification is moot. Adding it to a plain-HTTP origin would mask the
+# misconfiguration of someone later switching the origin to https:// with
+# a self-signed cert, silently bypassing cert validation.
 ingress:
-  # Route bets.raanman.lol to the Flask dashboard
+  # Canonical apex (added 2026-04-30 — short URL, replaces the old GH Pages
+  # path-based redirect)
+  - hostname: raanman.lol
+    service: http://localhost:5055
+    originRequest:
+      connectTimeout: 30s
+
+  # Legacy alias kept working for existing bookmarks
   - hostname: bets.raanman.lol
     service: http://localhost:5055
     originRequest:
-      noTLSVerify: true
       connectTimeout: 30s
 
   # Catch-all: return 404 for unmatched hostnames
