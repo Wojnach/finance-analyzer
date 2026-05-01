@@ -269,6 +269,39 @@ class TestOiTrend:
         assert _oi_trend(None, sample_df) == "HOLD"
         assert _oi_trend([], sample_df) == "HOLD"
 
+    # SM-P1-2 (2026-05-02 adversarial follow-ups): explicit guard against
+    # zero / non-positive price_start. The previous code relied on
+    # `if price_start and ...` which is functionally `if price_start != 0`
+    # for floats — correct but unclear. The fix makes the positivity
+    # check explicit so a future contributor doesn't misread the operator
+    # precedence (`(price_start and price_end) > price_start` would be
+    # very different from `price_start and (price_end > price_start)`).
+
+    def test_zero_price_start_returns_hold(self, oi_history_rising):
+        """If the historical close at iloc[-_MIN_HISTORY] is 0, return HOLD
+        rather than triggering a spurious BUY/SELL via Truthiness games."""
+        from portfolio.signals.futures_flow import _oi_trend
+        # Build a df where the lookback start is 0.0 but later prices are positive.
+        n = 30
+        closes = [0.0, 0.0, 0.0, 0.0, 0.0] + [100.0] * (n - 5)
+        df = pd.DataFrame({
+            "open": closes, "high": closes, "low": closes,
+            "close": closes, "volume": [1000] * n,
+        })
+        # _MIN_HISTORY=5, so price_start = df.close.iloc[-5] = 100, price_end = 100.
+        # Wait — that's not zero. Construct so that iloc[-5] is 0.
+        closes = [100.0] * 25 + [0.0] + [50.0, 60.0, 70.0, 80.0]
+        df2 = pd.DataFrame({
+            "open": closes, "high": closes, "low": closes,
+            "close": closes, "volume": [1000] * n,
+        })
+        # iloc[-5] = closes[25] = 0.0. price_end = closes[-1] = 80.0.
+        # With explicit `price_start > 0` guard: returns HOLD.
+        # With ambiguous `price_start and ...`: 0.0 is falsy so HOLD too,
+        # but it's a fragile pattern; this test pins the behavior.
+        result = _oi_trend(oi_history_rising, df2)
+        assert result == "HOLD"
+
 
 class TestOiDivergence:
     def test_price_up_oi_down_sell(self, oi_history_falling, sample_df):

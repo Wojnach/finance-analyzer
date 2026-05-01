@@ -61,10 +61,16 @@ def _oi_trend(oi_history, df):
         price_start = float(df["close"].iloc[-_MIN_HISTORY])
         price_end = float(df["close"].iloc[-1])
         # H35: NaN is truthy in Python; explicit guard required.
-        if not math.isnan(price_start) and not math.isnan(price_end):
-            if price_start and price_end > price_start:
+        # SM-P1-2 (2026-05-02 adversarial follow-ups): the original code
+        # used `if price_start and price_end > price_start` which Python
+        # parses as `(price_start) and (price_end > price_start)` — correct
+        # but easy to misread (could look like `(price_start and price_end)
+        # > price_start`). Replace truthiness check with explicit `> 0` so
+        # the intent (no division-by-zero, positive prices only) is obvious.
+        if not math.isnan(price_start) and not math.isnan(price_end) and price_start > 0:
+            if price_end > price_start:
                 return "BUY"   # rising OI + rising price = new longs
-            elif price_start and price_end < price_start:
+            if price_end < price_start:
                 return "SELL"  # rising OI + falling price = new shorts
 
     return "HOLD"
