@@ -1342,6 +1342,18 @@ _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "macro_external": 0.15,
 }
 
+# Meta-clusters: groups of correlation sub-clusters whose LEADERS frequently
+# agree (100% cross-cluster leader agreement measured 2026-05-01, 20 snapshots).
+# When all meta-cluster leaders vote the same direction, only the highest-accuracy
+# leader retains full weight; others get the meta-cluster penalty.
+# This prevents the trend mega-view from getting 3.0x effective leader weight
+# when pure_trend, oscillator_trend, and structural_flow leaders vote identically.
+# When leaders DISAGREE, no penalty is applied — that's informative diversity.
+_META_CLUSTER_GROUPS: dict[str, list[str]] = {
+    "trend_mega": ["pure_trend", "oscillator_trend", "structural_flow"],
+}
+_META_CLUSTER_PENALTY = 0.35  # 2nd/3rd agreeing leaders get 35% weight
+
 
 def _safe_accuracy(value, default):
     """Coerce an accuracy value to a clean float, mapping None/NaN/inf to `default`.
@@ -1912,6 +1924,38 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             for s in group_sigs:
                 if s != leader and s in active_non_hold:
                     penalized_signals[s] = min(penalized_signals.get(s, 1.0), penalty)
+
+    # Meta-cluster deduplication (2026-05-01): when leaders from related
+    # sub-clusters agree on direction, apply penalty to redundant leaders.
+    # Prevents the trend mega-view from getting 3.0x effective leader weight
+    # when pure_trend/oscillator_trend/structural_flow leaders vote identically.
+    for meta_name, sub_clusters in _META_CLUSTER_GROUPS.items():
+        meta_leaders: dict[str, str] = {}
+        for sc_name in sub_clusters:
+            leader = group_leaders.get(sc_name)
+            if leader and leader in active_non_hold:
+                meta_leaders[sc_name] = leader
+        if len(meta_leaders) < 2:
+            continue
+        # Check if all leaders agree on direction
+        leader_directions = {sc: votes.get(ldr, "HOLD")
+                            for sc, ldr in meta_leaders.items()}
+        active_dirs = set(leader_directions.values()) - {"HOLD"}
+        if len(active_dirs) != 1:
+            continue  # Leaders disagree — informative diversity, no penalty
+        # All leaders agree: keep best-accuracy leader, penalize others
+        best_sc = max(meta_leaders,
+                      key=lambda sc: _leader_accuracy_key(meta_leaders[sc]))
+        for sc_name, leader in meta_leaders.items():
+            if sc_name != best_sc:
+                current = penalized_signals.get(leader, 1.0)
+                penalized_signals[leader] = min(current, _META_CLUSTER_PENALTY)
+                logger.debug(
+                    "Meta-cluster %s: %s leader %s agrees with %s leader %s "
+                    "— penalized to %.0f%%",
+                    meta_name, sc_name, leader, best_sc,
+                    meta_leaders[best_sc], _META_CLUSTER_PENALTY * 100,
+                )
 
     # Crisis mode detection: when multiple macro-external signals have degraded
     # accuracy, the market is in an abnormal regime (war, systemic crisis) where
