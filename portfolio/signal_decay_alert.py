@@ -11,7 +11,7 @@ erosion between manual audit sessions.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger("portfolio.signal_decay_alert")
 
@@ -32,7 +32,7 @@ def check_signal_decay(accuracy_cache_path="data/accuracy_cache.json"):
         drop_pp, recent_samples, severity.
     """
     try:
-        with open(accuracy_cache_path) as f:
+        with open(accuracy_cache_path, encoding="utf-8") as f:
             cache = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         logger.warning("Cannot load accuracy cache: %s", e)
@@ -136,7 +136,7 @@ def log_decay_alerts(alerts):
 
     # Append to JSONL log
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "alert_count": len(alerts),
         "critical_count": sum(1 for a in alerts if a["severity"] == "critical"),
         "alerts": alerts,

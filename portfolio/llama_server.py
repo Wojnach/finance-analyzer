@@ -161,7 +161,7 @@ def _kill_server_by_pid():
     """
     try:
         if os.path.exists(_PID_FILE):
-            with open(_PID_FILE) as f:
+            with open(_PID_FILE, encoding="utf-8") as f:
                 content = f.read().strip()
             if content:
                 pid = int(content.split(":")[0])
@@ -184,7 +184,7 @@ def _write_pid(proc, model_name):
     """Write server PID + model name so other processes know what's loaded."""
     try:
         os.makedirs(os.path.dirname(_PID_FILE), exist_ok=True)
-        with open(_PID_FILE, "w") as f:
+        with open(_PID_FILE, "w", encoding="utf-8") as f:
             f.write(f"{proc.pid}:{model_name}")
             f.flush()
             os.fsync(f.fileno())
@@ -196,7 +196,7 @@ def _read_pid_model():
     """Read PID + model from pid file. Returns (pid, model_name) or (None, None)."""
     try:
         if os.path.exists(_PID_FILE):
-            with open(_PID_FILE) as f:
+            with open(_PID_FILE, encoding="utf-8") as f:
                 content = f.read().strip()
             if ":" in content:
                 pid_str, model = content.split(":", 1)
@@ -392,7 +392,7 @@ def _acquire_file_lock(timeout=300):
         except FileExistsError:
             # Check if lock is stale (owner dead)
             try:
-                with open(_LOCK_FILE) as f:
+                with open(_LOCK_FILE, encoding="utf-8") as f:
                     lock_pid = int(f.read().strip())
                 # Check if PID is alive
                 if platform.system() == "Windows":

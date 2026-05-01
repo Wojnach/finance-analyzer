@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio.shared_state import _cached
-from portfolio.signal_utils import majority_vote, safe_float
+from portfolio.signal_utils import safe_float
 
 logger = logging.getLogger("portfolio.signals.residual_pair_reversion")
 
