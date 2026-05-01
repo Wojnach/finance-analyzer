@@ -209,12 +209,24 @@ class TestRunBacktest:
         assert r["old_total"] == 0
 
     def test_days_filter_applied(self):
-        """Entries older than --days cutoff are excluded."""
+        """Entries older than --days cutoff are excluded.
+
+        2026-05-02: replaced hardcoded "recent" date 2026-03-27 with a
+        UTC-now-relative timestamp so the test doesn't drift past the
+        days=30 cutoff over time. With the hardcoded date, both entries
+        eventually filter out → run_backtest returns the no-entries
+        sentinel `{"error": ..., "entries": 0}` and the assertion fails
+        with KeyError on `horizon_results`.
+        """
+        import datetime
+        now = datetime.datetime.now(datetime.UTC)
+        recent_iso = (now - datetime.timedelta(days=5)).isoformat()
+
         old_entry = dict(_make_entry("BUY", 1.0))
         old_entry["ts"] = "2020-01-01T00:00:00+00:00"  # very old
 
         recent_entry = dict(_make_entry("BUY", 1.0))
-        recent_entry["ts"] = "2026-03-27T12:00:00+00:00"  # recent
+        recent_entry["ts"] = recent_iso  # always 5 days ago
 
         with (
             patch("portfolio.accuracy_stats.load_entries", return_value=[old_entry, recent_entry]),

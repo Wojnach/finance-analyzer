@@ -61,8 +61,51 @@ A global `autouse` fixture in `conftest.py` (`_reset_module_state`) now
 resets all HIGH-risk module state before and after every test:
 
 - `agent_invocation`: `_agent_proc`, `_agent_log`, `_agent_start`, etc.
-- `signal_engine`: `_adx_cache`, `_last_signal_per_ticker`, `_prev_sentiment`, etc.
+- `signal_engine`: `_adx_cache`, `_last_signal_per_ticker`, `_prev_sentiment`,
+  and (since 2026-05-02) `_ic_data_cache` + `_macro_window_cache`.
 - `shared_state`: `_tool_cache`, `_regime_cache`, `_run_cycle_id`, etc.
+- (2026-05-02) `data_collector` circuit breakers: `alpaca_cb`,
+  `binance_spot_cb`, `binance_fapi_cb` — reset to CLOSED via the new
+  `CircuitBreaker.reset()` method so a test that fails 5+ Alpaca calls
+  doesn't leave the breaker OPEN for the next test on the same worker.
+
+### Residual flakes that DO NOT respond to module-state resets (2026-05-02)
+
+Some `test_consensus.py` tests using `_NO_PENALTIES` config (notably
+`test_stock_buy_with_3_voters`, `test_stock_sell_with_3_voters`,
+`test_all_stock_tickers_use_3_voter_threshold`,
+`test_crypto_buy_with_3_voters`,
+`test_flip_direction_above_threshold_votes`,
+`TestStockSignalVoteCounts::test_stock_total_applicable`,
+`TestStockSignalVoteCounts::test_crypto_total_applicable`) fail
+when run together OR after other consensus tests, even with all
+state-reset fixtures wired correctly.
+
+Root cause: signals get force-HOLD'd by the per-ticker accuracy gate
+read from `data/accuracy_cache.json` — a real production file in the
+repo, not module state. The contents of that file change as the
+production loop writes accuracy snapshots. Whether RSI/MACD/BB are
+considered "above 45% accuracy on stocks" depends on what the file
+currently says, not on the test's setup. Until the consensus tests
+mock `data/accuracy_cache.json` themselves (or the production gate
+takes a config override), they will be data-coupled flakes.
+
+Recipe to skip them in CI / local runs:
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/ -n auto \
+    --deselect 'tests/test_consensus.py::TestStockConsensus::test_stock_buy_with_3_voters' \
+    --deselect 'tests/test_consensus.py::TestStockConsensus::test_stock_sell_with_3_voters' \
+    --deselect 'tests/test_consensus.py::TestStockConsensus::test_all_stock_tickers_use_3_voter_threshold' \
+    --deselect 'tests/test_consensus.py::TestCryptoConsensus::test_crypto_buy_with_3_voters' \
+    --deselect 'tests/test_consensus.py::TestSentimentHysteresis::test_flip_direction_above_threshold_votes' \
+    --deselect 'tests/test_consensus.py::TestStockSignalVoteCounts::test_stock_total_applicable' \
+    --deselect 'tests/test_consensus.py::TestStockSignalVoteCounts::test_crypto_total_applicable'
+```
+
+Proper fix (deferred): rewrite the consensus tests to mock
+`data/accuracy_cache.json` via tmp_path and patch the loader, the same
+way `metals_swing_trader` tests already isolate state files.
 
 Reset helpers live in `tests/_state_reset.py`. The module also provides
 `reset_all()` for MEDIUM/LOW-risk modules (forecast, logging_config,

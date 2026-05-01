@@ -32,26 +32,41 @@ def _make_fg_cached(fg_value, fg_class="Fear"):
 
 
 def _ind_trending_up(**overrides):
-    """Indicator dict that produces regime='trending-up'."""
+    """Indicator dict that produces regime='trending-up'.
+
+    2026-05-02: added adx=25 — the regime classifier in
+    portfolio/indicators.py forces 'ranging' when adx < 20 regardless
+    of the EMA gap. Default `make_indicators` has no adx, so without
+    this override every trending regime test silently became a
+    ranging-regime test.
+    """
     defaults = {
         "close": 69_000.0,
         "ema9": 70_000.0,   # > ema21 by >0.5%
         "ema21": 69_000.0,
         "rsi": 60.0,        # > 45
         "atr_pct": 2.2,
+        "adx": 25.0,        # >= 20 required by detect_regime
     }
     defaults.update(overrides)
     return _make_indicators_base(**defaults)
 
 
 def _ind_trending_down(**overrides):
-    """Indicator dict that produces regime='trending-down'."""
+    """Indicator dict that produces regime='trending-down'.
+
+    2026-05-02: same adx fix as _ind_trending_up. Also: close > ema21
+    would trigger the V-shape recovery override (line 200 of
+    indicators.py). Set close < ema21 here so trending-down stays
+    classified.
+    """
     defaults = {
-        "close": 69_000.0,
+        "close": 68_500.0,  # < ema21 to avoid V-shape override
         "ema9": 68_000.0,   # < ema21 by >0.5%
         "ema21": 69_000.0,
         "rsi": 40.0,        # < 55
         "atr_pct": 2.2,
+        "adx": 25.0,        # >= 20 required by detect_regime
     }
     defaults.update(overrides)
     return _make_indicators_base(**defaults)
@@ -65,6 +80,8 @@ def _ind_ranging(**overrides):
         "ema21": 69_000.0,
         "rsi": 50.0,
         "atr_pct": 2.2,
+        # adx omitted on purpose — adx < 20 forces ranging anyway, so
+        # this matches the default-no-adx make_indicators behaviour.
     }
     defaults.update(overrides)
     return _make_indicators_base(**defaults)
@@ -78,6 +95,7 @@ def _ind_high_vol(**overrides):
         "ema21": 69_000.0,
         "rsi": 50.0,
         "atr_pct": 5.0,     # > 4.0 threshold for crypto
+        # high-vol is detected first (atr_pct branch) regardless of adx.
     }
     defaults.update(overrides)
     return _make_indicators_base(**defaults)
