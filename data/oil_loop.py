@@ -1,24 +1,26 @@
-"""Crypto autonomous swing-trading loop — BTC + ETH.
+"""Oil autonomous swing-trading loop — WTI.
 
-Mirrors `data/metals_loop.py` for the crypto subsystem. 60-second cycle:
+Mirrors `data/crypto_loop.py` (which itself mirrors `data/metals_loop.py`)
+for the oil subsystem. 60-second cycle:
   1. Acquire singleton lock (one process at a time).
-  2. Fetch live BTC + ETH prices from Binance.
+  2. Fetch live WTI price via portfolio.price_source (CL=F → Binance FAPI
+     real-time, with yfinance fallback).
   3. Read the latest Layer 1 signal snapshot from data/agent_summary*.json.
-  4. Run CryptoSwingTrader.evaluate_and_execute(prices, signal_data).
+  4. Run OilSwingTrader.evaluate_and_execute(prices, signal_data).
   5. Sleep CYCLE_SECONDS, with embedded fast-tick monitor every 10s for
      sharp-dip alerts (Telegram).
 
-Ships in DRY_RUN=True via crypto_swing_config — the loop will log decisions
-to data/crypto_swing_decisions.jsonl but place no Avanza orders. Wiring
+Ships in DRY_RUN=True via oil_swing_config — the loop will log decisions
+to data/oil_swing_decisions.jsonl but place no Avanza orders. Wiring
 into a scheduled task should wait until live warrant discovery has run
-(via the loop itself: it'll call crypto_warrant_refresh.load_catalog_or_fetch
+(via the loop itself: it'll call oil_warrant_refresh.load_catalog_or_fetch
 on first cycle when a Playwright page is available).
 
 Run manually:
-    .venv/Scripts/python.exe -u data/crypto_loop.py --loop
+    .venv/Scripts/python.exe -u data/oil_loop.py --loop
 
 One-shot (single cycle, no sleep):
-    .venv/Scripts/python.exe -u data/crypto_loop.py --once
+    .venv/Scripts/python.exe -u data/oil_loop.py --once
 """
 from __future__ import annotations
 
@@ -38,23 +40,24 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 
-from data import crypto_swing_config as cfg
-from data.crypto_swing_trader import CryptoSwingTrader
+from data import oil_swing_config as cfg
+from data.oil_swing_trader import OilSwingTrader
 from portfolio.file_utils import load_json
 
-logger = logging.getLogger("crypto_loop")
+logger = logging.getLogger("oil_loop")
 
 CYCLE_SECONDS = 60
 SIGNAL_SUMMARY_FILE = "data/agent_summary_compact.json"
-SINGLETON_LOCK_FILE = "data/crypto_loop.lock"
-HEARTBEAT_FILE = "data/crypto_loop.heartbeat"
-EXIT_LOCK_CONFLICT = 11        # Mirrors metals-loop.bat exit-code-11 contract.
-                                # The .bat wrapper sees 11 and stops the
-                                # restart loop instead of fork-bombing into
-                                # the live instance.
+SINGLETON_LOCK_FILE = "data/oil_loop.lock"
+HEARTBEAT_FILE = "data/oil_loop.heartbeat"
+EXIT_LOCK_CONFLICT = 11        # Mirrors metals-loop.bat / crypto-loop.bat
+                                # exit-code-11 contract: the .bat wrapper
+                                # sees 11 and stops the restart loop instead
+                                # of fork-bombing into the live instance.
 
-# Binance public endpoints (no auth needed for prices)
-_BINANCE_24HR = "https://api.binance.com/api/v3/ticker/24hr"
+# Live oil prices route through portfolio.price_source.fetch_klines —
+# CL=F goes Binance FAPI (real-time) with yfinance fallback. Module-level
+# constants kept for grep parity with crypto_loop / metals_loop.
 
 
 def _now_utc() -> datetime.datetime:
@@ -69,10 +72,15 @@ def _now_iso() -> str:
 # Singleton lock (matches metals_loop pattern)
 # ---------------------------------------------------------------------------
 def _pid_alive(pid: int) -> bool:
-    """Check if *pid* is running. Windows: tasklist; POSIX: kill(0)."""
+    """Check if *pid* is running. Windows: tasklist; POSIX: kill(0).
+
+    2026-05-01: subprocess imported at module top so the except clause
+    below resolves on POSIX even when tasklist branch is skipped (codex
+    review caught NameError on stale-lock cleanup in WSL/CI).
+    """
+    import subprocess  # noqa: PLC0415 — explicit local for the except clause
     try:
         if os.name == "nt":
-            import subprocess
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}"],
                 capture_output=True, text=True, timeout=5,
@@ -129,27 +137,41 @@ def release_singleton_lock(lock_path: str | None) -> None:
 # Live price fetch
 # ---------------------------------------------------------------------------
 def fetch_live_prices() -> dict[str, float]:
-    """Fetch BTC + ETH live prices from Binance public API.
+    """Fetch WTI/Brent live prices via the canonical price_source router.
 
-    Returns dict mapping config tickers (BTC-USD, ETH-USD) to USD spot price.
-    Failures land as missing keys — the caller treats them as "skip this
-    instrument".
+    Returns dict mapping config tickers (OIL-USD) to USD spot price. The
+    underlying yfinance symbol is taken from cfg.DATA_SOURCES. The router
+    (`portfolio.price_source.fetch_klines`) prefers Binance FAPI for
+    real-time CL=F (per oil_precompute.py 2026-04-14 routing), with
+    yfinance fallback. Failures land as missing keys — the caller treats
+    them as "skip this instrument".
     """
     out: dict[str, float] = {}
     try:
-        import requests
-        for ticker in cfg.INSTRUMENTS:
-            sym = cfg.DATA_SOURCES.get(ticker, {}).get("binance_symbol")
-            if not sym:
+        from portfolio.price_source import fetch_klines
+    except ImportError as exc:
+        logger.warning("price_source unavailable: %s", exc)
+        return out
+
+    for ticker in cfg.INSTRUMENTS:
+        sym = cfg.DATA_SOURCES.get(ticker, {}).get("yfinance_symbol")
+        if not sym:
+            continue
+        try:
+            # Pull recent 1m bars; last close is the freshest price the
+            # router has. fetch_klines handles Binance/yfinance routing.
+            hist = fetch_klines(sym, interval="1m", limit=5, period="1d")
+            if hist is None or hist.empty:
+                # Fall back to daily bar for cases where the 1m feed is
+                # gapped (weekend, between sessions).
+                hist = fetch_klines(sym, interval="1d", limit=2, period="5d")
+            if hist is None or hist.empty:
                 continue
-            try:
-                r = requests.get(_BINANCE_24HR, params={"symbol": sym}, timeout=10)
-                if r.status_code == 200:
-                    out[ticker] = float(r.json().get("lastPrice", 0))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("price fetch %s: %s", ticker, exc)
-    except ImportError:
-        logger.warning("requests not available — no live prices")
+            last = float(hist["close"].dropna().iloc[-1])
+            if last > 0:
+                out[ticker] = last
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("price fetch %s: %s", ticker, exc)
     return out
 
 
@@ -223,7 +245,7 @@ def fast_tick_check(reference_prices: dict[str, dict[str, float]],
 # ---------------------------------------------------------------------------
 # Cycle
 # ---------------------------------------------------------------------------
-def run_one_cycle(trader: CryptoSwingTrader,
+def run_one_cycle(trader: OilSwingTrader,
                   notify: Any = None) -> dict[str, Any]:
     prices = fetch_live_prices()
     signal_data = load_signal_snapshot()
@@ -250,7 +272,7 @@ def write_heartbeat(extra: dict | None = None) -> None:
     """Write a JSON heartbeat file each successful cycle.
 
     Used by an external watchdog (TBD) to detect a hung loop. Format
-    mirrors the metals_loop pattern used elsewhere in the system.
+    mirrors the crypto_loop / metals_loop heartbeat pattern.
     """
     try:
         from portfolio.file_utils import atomic_write_json
@@ -259,7 +281,6 @@ def write_heartbeat(extra: dict | None = None) -> None:
             payload.update(extra)
         atomic_write_json(HEARTBEAT_FILE, payload)
     except Exception as exc:  # noqa: BLE001
-        # Heartbeat write failure must never crash the loop — log and continue.
         logger.debug("heartbeat write failed: %s", exc)
 
 
@@ -272,7 +293,7 @@ def run_loop(notify: Any = None) -> int:
     """
     lock = acquire_singleton_lock()
     if lock is None:
-        logger.error("crypto_loop: another instance is running. exiting.")
+        logger.error("oil_loop: another instance is running. exiting.")
         return EXIT_LOCK_CONFLICT
 
     stop = {"flag": False}
@@ -286,12 +307,12 @@ def run_loop(notify: Any = None) -> int:
         with contextlib.suppress(AttributeError, ValueError):
             signal.signal(signal.SIGTERM, _sigterm)
 
-        trader = CryptoSwingTrader(page=None, executor=None)
-        logger.info("crypto_loop start. DRY_RUN=%s instruments=%s",
+        trader = OilSwingTrader(page=None, executor=None)
+        logger.info("oil_loop start. DRY_RUN=%s instruments=%s",
                     cfg.DRY_RUN, cfg.INSTRUMENTS)
         if notify:
             with contextlib.suppress(Exception):
-                notify(f"crypto_loop start — DRY_RUN={cfg.DRY_RUN} "
+                notify(f"oil_loop start — DRY_RUN={cfg.DRY_RUN} "
                        f"instruments={','.join(cfg.INSTRUMENTS)}")
 
         fast_tick_refs: dict[str, dict[str, float]] = {}
@@ -303,8 +324,6 @@ def run_loop(notify: Any = None) -> int:
                 result = run_one_cycle(trader, notify=notify)
                 logger.info("cycle ok=%s n_pos=%s", result.get("ok"),
                             result.get("n_positions"))
-                # Heartbeat after successful cycle — even on ok=False
-                # (no prices) we want to indicate the loop is alive.
                 write_heartbeat({
                     "cycle": cycle_count,
                     "ok": bool(result.get("ok")),
@@ -331,14 +350,14 @@ def run_loop(notify: Any = None) -> int:
                 time.sleep(drift)
     finally:
         release_singleton_lock(lock)
-        logger.info("crypto_loop exited cleanly")
+        logger.info("oil_loop exited cleanly")
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Crypto swing-trading loop (BTC + ETH)")
+    p = argparse.ArgumentParser(description="Oil swing-trading loop (WTI)")
     p.add_argument("--loop", action="store_true",
                    help="Run forever (60s cycle).")
     p.add_argument("--once", action="store_true",
@@ -377,7 +396,7 @@ def main() -> int:
         return 0
 
     if args.once:
-        trader = CryptoSwingTrader(page=None, executor=None)
+        trader = OilSwingTrader(page=None, executor=None)
         result = run_one_cycle(trader)
         print(json.dumps({"ok": result.get("ok"),
                           "n_positions": result.get("n_positions"),
