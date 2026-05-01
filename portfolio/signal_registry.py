@@ -254,6 +254,15 @@ def _register_defaults():
                       "portfolio.signals.residual_pair_reversion",
                       "compute_residual_pair_reversion_signal",
                       requires_context=True, max_confidence=0.7)
+    # Williams VIX Fix — synthetic volatility bottom/capitulation detector (all assets)
+    # 2026-05-01: Larry Williams (2007). Profit factor 2.0, 322 trades 1993-2024.
+    # WVF = (highest_close_22 - low) / highest_close_22 * 100. Spikes above upper
+    # Bollinger Band signal extreme fear = BUY. Directly targets system's BUY-side
+    # accuracy weakness. Pure OHLCV, all 5 tickers.
+    register_enhanced("williams_vix_fix",
+                      "portfolio.signals.williams_vix_fix",
+                      "compute_williams_vix_fix_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
