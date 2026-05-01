@@ -935,3 +935,131 @@ class TestStreamingMaxPeakCache:
 
         result = _streaming_max(history, "value", 0)
         assert result == 300
+
+
+# ===========================================================================
+# Adversarial review 05-01 P1-15: FX rate fallback to 1.0
+#
+# Before: any fx_rate-consuming function did
+#     fx_rate = agent_summary.get("fx_rate", 1.0)
+# When agent_summary was missing, malformed, or had no fx_rate (e.g. early
+# loop cycle, AV-rotated agent_summary, fx_rates module crashed mid-fetch),
+# the default 1.0 understates SEK valuations by ~10x. A 500_000 SEK portfolio
+# valued at fx_rate=1.0 with all crypto holdings looks like a 95% drawdown
+# vs the correct ~10.85x value. That's a *false* circuit breaker that would
+# have triggered the drawdown block path and stopped Layer 2 from trading.
+#
+# Fix: `_resolve_fx_rate(agent_summary)` consults the agent_summary first
+# (sanity-checked 7-15 range), then a persisted disk cache at
+# DATA_DIR/fx_rate_cache.json (last known good rate), and only falls back to
+# the hardcoded 10.85 default when both fail. Successful summary values
+# update the cache.
+# ===========================================================================
+
+class TestFxRateResolution:
+
+    def test_summary_fx_rate_used_when_in_range(self, tmp_path, monkeypatch):
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        rate = _resolve_fx_rate({"fx_rate": 10.5})
+        assert rate == 10.5
+
+    def test_missing_fx_rate_falls_back_to_disk_cache(self, tmp_path, monkeypatch):
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        # Seed cache with last-known-good rate
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({
+            "rate": 10.92,
+            "ts": "2026-05-02T10:00:00+00:00",
+        }), encoding="utf-8")
+        rate = _resolve_fx_rate({"signals": {}})
+        assert rate == 10.92, "must use cached rate, not 1.0"
+
+    def test_zero_fx_rate_falls_back_to_disk_cache(self, tmp_path, monkeypatch):
+        """An explicit 0 from agent_summary is a sentinel for fx-fetch-failure."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.7, "ts": "x"}), encoding="utf-8")
+        rate = _resolve_fx_rate({"fx_rate": 0})
+        assert rate == 10.7
+
+    def test_one_fx_rate_falls_back_to_disk_cache(self, tmp_path, monkeypatch):
+        """The classic 1.0 fallback bug — must prefer cached rate."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.83, "ts": "x"}), encoding="utf-8")
+        rate = _resolve_fx_rate({"fx_rate": 1.0})
+        assert rate == 10.83, "fx_rate=1.0 in summary must defer to cached rate"
+
+    def test_out_of_range_summary_rate_falls_back(self, tmp_path, monkeypatch):
+        """Sanity-check failure (rate <7 or >15) must use cache."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.85, "ts": "x"}), encoding="utf-8")
+        # Negative or absurdly high rate
+        assert _resolve_fx_rate({"fx_rate": -5}) == 10.85
+        assert _resolve_fx_rate({"fx_rate": 50}) == 10.85
+        assert _resolve_fx_rate({"fx_rate": 0.01}) == 10.85
+
+    def test_no_cache_no_summary_uses_hardcoded_fallback(self, tmp_path, monkeypatch):
+        """No agent_summary, no disk cache — last resort 10.85 (NOT 1.0)."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        rate = _resolve_fx_rate({})
+        assert rate == 10.85, "last-resort fallback must be 10.85, not 1.0"
+
+    def test_corrupt_cache_falls_back_to_hardcoded(self, tmp_path, monkeypatch):
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text("not valid json", encoding="utf-8")
+        rate = _resolve_fx_rate({})
+        assert rate == 10.85
+
+    def test_cache_with_invalid_rate_falls_back(self, tmp_path, monkeypatch):
+        """Cache file present but rate field is missing/invalid."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": "n/a"}), encoding="utf-8")
+        rate = _resolve_fx_rate({})
+        assert rate == 10.85
+
+    def test_good_summary_rate_updates_disk_cache(self, tmp_path, monkeypatch):
+        """When summary provides a valid rate, persist it for next-time fallback."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        # Initially no cache
+        assert not cache_path.exists()
+        _resolve_fx_rate({"fx_rate": 10.91})
+        assert cache_path.exists()
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        assert cached["rate"] == 10.91
+        assert "ts" in cached
+
+    def test_compute_portfolio_value_uses_resolver(self, tmp_path, monkeypatch):
+        """End-to-end: _compute_portfolio_value goes through _resolve_fx_rate
+        instead of the raw .get('fx_rate', 1.0) — so a missing rate doesn't
+        turn a 5_435_000 SEK position into a 500_000 SEK valuation."""
+        from portfolio.risk_management import _compute_portfolio_value
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.85, "ts": "x"}), encoding="utf-8")
+
+        pf = _make_portfolio(cash=0, holdings={
+            "BTC-USD": {"shares": 1.0, "avg_cost_usd": 50_000},
+        })
+        # Summary missing fx_rate entirely
+        summary = {"signals": {"BTC-USD": {"price_usd": 60_000}}}
+        value = _compute_portfolio_value(pf, summary)
+        # Without the fix: 1 * 60_000 * 1.0 = 60_000 (wrong)
+        # With the fix: 1 * 60_000 * 10.85 = 651_000
+        assert value == 651_000, (
+            f"P1-15: missing fx_rate must defer to cache (10.85), "
+            f"not 1.0 (got {value} SEK)"
+        )
