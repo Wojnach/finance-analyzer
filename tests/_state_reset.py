@@ -38,6 +38,27 @@ def reset_agent_invocation():
         pass
 
 
+def reset_circuit_breakers():
+    """Reset module-level CircuitBreaker instances to CLOSED.
+
+    2026-05-02: tests that touch yfinance/Alpaca paths trip the breakers
+    after a few failures (5 by default). Once tripped, subsequent tests
+    on the same xdist worker get "Alpaca circuit OPEN — skipping X"
+    instead of real fetch attempts, which silently changes signal
+    outputs and breaks consensus tests. Reset fixes the leak.
+    """
+    try:
+        from portfolio.data_collector import (
+            alpaca_cb,
+            binance_fapi_cb,
+            binance_spot_cb,
+        )
+        for cb in (alpaca_cb, binance_fapi_cb, binance_spot_cb):
+            cb.reset()
+    except ImportError:
+        pass
+
+
 def reset_signal_engine():
     """Reset signal_engine module-level caches and state."""
     try:
@@ -52,6 +73,15 @@ def reset_signal_engine():
             se._prev_sentiment.clear()
             se._prev_sentiment_loaded = False
             se._sentiment_dirty = False
+        # 2026-05-02: clear additional module-level caches identified
+        # as the source of the test_consensus xdist flake (per
+        # docs/TESTING.md:52). These are populated by `_cached(...)`
+        # calls inside generate_signal and persist across worker tests.
+        if hasattr(se, "_ic_data_cache"):
+            se._ic_data_cache.clear()
+        if hasattr(se, "_macro_window_cache"):
+            with se._macro_window_cache_lock:
+                se._macro_window_cache.update({"value": False, "ts": 0.0})
     except ImportError:
         pass
 
@@ -120,6 +150,7 @@ def reset_all_high_risk():
     reset_agent_invocation()
     reset_signal_engine()
     reset_shared_state()
+    reset_circuit_breakers()
 
 
 def reset_all():

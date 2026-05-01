@@ -114,3 +114,21 @@ class CircuitBreaker:
                 "failure_count": self._failure_count,
                 "last_failure_time": self._last_failure_time,
             }
+
+    def reset(self) -> None:
+        """Force the breaker back to CLOSED with zero failures.
+
+        Intended use: operational override (manual recovery) and test
+        isolation. Production code should NOT call this in normal flow
+        — let record_success/record_failure drive the state machine.
+
+        2026-05-02: added when test_consensus xdist flakes traced back
+        to module-level breakers tripping during one test and leaking
+        into the next on the same xdist worker.
+        """
+        with self._lock:
+            self._state = State.CLOSED
+            self._failure_count = 0
+            self._last_failure_time = None
+            self._half_open_probe_sent = False
+            self.recovery_timeout = self._base_recovery_timeout
