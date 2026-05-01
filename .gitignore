@@ -89,6 +89,11 @@ data/analysis_log.jsonl
 data/watch_log.jsonl
 data/accuracy_cache.json
 data/critical_errors.jsonl
+data/forecast_health.jsonl
+data/forecast_predictions.jsonl
+data/sentiment_ab_log.jsonl
+data/auto-improve-progress.json
+data/after-hours-research-progress.json
 data/health_state.json
 data/lora_backtest_results.json
 data/shadow_lora_config.json
@@ -101,6 +106,15 @@ data/backtest_funding_*.csv
 data/_test_*
 data/_tmp_*
 data/backups/
+# Lockfiles created by file_utils.atomic_append_jsonl (per-journal *.lock)
+data/.*.lock
+# RUNTIME ML model artifacts written by PF-MLRetrain task. The
+# `models/*.joblib` rule below only matches a top-level `models/` dir,
+# so data/models/ needs its own entry. SNAPSHOT artifacts that should
+# stay tracked (e.g. data/temporal_patterns.json) live in data/ root,
+# not data/models/.
+data/models/meta_learner_*.joblib
+data/models/meta_learner_*_metrics.json
 
 # Scratch/debug scripts
 _*.py
