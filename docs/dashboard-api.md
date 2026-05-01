@@ -463,6 +463,38 @@ Returns recent trigger/invocation events.
 
 ---
 
+## House blueprint (`/house/*`)
+
+Read-only viewer over the [househunting](https://github.com/...) project's
+findapartments runs and innerstad heatmap. Mounted as a Flask blueprint
+in `dashboard/house_blueprint.py`. Reuses the same `pf_dashboard_token`
+cookie auth as the rest of the dashboard.
+
+Path roots come from `config.json[house_root]` (default `Q:\\househunting`).
+The blueprint is a pure file viewer — it never imports from the
+househunting project and the two repos stay decoupled.
+
+| Path | Returns |
+|------|---------|
+| `GET /house/` | 302 → most recent run |
+| `GET /house/runs` | HTML list of all `data/findapartments/<run-id>/` |
+| `GET /house/runs/<run-id>` | HTML render of `_summary.thesis.md` (fallback `_summary.md`) + manifest links |
+| `GET /house/runs/<run-id>/<slug>` | HTML render of `<slug>.thesis.md` (fallback `<slug>.md`) |
+| `GET /house/runs/<run-id>/<slug>/raw` | The candidate's `data.json` |
+| `GET /house/runs/<run-id>/_manifest.json` | The manifest |
+| `GET /house/heatmap` | `output/heatmap.html` (the innerstad CAGR heatmap) |
+| `GET /house/api/runs` | JSON list of runs |
+| `GET /house/api/runs/<run-id>` | JSON list of candidates |
+| `GET /house/api/runs/<run-id>/<slug>` | The candidate's `data.json` |
+
+`run-id` matches `^\\d{4}-\\d{2}-\\d{2}(-\\d{4})?$` (e.g. `2026-05-01-0032`)
+and `slug` matches `^[a-z0-9][a-z0-9-]{2,200}$`. Both are validated before
+use as path components — invalid → 404.
+
+Test coverage: `tests/test_dashboard_house.py` (32 cases — every route
+asserted to require auth, plus path-validation, fallback-md, real-file
+delivery).
+
 ## Data Sources
 
 All API endpoints read from files in the `data/` directory. These files are written by

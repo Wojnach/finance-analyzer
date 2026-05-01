@@ -1474,5 +1474,16 @@ def api_market_health():
         return jsonify({"error": "Internal server error"}), 500
 
 
+# ---------------------------------------------------------------------------
+# Blueprint: /house — read-only viewer over the househunting project
+# (data/findapartments runs + innerstad heatmap). Reuses pf_dashboard_token
+# auth. Path roots come from config.json[house_root]. See
+# dashboard/house_blueprint.py for routes.
+# ---------------------------------------------------------------------------
+from dashboard.house_blueprint import bp as _house_bp  # noqa: E402
+
+app.register_blueprint(_house_bp)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5055, debug=False)
