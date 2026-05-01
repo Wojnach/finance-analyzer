@@ -1009,6 +1009,62 @@ def _crash_sleep():
     time.sleep(delay)
 
 
+# Adversarial review 04-29 OR-P1-2 (2026-05-02): the original loop did
+#     _crash_alert(traceback)
+#     _crash_sleep()
+# inline in the except handler. If _crash_alert raised (disk full on
+# _save_crash_counter, load_json IO error before the inner try guard, etc.)
+# the loop process either died entirely or — under any future refactor
+# that tried to be defensive — proceeded without backoff. Even today
+# `_crash_sleep` would fire 10 * 2^(-1) ≈ 5s but only if
+# _consecutive_crashes was incremented by a non-failing _crash_alert call.
+#
+# This wrapper guarantees the loop ALWAYS sleeps before continuing,
+# regardless of what fails inside _crash_alert/_crash_sleep — using the
+# plan's recommended `time.sleep(min(2 ** n_failures, 30))` floor as the
+# last line of defense.
+_CRASH_FLOOR_SLEEP_CAP = 30  # seconds — plan-spec ceiling
+
+
+def _safe_crash_recovery(traceback_text: str) -> None:
+    """Crash-recovery sequence with a guaranteed minimum sleep floor.
+
+    Sequence:
+      1. _crash_alert (Telegram + counter persistence) — best-effort,
+         exceptions logged but never re-raised.
+      2. _crash_sleep (exponential backoff with jitter) — best-effort,
+         exceptions logged but never re-raised.
+      3. Floor sleep `min(2 ** n_failures, 30)` IF _crash_sleep didn't
+         actually sleep (raised before time.sleep, or both attempts above
+         died). Always fires when both helpers raise; skipped when
+         _crash_sleep ran cleanly (it already paused the cycle).
+
+    The floor exists to prevent the loop from spinning tight on persistent
+    failure when the alerting machinery itself is broken (e.g. disk full
+    is what's crashing the loop in the first place — same disk hosts the
+    crash counter file).
+    """
+    crash_sleep_succeeded = False
+    try:
+        _crash_alert(traceback_text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Crash alert helper raised: %s — proceeding to floor sleep", e)
+    try:
+        _crash_sleep()
+        crash_sleep_succeeded = True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Crash sleep helper raised: %s — using floor sleep", e)
+
+    if not crash_sleep_succeeded:
+        n = max(_consecutive_crashes, 1)
+        # Cap exponent at log2(_CRASH_FLOOR_SLEEP_CAP) to avoid
+        # arithmetic overflow on n=50 — 2 ** 50 is fine in Python but
+        # the cap math happens regardless.
+        floor = min(2 ** min(n, 16), _CRASH_FLOOR_SLEEP_CAP)
+        logger.warning("Crash floor sleep: %.0fs (crash #%d)", floor, n)
+        time.sleep(floor)
+
+
 def _reset_crash_counter():
     """Reset crash counter after a successful run cycle."""
     global _consecutive_crashes
@@ -1105,9 +1161,11 @@ def loop(interval=None):
         return
     except Exception as e:
         import traceback
-        _crash_alert(traceback.format_exc())
+        # OR-P1-2 (2026-05-02): wrap alert+sleep in _safe_crash_recovery so
+        # an alert helper failure (disk full on crash counter, etc.) still
+        # leaves a minimum backoff before the next try.
         logger.error("in initial run: %s", e)
-        _crash_sleep()
+        _safe_crash_recovery(traceback.format_exc())
 
     last_state = None
     last_cycle_started = time.monotonic()
@@ -1132,7 +1190,7 @@ def loop(interval=None):
             break
         except Exception as e:
             import traceback
-            _crash_alert(traceback.format_exc())
+            tb_text = traceback.format_exc()
             logger.error("in run: %s", e)
             try:
                 from portfolio.health import update_health
@@ -1140,7 +1198,12 @@ def loop(interval=None):
                               error=str(e))
             except Exception as e2:
                 logger.warning("Health update after crash failed: %s", e2)
-            _crash_sleep()
+            # OR-P1-2 (2026-05-02): _safe_crash_recovery guarantees a
+            # minimum sleep even if both _crash_alert and _crash_sleep fail
+            # (e.g. disk full breaking the counter file). Without this floor,
+            # the loop could spin tight on persistent failure since
+            # _sleep_for_next_cycle takes 0s when elapsed > interval.
+            _safe_crash_recovery(tb_text)
             report = None
         last_cycle_started = cycle_started
         try:

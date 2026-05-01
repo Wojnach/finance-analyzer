@@ -5,7 +5,6 @@ and delegates to iskbets.handle_command(). Also handles /mode command for
 switching notification format (signals vs probability).
 """
 
-import json
 import logging
 import threading
 import time
@@ -321,8 +320,15 @@ class TelegramPoller:
         """
         from pathlib import Path
 
-        from portfolio.file_utils import atomic_write_json
-
+        # Adversarial review 04-29 IN-P1-3 (2026-05-02): use the
+        # file_utils helpers (load_json + atomic_write_json) rather than
+        # raw open()/json.load(). Two reasons:
+        #   1. CLAUDE.md rule 4: "Atomic I/O only".
+        #   2. config.json is a symlink to an external file; raw open() can
+        #      race against an external atomic_write_json rename mid-read on
+        #      Windows (we've seen partial-byte reads in agent.log). load_json
+        #      handles the same edge cases (missing/corrupt → default) as
+        #      every other consumer in the codebase.
         config_path = Path(__file__).resolve().parent.parent / "config.json"
 
         if not mode_arg:
@@ -333,12 +339,10 @@ class TelegramPoller:
         if mode_arg not in ("signals", "probability"):
             return "Usage: `/mode signals` or `/mode probability`"
 
-        # Update config.json
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                cfg = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            cfg = {}
+        # Update config.json — load_json returns {} for missing/corrupt files
+        # without raising, so the BUG-210 size guard below catches both the
+        # genuine-corrupt case and the transient-unreadable case.
+        cfg = load_json(config_path, default={})
 
         # BUG-210: Guard against writing suspiciously small config.
         # If config.json was momentarily unreadable (symlink, AV lock, fs

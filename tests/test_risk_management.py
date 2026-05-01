@@ -935,3 +935,253 @@ class TestStreamingMaxPeakCache:
 
         result = _streaming_max(history, "value", 0)
         assert result == 300
+
+
+# ===========================================================================
+# Adversarial review 05-01 P1-15: FX rate fallback to 1.0
+#
+# Before: any fx_rate-consuming function did
+#     fx_rate = agent_summary.get("fx_rate", 1.0)
+# When agent_summary was missing, malformed, or had no fx_rate (e.g. early
+# loop cycle, AV-rotated agent_summary, fx_rates module crashed mid-fetch),
+# the default 1.0 understates SEK valuations by ~10x. A 500_000 SEK portfolio
+# valued at fx_rate=1.0 with all crypto holdings looks like a 95% drawdown
+# vs the correct ~10.85x value. That's a *false* circuit breaker that would
+# have triggered the drawdown block path and stopped Layer 2 from trading.
+#
+# Fix: `_resolve_fx_rate(agent_summary)` consults the agent_summary first
+# (sanity-checked 7-15 range), then a persisted disk cache at
+# DATA_DIR/fx_rate_cache.json (last known good rate), and only falls back to
+# the hardcoded 10.85 default when both fail. Successful summary values
+# update the cache.
+# ===========================================================================
+
+class TestFxRateResolution:
+
+    def test_summary_fx_rate_used_when_in_range(self, tmp_path, monkeypatch):
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        rate = _resolve_fx_rate({"fx_rate": 10.5})
+        assert rate == 10.5
+
+    def test_missing_fx_rate_falls_back_to_disk_cache(self, tmp_path, monkeypatch):
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        # Seed cache with last-known-good rate
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({
+            "rate": 10.92,
+            "ts": "2026-05-02T10:00:00+00:00",
+        }), encoding="utf-8")
+        rate = _resolve_fx_rate({"signals": {}})
+        assert rate == 10.92, "must use cached rate, not 1.0"
+
+    def test_zero_fx_rate_falls_back_to_disk_cache(self, tmp_path, monkeypatch):
+        """An explicit 0 from agent_summary is a sentinel for fx-fetch-failure."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.7, "ts": "x"}), encoding="utf-8")
+        rate = _resolve_fx_rate({"fx_rate": 0})
+        assert rate == 10.7
+
+    def test_one_fx_rate_falls_back_to_disk_cache(self, tmp_path, monkeypatch):
+        """The classic 1.0 fallback bug — must prefer cached rate."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.83, "ts": "x"}), encoding="utf-8")
+        rate = _resolve_fx_rate({"fx_rate": 1.0})
+        assert rate == 10.83, "fx_rate=1.0 in summary must defer to cached rate"
+
+    def test_out_of_range_summary_rate_falls_back(self, tmp_path, monkeypatch):
+        """Sanity-check failure (rate <7 or >15) must use cache."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.85, "ts": "x"}), encoding="utf-8")
+        # Negative or absurdly high rate
+        assert _resolve_fx_rate({"fx_rate": -5}) == 10.85
+        assert _resolve_fx_rate({"fx_rate": 50}) == 10.85
+        assert _resolve_fx_rate({"fx_rate": 0.01}) == 10.85
+
+    def test_no_cache_no_summary_uses_hardcoded_fallback(self, tmp_path, monkeypatch):
+        """No agent_summary, no disk cache — last resort 10.85 (NOT 1.0)."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        rate = _resolve_fx_rate({})
+        assert rate == 10.85, "last-resort fallback must be 10.85, not 1.0"
+
+    def test_corrupt_cache_falls_back_to_hardcoded(self, tmp_path, monkeypatch):
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text("not valid json", encoding="utf-8")
+        rate = _resolve_fx_rate({})
+        assert rate == 10.85
+
+    def test_cache_with_invalid_rate_falls_back(self, tmp_path, monkeypatch):
+        """Cache file present but rate field is missing/invalid."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": "n/a"}), encoding="utf-8")
+        rate = _resolve_fx_rate({})
+        assert rate == 10.85
+
+    def test_good_summary_rate_updates_disk_cache(self, tmp_path, monkeypatch):
+        """When summary provides a valid rate, persist it for next-time fallback."""
+        from portfolio.risk_management import _resolve_fx_rate
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        # Initially no cache
+        assert not cache_path.exists()
+        _resolve_fx_rate({"fx_rate": 10.91})
+        assert cache_path.exists()
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        assert cached["rate"] == 10.91
+        assert "ts" in cached
+
+    def test_compute_portfolio_value_uses_resolver(self, tmp_path, monkeypatch):
+        """End-to-end: _compute_portfolio_value goes through _resolve_fx_rate
+        instead of the raw .get('fx_rate', 1.0) — so a missing rate doesn't
+        turn a 5_435_000 SEK position into a 500_000 SEK valuation."""
+        from portfolio.risk_management import _compute_portfolio_value
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        cache_path = tmp_path / "fx_rate_cache.json"
+        cache_path.write_text(json.dumps({"rate": 10.85, "ts": "x"}), encoding="utf-8")
+
+        pf = _make_portfolio(cash=0, holdings={
+            "BTC-USD": {"shares": 1.0, "avg_cost_usd": 50_000},
+        })
+        # Summary missing fx_rate entirely
+        summary = {"signals": {"BTC-USD": {"price_usd": 60_000}}}
+        value = _compute_portfolio_value(pf, summary)
+        # Without the fix: 1 * 60_000 * 1.0 = 60_000 (wrong)
+        # With the fix: 1 * 60_000 * 10.85 = 651_000
+        assert value == 651_000, (
+            f"P1-15: missing fx_rate must defer to cache (10.85), "
+            f"not 1.0 (got {value} SEK)"
+        )
+
+
+# ===========================================================================
+# Adversarial review 04-29 PR-P1-2: peak cache no thread lock
+#
+# Before: _peak_cache (module-level dict) was read+modified by _streaming_max
+# without a lock. The main loop's 8-worker ThreadPoolExecutor invokes
+# check_drawdown across the cycle (potentially concurrently for two
+# portfolios), and update_health periodically calls _streaming_max. A
+# concurrent reader could see the dict mid-update (partial offset, dropped
+# peak entry) — same class of bug as today's commit cdcbbd0f for
+# signal_history.update_history.
+#
+# Fix: serialize all peak-cache reads/writes under a threading.Lock.
+# ===========================================================================
+
+class TestPeakCacheLock:
+
+    def test_lock_exists_and_is_a_lock(self):
+        """The module-level _peak_cache_lock must be a real Lock."""
+        import threading
+        from portfolio.risk_management import _peak_cache_lock
+        # _thread.lock isn't a class but exposes acquire/release
+        assert hasattr(_peak_cache_lock, "acquire")
+        assert hasattr(_peak_cache_lock, "release")
+        # Sanity: looks like a threading.Lock instance
+        assert _peak_cache_lock.__class__.__name__ in (
+            "lock",
+            "Lock",
+            "_Lock",
+            "RLock",
+            "_RLock",
+        )
+        # Document intent — match the threading.Lock factory return type
+        assert isinstance(_peak_cache_lock, type(threading.Lock()))
+
+    def test_concurrent_streaming_max_no_lost_peaks(self, tmp_path, monkeypatch):
+        """8 worker threads × 25 _streaming_max calls each — peak still computed.
+
+        Without the lock, _peak_cache[cache_key] = {...} could race against a
+        concurrent .get() in another worker, occasionally losing the cached
+        offset and forcing a full re-scan (correctness preserved, but cache
+        churn). With high contention the dict can throw in CPython 3.12+
+        (concurrent dict mutation can raise RuntimeError).
+        """
+        import json as _json
+        from concurrent.futures import ThreadPoolExecutor
+
+        from portfolio.risk_management import _peak_cache, _streaming_max
+
+        history = tmp_path / "history.jsonl"
+        with open(history, "w", encoding="utf-8") as f:
+            for i in range(200):
+                f.write(_json.dumps({"value": i}) + "\n")
+
+        # Reset cache for the specific key we'll exercise
+        cache_key = (str(history), "value")
+        _peak_cache.pop(cache_key, None)
+
+        def worker():
+            return _streaming_max(history, "value", floor=0)
+
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            results = list(ex.map(lambda _: worker(), range(8 * 25)))
+
+        # Every call must return the true max (199), regardless of cache races.
+        assert all(r == 199 for r in results), (
+            "Concurrent _streaming_max calls returned wrong peak — "
+            "indicates the cache mutation race corrupted reads."
+        )
+
+    def test_serial_calls_still_use_cache(self, tmp_path, monkeypatch):
+        """Adding the lock must not break the cache fast path."""
+        import json as _json
+
+        from portfolio.risk_management import _peak_cache, _streaming_max
+
+        history = tmp_path / "history.jsonl"
+        with open(history, "w", encoding="utf-8") as f:
+            for i in range(50):
+                f.write(_json.dumps({"value": i}) + "\n")
+
+        cache_key = (str(history), "value")
+        _peak_cache.pop(cache_key, None)
+
+        # First call populates the cache.
+        r1 = _streaming_max(history, "value", floor=0)
+        assert r1 == 49
+        assert cache_key in _peak_cache
+        first_offset = _peak_cache[cache_key]["offset"]
+
+        # Append a new line to the file — cache should resume from offset.
+        with open(history, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({"value": 100}) + "\n")
+        r2 = _streaming_max(history, "value", floor=0)
+        assert r2 == 100
+        # Offset should have advanced past the new line
+        assert _peak_cache[cache_key]["offset"] > first_offset
+
+    def test_file_shrink_invalidates_cache_under_lock(self, tmp_path, monkeypatch):
+        """Cache invalidation on file shrink (rotation) must still fire."""
+        import json as _json
+
+        from portfolio.risk_management import _peak_cache, _streaming_max
+
+        history = tmp_path / "history.jsonl"
+        with open(history, "w", encoding="utf-8") as f:
+            for i in range(50):
+                f.write(_json.dumps({"value": i}) + "\n")
+
+        cache_key = (str(history), "value")
+        _peak_cache.pop(cache_key, None)
+
+        # Prime cache.
+        assert _streaming_max(history, "value", floor=0) == 49
+
+        # Rotate file (new content with smaller max).
+        with open(history, "w", encoding="utf-8") as f:
+            f.write(_json.dumps({"value": 5}) + "\n")
+        # Floor=0 — cache invalidation should pick up the new (smaller) max.
+        result = _streaming_max(history, "value", floor=0)
+        assert result == 5

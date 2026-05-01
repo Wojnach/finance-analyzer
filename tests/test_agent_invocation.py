@@ -1223,3 +1223,253 @@ class TestDrawdownFailSafe:
             f"Per-portfolio IO error should not trigger drawdown block, "
             f"but got: {block_calls}"
         )
+
+
+# ===========================================================================
+# Adversarial review 05-01 P1-12: should_block_trade never called
+#
+# Before: portfolio.trade_guards.should_block_trade was implemented but never
+# imported by any production code (only tests). Trade guard warnings were
+# computed in reporting.py and stuffed into agent_summary, but Layer 2 was
+# only soft-asked to look at them in the prompt — there was no automated
+# pre-execution gate that refused to invoke when ALL trigger tickers were
+# under cooldown for BOTH strategies.
+#
+# Wiring: after the drawdown circuit breaker, agent_invocation reads the
+# trade_guard_warnings from agent_summary, surfaces them in _guard_context
+# (appended to the prompt like _drawdown_context), and BLOCKS when:
+#   1. should_block_trade(guard_result) is True (≥1 severity=block warning), AND
+#   2. The trigger ticker is blocked for BOTH Patient and Bold strategies.
+# Otherwise, warnings flow as advisory context and the invocation proceeds.
+#
+# This preserves Layer 2's discretion when ANY strategy can still trade,
+# while preventing the wasteful T2/T3 spawn (~600s of subprocess + Claude
+# tokens) when no useful trade decision is possible.
+# ===========================================================================
+
+class TestTradeGuardsBlockGate:
+
+    def _setup_invoke_path(self, monkeypatch):
+        """Mock the early-return paths so we exercise the trade-guards gate."""
+        ai._agent_proc = None
+        ai._consecutive_stack_overflows = 0
+        monkeypatch.setattr(
+            "portfolio.perception_gate.should_invoke",
+            lambda r, t: (True, "ok"),
+        )
+        monkeypatch.setattr("portfolio.journal.write_context", lambda: 0)
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_config",
+            lambda: {"layer2": {"enabled": True}},
+        )
+        monkeypatch.setattr(
+            ai.PATIENT_PORTFOLIO.__class__, "exists", lambda self: True
+        )
+        # Drawdown check returns clean — exercise the trade guards gate next.
+        monkeypatch.setattr(
+            "portfolio.risk_management.check_drawdown",
+            lambda pf_path, max_drawdown_pct=20.0: {
+                "current_drawdown_pct": 5.0,
+                "peak_value": 500_000.0,
+                "current_value": 475_000.0,
+            },
+        )
+
+    def test_blocks_when_trigger_ticker_blocked_for_both_strategies(self, monkeypatch):
+        """When BTC-USD is in cooldown for both Patient and Bold, the
+        invocation must short-circuit before the multi-agent / subprocess
+        spawn block — no useful trade decision is possible."""
+        self._setup_invoke_path(monkeypatch)
+
+        # agent_summary with trade_guard_warnings blocking BTC-USD on both
+        guard_result = {
+            "warnings": [
+                {
+                    "guard": "ticker_cooldown",
+                    "severity": "block",
+                    "ticker": "BTC-USD",
+                    "strategy": "patient",
+                    "details": {"ticker": "BTC-USD", "strategy": "patient"},
+                },
+                {
+                    "guard": "ticker_cooldown",
+                    "severity": "block",
+                    "ticker": "BTC-USD",
+                    "strategy": "bold",
+                    "details": {"ticker": "BTC-USD", "strategy": "bold"},
+                },
+            ],
+            "summary": "ticker_cooldown: 2",
+        }
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_guard_warnings",
+            lambda: guard_result,
+        )
+
+        with patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            result = ai.invoke_agent(["BTC-USD trigger flipped BUY"], tier=2)
+
+        assert result is False, (
+            "P1-12: invocation must block when trigger ticker is in cooldown "
+            "for both strategies — no decision is possible."
+        )
+        block_calls = [
+            c for c in mock_log.call_args_list
+            if len(c.args) >= 2 and "blocked_trade_guards" in str(c.args[1])
+        ]
+        assert block_calls, (
+            f"Expected a blocked_trade_guards _log_trigger call, got: "
+            f"{[c.args for c in mock_log.call_args_list]}"
+        )
+
+    def test_proceeds_when_only_one_strategy_blocked(self, monkeypatch):
+        """When only Patient is blocked but Bold is free, invocation must
+        proceed — Bold can still take action."""
+        self._setup_invoke_path(monkeypatch)
+
+        guard_result = {
+            "warnings": [
+                {
+                    "guard": "ticker_cooldown",
+                    "severity": "block",
+                    "ticker": "BTC-USD",
+                    "strategy": "patient",
+                    "details": {"ticker": "BTC-USD", "strategy": "patient"},
+                },
+            ],
+            "summary": "ticker_cooldown: 1",
+        }
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_guard_warnings",
+            lambda: guard_result,
+        )
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen", return_value=MagicMock(pid=99)), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()), \
+             patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            ai.invoke_agent(["BTC-USD trigger flipped BUY"], tier=2)
+
+        # No blocked_trade_guards call — gate let it through (Bold can still trade).
+        block_calls = [
+            c for c in mock_log.call_args_list
+            if len(c.args) >= 2 and "blocked_trade_guards" in str(c.args[1])
+        ]
+        assert not block_calls, (
+            f"Single-strategy block must not block invocation: {block_calls}"
+        )
+
+    def test_proceeds_with_only_warning_severity(self, monkeypatch):
+        """severity=warning (e.g. consecutive_losses informational) must
+        not block the invocation — they're advisory only."""
+        self._setup_invoke_path(monkeypatch)
+
+        guard_result = {
+            "warnings": [
+                {
+                    "guard": "consecutive_losses",
+                    "severity": "warning",
+                    "details": {"consecutive_losses": 2, "strategy": "bold"},
+                },
+            ],
+            "summary": "consecutive_losses: 1",
+        }
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_guard_warnings",
+            lambda: guard_result,
+        )
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen", return_value=MagicMock(pid=99)), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()), \
+             patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            ai.invoke_agent(["BTC-USD trigger flipped BUY"], tier=2)
+
+        block_calls = [
+            c for c in mock_log.call_args_list
+            if len(c.args) >= 2 and "blocked_trade_guards" in str(c.args[1])
+        ]
+        assert not block_calls
+
+    def test_no_warnings_proceeds_normally(self, monkeypatch):
+        """Empty guard_result must not affect invocation flow."""
+        self._setup_invoke_path(monkeypatch)
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_guard_warnings",
+            lambda: {"warnings": [], "summary": "All clear"},
+        )
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen", return_value=MagicMock(pid=99)), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()), \
+             patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            ai.invoke_agent(["BTC-USD trigger flipped BUY"], tier=2)
+
+        block_calls = [
+            c for c in mock_log.call_args_list
+            if len(c.args) >= 2 and "blocked_trade_guards" in str(c.args[1])
+        ]
+        assert not block_calls
+
+    def test_load_guard_failure_does_not_block(self, monkeypatch):
+        """A failure inside _load_guard_warnings (missing agent_summary,
+        IO race, import error) must not block the invocation — fail-open
+        for THIS gate (unlike drawdown which is fail-safe block)."""
+        self._setup_invoke_path(monkeypatch)
+
+        def boom():
+            raise OSError("missing agent_summary")
+
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_guard_warnings", boom
+        )
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen", return_value=MagicMock(pid=99)), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()), \
+             patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            ai.invoke_agent(["BTC-USD trigger flipped BUY"], tier=2)
+
+        # The failure must not surface as a blocked_trade_guards call.
+        block_calls = [
+            c for c in mock_log.call_args_list
+            if len(c.args) >= 2 and "blocked_trade_guards" in str(c.args[1])
+        ]
+        assert not block_calls, (
+            "P1-12: trade-guard load failure must fail-open, not fail-safe-block "
+            "(unlike drawdown). The cooldown is itself a soft constraint and "
+            "missing data should not stop the loop from invoking."
+        )
+
+    def test_load_guard_warnings_reads_agent_summary(self, tmp_path, monkeypatch):
+        """End-to-end: _load_guard_warnings reads from agent_summary.json
+        and returns its trade_guard_warnings field (or empty default)."""
+        from portfolio.agent_invocation import _load_guard_warnings
+
+        # Direct DATA_DIR to tmp
+        monkeypatch.setattr("portfolio.agent_invocation.DATA_DIR", tmp_path)
+
+        # No file → empty warnings
+        result = _load_guard_warnings()
+        assert result == {"warnings": [], "summary": "no_summary"}
+
+        # File with warnings → returned
+        import json as _json
+        summary = {
+            "trade_guard_warnings": {
+                "warnings": [{"severity": "block", "ticker": "ETH-USD"}],
+                "summary": "1 block",
+            }
+        }
+        (tmp_path / "agent_summary.json").write_text(_json.dumps(summary))
+        result = _load_guard_warnings()
+        assert len(result["warnings"]) == 1
+        assert result["warnings"][0]["severity"] == "block"

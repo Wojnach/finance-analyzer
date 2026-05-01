@@ -12,6 +12,7 @@ import datetime
 import json
 import logging
 import pathlib
+import threading
 
 from portfolio.file_utils import atomic_append_jsonl, load_json
 
@@ -24,6 +25,18 @@ logger = logging.getLogger(__name__)
 # Invalidated when the file shrinks (log rotation).
 _peak_cache: dict[tuple, dict] = {}
 
+# Adversarial review 04-29 PR-P1-2 (2026-05-02): the main loop's 8-worker
+# ThreadPoolExecutor invokes check_drawdown() concurrently across the
+# patient + bold portfolios, and update_health periodically calls
+# _streaming_max. Without a lock, two threads could last-writer-wins on
+# _peak_cache[cache_key] = {...}, occasionally losing a cached offset and
+# forcing the next call to do a full O(file_size) scan instead of the
+# O(delta) streaming read. Same class of bug as today's commit cdcbbd0f
+# for signal_history.update_history. Lock scope: the entire read-decide-
+# update sequence in _streaming_max — both reading the cached offset and
+# writing back the new offset have to be atomic relative to other workers.
+_peak_cache_lock = threading.Lock()
+
 
 def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> float:
     """A-PR-2 (2026-04-11): Find the maximum value at `value_key` in a JSONL file.
@@ -32,6 +45,10 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
     scan new entries appended since the last call. Falls back to a full scan
     if the file shrinks (rotation) or on any seek error.
 
+    PR-P1-2 (2026-05-02): _peak_cache reads + writes are serialized under
+    _peak_cache_lock to avoid the 8-worker ThreadPoolExecutor losing cached
+    offsets to last-writer-wins races (see lock comment above).
+
     Streams line-by-line so memory stays O(1) regardless of file size.
     Returns `floor` (typically initial_value) if file missing/empty.
     """
@@ -39,24 +56,28 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
         return floor
 
     cache_key = (str(history_path), value_key)
-    cached = _peak_cache.get(cache_key)
 
     try:
         file_size = history_path.stat().st_size
     except OSError:
         file_size = 0
 
-    # Determine where to start reading
-    start_offset = 0
-    peak = floor
-    if cached is not None:
-        if file_size >= cached["offset"]:
-            # File grew or stayed the same — resume from last position
-            start_offset = cached["offset"]
-            peak = cached["peak"]
+    # Snapshot cache under the lock — keeps the (read offset, decide
+    # restart vs resume, hold last good peak) sequence consistent with
+    # the matching write at the bottom of the function.
+    with _peak_cache_lock:
+        cached = _peak_cache.get(cache_key)
+        if cached is not None:
+            if file_size >= cached["offset"]:
+                start_offset = cached["offset"]
+                peak = cached["peak"]
+            else:
+                # File shrank (rotation) — full re-scan
+                start_offset = 0
+                peak = floor
         else:
-            # File shrank (rotation) — full re-scan
             start_offset = 0
+            peak = floor
 
     try:
         with open(history_path, encoding="utf-8") as f:
@@ -76,16 +97,91 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
             end_offset = f.tell()
     except OSError as e:
         logger.warning("Could not stream history file %s: %s", history_path.name, e)
-        if cached is not None:
-            return cached["peak"]
+        with _peak_cache_lock:
+            cached_after = _peak_cache.get(cache_key)
+        if cached_after is not None:
+            return cached_after["peak"]
         return peak
 
-    _peak_cache[cache_key] = {"peak": peak, "offset": end_offset}
+    with _peak_cache_lock:
+        _peak_cache[cache_key] = {"peak": peak, "offset": end_offset}
     return peak
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
 INITIAL_VALUE_DEFAULT = 500_000  # SEK
+
+# Adversarial review 05-01 P1-15 (2026-05-02): persistent fallback for fx_rate.
+# Sane historical USD/SEK band (matches portfolio/fx_rates.py:42 sanity gate).
+# The hardcoded last-resort value matches portfolio/fx_rates.py:66 — both
+# modules need the same number so a fallback path through risk_management
+# doesn't disagree with the live fx fetcher.
+_FX_RATE_MIN = 7.0
+_FX_RATE_MAX = 15.0
+_FX_RATE_HARDCODED_FALLBACK = 10.85
+_FX_CACHE_FILENAME = "fx_rate_cache.json"
+
+
+def _resolve_fx_rate(agent_summary: dict) -> float:
+    """Return USD→SEK rate, preferring (1) summary, (2) cached, (3) hardcoded.
+
+    Adversarial review 05-01 P1-15: the original code did
+    ``fx_rate = agent_summary.get("fx_rate", 1.0)``. When agent_summary was
+    missing/empty/lacking the field — early loop cycle, agent_summary
+    rotation, fx_rates.py crashed mid-fetch — the 1.0 default understated
+    SEK valuations by ~10x and could trigger a false drawdown breach
+    (a 5_435_000 SEK position valued at fx_rate=1.0 looks like 95%
+    drawdown from the 500_000 SEK initial).
+
+    Resolution order:
+      1. ``agent_summary["fx_rate"]`` if it's a finite number in [7, 15].
+         (Same sanity band as portfolio/fx_rates.py:42.) Successful values
+         update the disk cache for future fallbacks.
+      2. Cached rate from ``DATA_DIR/fx_rate_cache.json`` if present and
+         in-band. The cache is best-effort: corrupt JSON or missing/invalid
+         rate field is treated as no-cache.
+      3. ``_FX_RATE_HARDCODED_FALLBACK`` (10.85) — matches
+         portfolio/fx_rates.py:66 so both modules disagree-by-zero on the
+         absolute worst-case path.
+
+    Note: 1.0 is explicitly rejected by the sanity band, so the legacy
+    pattern ``agent_summary.get("fx_rate", 1.0)`` continues to defer
+    correctly even if a stale agent_summary still embeds 1.0 itself.
+    """
+    raw = agent_summary.get("fx_rate") if isinstance(agent_summary, dict) else None
+    try:
+        rate = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        rate = None
+    if rate is not None and _FX_RATE_MIN <= rate <= _FX_RATE_MAX:
+        # Cache the good rate for future fallback paths.
+        try:
+            from portfolio.file_utils import atomic_write_json
+            atomic_write_json(DATA_DIR / _FX_CACHE_FILENAME, {
+                "rate": rate,
+                "ts": datetime.datetime.now(datetime.UTC).isoformat(),
+            })
+        except Exception as e:
+            logger.debug("fx cache persist failed: %s", e)
+        return rate
+
+    # Try disk cache.
+    cached = load_json(DATA_DIR / _FX_CACHE_FILENAME, default=None)
+    if isinstance(cached, dict):
+        try:
+            cached_rate = float(cached.get("rate"))
+            if _FX_RATE_MIN <= cached_rate <= _FX_RATE_MAX:
+                return cached_rate
+        except (TypeError, ValueError):
+            pass
+
+    logger.warning(
+        "fx_rate fallback to hardcoded %.2f — agent_summary missing/invalid "
+        "and no usable cache at %s. Portfolio valuations may be ~10%% off if "
+        "SEK has moved.",
+        _FX_RATE_HARDCODED_FALLBACK, DATA_DIR / _FX_CACHE_FILENAME,
+    )
+    return _FX_RATE_HARDCODED_FALLBACK
 
 
 def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
@@ -96,7 +192,8 @@ def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
     """
     cash = portfolio.get("cash_sek", 0)
     holdings = portfolio.get("holdings", {})
-    fx_rate = agent_summary.get("fx_rate", 1.0)
+    # P1-15 (2026-05-02): use cached fallback chain instead of raw .get(..., 1.0).
+    fx_rate = _resolve_fx_rate(agent_summary)
     signals = agent_summary.get("signals", {})
 
     holdings_value = 0.0
@@ -491,7 +588,11 @@ def log_portfolio_value(patient_path: str | None = None,
 
     patient = load_json(patient_path, default={})
     bold = load_json(bold_path, default={})
-    summary = load_json(agent_summary_path, default={"signals": {}, "fx_rate": 1.0})
+    # P1-15 (2026-05-02): the {"fx_rate": 1.0} default here was load-bearing
+    # for the false-circuit-breaker bug. Using a missing-fx_rate default lets
+    # _resolve_fx_rate inside _compute_portfolio_value walk the cache chain
+    # instead of taking the 1.0 at face value.
+    summary = load_json(agent_summary_path, default={"signals": {}})
 
     patient_value = _compute_portfolio_value(patient, summary)
     bold_value = _compute_portfolio_value(bold, summary)
@@ -515,7 +616,7 @@ def log_portfolio_value(patient_path: str | None = None,
         "bold_value_sek": round(bold_value, 2),
         "patient_pnl_pct": round(patient_pnl_pct, 4),
         "bold_pnl_pct": round(bold_pnl_pct, 4),
-        "fx_rate": summary.get("fx_rate", 1.0),
+        "fx_rate": _resolve_fx_rate(summary),  # P1-15 (2026-05-02)
         "prices": prices,
     }
 
@@ -655,7 +756,8 @@ def check_concentration_risk(ticker, action, portfolio, agent_summary, strategy=
 
     cash = portfolio.get("cash_sek", 0)
     holdings = portfolio.get("holdings", {})
-    fx_rate = agent_summary.get("fx_rate", 1.0)
+    # P1-15 (2026-05-02): use cached fallback chain instead of raw .get(..., 1.0).
+    fx_rate = _resolve_fx_rate(agent_summary)
     signals = agent_summary.get("signals", {})
 
     # Compute current portfolio value

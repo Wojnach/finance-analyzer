@@ -20,7 +20,24 @@ def _fetch_funding_rate(ticker):
     if data is None:
         return None
 
-    rate = float(data["lastFundingRate"])
+    # Adversarial review 04-29 DE-P1-1 (2026-05-02): Binance FAPI premiumIndex
+    # response is normally {lastFundingRate, markPrice, ...}, but a partial
+    # deployment / weird symbol state / schema change can return a payload
+    # missing one of those fields. The pre-fix code did `data["lastFundingRate"]`
+    # which raised KeyError that bubbled into the worker thread, killing the
+    # funding signal for the cycle (and 8 of those = whole cycle thread pool
+    # poisoned). Use .get() + None-return so the signal disappears cleanly
+    # for ONE cycle instead of crashing.
+    last_funding = data.get("lastFundingRate")
+    mark_price = data.get("markPrice")
+    if last_funding is None or mark_price is None:
+        return None
+    try:
+        rate = float(last_funding)
+        mark_price_f = float(mark_price)
+    except (TypeError, ValueError):
+        return None
+
     # Normal funding ~0.01% (0.0001). Thresholds:
     #   > 0.03% → overleveraged longs → contrarian SELL
     #   < -0.01% → overleveraged shorts → contrarian BUY
@@ -35,7 +52,7 @@ def _fetch_funding_rate(ticker):
         "rate": rate,
         "rate_pct": round(rate * 100, 4),
         "action": action,
-        "mark_price": float(data["markPrice"]),
+        "mark_price": mark_price_f,
     }
 
 
