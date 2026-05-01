@@ -63,7 +63,18 @@ Thumbs.db
 *.log
 logs/
 
-# Runtime data
+# Runtime data — files written by the loop, scheduled tasks, or the
+# Layer 2 agent on the fly. NEVER commit these — they diverge between
+# every push and every loop tick. If you find a new tracked file under
+# data/ that the loop is appending/overwriting, follow the same fix
+# pattern from chore/git-tracking-hygiene-20260502: add to this list,
+# `git rm --cached <path>`, commit. The on-disk file is preserved.
+#
+# RUNTIME vs SNAPSHOT: data/morning_briefing.json and
+# data/daily_research_*.json look runtime (overwritten daily by
+# scripts/after-hours-research.bat) but are intentionally tracked —
+# the user commits each day's research as a snapshot. Don't add them
+# here unless you also kill the daily research-commit workflow.
 data/portfolio.log
 data/portfolio_state.json
 data/portfolio_state_bold.json
