@@ -63,7 +63,18 @@ Thumbs.db
 *.log
 logs/
 
-# Runtime data
+# Runtime data — files written by the loop, scheduled tasks, or the
+# Layer 2 agent on the fly. NEVER commit these — they diverge between
+# every push and every loop tick. If you find a new tracked file under
+# data/ that the loop is appending/overwriting, follow the same fix
+# pattern from chore/git-tracking-hygiene-20260502: add to this list,
+# `git rm --cached <path>`, commit. The on-disk file is preserved.
+#
+# RUNTIME vs SNAPSHOT: data/morning_briefing.json and
+# data/daily_research_*.json look runtime (overwritten daily by
+# scripts/after-hours-research.bat) but are intentionally tracked —
+# the user commits each day's research as a snapshot. Don't add them
+# here unless you also kill the daily research-commit workflow.
 data/portfolio.log
 data/portfolio_state.json
 data/portfolio_state_bold.json
@@ -88,6 +99,12 @@ data/ab_test_log.jsonl
 data/analysis_log.jsonl
 data/watch_log.jsonl
 data/accuracy_cache.json
+data/critical_errors.jsonl
+data/forecast_health.jsonl
+data/forecast_predictions.jsonl
+data/sentiment_ab_log.jsonl
+data/auto-improve-progress.json
+data/after-hours-research-progress.json
 data/health_state.json
 data/lora_backtest_results.json
 data/shadow_lora_config.json
@@ -100,6 +117,15 @@ data/backtest_funding_*.csv
 data/_test_*
 data/_tmp_*
 data/backups/
+# Lockfiles created by file_utils.atomic_append_jsonl (per-journal *.lock)
+data/.*.lock
+# RUNTIME ML model artifacts written by PF-MLRetrain task. The
+# `models/*.joblib` rule below only matches a top-level `models/` dir,
+# so data/models/ needs its own entry. SNAPSHOT artifacts that should
+# stay tracked (e.g. data/temporal_patterns.json) live in data/ root,
+# not data/models/.
+data/models/meta_learner_*.joblib
+data/models/meta_learner_*_metrics.json
 
 # Scratch/debug scripts
 _*.py
