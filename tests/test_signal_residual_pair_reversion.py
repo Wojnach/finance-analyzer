@@ -1,10 +1,8 @@
 """Tests for residual_pair_reversion signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.residual_pair_reversion import (
-    MIN_ROWS,
     _compute_half_life,
     _residual_z_signal,
     _rolling_ols_beta,

@@ -1,17 +1,12 @@
 """Tests for portfolio.signal_decay_alert module."""
 
 import json
-import os
-import pytest
 
 from portfolio.signal_decay_alert import (
     check_signal_decay,
     format_decay_report,
     log_decay_alerts,
     run_decay_check,
-    _DECAY_THRESHOLD_PP,
-    _MIN_RECENT_SAMPLES,
-    _MIN_ALLTIME_SAMPLES,
 )
 
 

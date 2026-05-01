@@ -16,8 +16,6 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # data/ contains script-style modules, not a package.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 

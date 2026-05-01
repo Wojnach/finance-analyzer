@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-28
-Branch: improve/auto-session-2026-04-28
+Updated: 2026-05-01
+Branch: improve/auto-session-2026-05-01
 
 ## 1) Architecture Summary
 
@@ -23,7 +23,7 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 | Metals loop | `data/metals_loop.py` | Separate process, warrant trading |
 | Agent | `scripts/win/pf-agent.bat` | Spawns Claude CLI for Layer 2 |
 
-## 3) Module Map (~142 portfolio modules)
+## 3) Module Map (~152 portfolio modules)
 
 ### Orchestration (5 modules)
 - `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
@@ -33,7 +33,7 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 - `config_validator.py`: Startup config validation
 
 ### Signal System (52 signals: 12 core + 40 enhanced, 33 active + 19 disabled)
-- `signal_engine.py` (~2,700 lines): 51-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
+- `signal_engine.py (~3,621 lines): 52-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
 - `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators

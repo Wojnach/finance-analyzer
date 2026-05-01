@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
