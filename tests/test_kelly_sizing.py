@@ -288,6 +288,184 @@ class TestGetTickerSignalAccuracy:
 
 
 # ===================================================================
+# P1-11 (2026-05-02): per-ticker accuracy as primary path
+# ===================================================================
+#
+# Before the fix, _get_ticker_signal_accuracy() only consulted
+# `signal_accuracy_1d.signals` — system-wide per-signal accuracy
+# aggregated across every instrument. A signal that's 70% accurate on
+# XAG-USD but 30% on BTC-USD shows up as ~50% in the system-wide block,
+# so XAG-USD trades were under-sized and BTC-USD trades over-sized
+# relative to true ticker-conditioned win probability.
+#
+# The new path prefers `per_ticker_signal_accuracy` when present in
+# agent_summary; the system-wide block remains the fallback for tickers
+# / signals without a per-ticker entry.
+
+import pytest
+
+
+class TestPerTickerAccuracyPlumbing:
+    """P1-11: kelly_sizing must consume per-ticker per-signal accuracy
+    when it's available in agent_summary, not the system-wide aggregate."""
+
+    def test_per_ticker_block_wins_over_system_wide(self):
+        """Per-ticker beats system-wide when both are present.
+
+        System-wide says rsi=50%/100sam. Per-ticker says rsi=70%/30sam
+        for XAG-USD. The per-ticker number must drive the result, not
+        the contaminated cross-ticker average.
+        """
+        summary = {
+            "signal_accuracy_1d": {
+                "signals": {
+                    "rsi": {"accuracy": 0.50, "samples": 100},  # system-wide
+                },
+            },
+            "per_ticker_signal_accuracy": {
+                "XAG-USD": {
+                    "rsi": {"accuracy": 0.70, "samples": 30},
+                },
+            },
+            "signal_weights": {"rsi": {"normalized_weight": 1.0}},
+            "signals": {
+                "XAG-USD": {"extra": {"_votes": {"rsi": "BUY"}}},
+            },
+        }
+        result = _get_ticker_signal_accuracy(summary, "XAG-USD")
+        # Must pick up the 0.70 per-ticker number, not 0.50.
+        assert result == pytest.approx(0.70, abs=0.001)
+
+    def test_falls_back_to_system_wide_when_per_ticker_missing(self):
+        """Backwards compat: no per_ticker_signal_accuracy block in
+        agent_summary → fall back to the existing system-wide path.
+
+        Pins the migration window: agent_summary writers may be older
+        than this kelly_sizing version, and they still need to work.
+        """
+        summary = {
+            "signal_accuracy_1d": {
+                "signals": {"rsi": {"accuracy": 0.55, "samples": 50}},
+            },
+            "signal_weights": {"rsi": {"normalized_weight": 1.0}},
+            "signals": {
+                "BTC-USD": {"extra": {"_votes": {"rsi": "BUY"}}},
+            },
+        }
+        result = _get_ticker_signal_accuracy(summary, "BTC-USD")
+        assert result == pytest.approx(0.55, abs=0.001)
+
+    def test_falls_back_when_ticker_not_in_per_ticker_block(self):
+        """If per_ticker block exists but lacks our ticker, fall back."""
+        summary = {
+            "signal_accuracy_1d": {
+                "signals": {"rsi": {"accuracy": 0.62, "samples": 200}},
+            },
+            "per_ticker_signal_accuracy": {
+                "XAG-USD": {"rsi": {"accuracy": 0.80, "samples": 40}},
+                # BTC-USD missing entirely
+            },
+            "signal_weights": {"rsi": {"normalized_weight": 1.0}},
+            "signals": {
+                "BTC-USD": {"extra": {"_votes": {"rsi": "BUY"}}},
+            },
+        }
+        result = _get_ticker_signal_accuracy(summary, "BTC-USD")
+        # BTC-USD not in per-ticker block → use system-wide 0.62.
+        assert result == pytest.approx(0.62, abs=0.001)
+
+    def test_per_ticker_low_samples_falls_back_to_system_wide(self):
+        """Per-ticker accuracy with < min_samples (5) is unreliable;
+        fall back to the system-wide entry for that signal.
+
+        Without this fallback, a brand-new ticker with 2 samples could
+        produce arbitrary win_prob estimates and bias Kelly sizing wildly.
+        """
+        summary = {
+            "signal_accuracy_1d": {
+                "signals": {"rsi": {"accuracy": 0.60, "samples": 500}},
+            },
+            "per_ticker_signal_accuracy": {
+                "XAG-USD": {
+                    "rsi": {"accuracy": 0.95, "samples": 2},  # too few
+                },
+            },
+            "signal_weights": {"rsi": {"normalized_weight": 1.0}},
+            "signals": {
+                "XAG-USD": {"extra": {"_votes": {"rsi": "BUY"}}},
+            },
+        }
+        result = _get_ticker_signal_accuracy(summary, "XAG-USD")
+        # Per-ticker has 2 samples (<5) → use system-wide 0.60.
+        assert result == pytest.approx(0.60, abs=0.001)
+
+    def test_per_ticker_weighted_average_across_signals(self):
+        """Weighted average works across signals using per-ticker accuracies.
+
+        rsi BUY at 70% (per-ticker, 50sam, weight 1.0) and macd BUY at
+        80% (per-ticker, 100sam, weight 2.0) → (0.70*1 + 0.80*2)/3 = 0.7667.
+        System-wide entries are ignored when per-ticker is present.
+        """
+        summary = {
+            "signal_accuracy_1d": {
+                "signals": {
+                    "rsi": {"accuracy": 0.50, "samples": 200},   # noise
+                    "macd": {"accuracy": 0.50, "samples": 200},  # noise
+                },
+            },
+            "per_ticker_signal_accuracy": {
+                "XAG-USD": {
+                    "rsi": {"accuracy": 0.70, "samples": 50},
+                    "macd": {"accuracy": 0.80, "samples": 100},
+                },
+            },
+            "signal_weights": {
+                "rsi": {"normalized_weight": 1.0},
+                "macd": {"normalized_weight": 2.0},
+            },
+            "signals": {
+                "XAG-USD": {"extra": {"_votes": {"rsi": "BUY", "macd": "BUY"}}},
+            },
+        }
+        result = _get_ticker_signal_accuracy(summary, "XAG-USD")
+        expected = (0.70 * 1.0 + 0.80 * 2.0) / 3.0
+        assert result == pytest.approx(expected, abs=0.001)
+
+    def test_recommended_size_picks_up_per_ticker_path(self, tmp_path):
+        """End-to-end: recommended_size() must report the per-ticker path
+        in its `source` field when it's used.
+
+        Pins the source-attribution string so operators can see which
+        accuracy path drove a sizing decision (matters for review).
+        """
+        pf_path = tmp_path / "portfolio_state.json"
+        _write_json(pf_path, _make_portfolio(cash=500_000))
+
+        summary = {
+            "signal_accuracy_1d": {
+                "consensus": {"accuracy": 0.55},
+                "signals": {"rsi": {"accuracy": 0.50, "samples": 200}},
+            },
+            "per_ticker_signal_accuracy": {
+                "BTC-USD": {"rsi": {"accuracy": 0.72, "samples": 60}},
+            },
+            "signal_weights": {"rsi": {"normalized_weight": 1.0}},
+            "signals": {
+                "BTC-USD": {
+                    "atr_pct": 3.0,
+                    "extra": {"_votes": {"rsi": "BUY"}},
+                },
+            },
+        }
+        result = recommended_size("BTC-USD", portfolio_path=pf_path,
+                                  agent_summary=summary, strategy="patient")
+        # win_prob must reflect 0.72 (per-ticker), not 0.55 (consensus)
+        # or 0.50 (system-wide signal).
+        assert result["win_prob"] == pytest.approx(0.72, abs=0.001)
+        assert "per-ticker" in result["source"]
+
+
+# ===================================================================
 # recommended_size
 # ===================================================================
 
