@@ -488,7 +488,21 @@ class CryptoSwingTrader:
         if budget < cfg.MIN_TRADE_SEK:
             return {"executed": False, "reason": f"budget {budget:.0f} < min {cfg.MIN_TRADE_SEK}"}
 
-        warrant_ask = warrant.get("ask") or warrant.get("last") or 1.0
+        # 2026-05-02 back-port from oil (codex P1): refuse to size when
+        # the warrant entry has no live ask/last. The static fallback
+        # catalog (XBT_TRACKER_AVA / ETH_TRACKER_AVA) lacks quotes — only
+        # refresh_warrant_catalog with a live page fills them in. Sizing
+        # at warrant_ask=1.0 yielded clearly-wrong unit counts and bogus
+        # entry_warrant_bid for downstream P&L. Crypto ships DRY_RUN so
+        # behaviour is unchanged today, but this prevents the bug from
+        # firing the moment DRY_RUN is flipped.
+        warrant_ask = warrant.get("ask") or warrant.get("last")
+        if not warrant_ask or float(warrant_ask) <= 0:
+            return {"executed": False,
+                    "reason": ("warrant has no live ask/last — refresh "
+                               "warrant catalog with a live Avanza page "
+                               "before trading")}
+        warrant_ask = float(warrant_ask)
         units = max(int(budget / warrant_ask), 0)
         if units <= 0:
             return {"executed": False, "reason": "units=0 after sizing"}

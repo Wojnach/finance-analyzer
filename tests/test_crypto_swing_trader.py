@@ -41,6 +41,53 @@ def _fresh_signal(action="BUY", conf=0.75, buy=4, sell=1,
     }
 
 
+class TestPlaceBuyWarrantQuoteSafety:
+    """Regression for the 2026-05-02 back-port of the oil codex finding.
+
+    Sizing must refuse when the warrant entry has no live ask/last;
+    previously fell back to ask=1.0 and computed clearly-wrong unit
+    counts. The fallback catalog (XBT_TRACKER_AVA / ETH_TRACKER_AVA)
+    has no quotes until refresh runs with a live page, so this gate is
+    the only thing standing between a DRY_RUN→live flip and broken
+    sizing.
+    """
+
+    def test_buy_refused_when_warrant_has_no_ask_or_last(self, isolate_state):
+        trader = cst.CryptoSwingTrader(page=None, executor=None)
+        warrant = {"name": "XBT TRACKER AVA", "ob_id": "12345",
+                   "underlying": "BTC-USD", "direction": "LONG",
+                   "leverage": 1.0, "barrier": None, "parity": 1}
+        # No ask, no last in the warrant dict
+        result = trader._place_buy(
+            "BTC-USD", warrant, signal_ctx={}, underlying_price=70000.0,
+        )
+        assert result["executed"] is False
+        assert "ask/last" in result["reason"] or "live" in result["reason"]
+
+    def test_buy_refused_when_ask_is_zero(self, isolate_state):
+        trader = cst.CryptoSwingTrader(page=None, executor=None)
+        warrant = {"name": "XBT TRACKER AVA", "ob_id": "12345",
+                   "underlying": "BTC-USD", "direction": "LONG",
+                   "leverage": 1.0, "ask": 0, "last": 0, "parity": 1}
+        result = trader._place_buy(
+            "BTC-USD", warrant, signal_ctx={}, underlying_price=70000.0,
+        )
+        assert result["executed"] is False
+
+    def test_buy_proceeds_when_ask_present(self, isolate_state):
+        trader = cst.CryptoSwingTrader(page=None, executor=None)
+        warrant = {"name": "XBT TRACKER AVA", "ob_id": "12345",
+                   "underlying": "BTC-USD", "direction": "LONG",
+                   "leverage": 1.0, "ask": 850.0, "last": 850.0,
+                   "parity": 1}
+        result = trader._place_buy(
+            "BTC-USD", warrant, signal_ctx={}, underlying_price=70000.0,
+        )
+        # In DRY_RUN with valid ask, the path completes (executed=True
+        # with dry_run=True flag).
+        assert result["executed"] is True
+
+
 class TestExtractors:
     def test_extract_action_recognizes_keys(self):
         assert cst._extract_action({"recommendation": "BUY"}) == "BUY"
@@ -185,7 +232,18 @@ class TestExitGates:
 
 class TestEvaluateAndExecute:
     def test_dry_run_buy_after_persistence(self, isolate_state):
+        """Updated 2026-05-02: the warrant-sizing safety gate now refuses
+        BUYs when the catalog has no live ask. The fallback catalog
+        (XBT_TRACKER_AVA / ETH_TRACKER_AVA) has no quotes, so we inject
+        them here to assert the persistence path still wires through end-
+        to-end. Without the injection, the test would assert the new
+        gate fires (also valid)."""
         trader = cst.CryptoSwingTrader(page=None, executor=None)
+        # Inject live quotes into the fallback catalog so sizing succeeds
+        for w in trader.warrant_catalog.values():
+            w.setdefault("ask", 850.0)
+            w.setdefault("last", 850.0)
+
         prices = {"BTC-USD": 100000.0, "ETH-USD": 3500.0}
 
         # Three cycles of identical BUY signal — should establish persistence
@@ -197,6 +255,29 @@ class TestEvaluateAndExecute:
 
         assert any(a["type"] == "entry" and a["result"]["executed"]
                    for a in result["actions"]) or len(trader.state["positions"]) > 0
+
+    def test_dry_run_buy_blocked_when_catalog_lacks_quotes(self, isolate_state):
+        """The fallback catalog has no ask/last fields; the new sizing
+        gate must block BUYs until refresh_warrant_catalog runs with a
+        live page. Behaviour is unchanged for DRY_RUN today (no orders
+        either way) but prevents the bug from firing on DRY_RUN→live."""
+        trader = cst.CryptoSwingTrader(page=None, executor=None)
+        # WARRANT_CATALOG_FALLBACK is module-level and may have been
+        # mutated by a sibling test (test_dry_run_buy_after_persistence
+        # injects ask/last). Strip those fields to simulate the cold-
+        # boot state where the catalog has no live quotes yet.
+        for w in trader.warrant_catalog.values():
+            w.pop("ask", None)
+            w.pop("last", None)
+
+        prices = {"BTC-USD": 100000.0, "ETH-USD": 3500.0}
+        for _ in range(6):
+            sig = _fresh_signal()
+            signal_data = {"per_ticker": {"BTC-USD": sig}}
+            trader.evaluate_and_execute(prices, signal_data)
+
+        # No positions — every entry attempt was blocked at the sizing gate
+        assert len(trader.state["positions"]) == 0
 
     def test_no_entry_without_warrant_for_short(self, isolate_state):
         trader = cst.CryptoSwingTrader(page=None, executor=None)
