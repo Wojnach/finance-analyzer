@@ -162,6 +162,34 @@ def _log_trigger(reasons, status, tier=None):
     atomic_append_jsonl(INVOCATIONS_FILE, entry)
 
 
+def _load_guard_warnings():
+    """Read trade_guard_warnings from agent_summary.json.
+
+    P1-12 (2026-05-02): the trade-guards pre-execution gate consumes the
+    warnings already computed by reporting.py and stored in agent_summary.
+    Reading them here (rather than recomputing) keeps the gate consistent
+    with what Layer 2 sees in its prompt context, and is much cheaper.
+
+    Returns a dict shaped like trade_guards.get_all_guard_warnings():
+        {"warnings": [...], "summary": "..."}
+    Defaults to empty/no_summary when agent_summary is missing or has
+    no trade_guard_warnings field — caller treats that as "no blocks".
+    """
+    from portfolio.file_utils import load_json
+    summary_path = DATA_DIR / "agent_summary.json"
+    summary = load_json(summary_path, default=None)
+    if not isinstance(summary, dict):
+        return {"warnings": [], "summary": "no_summary"}
+    guard_block = summary.get("trade_guard_warnings")
+    if not isinstance(guard_block, dict):
+        return {"warnings": [], "summary": "no_warnings"}
+    # Normalize: ensure required keys exist so callers don't have to .get()
+    return {
+        "warnings": guard_block.get("warnings", []) or [],
+        "summary": guard_block.get("summary", ""),
+    }
+
+
 def _last_jsonl_ts(path):
     """Return the 'ts' value from the last entry of a JSONL file, or None.
 
@@ -433,6 +461,70 @@ def invoke_agent(reasons, tier=3):
                 label, e,
             )
 
+    # Adversarial review 05-01 P1-12 (2026-05-02): trade-guards pre-execution gate.
+    # `should_block_trade` was implemented in trade_guards.py for ARCH-29 but
+    # never imported by production code — only by tests. Wire it here so an
+    # invocation triggered by a ticker that is in cooldown for BOTH Patient
+    # and Bold gets short-circuited before the multi-agent / subprocess spawn
+    # (saves ~600s of T2 subprocess + Claude tokens for a decision that
+    # cannot be acted on).
+    #
+    # Semantics:
+    #   1. Pull the trade_guard_warnings already computed by reporting.py and
+    #      stored in agent_summary.json.
+    #   2. Build _guard_context for the prompt (advisory) — Layer 2 should
+    #      see active cooldowns/loss-streaks regardless of the gate decision.
+    #   3. Block ONLY when should_block_trade(...) is True AND the trigger
+    #      ticker is blocked for BOTH strategies. Single-strategy block
+    #      proceeds (the unblocked strategy can still trade).
+    #   4. Failure to load warnings (missing agent_summary, IO race) is
+    #      fail-OPEN — unlike drawdown, cooldowns are soft constraints and a
+    #      single missed gate cycle is not a safety risk.
+    _guard_context = ""
+    try:
+        guard_result = _load_guard_warnings()
+    except Exception as e:
+        logger.warning("trade-guards load failed (proceeding): %s", e)
+        guard_result = {"warnings": [], "summary": "load_failed"}
+
+    if guard_result.get("warnings"):
+        _guard_context += f"\n[TRADE GUARDS] {guard_result.get('summary', '')}"
+        for w in guard_result["warnings"][:10]:  # cap context size
+            sev = w.get("severity", "?")
+            tkr = w.get("ticker") or w.get("details", {}).get("ticker", "?")
+            strat = w.get("strategy") or w.get("details", {}).get("strategy", "?")
+            msg = w.get("message", w.get("guard", "?"))
+            _guard_context += f"\n  [{sev.upper()}] {tkr}/{strat}: {msg}"
+
+    try:
+        from portfolio.trade_guards import should_block_trade
+        if should_block_trade(guard_result):
+            # Determine the trigger ticker and check whether BOTH strategies
+            # are blocked on it. Anything else (single-strategy block, or
+            # block on a different ticker than the trigger) is advisory.
+            trigger_ticker = _extract_ticker(reasons)
+            blocked_strategies = {
+                w.get("strategy") or w.get("details", {}).get("strategy")
+                for w in guard_result["warnings"]
+                if w.get("severity") == "block"
+                and (
+                    w.get("ticker") == trigger_ticker
+                    or w.get("details", {}).get("ticker") == trigger_ticker
+                )
+            }
+            blocked_strategies.discard(None)
+            if {"patient", "bold"}.issubset(blocked_strategies):
+                logger.error(
+                    "TRADE GUARDS BLOCK: %s in cooldown for BOTH strategies — "
+                    "skipping invocation",
+                    trigger_ticker,
+                )
+                _log_trigger(reasons, "blocked_trade_guards", tier=tier)
+                return False
+    except Exception as e:
+        # Import failures or shape mismatches must not derail the invocation.
+        logger.warning("trade-guards gate failed (proceeding): %s", e)
+
     # Multi-agent mode: parallel specialists + synthesis (Coordinator Mode pattern)
     # Enabled via config.layer2.multi_agent = true, only for T2/T3
     try:
@@ -475,6 +567,11 @@ def invoke_agent(reasons, tier=3):
     # BUG-214: Append drawdown context so Layer 2 sees current risk levels.
     if _drawdown_context:
         prompt += "\n\n[RISK DATA]" + _drawdown_context
+    # P1-12 (2026-05-02): also surface trade-guard warnings to Layer 2 so
+    # it can avoid suggesting actions that the guards would just block in
+    # check_overtrading_guards anyway.
+    if _guard_context:
+        prompt += "\n\n[TRADE GUARDS]" + _guard_context
 
     max_turns = tier_cfg["max_turns"]
 
