@@ -296,24 +296,55 @@ class TestYieldCurve:
 
 
 class TestYield10YMomentum:
-    """10Y yield direction-based (change_5d ±1.5%)."""
+    """10Y yield direction-based (change_5d ±0.15% = ±15bps).
+
+    P1-7 (2026-05-02 adversarial follow-ups): threshold lowered from 1.5
+    (150bps) to 0.15 (15bps). 150bps is an extreme yield move that
+    happens at most a few times per decade — the old gate was effectively
+    permanent HOLD. 15bps over 5 days is the right scale for "sharp"
+    yield moves.
+    """
 
     def test_rising_yields_triggers_sell(self):
-        macro = {"treasury": {"10y": {"yield_pct": 4.5, "change_5d": 2.0}}}
+        macro = {"treasury": {"10y": {"yield_pct": 4.5, "change_5d": 0.20}}}
         action, indicators = _yield_10y_momentum(macro)
         assert action == "SELL"
-        assert indicators["treasury_10y_change_5d"] == 2.0
+        assert indicators["treasury_10y_change_5d"] == 0.20
+
+    def test_strongly_rising_yields_triggers_sell(self):
+        """Even very large moves (200bps) still trigger SELL."""
+        macro = {"treasury": {"10y": {"yield_pct": 4.5, "change_5d": 2.0}}}
+        action, _ = _yield_10y_momentum(macro)
+        assert action == "SELL"
 
     def test_falling_yields_triggers_buy(self):
-        macro = {"treasury": {"10y": {"yield_pct": 4.0, "change_5d": -2.29}}}
+        macro = {"treasury": {"10y": {"yield_pct": 4.0, "change_5d": -0.20}}}
         action, indicators = _yield_10y_momentum(macro)
         assert action == "BUY"
         assert indicators["treasury_10y"] == 4.0
 
-    def test_flat_yields_triggers_hold(self):
-        macro = {"treasury": {"10y": {"yield_pct": 4.2, "change_5d": 0.5}}}
-        action, indicators = _yield_10y_momentum(macro)
+    def test_strongly_falling_yields_triggers_buy(self):
+        macro = {"treasury": {"10y": {"yield_pct": 4.0, "change_5d": -2.29}}}
+        action, _ = _yield_10y_momentum(macro)
+        assert action == "BUY"
+
+    def test_modest_rise_under_15bps_holds(self):
+        """10bps rise — below the 15bps threshold, should HOLD."""
+        macro = {"treasury": {"10y": {"yield_pct": 4.2, "change_5d": 0.10}}}
+        action, _ = _yield_10y_momentum(macro)
         assert action == "HOLD"
+
+    def test_at_threshold_holds(self):
+        """Exactly 0.15 (boundary) — gate is `> 0.15` so 0.15 HOLDs."""
+        macro = {"treasury": {"10y": {"yield_pct": 4.2, "change_5d": 0.15}}}
+        action, _ = _yield_10y_momentum(macro)
+        assert action == "HOLD"
+
+    def test_just_above_threshold_sells(self):
+        """16bps — just above threshold, triggers SELL."""
+        macro = {"treasury": {"10y": {"yield_pct": 4.2, "change_5d": 0.16}}}
+        action, _ = _yield_10y_momentum(macro)
+        assert action == "SELL"
 
     def test_no_macro_returns_hold(self):
         action, indicators = _yield_10y_momentum(None)
@@ -443,7 +474,9 @@ class TestVotingLogic:
             "dxy": {"value": 105.0, "change_5d_pct": 1.5},            # SELL
             "treasury": {
                 "spread_2s10s": 1.0,                                    # BUY
-                "10y": {"yield_pct": 4.2, "change_5d": 0.5},          # HOLD
+                # P1-7 (2026-05-02): yield threshold lowered to 0.15.
+                # 0.10 (10bps) is below threshold so still HOLDs.
+                "10y": {"yield_pct": 4.2, "change_5d": 0.10},         # HOLD
             },
             "fed": {"days_until": 10},                                  # HOLD
         }
