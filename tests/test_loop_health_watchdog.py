@@ -188,3 +188,33 @@ def test_main_alerts_when_unhealthy(tmp_path, monkeypatch):
     import json as _json
     state = _json.loads((tmp_path / "state.json").read_text())
     assert "oil" in state["last_alert_per_loop"]
+
+
+def test_main_does_not_set_cooldown_when_send_returns_false(tmp_path, monkeypatch):
+    """Codex P2: when send_telegram returns False (muted/down/no config),
+    the cooldown timestamp must NOT be written, so the next watchdog
+    tick retries the alert. Otherwise a single failed delivery suppresses
+    retries for 4h while no operator ever saw the alert.
+    """
+    monkeypatch.setattr(lhw, "STATE_FILE", tmp_path / "state.json")
+    fake_rollup = {
+        "any_unhealthy": True,
+        "unhealthy": ["oil"],
+        "loops": {
+            "oil": {"state": "stale", "age_seconds": 3600.0,
+                    "name": "oil", "path": "x", "payload": None,
+                    "error": None},
+        },
+    }
+    with patch.object(lhw, "read_loop_health", return_value=fake_rollup), \
+         patch.object(lhw, "send_telegram", return_value=False):
+        rc = lhw.main()
+
+    assert rc == 0
+    # Cooldown file must NOT exist (or must not contain oil) — we
+    # didn't actually deliver the alert, so retry next tick.
+    state_file = tmp_path / "state.json"
+    if state_file.exists():
+        import json as _json
+        state = _json.loads(state_file.read_text())
+        assert "oil" not in (state.get("last_alert_per_loop") or {})

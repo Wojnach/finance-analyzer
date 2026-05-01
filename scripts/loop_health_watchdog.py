@@ -105,8 +105,19 @@ def build_alert(rollup: dict[str, Any], state: dict[str, Any],
 
 
 def send_telegram(message: str) -> bool:
-    """Best-effort telegram send. Returns True on success, False on no-op
-    (no config) or failure."""
+    """Best-effort telegram send.
+
+    Returns True only when the underlying send_telegram() actually
+    delivered the message. Returns False when:
+      - config.json missing or has no telegram.token
+      - send_telegram() returned False (typically because
+        telegram.mute_all=true or telegram.layer1_messages=false)
+      - send_telegram() raised an exception
+
+    2026-05-02 codex P2: previously returned True unconditionally after
+    calling _send(), which masked the muted/suppressed cases and let
+    the cooldown gate respect a delivery that never happened.
+    """
     try:
         from portfolio.telegram_notifications import send_telegram as _send
         cfg = load_json(str(REPO / "config.json")) or {}
@@ -114,8 +125,14 @@ def send_telegram(message: str) -> bool:
             logger.info("telegram not configured — printing message")
             print(message)
             return False
-        _send(message, cfg)
-        return True
+        result = _send(message, cfg)
+        # send_telegram() returns True/False to indicate actual delivery.
+        # None or other falsy → treat as "did not actually send".
+        if result is False:
+            logger.info("telegram send suppressed (mute_all or layer1_messages)")
+            print(message)
+            return False
+        return bool(result) if result is not None else True
     except Exception as exc:  # noqa: BLE001
         logger.warning("telegram send failed: %s — printing", exc)
         print(message)
@@ -141,11 +158,22 @@ def main() -> int:
         return 0
 
     sent = send_telegram(message)
-    state.setdefault("last_alert_per_loop", {})
-    for name in alerted:
-        state["last_alert_per_loop"][name] = now.isoformat()
-    _save_state(state)
-    logger.info("alerted on %s (telegram=%s)", alerted, sent)
+    # 2026-05-02 codex P2: only stamp the cooldown when the alert
+    # actually went out. If telegram is muted/down/missing config, we
+    # still WANT the next watchdog tick to retry rather than wait 4h.
+    # The trade-off: when mute_all is on, the watchdog will print to
+    # stdout every 30 min instead of every 4h. That's louder in the
+    # log but correct: an unhealthy loop the operator can't see is
+    # worse than a noisy log.
+    if sent:
+        state.setdefault("last_alert_per_loop", {})
+        for name in alerted:
+            state["last_alert_per_loop"][name] = now.isoformat()
+        _save_state(state)
+        logger.info("alerted on %s (telegram delivered)", alerted)
+    else:
+        logger.warning("alerted on %s but telegram NOT delivered — "
+                        "cooldown not set, will retry next tick", alerted)
     return 0
 
 

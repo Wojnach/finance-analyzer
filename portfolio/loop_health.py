@@ -95,11 +95,19 @@ def read_loop_status(
         out["error"] = "no ts field"
         return out
 
+    # 2026-05-02 codex P3: a heartbeat file can be valid JSON but have
+    # a non-string ts (number, object, list). Without this guard,
+    # ts_str.replace() raises AttributeError and crashes the rollup.
+    if not isinstance(ts_str, str):
+        out["state"] = "unparseable"
+        out["error"] = f"ts not a string (got {type(ts_str).__name__})"
+        return out
+
     try:
         ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=datetime.UTC)
-    except ValueError as exc:
+    except (ValueError, TypeError, AttributeError) as exc:
         out["state"] = "unparseable"
         out["error"] = f"ts parse: {exc}"
         return out

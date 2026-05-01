@@ -81,6 +81,17 @@ class TestReadLoopStatus:
         assert result["state"] == "unparseable"
         assert "ts parse" in result["error"]
 
+    def test_non_string_ts_returns_unparseable(self, tmp_path, fixed_now):
+        """Codex P3: a heartbeat with a numeric / object / list ts must
+        return 'unparseable' rather than crashing the rollup with
+        AttributeError on ts_str.replace()."""
+        for bad_ts in (12345, 12345.6, {"nested": "object"}, ["list"]):
+            path = tmp_path / f"hb_{type(bad_ts).__name__}.json"
+            path.write_text(json.dumps({"ts": bad_ts}))
+            result = loop_health.read_loop_status("crypto", path, now=fixed_now)
+            assert result["state"] == "unparseable", f"failed for {type(bad_ts).__name__}"
+            assert result["error"] is not None
+
     def test_z_suffix_timestamp_handled(self, tmp_path, fixed_now):
         """Heartbeats written with Z suffix instead of +00:00 still parse."""
         path = tmp_path / "hb.json"
