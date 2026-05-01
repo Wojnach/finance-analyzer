@@ -874,7 +874,24 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
 
 
 def _get_regime_gated(regime: str, horizon: str | None = None) -> frozenset[str]:
-    """Get the set of signals to gate for a regime+horizon combination."""
+    """Get the set of signals to gate for a regime+horizon combination.
+
+    Intentional semantics: horizon-specific override REPLACES `_default`,
+    NOT unions with it. This is by design (BUG-149, 2026-03-29):
+    `_default` lists signals that are bad at long horizons (1d/3d/5d) in
+    a regime, while a horizon override (3h/4h) is the FINER-grained list
+    of what should still be gated at that intraday horizon. Example:
+    `trend` has 40.7% accuracy at 1d ranging (gate via _default) but
+    61.6% at 3h ranging (allow via no-mention in 3h override).
+
+    2026-05-02 audit: 04-24 P0-1 / 04-29 SC-P1-1 / 05-01 P0 (carryover)
+    framed this as a "union bug" by analogy to `_get_horizon_disabled_signals`.
+    Re-reading the docstring at line 762-767 and the per-signal comments
+    in REGIME_GATED_SIGNALS confirms the intent is replace-semantics.
+    Verified: funding 74.2% at 3h (in _default for 1d but excluded from
+    3h override on purpose), trend 61.6% at 3h (same pattern).
+    Finding REJECTED — leaving behavior unchanged. No fix needed.
+    """
     regime_dict = REGIME_GATED_SIGNALS.get(regime, {})
     if not regime_dict:
         return frozenset()

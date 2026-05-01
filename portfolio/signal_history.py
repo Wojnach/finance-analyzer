@@ -5,6 +5,7 @@ Signals that maintain direction for 3+ consecutive checks are "persistent".
 Signals that flip every 1-2 checks are "noisy".
 """
 
+import threading
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,16 @@ DATA_DIR = BASE_DIR / "data"
 HISTORY_FILE = DATA_DIR / "signal_history.jsonl"
 
 MAX_ENTRIES_PER_TICKER = 50
+
+# 2026-05-02 (adversarial review 05-01 P0-3): the main loop's
+# ThreadPoolExecutor (8 workers) calls update_history() concurrently for
+# 5 tickers. update_history is a read-modify-write of HISTORY_FILE; without
+# a lock, last-writer-wins and 4/5 ticker updates per cycle are silently
+# discarded. Persistence scores, streaks, and noisy-signal lists are then
+# computed from a corrupted history. The atomic_write_jsonl call inside
+# only guarantees the FILE write is atomic — not that the read+modify+write
+# sequence is atomic across threads.
+_history_lock = threading.Lock()
 
 
 def _load_history():
@@ -55,31 +66,36 @@ def update_history(ticker, votes_dict):
 
     Trims to keep only the last MAX_ENTRIES_PER_TICKER entries per ticker.
 
+    Thread-safe (2026-05-02): the read-modify-write of HISTORY_FILE is
+    serialized with `_history_lock` so concurrent ThreadPoolExecutor
+    workers don't lose each other's writes.
+
     Args:
         ticker: Ticker symbol (e.g. "BTC-USD").
         votes_dict: Dict mapping signal_name -> vote ("BUY"/"SELL"/"HOLD").
     """
-    entries = _load_history()
+    with _history_lock:
+        entries = _load_history()
 
-    new_entry = {
-        "ts": datetime.now(UTC).isoformat(),
-        "ticker": ticker,
-        "votes": {sig: votes_dict.get(sig, "HOLD") for sig in SIGNAL_NAMES},
-    }
-    entries.append(new_entry)
+        new_entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "ticker": ticker,
+            "votes": {sig: votes_dict.get(sig, "HOLD") for sig in SIGNAL_NAMES},
+        }
+        entries.append(new_entry)
 
-    # Trim: keep only last MAX_ENTRIES_PER_TICKER per ticker
-    by_ticker = defaultdict(list)
-    for e in entries:
-        by_ticker[e.get("ticker", "unknown")].append(e)
+        # Trim: keep only last MAX_ENTRIES_PER_TICKER per ticker
+        by_ticker = defaultdict(list)
+        for e in entries:
+            by_ticker[e.get("ticker", "unknown")].append(e)
 
-    trimmed = []
-    for _t, t_entries in by_ticker.items():
-        trimmed.extend(t_entries[-MAX_ENTRIES_PER_TICKER:])
+        trimmed = []
+        for _t, t_entries in by_ticker.items():
+            trimmed.extend(t_entries[-MAX_ENTRIES_PER_TICKER:])
 
-    # Sort by timestamp for stable ordering
-    trimmed.sort(key=lambda e: e.get("ts", ""))
-    _save_history(trimmed)
+        # Sort by timestamp for stable ordering
+        trimmed.sort(key=lambda e: e.get("ts", ""))
+        _save_history(trimmed)
 
 
 def get_persistence_scores(ticker):

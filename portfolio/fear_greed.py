@@ -97,14 +97,30 @@ def get_crypto_fear_greed() -> dict:
                       label="crypto_fear_greed")
     if body is None:
         return None
-    data = body["data"][0]
-    return {
-        "value": int(data["value"]),
-        "classification": data["value_classification"],
-        "timestamp": datetime.fromtimestamp(
-            int(data["timestamp"]), tz=UTC
-        ).isoformat(),
-    }
+    # 2026-05-02 (adversarial review 05-01 P1-13 / 04-29 DE-P1-2):
+    # alternative.me returns {"data": []} during maintenance windows. The
+    # previous unguarded `body["data"][0]` raised IndexError, which then
+    # crashed every cycle's fear-greed signal computation silently.
+    # Belt-and-braces: also guard against missing/malformed inner fields.
+    data_list = body.get("data") if isinstance(body, dict) else None
+    if not data_list:
+        logger.debug("crypto_fear_greed: API returned no data (maintenance?)")
+        return None
+    data = data_list[0]
+    if not isinstance(data, dict):
+        logger.debug("crypto_fear_greed: data[0] not a dict, got %r", type(data))
+        return None
+    try:
+        return {
+            "value": int(data["value"]),
+            "classification": data["value_classification"],
+            "timestamp": datetime.fromtimestamp(
+                int(data["timestamp"]), tz=UTC
+            ).isoformat(),
+        }
+    except (KeyError, ValueError, TypeError) as e:
+        logger.debug("crypto_fear_greed: malformed entry: %s", e)
+        return None
 
 
 def get_stock_fear_greed() -> dict:

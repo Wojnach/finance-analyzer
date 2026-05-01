@@ -16,7 +16,13 @@ from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("data")
+# 2026-05-02: absolute path (was relative `Path("data")`).
+# Adversarial review 05-01 P0-2: every other module uses
+# `Path(__file__).resolve().parent.parent / "data"`. When the scheduled task
+# CWD differs from repo root (e.g. PF-DataLoop launched from C:\Windows),
+# IC cache reads/writes silently went to a phantom directory and IC-based
+# weight multipliers fell to 1.0 for every signal every cycle.
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 IC_CACHE_FILE = DATA_DIR / "ic_cache.json"
 IC_CACHE_TTL = 3600
 SIGNAL_LOG_FILE = DATA_DIR / "signal_log.jsonl"
