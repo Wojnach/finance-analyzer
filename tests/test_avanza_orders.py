@@ -304,6 +304,198 @@ class TestCheckTelegramConfirm:
         assert mod._check_telegram_confirm({"telegram": {}}) is False
 
 
+# --- AV-P1-3: sender authentication on CONFIRM ---
+
+
+class TestCheckTelegramConfirmSenderAuth:
+    """When `telegram.allowed_user_id` is configured, only CONFIRM messages
+    whose sender matches the allowed user are honored. This protects against
+    group-chat misuse and bot-token compromise where an attacker could deliver
+    fake updates for the configured chat_id.
+
+    When `allowed_user_id` is NOT configured, the existing chat-only check
+    remains in place (backwards compatible)."""
+
+    def test_allowed_user_passes(self, tmp_data_dir):
+        """A CONFIRM from the allowed user is honored."""
+        config = {
+            "telegram": {
+                "token": "fake-token",
+                "chat_id": "123456",
+                "allowed_user_id": 7777,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "chat": {"id": 123456},
+                        "from": {"id": 7777},
+                        "text": "CONFIRM",
+                    },
+                }
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            assert mod._check_telegram_confirm(config) is True
+
+    def test_disallowed_user_dropped(self, tmp_data_dir):
+        """A CONFIRM from a different user (in the same chat) is dropped.
+
+        This is the attack: someone in the group chat (or an attacker who
+        compromised the bot token and is delivering fake updates to the
+        right chat_id) sends CONFIRM. With sender authentication, it must
+        not execute the pending order.
+        """
+        config = {
+            "telegram": {
+                "token": "fake-token",
+                "chat_id": "123456",
+                "allowed_user_id": 7777,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "chat": {"id": 123456},
+                        "from": {"id": 9999},  # NOT the allowed user
+                        "text": "CONFIRM",
+                    },
+                }
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            assert mod._check_telegram_confirm(config) is False
+
+    def test_missing_from_field_dropped_when_auth_enabled(self, tmp_data_dir):
+        """If sender info is missing from the message but allowed_user_id is
+        set, fail-closed: drop the message rather than honor it."""
+        config = {
+            "telegram": {
+                "token": "fake-token",
+                "chat_id": "123456",
+                "allowed_user_id": 7777,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "chat": {"id": 123456},
+                        # no "from" field
+                        "text": "CONFIRM",
+                    },
+                }
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            assert mod._check_telegram_confirm(config) is False
+
+    def test_allowed_user_as_string(self, tmp_data_dir):
+        """allowed_user_id may be configured as either int or string —
+        both formats must work."""
+        config = {
+            "telegram": {
+                "token": "fake-token",
+                "chat_id": "123456",
+                "allowed_user_id": "7777",  # string!
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "chat": {"id": 123456},
+                        "from": {"id": 7777},  # int from Telegram
+                        "text": "CONFIRM",
+                    },
+                }
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            assert mod._check_telegram_confirm(config) is True
+
+    def test_no_allowed_user_falls_back_to_chat_only(self, tmp_data_dir):
+        """Backwards compat: if allowed_user_id is not configured, the
+        existing chat-only check still works (so existing deployments
+        don't break)."""
+        config = {
+            "telegram": {
+                "token": "fake-token",
+                "chat_id": "123456",
+                # no allowed_user_id
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 100,
+                    "message": {
+                        "chat": {"id": 123456},
+                        "from": {"id": 9999},  # any sender
+                        "text": "CONFIRM",
+                    },
+                }
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            assert mod._check_telegram_confirm(config) is True
+
+    def test_offset_advances_even_when_sender_dropped(self, tmp_data_dir):
+        """Even when CONFIRM is dropped due to sender mismatch, the
+        getUpdates offset must still advance so we don't replay the
+        rejected message every cycle."""
+        config = {
+            "telegram": {
+                "token": "fake-token",
+                "chat_id": "123456",
+                "allowed_user_id": 7777,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {
+                    "update_id": 200,
+                    "message": {
+                        "chat": {"id": 123456},
+                        "from": {"id": 9999},
+                        "text": "CONFIRM",
+                    },
+                }
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            mod._check_telegram_confirm(config)
+
+        offset_file = tmp_data_dir / "avanza_telegram_offset.txt"
+        assert offset_file.exists()
+        data = json.loads(offset_file.read_text(encoding="utf-8"))
+        assert data["offset"] == 201
+
+
 # --- _execute_confirmed_order ---
 
 

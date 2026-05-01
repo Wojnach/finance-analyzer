@@ -147,11 +147,29 @@ def _check_telegram_confirm(config: dict) -> bool:
     """Poll Telegram for a CONFIRM reply from the configured chat.
 
     Uses getUpdates with a stored offset to avoid reprocessing old messages.
+
+    AV-P1-3 (2026-05-02): Sender-authenticated when
+    ``telegram.allowed_user_id`` is set. Without sender auth, the chat-only
+    filter is bypassable in two ways:
+      - Group chats: anyone admitted can send CONFIRM and execute the
+        pending order.
+      - Bot-token compromise: an attacker who has the bot token can
+        deliver fake updates with the right ``chat_id`` and execute orders.
+    When ``allowed_user_id`` is unset the chat-only check is preserved
+    (backwards-compatible). The offset still advances on dropped messages
+    so we don't re-process the rejected update every cycle.
     """
     token = config.get("telegram", {}).get("token", "")
     chat_id = str(config.get("telegram", {}).get("chat_id", ""))
     if not token or not chat_id:
         return False
+
+    # AV-P1-3 (2026-05-02): optional sender allow-list. Accept either int
+    # or string in config — Telegram's `from.id` is always int, so coerce
+    # both sides to str for comparison so format mistakes don't accidentally
+    # admit/reject a real user.
+    raw_allowed_user = config.get("telegram", {}).get("allowed_user_id")
+    allowed_user = str(raw_allowed_user) if raw_allowed_user is not None else None
 
     # Load stored offset (BUG-128: now atomic JSON; handles legacy plain-text format)
     offset_file = DATA_DIR / "avanza_telegram_offset.txt"
@@ -185,13 +203,27 @@ def _check_telegram_confirm(config: dict) -> bool:
     found_confirm = False
     for update in data.get("result", []):
         update_id = update.get("update_id", 0)
-        # Always advance offset
+        # Always advance offset (AV-P1-3: applies to dropped messages too —
+        # otherwise a single rejected CONFIRM would replay every cycle).
         if update_id >= offset:
             offset = update_id + 1
 
         msg = update.get("message", {})
         if str(msg.get("chat", {}).get("id")) != chat_id:
             continue
+
+        # AV-P1-3 (2026-05-02): sender authentication. Fail-closed:
+        # missing `from` field with auth enabled drops the message.
+        if allowed_user is not None:
+            sender = msg.get("from") or {}
+            sender_id = sender.get("id")
+            if sender_id is None or str(sender_id) != allowed_user:
+                logger.warning(
+                    "Dropping Telegram message from unauthorized sender id=%r "
+                    "(allowed=%s, chat=%s)",
+                    sender_id, allowed_user, chat_id,
+                )
+                continue
 
         text = (msg.get("text") or "").strip().upper()
         if text == "CONFIRM":

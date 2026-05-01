@@ -459,6 +459,13 @@ def delete_stop_loss(page, account_id, stop_id):
 
     Uses DELETE to /_api/trading/stoploss/{accountId}/{stopId}.
 
+    AV-P1-2 (2026-05-02): Wrapped in ``avanza_order_lock`` so SL delete
+    serializes against new orders / SL placement (all of which already
+    lock). Without this, deleting a stop-loss to retune it on a partial
+    fill could race against the new place_stop_loss call, leaving the
+    position partially unprotected for a few hundred ms — long enough
+    for a fast-moving warrant to slip past the gap.
+
     Returns (success: bool, result: dict).
     """
     csrf = get_csrf(page)
@@ -466,18 +473,20 @@ def delete_stop_loss(page, account_id, stop_id):
         return False, {"error": "no CSRF token"}
 
     try:
-        result = page.evaluate("""async (args) => {
-            const [accountId, stopId, token] = args;
-            const resp = await fetch(
-                'https://www.avanza.se/_api/trading/stoploss/' + accountId + '/' + stopId,
-                {
-                    method: 'DELETE',
-                    headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                    credentials: 'include',
-                }
-            );
-            return {status: resp.status, body: await resp.text()};
-        }""", [account_id, stop_id, csrf])
+        # AV-P1-2 (2026-05-02): cross-process order lock — see place_order.
+        with avanza_order_lock(op=f"delete_stop_loss/{stop_id}"):
+            result = page.evaluate("""async (args) => {
+                const [accountId, stopId, token] = args;
+                const resp = await fetch(
+                    'https://www.avanza.se/_api/trading/stoploss/' + accountId + '/' + stopId,
+                    {
+                        method: 'DELETE',
+                        headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                        credentials: 'include',
+                    }
+                );
+                return {status: resp.status, body: await resp.text()};
+            }""", [account_id, stop_id, csrf])
 
         http_status = result.get("status", 0)
         success = 200 <= http_status < 300

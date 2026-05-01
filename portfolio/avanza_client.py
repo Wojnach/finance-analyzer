@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from portfolio.avanza_order_lock import avanza_order_lock
 from portfolio.file_utils import load_json
 
 logger = logging.getLogger("portfolio.avanza_client")
@@ -324,7 +325,23 @@ def place_sell_order(
 
 
 def _place_order(orderbook_id, order_type, price, volume, valid_until):
-    """Internal: place an order via the Avanza API."""
+    """Internal: place an order via the Avanza API.
+
+    P0-4 (2026-05-02): Wrapped in ``avanza_order_lock`` so the TOTP path
+    cannot race against the page-session paths in
+    ``data/metals_avanza_helpers.place_order``,
+    ``portfolio/avanza_session.place_order``, or
+    ``portfolio/avanza_control.place_order`` (all of which already lock).
+    Without the lock, two callers observing the same ``buying_power``
+    snapshot could both fire orders and overdraw the ISK.
+
+    The op label is distinct from page-session labels
+    (``place_order_totp/...``) so the rate-limit diagnostic ("which loop
+    hit the busy lock") still works. ``OrderLockBusyError`` is allowed
+    to propagate so callers can decide whether to retry next cycle —
+    matches the existing semantics in
+    ``data/metals_avanza_helpers.place_order``.
+    """
     if volume < 1:
         raise ValueError(f"Volume must be >= 1, got {volume}")
     if price <= 0:
@@ -338,14 +355,15 @@ def _place_order(orderbook_id, order_type, price, volume, valid_until):
         "Placing %s order: orderbook=%s price=%.2f vol=%d until=%s account=%s",
         order_type.value, orderbook_id, price, volume, expiry, account_id,
     )
-    result = client.place_order(
-        account_id=account_id,
-        order_book_id=orderbook_id,
-        order_type=order_type,
-        price=price,
-        valid_until=expiry,
-        volume=volume,
-    )
+    with avanza_order_lock(op=f"place_order_totp/{order_type.value}/{orderbook_id}"):
+        result = client.place_order(
+            account_id=account_id,
+            order_book_id=orderbook_id,
+            order_type=order_type,
+            price=price,
+            valid_until=expiry,
+            volume=volume,
+        )
     logger.info("Order result: %s", result)
     return result
 
@@ -364,10 +382,16 @@ def get_order_status(order_id: str) -> dict:
 def delete_order(order_id: str) -> dict:
     """Cancel a pending order.
 
+    P0-4 (2026-05-02): Wrapped in ``avanza_order_lock`` for the same
+    reason as ``_place_order`` — cancelling an order is mutating and must
+    serialize against new orders / stop-loss adjustments to avoid races
+    where the position view is read between cancel-and-place.
+
     Returns:
         Dict with orderId, orderRequestStatus, messages
     """
     client = get_client()
     account_id = get_account_id()
     logger.info("Deleting order %s on account %s", order_id, account_id)
-    return client.delete_order(account_id, order_id)
+    with avanza_order_lock(op=f"delete_order_totp/{order_id}"):
+        return client.delete_order(account_id, order_id)
