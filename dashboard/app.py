@@ -663,14 +663,19 @@ def _build_local_llm_trend_point(entry, ticker=None):
 # Token authentication middleware
 # ---------------------------------------------------------------------------
 
-# Cookie auth (added 2026-04-30): the dashboard is publicly reachable via the
-# Cloudflare tunnel at raanman.lol, so a valid `?token=` in the URL would have
-# to be bookmarked and copy-pasted — long and ugly. Solution: when a valid
-# query token arrives, set a 30-day HTTP-only cookie on the response and (on
-# the index route) redirect to a token-less URL. Future visits from the same
-# browser carry the cookie automatically and the URL stays clean.
+# Cookie auth (added 2026-04-30, rolling refresh added 2026-05-02): the
+# dashboard is publicly reachable via the Cloudflare tunnel at raanman.lol,
+# so putting `?token=` in every bookmark is long and ugly. Solution: when
+# any valid token arrives (query, cookie, or bearer), set/refresh a long-
+# lived HTTP-only cookie on the response. Combined with rolling refresh on
+# every authenticated request, the cookie functionally never expires for an
+# active user — they re-auth only if they take a >COOKIE_MAX_AGE break, lose
+# the cookie store, or switch browsers.
+#
+# 365 days is intentionally just under Chrome's silent 400-day max-age cap
+# (introduced 2022); any longer would be clamped by the browser anyway.
 COOKIE_NAME = "pf_dashboard_token"
-COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
+COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year, refreshed on every authed request
 
 
 def _get_dashboard_token():
@@ -679,12 +684,29 @@ def _get_dashboard_token():
     return cfg.get("dashboard_token") or None
 
 
+def _refresh_cookie(response, token):
+    """Refresh the auth cookie's expiry on `response`.
+
+    Called on every successfully-authenticated request so the cookie's
+    1-year expiry slides forward — an active user never re-auths.
+    """
+    response.set_cookie(
+        COOKIE_NAME,
+        token,
+        max_age=COOKIE_MAX_AGE,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+    )
+    return response
+
+
 def require_auth(f):
     """Decorator: check cookie, ?token= query, or Authorization: Bearer header.
 
-    Validation order: cookie → query param → bearer header. On a valid query
-    token, sets a 30-day cookie on the response so future visits work without
-    ?token= in the URL.
+    Validation order: cookie → query param → bearer header. On any successful
+    auth path, refreshes the cookie's 1-year expiry so it slides forward —
+    an active user effectively never re-authenticates.
 
     If no dashboard_token is configured, access is allowed (backwards
     compatible). Returns 401 for invalid/missing tokens.
@@ -695,26 +717,19 @@ def require_auth(f):
         if expected is None:
             return f(*args, **kwargs)
 
-        # 1. Cookie — preferred path (no URL pollution, survives bookmarks)
+        # 1. Cookie — preferred path. Refresh expiry so the cookie doesn't
+        # decay for users who visit regularly.
         cookie_token = request.cookies.get(COOKIE_NAME)
         if cookie_token and hmac.compare_digest(cookie_token, expected):
-            return f(*args, **kwargs)
+            return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
 
-        # 2. Query param — also sets the cookie so next time the URL is clean
+        # 2. Query param — sets the cookie so the URL stays clean next time
         token = request.args.get("token")
         if token and hmac.compare_digest(token, expected):
-            response = make_response(f(*args, **kwargs))
-            response.set_cookie(
-                COOKIE_NAME,
-                expected,
-                max_age=COOKIE_MAX_AGE,
-                httponly=True,
-                secure=True,
-                samesite="Lax",
-            )
-            return response
+            return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
 
-        # 3. Authorization: Bearer header (CLI / script clients)
+        # 3. Authorization: Bearer header (CLI / script clients — no cookie
+        # since these clients usually don't carry one across requests anyway)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             bearer_token = auth_header[7:].strip()
@@ -723,7 +738,11 @@ def require_auth(f):
 
         return jsonify({
             "error": "Unauthorized",
-            "message": "Visit /?token=YOUR_TOKEN once to set a 30-day auth cookie.",
+            "message": (
+                "Visit /?token=YOUR_TOKEN once to set a 1-year rolling auth "
+                "cookie. Replace YOUR_TOKEN with the dashboard_token from "
+                "config.json."
+            ),
         }), 401
 
     return decorated

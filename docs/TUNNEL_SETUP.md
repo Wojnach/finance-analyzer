@@ -109,9 +109,9 @@ service runs as `LocalSystem`, whose `%USERPROFILE%` is
 profile. `cloudflared service install` does NOT copy the config; the bat
 does it explicitly.
 
-## Step 3: First-time browser auth (one-time per device)
+## Step 3: First-time browser auth (one-time per device, then permanent)
 
-The dashboard is now reachable but gated. To set the 30-day auth cookie,
+The dashboard is now reachable but gated. To set the auth cookie,
 open this URL **once** in your browser:
 
 ```
@@ -119,10 +119,16 @@ https://raanman.lol/?token=<dashboard_token from config.json>
 ```
 
 The dashboard validates the token, sets an `HttpOnly` `Secure` `SameSite=Lax`
-cookie named `pf_dashboard_token`, then 302-redirects you to a clean
-`https://raanman.lol/`. Bookmark *that*. From then on, just typing
-`raanman.lol` in the same browser hits the dashboard directly. The cookie
-expires after 30 days; re-visit the token URL once to refresh.
+cookie named `pf_dashboard_token` (1-year max-age), then 302-redirects you to
+a clean `https://raanman.lol/`. Bookmark *that*. From then on, just typing
+`raanman.lol` in the same browser hits the dashboard directly.
+
+**The cookie is rolling**: every authenticated request resets the expiry
+forward, so as long as you visit the dashboard at least once a year the
+cookie never expires. You only re-auth if you take a >1-year break,
+lose the cookie store, or switch browsers. (Chrome silently caps cookie
+max-age at 400 days, which is why the server sets 365 days specifically —
+any longer would be clamped browser-side.)
 
 ## Step 4: Verify
 
