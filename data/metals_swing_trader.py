@@ -2977,6 +2977,26 @@ class SwingTrader:
                         exit_reason = f"MOMENTUM_EXIT: 3 rising checks ({move_rate:+.2f}%)"
 
             if exit_reason:
+                # MC-P1-4 (2026-05-02): zero-price sell guard. fetch_price
+                # at line ~2786 returns 0 for current_bid when the Avanza
+                # call fails or returns a dict missing "bid". Falling
+                # through to _execute_sell with price=0 either rejects at
+                # Avanza (best case) or fills at the bid (worst case if
+                # Avanza interprets price=0 as "any price"). Defer the
+                # sell to the next cycle when (hopefully) the price fetch
+                # succeeds. If the position truly needs out, the same
+                # exit_reason will fire again next tick with a real bid.
+                if current_bid <= 0:
+                    _log(
+                        f"  ABORT SELL {pos.get('warrant_name', pos_id)}: "
+                        f"current_bid={current_bid} (fetch_price failed) — "
+                        f"deferring exit '{exit_reason}' to next cycle"
+                    )
+                    _send_telegram(
+                        f"_SWING: deferred exit for {pos.get('warrant_name', pos_id)} — "
+                        f"warrant price unavailable (will retry)_"
+                    )
+                    continue
                 try:
                     self._execute_sell(pos_id, pos, current_bid, underlying_price, exit_reason)
                     to_remove.append(pos_id)
