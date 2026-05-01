@@ -111,6 +111,96 @@ Selected by severity, blast radius, and ease of testing:
 - P0-6 (equity_curve fees): correctness fix but cascades to profit_factor / Sharpe / Sortino — needs tests across `equity_curve` math. Defer.
 - All P1 findings except P1-9/P1-13 (already in top 5): defer to backlog.
 
+## Outcome (2026-05-02 session)
+
+| # | Finding | Status | Commit |
+|---|---------|--------|--------|
+| 1 | _get_regime_gated union (P0 carryover) | REJECTED — replace-semantics is intentional, regression test added | `0c7fcfe0` |
+| 2 | ic_computation absolute path (P0-2) | FIXED + 4 tests | `c5b78210` |
+| 3 | signal_history threading.Lock (P0-3) | FIXED + 4 tests | `cdcbbd0f` |
+| 4 | drawdown fail-safe circuit breaker (P0-5) | FIXED + 3 tests | `519ec6af` |
+| 5 | fear_greed malformed API guards (P1-13) | FIXED + 9 tests | `e2332885` |
+
+Total: 4 outstanding findings fixed, 1 rejected with documentation, 23 new
+regression tests added across 5 files.
+
+## Outstanding findings deferred to next session
+
+### Critical (P0)
+
+- **P0-1 (ticker_accuracy neutral filter)** — `portfolio/ticker_accuracy.py:53-62`.
+  Apply `_vote_correct()` from accuracy_stats. Per-ticker `direction_probability`
+  feeds Mode B Telegram notifications and Kelly sizing — accuracy is overstated.
+  Estimated 1 hour: 4-line fix + 6 tests.
+
+- **P0-4 (avanza_client TOTP order lock)** — `portfolio/avanza_client.py:326`.
+  Wrap `_place_order` with `avanza_order_lock`. Concurrent orders can overdraw
+  ISK account. Estimated 30 min: 5-line fix + 2 tests.
+
+- **P0-6 (equity_curve fees)** — `portfolio/equity_curve.py:384`. Subtract
+  `buy_fee_share + sell_fee_share` from `pnl_sek`. Cascades to profit_factor,
+  Sharpe, Sortino — needs ~6 tests covering reported metrics.
+
+### Important (P1)
+
+- **P1-1 (_rescued not initialized)** — `portfolio/signal_engine.py:2033`.
+  Defensive 1-line fix (`_rescued = False` at top of loop). Low impact in
+  practice but defensive.
+
+- **P1-3 (Layer 2 bypasses claude_gate)** — known design choice per CLAUDE.md.
+  Architectural decision, not a quick fix.
+
+- **P1-4 / SM-P1-3 (VWAP cumulative)** — `portfolio/signals/volume_flow.py:63`.
+  Needs session-boundary detection. ~30 min.
+
+- **P1-6 (mean_reversion seasonality compounds)** — `portfolio/signals/mean_reversion.py:466-473`.
+  Copy original close column before loop; metals-only path. ~15 min.
+
+- **P1-7 (macro_regime yield threshold)** — `portfolio/signals/macro_regime.py:203,205`.
+  Lower from 1.5 to 0.15 (15bps). Config decision. ~5 min.
+
+- **P1-8 (metals stops too tight)** — `data/metals_swing_config.py:177`.
+  Raise HARD_STOP_UNDERLYING_PCT from 2.0 to 3.0+. Config decision affecting
+  live metals trading — coordinate with user.
+
+- **P1-9 (metals exit optimizer hardcoded usdsek)** — `data/metals_swing_trader.py:2823`.
+  Use `portfolio.fx_rates.get_usd_sek_rate()` with fallback to last cached.
+
+- **P1-10 (CONFIRM races)** — `portfolio/avanza_orders.py`. UX change requiring
+  user buy-in.
+
+- **P1-11 (kelly_sizing per-ticker accuracy)** — `portfolio/kelly_sizing.py:139`.
+  Use per-ticker accuracy as primary path. Plumbing work.
+
+- **P1-12 (should_block_trade never called)** — `portfolio/trade_guards.py:373`.
+  Wire into `agent_invocation.py` pre-execution gate. ~30 min + tests.
+
+- **P1-14 (onchain _coerce_epoch)** — `portfolio/onchain_data.py:101`.
+  Already gracefully fails to None via existing try/except — defensive only.
+
+- **P1-15 (FX fallback to 1.0)** — `portfolio/risk_management.py:99`.
+  Cache last known good rate; only use 1.0 as last resort. Couples with P1-9.
+
+### From 04-29 review
+
+- **SC-P1-2 (circuit-breaker high-sample relaxation)** — `signal_engine.py:1330-1349`
+- **SC-P1-3 (outcome_tracker JSONL race)** — `outcome_tracker.py:430-446`
+- **OR-P1-2 (zero-delay spin after crash)** — `main.py:1125,1144-1145`
+- **PR-P1-1 (warrant avg-in)** — `warrant_portfolio.py:218-227`
+- **PR-P1-2 (peak cache no lock)** — `risk_management.py:25,42,83`
+- **AV-P1-1 (wrong DELETE URL)** — `scripts/fin_fish_monitor.py:142`
+- **AV-P1-2 (delete_stop_loss missing lock)** — `data/metals_avanza_helpers.py:457-489`
+- **AV-P1-3 (Telegram CONFIRM not sender-authed)** — `portfolio/avanza_orders.py:186-198`
+- **DE-P1-1 (funding rate KeyError)** — `portfolio/funding_rate.py:23,38`
+- **SM-P1-1 (news_event "cut" keyword)** — `portfolio/signals/news_event.py:255-263`
+- **SM-P1-2 (futures_flow operator precedence)** — `portfolio/signals/futures_flow.py:65`
+- **SM-P1-4 (cot_positioning CWD path)** — `portfolio/signals/cot_positioning.py:54,66`
+- **MC-P1-1 (orphan stop from entry not bid)** — `data/metals_swing_trader.py:2667-2669`
+- **MC-P1-2 (HW stop tighter than SW stop)** — `data/metals_swing_config.py:177,264`
+- **MC-P1-3 (pos_id collision)** — `data/metals_swing_trader.py:2528`
+- **MC-P1-4 (zero-price sell)** — `data/metals_swing_trader.py:2786-2787`
+- **IN-P1-3 (telegram_poller raw open)** — `portfolio/telegram_poller.py:338-357`
+
 ## Test plan
 
 For each fix:
