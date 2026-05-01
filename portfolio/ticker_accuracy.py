@@ -27,7 +27,12 @@ def accuracy_by_ticker_signal(ticker, horizon="1d", days=None):
     Returns:
         dict: {signal_name: {"accuracy": float, "samples": int, "correct": int}}
     """
-    from portfolio.accuracy_stats import load_entries
+    # P0-1 (2026-05-02 adversarial follow-up): use accuracy_stats._vote_correct
+    # so the neutral-outcome filter (|change_pct| < _MIN_CHANGE_PCT, change_pct
+    # is None) matches signal_accuracy() / per_ticker_accuracy() / consensus_
+    # accuracy() everywhere else. Without this, per-ticker accuracy was
+    # overstated — Mode B Telegram and Kelly sizing both feed off it.
+    from portfolio.accuracy_stats import _vote_correct, load_entries
 
     entries = load_entries()
 
@@ -50,15 +55,18 @@ def accuracy_by_ticker_signal(ticker, horizon="1d", days=None):
         if not outcome:
             continue
 
-        change_pct = outcome.get("change_pct", 0)
+        change_pct = outcome.get("change_pct")
         signals = tdata.get("signals", {})
 
         for sig_name in SIGNAL_NAMES:
             vote = signals.get(sig_name, "HOLD")
             if vote == "HOLD":
                 continue
+            result_val = _vote_correct(vote, change_pct)
+            if result_val is None:
+                continue  # neutral outcome — don't count
             stats[sig_name]["total"] += 1
-            if (vote == "BUY" and change_pct > 0) or (vote == "SELL" and change_pct < 0):
+            if result_val:
                 stats[sig_name]["correct"] += 1
 
     result = {}
