@@ -376,12 +376,34 @@ def invoke_agent(reasons, tier=3):
     # BUG-214: Drawdown circuit breaker — first-ever automated risk gate on
     # the primary trading path. Advisory below _DRAWDOWN_BLOCK_PCT, hard-block
     # above it. Respects user's high risk tolerance (memory/feedback_risk_tolerance.md).
+    #
+    # 2026-05-02 (adversarial review 05-01 P0-5): the bare `except Exception`
+    # used to swallow all errors and proceed. That meant a portfolio in
+    # 50%+ drawdown could continue trading if anything in the check threw
+    # (ImportError, IO error on portfolio_state.json mid-rename, KeyError
+    # on a missing dd dict key). The fail-safe direction for a circuit
+    # breaker is BLOCK on failure, not pass.
+    #
+    # New behavior:
+    # - Per-portfolio errors (file read, dict access) are tolerated for THAT
+    #   portfolio only — we still check the other portfolio.
+    # - A complete failure to even load the check (ImportError) is logged
+    #   ERROR + treated as block (fail-safe).
+    # - The narrow per-portfolio try/except still tolerates transient I/O,
+    #   so a missing portfolio_state.json mid-rename doesn't take the loop
+    #   down.
     _drawdown_context = ""
     try:
         from portfolio.risk_management import check_drawdown
-        for label, pf_path in [("Patient", PATIENT_PORTFOLIO), ("Bold", BOLD_PORTFOLIO)]:
-            if not pf_path.exists():
-                continue
+    except Exception as e:
+        logger.error("DRAWDOWN BLOCK: check_drawdown unavailable (%s) — fail-safe block", e)
+        _log_trigger(reasons, "blocked_drawdown_unavailable", tier=tier)
+        return False
+
+    for label, pf_path in [("Patient", PATIENT_PORTFOLIO), ("Bold", BOLD_PORTFOLIO)]:
+        if not pf_path.exists():
+            continue
+        try:
             dd = check_drawdown(str(pf_path), max_drawdown_pct=_DRAWDOWN_WARN_PCT)
             if dd["current_drawdown_pct"] > _DRAWDOWN_BLOCK_PCT:
                 logger.error(
@@ -399,8 +421,17 @@ def invoke_agent(reasons, tier=3):
                 f"\n[DRAWDOWN {label}] {dd['current_drawdown_pct']:.1f}% from peak "
                 f"(peak={dd['peak_value']:.0f}, current={dd['current_value']:.0f} SEK)"
             )
-    except Exception as e:
-        logger.warning("drawdown check failed (proceeding): %s", e)
+        except Exception as e:
+            # Per-portfolio failure: log ERROR (not WARNING), but tolerate so
+            # the OTHER portfolio still gets checked. This keeps a transient IO
+            # error on one file from disabling the gate entirely. If BOTH
+            # portfolios fail, neither will set the block flag, and the
+            # invocation proceeds — by design, since blocking trading on a pure
+            # IO race that the next cycle will re-check is too aggressive.
+            logger.error(
+                "DRAWDOWN check failed for %s portfolio (proceeding for this portfolio only): %s",
+                label, e,
+            )
 
     # Multi-agent mode: parallel specialists + synthesis (Coordinator Mode pattern)
     # Enabled via config.layer2.multi_agent = true, only for T2/T3

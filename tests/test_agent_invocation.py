@@ -1090,3 +1090,136 @@ class TestRecordNewTrades:
 
         with patch("portfolio.file_utils.load_json", side_effect=OSError("disk")):
             ai._record_new_trades()  # must not raise
+
+
+# ===========================================================================
+# Drawdown circuit-breaker fail-safe (adversarial review 05-01 P0-5)
+#
+# Before 2026-05-02: a single bare `except Exception` wrapped the entire
+# drawdown check block. ANY error (ImportError, file IO, KeyError on dd
+# dict, _log_trigger raising) would log WARNING and proceed — meaning a
+# portfolio in 50%+ drawdown could continue trading if anything threw.
+# After: ImportError on check_drawdown is fail-safe BLOCK (returns False).
+# Per-portfolio errors log ERROR but tolerate (other portfolio still gets
+# checked). Both portfolios failing is logged but proceeds (transient IO
+# tolerance).
+# ===========================================================================
+
+class TestDrawdownFailSafe:
+
+    def _setup_invoke_path(self, monkeypatch):
+        """Mock everything before/after the drawdown check so we can exercise it."""
+        # Reset module-level state
+        ai._agent_proc = None
+        ai._consecutive_stack_overflows = 0
+        # Make perception_gate always pass-through
+        monkeypatch.setattr(
+            "portfolio.perception_gate.should_invoke",
+            lambda r, t: (True, "ok"),
+        )
+        # write_context returns 0
+        monkeypatch.setattr("portfolio.journal.write_context", lambda: 0)
+        # Mock the loader that runs at top
+        monkeypatch.setattr(
+            "portfolio.agent_invocation._load_config",
+            lambda: {"layer2": {"enabled": True}},
+        )
+        # Force PATIENT/BOLD paths to "exist" so the for-loop iterates.
+        # We patch Path.exists on the actual path objects.
+        monkeypatch.setattr(
+            ai.PATIENT_PORTFOLIO.__class__, "exists", lambda self: True
+        )
+
+    def test_block_when_check_drawdown_module_unimportable(self, monkeypatch):
+        """ImportError on check_drawdown must fail-safe BLOCK (return False)."""
+        self._setup_invoke_path(monkeypatch)
+
+        # Make `from portfolio.risk_management import check_drawdown` raise
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "portfolio.risk_management":
+                raise ImportError("simulated")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import), \
+             patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            result = ai.invoke_agent(["test"], tier=2)
+
+        assert result is False, (
+            "Adversarial review 05-01 P0-5: ImportError on check_drawdown "
+            "must fail-safe BLOCK, not pass through."
+        )
+        # Verify it was logged as the right reason
+        call_args = mock_log.call_args
+        assert call_args is not None
+        assert call_args.args[1] == "blocked_drawdown_unavailable"
+
+    def test_block_when_drawdown_exceeds_block_pct(self, monkeypatch):
+        """A portfolio in 60% drawdown (>50% block threshold) must BLOCK."""
+        self._setup_invoke_path(monkeypatch)
+
+        def fake_check(pf_path, max_drawdown_pct=20.0):
+            return {
+                "current_drawdown_pct": 60.0,
+                "peak_value": 500_000.0,
+                "current_value": 200_000.0,
+            }
+
+        monkeypatch.setattr(
+            "portfolio.risk_management.check_drawdown", fake_check,
+        )
+        with patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            result = ai.invoke_agent(["test"], tier=2)
+
+        assert result is False, "60% drawdown must trigger BLOCK"
+        # Verify the right log reason
+        call_args = mock_log.call_args
+        assert call_args is not None
+        assert "blocked_drawdown_" in call_args.args[1]
+
+    def test_per_portfolio_io_error_does_not_block_invocation(self, monkeypatch):
+        """Per-portfolio IO error on ONE portfolio is tolerated (other still checked).
+
+        This matches the "transient IO race tolerance" the next cycle re-checks.
+        We verify the drawdown block path does NOT fire (no `blocked_drawdown_*`
+        _log_trigger call) — the invocation may still fail downstream for other
+        unrelated reasons (subprocess spawn etc.) but the drawdown gate let it
+        through.
+        """
+        self._setup_invoke_path(monkeypatch)
+
+        def fake_check(pf_path, max_drawdown_pct=20.0):
+            # First portfolio: error. Second portfolio: clean.
+            if "bold" in str(pf_path):
+                return {
+                    "current_drawdown_pct": 5.0,
+                    "peak_value": 500_000.0,
+                    "current_value": 475_000.0,
+                }
+            raise OSError("file race")
+
+        monkeypatch.setattr(
+            "portfolio.risk_management.check_drawdown", fake_check,
+        )
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen", return_value=MagicMock(pid=99)), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()), \
+             patch("portfolio.agent_invocation._log_trigger") as mock_log:
+            ai.invoke_agent(["test"], tier=2)
+
+        # Verify NO drawdown-block call was made (per-portfolio IO error
+        # was tolerated — other portfolio's check passed cleanly).
+        block_calls = [
+            c for c in mock_log.call_args_list
+            if len(c.args) >= 2 and isinstance(c.args[1], str)
+            and c.args[1].startswith("blocked_drawdown_")
+        ]
+        assert not block_calls, (
+            f"Per-portfolio IO error should not trigger drawdown block, "
+            f"but got: {block_calls}"
+        )
