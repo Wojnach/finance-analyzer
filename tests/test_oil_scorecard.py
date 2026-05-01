@@ -8,6 +8,8 @@ import datetime
 import os
 import sys
 
+import pytest
+
 # Add scripts/ to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
@@ -32,6 +34,19 @@ def test_score_single_winning_trade():
     assert s["losses"] == 0
     assert s["win_rate_pct"] == 100.0
     assert s["total_pnl_sek"] == 100.0
+    assert s["pnl_unit"] == "sek"
+
+
+def test_score_dry_run_uses_underlying_pct():
+    """In DRY_RUN the trader records underlying_pct, not pnl_sek.
+    The scorecard should detect that and label the output accordingly."""
+    trades = [{"underlying_pct": 1.5}, {"underlying_pct": -0.8}]
+    s = ols.score(trades)
+    assert s["n_trades"] == 2
+    assert s["wins"] == 1
+    assert s["losses"] == 1
+    assert s["pnl_unit"] == "underlying_pct"
+    assert "total_pnl_underlying_pct" in s
 
 
 def test_score_winning_and_losing_trades():
@@ -50,14 +65,20 @@ def test_score_max_drawdown():
     assert s["max_drawdown_sek"] == 150.0
 
 
-def test_pair_trades_basic():
+def test_pair_trades_uses_actual_swing_log_format():
+    """Per oil_swing_trader log format: BUY_DRY_RUN with pos.ticker,
+    SELL_DRY_RUN/SELL with pos_id="<TICKER>_<ts>". Ticker NOT at top level."""
     decisions = [
-        {"ts": _ts_iso(-2), "ticker": "OIL-USD", "action": "BUY",
-         "underlying_price": 75.0, "confidence": 0.7},
+        {"ts": _ts_iso(-2), "action": "BUY_DRY_RUN",
+         "pos": {"ticker": "OIL-USD", "entry_underlying_price": 75.0,
+                 "direction": "LONG"},
+         "warrant": {"name": "MINI L OLJA AVA 624"},
+         "underlying_price": 75.0},
     ]
     trades = [
-        {"ts": _ts_iso(-1), "ticker": "OIL-USD", "action": "SELL",
-         "underlying_price": 77.0, "pnl_sek": 200, "exit_reason": "tp"},
+        {"ts": _ts_iso(-1), "action": "SELL", "pos_id": "OIL-USD_1700000000",
+         "exit_underlying": 77.0, "underlying_pct": 2.667,
+         "reason": "tp", "dry_run": True},
     ]
     paired = ols.pair_trades(decisions, trades)
     assert "OIL-USD" in paired
@@ -65,16 +86,17 @@ def test_pair_trades_basic():
     rt = paired["OIL-USD"][0]
     assert rt["entry_price"] == 75.0
     assert rt["exit_price"] == 77.0
-    assert rt["pnl_sek"] == 200
+    assert rt["underlying_pct"] == pytest.approx(2.667)
     assert rt["exit_reason"] == "tp"
+    assert rt["direction"] == "LONG"
 
 
 def test_pair_trades_unmatched_sell_skipped():
     """A SELL with no preceding BUY shouldn't blow up — just skip it."""
     decisions = []
     trades = [
-        {"ts": _ts_iso(-1), "ticker": "OIL-USD", "action": "SELL",
-         "underlying_price": 77.0},
+        {"ts": _ts_iso(-1), "action": "SELL", "pos_id": "OIL-USD_1700000000",
+         "exit_underlying": 77.0},
     ]
     paired = ols.pair_trades(decisions, trades)
     assert paired == {}

@@ -72,10 +72,15 @@ def _now_iso() -> str:
 # Singleton lock (matches metals_loop pattern)
 # ---------------------------------------------------------------------------
 def _pid_alive(pid: int) -> bool:
-    """Check if *pid* is running. Windows: tasklist; POSIX: kill(0)."""
+    """Check if *pid* is running. Windows: tasklist; POSIX: kill(0).
+
+    2026-05-01: subprocess imported at module top so the except clause
+    below resolves on POSIX even when tasklist branch is skipped (codex
+    review caught NameError on stale-lock cleanup in WSL/CI).
+    """
+    import subprocess  # noqa: PLC0415 — explicit local for the except clause
     try:
         if os.name == "nt":
-            import subprocess
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}"],
                 capture_output=True, text=True, timeout=5,

@@ -69,6 +69,15 @@ _YFINANCE_LAST_RESORT = frozenset({
     "^TYX",          # 30y treasury yield
     "2YY=F",         # 2y treasury yield futures pseudo-ticker
     "^FVX",          # 5y treasury yield
+    # Oil futures — no free real-time alternative (Binance has no oil
+    # perpetual; Alpaca has the USO ETF but not the underlying futures).
+    # 2026-05-01: added when oil_loop went live in DRY_RUN — previously
+    # CL=F/BZ=F routed to Alpaca (futures unsupported) → fallback to
+    # yfinance with WARNING noise every 60s cycle. oil_precompute had
+    # been silently relying on the same fallback path.
+    "CL=F",          # WTI front-month
+    "BZ=F",          # Brent front-month
+    "RB=F",          # RBOB gasoline (used for crack-spread context)
 }) | _CBOE_VOL_INDICES
 
 

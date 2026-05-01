@@ -54,12 +54,42 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _ticker_of(event: dict[str, Any]) -> str:
+    """Extract ticker. Per oil_swing_trader log format, the ticker lives
+    inside `pos.ticker` for BUY-side events and `pos_id` (TICKER_<ts>)
+    for SELL-side events. Falls back to top-level for forward-compat."""
+    pos = event.get("pos") or {}
+    if pos.get("ticker"):
+        return pos["ticker"]
+    pos_id = event.get("pos_id") or ""
+    if "_" in pos_id:
+        return pos_id.split("_", 1)[0]
+    return event.get("ticker", "OIL-USD")
+
+
+def _is_buy(action: str) -> bool:
+    return action in ("BUY", "BUY_DRY_RUN")
+
+
+def _is_sell(action: str) -> bool:
+    return action in ("SELL", "SELL_DRY_RUN", "STOP", "EXIT")
+
+
 def pair_trades(decisions: list[dict[str, Any]],
                  trades: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Pair BUY decisions with matching SELL trades by ticker.
 
-    Trades log entries are authoritative for closed round-trips; decisions
-    log entries flesh out the entry context (confidence, voters, regime).
+    oil_swing_trader logs:
+      Decisions: {"action":"BUY_DRY_RUN", "pos":{ticker,entry_underlying_price,..},
+                  "warrant":{...}, "underlying_price":..., "ts":...}
+      Decisions: {"action":"SELL_DRY_RUN", "pos_id":"TICKER_<ts>",
+                  "underlying_price":..., "warrant_bid":..., "reason":..., "ts":...}
+      Trades:    {"action":"SELL", "pos_id":..., "reason":..., "underlying_pct":...,
+                  "exit_underlying":..., "exit_warrant_bid":..., "dry_run":True, "ts":...}
+
+    P&L is reported as `underlying_pct` (signed for SHORT) on the SELL
+    side. Trades log entries are authoritative for closed round-trips;
+    decisions log entries flesh out the entry context.
     """
     paired: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     open_positions: dict[str, dict[str, Any]] = {}
@@ -67,33 +97,55 @@ def pair_trades(decisions: list[dict[str, Any]],
     by_ts = sorted(decisions + trades,
                     key=lambda e: e.get("ts") or "")
     for e in by_ts:
-        ticker = e.get("ticker", "OIL-USD")
         action = (e.get("action") or e.get("type") or "").upper()
-        if action == "BUY":
+        ticker = _ticker_of(e)
+        if _is_buy(action):
             open_positions[ticker] = e
-        elif action in ("SELL", "STOP", "EXIT"):
+        elif _is_sell(action):
             opened = open_positions.pop(ticker, None)
             if opened is None:
                 continue
+            opened_pos = opened.get("pos") or {}
+            entry_price = (opened_pos.get("entry_underlying_price")
+                           or opened.get("underlying_price")
+                           or opened.get("price"))
+            exit_price = (e.get("exit_underlying")
+                          or e.get("underlying_price")
+                          or e.get("price"))
             paired[ticker].append({
                 "entry_ts": opened.get("ts"),
                 "exit_ts": e.get("ts"),
-                "entry_price": opened.get("underlying_price")
-                                or opened.get("price"),
-                "exit_price": e.get("underlying_price") or e.get("price"),
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "underlying_pct": e.get("underlying_pct"),
                 "pnl_sek": e.get("pnl_sek", 0),
-                "exit_reason": e.get("exit_reason") or e.get("reason"),
-                "confidence_at_entry": opened.get("confidence")
-                                       or opened.get("calibrated_confidence"),
+                "exit_reason": e.get("reason") or e.get("exit_reason"),
+                "direction": opened_pos.get("direction"),
+                "confidence_at_entry": (opened_pos.get("signal_context") or {})
+                                       .get("confidence"),
             })
     return paired
+
+
+def _pnl_of(trade: dict[str, Any]) -> float:
+    """Return the trade's P&L. In DRY_RUN, oil_swing_trader records only
+    `underlying_pct` (signed); we treat that as the P&L unit. In live
+    mode, `pnl_sek` is the canonical field."""
+    if trade.get("pnl_sek"):
+        return float(trade["pnl_sek"])
+    if trade.get("underlying_pct") is not None:
+        return float(trade["underlying_pct"])
+    return 0.0
 
 
 def score(trades: list[dict[str, Any]]) -> dict[str, Any]:
     n = len(trades)
     if n == 0:
         return {"n_trades": 0}
-    pnls = [float(t.get("pnl_sek", 0)) for t in trades]
+    pnls = [_pnl_of(t) for t in trades]
+    # Distinguish dry-run (underlying_pct units) from live (sek units) for
+    # the output labels — keeps the scorecard readable in either mode.
+    pnl_unit = "sek" if any(t.get("pnl_sek") for t in trades) else "underlying_pct"
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p <= 0]
     win_rate = len(wins) / n if n else 0.0
@@ -101,10 +153,9 @@ def score(trades: list[dict[str, Any]]) -> dict[str, Any]:
     avg_loss = statistics.mean(losses) if losses else 0.0
     total_pnl = sum(pnls)
     expectancy = avg_win * win_rate + avg_loss * (1 - win_rate)
-    equity, running, peak, max_dd = [], 0.0, 0.0, 0.0
+    running, peak, max_dd = 0.0, 0.0, 0.0
     for p in pnls:
         running += p
-        equity.append(running)
         peak = max(peak, running)
         max_dd = max(max_dd, peak - running)
     return {
@@ -112,11 +163,12 @@ def score(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "wins": len(wins),
         "losses": len(losses),
         "win_rate_pct": round(win_rate * 100, 2),
-        "avg_win_sek": round(avg_win, 2),
-        "avg_loss_sek": round(avg_loss, 2),
-        "total_pnl_sek": round(total_pnl, 2),
-        "expectancy_sek_per_trade": round(expectancy, 2),
-        "max_drawdown_sek": round(max_dd, 2),
+        f"avg_win_{pnl_unit}": round(avg_win, 2),
+        f"avg_loss_{pnl_unit}": round(avg_loss, 2),
+        f"total_pnl_{pnl_unit}": round(total_pnl, 2),
+        f"expectancy_per_trade_{pnl_unit}": round(expectancy, 2),
+        f"max_drawdown_{pnl_unit}": round(max_dd, 2),
+        "pnl_unit": pnl_unit,
     }
 
 

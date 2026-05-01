@@ -278,6 +278,13 @@ def refresh_warrant_catalog(page) -> tuple[dict[str, dict], set[tuple[str, str]]
                 "parity": int(probe.get("parity") or 1),
                 "name": probe["name"],
                 "isAza": bool(probe.get("isAza")),
+                # 2026-05-01: persist live quotes so the swing trader can
+                # size positions without re-probing. Codex review caught
+                # that the trader's _place_buy fell back to ask=1.0
+                # whenever these were absent.
+                "bid": float(probe["bid"]) if probe.get("bid") else None,
+                "ask": float(probe["ask"]) if probe.get("ask") else None,
+                "last": float(probe["last"]) if probe.get("last") else None,
                 "spread_pct": round(_spread_pct(probe), 2),
                 "barrier_dist_pct": round(_barrier_distance_pct(probe, direction), 2),
                 "last_probe": _now_utc().isoformat(),
