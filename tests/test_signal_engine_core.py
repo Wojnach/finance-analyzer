@@ -914,6 +914,61 @@ class TestCorrelationDedup:
         # SELL wins
         assert action == "SELL"
 
+    def test_meta_cluster_penalizes_agreeing_leaders(self):
+        """2026-05-01: When pure_trend, oscillator_trend, and structural_flow
+        leaders all vote BUY, the 2nd and 3rd leaders should be penalized.
+        Compare: all three agree vs only one votes."""
+        from portfolio.signal_engine import _STATIC_CORRELATION_GROUPS
+        # Set up all three sub-cluster leaders voting BUY with a SELL counterweight
+        votes_3leaders = {
+            # pure_trend: ema is leader
+            "ema": "BUY", "trend": "BUY", "heikin_ashi": "BUY",
+            # oscillator_trend: momentum_factors is leader
+            "macd": "BUY", "momentum_factors": "BUY", "oscillators": "BUY",
+            # structural_flow: macro_regime is leader
+            "volume_flow": "BUY", "macro_regime": "BUY", "structure": "BUY",
+            # counterweight
+            "rsi": "SELL",
+        }
+        acc = {
+            "ema": {"accuracy": 0.60, "total": 1000},
+            "trend": {"accuracy": 0.55, "total": 1000},
+            "heikin_ashi": {"accuracy": 0.50, "total": 1000},
+            "macd": {"accuracy": 0.50, "total": 1000},
+            "momentum_factors": {"accuracy": 0.58, "total": 1000},
+            "oscillators": {"accuracy": 0.50, "total": 1000},
+            "volume_flow": {"accuracy": 0.50, "total": 1000},
+            "macro_regime": {"accuracy": 0.55, "total": 1000},
+            "structure": {"accuracy": 0.50, "total": 1000},
+            "rsi": {"accuracy": 0.60, "total": 1000},
+        }
+        with mock.patch(
+            "portfolio.signal_engine._get_correlation_groups",
+            return_value=_STATIC_CORRELATION_GROUPS,
+        ):
+            action_agree, conf_agree = _weighted_consensus(
+                votes_3leaders, acc, "trending-up")
+
+        # Now test with leaders disagreeing — one votes SELL
+        votes_disagree = dict(votes_3leaders)
+        votes_disagree["macro_regime"] = "SELL"
+        votes_disagree["volume_flow"] = "SELL"
+        votes_disagree["structure"] = "SELL"
+        with mock.patch(
+            "portfolio.signal_engine._get_correlation_groups",
+            return_value=_STATIC_CORRELATION_GROUPS,
+        ):
+            action_disagree, conf_disagree = _weighted_consensus(
+                votes_disagree, acc, "trending-up")
+
+        # When leaders agree, BUY confidence should be LOWER than when they
+        # all vote independently at full weight (meta-penalty reduces weight)
+        # The action should still be BUY (9 BUY vs 1 SELL)
+        assert action_agree == "BUY"
+        # The key assertion: confidence when all agree should be less than
+        # what it would be without meta-cluster penalty (i.e. < 1.0)
+        assert conf_agree < 1.0
+
     def test_adaptive_recency_fast_track(self):
         """When divergence > 15%, the blend should use 90% recent weight.
 

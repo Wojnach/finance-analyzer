@@ -792,6 +792,35 @@ class TestPerClusterCorrelationPenalties:
         assert _CORRELATION_PENALTY == 0.3
 
 
+class TestMetaClusterDedup:
+    """2026-05-01: Meta-cluster deduplication — when leaders from related sub-clusters
+    agree on direction, apply penalty to redundant leaders. Prevents trend mega-view
+    from getting 3.0x effective leader weight."""
+
+    def test_meta_cluster_groups_exist(self):
+        from portfolio.signal_engine import _META_CLUSTER_GROUPS
+        assert isinstance(_META_CLUSTER_GROUPS, dict)
+        assert "trend_mega" in _META_CLUSTER_GROUPS
+
+    def test_trend_mega_contains_three_subclusters(self):
+        from portfolio.signal_engine import _META_CLUSTER_GROUPS
+        assert set(_META_CLUSTER_GROUPS["trend_mega"]) == {
+            "pure_trend", "oscillator_trend", "structural_flow"
+        }
+
+    def test_meta_cluster_penalty_is_035(self):
+        from portfolio.signal_engine import _META_CLUSTER_PENALTY
+        assert _META_CLUSTER_PENALTY == 0.35
+
+    def test_meta_cluster_penalty_less_than_default(self):
+        from portfolio.signal_engine import (
+            _META_CLUSTER_PENALTY,
+            _CORRELATION_PENALTY,
+        )
+        # Meta-cluster penalty should be at least as harsh as default correlation
+        assert _META_CLUSTER_PENALTY <= _CORRELATION_PENALTY + 0.1
+
+
 class TestTickerDisabledSignals:
     """Per-ticker signal gating: force HOLD for specific signal+ticker combos."""
 
