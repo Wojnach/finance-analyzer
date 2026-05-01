@@ -79,9 +79,14 @@ intentionally deferred, which are outdated/false positives.
 Selected by severity, blast radius, and ease of testing:
 
 1. **`_get_regime_gated` regime/horizon union** (signal_engine.py:881-882)
-   - Affects every signal-engine cycle in ranging regime at 3h/4h
-   - 1-line behavior fix + targeted test
-   - Highest-impact OUTSTANDING finding (flagged in 04-24, 04-29, 05-01)
+   - REJECTED on closer audit: replace-semantics is intentional (BUG-149,
+     2026-03-29). Funding 74.2% @3h_ranging means we WANT it to vote at
+     3h ranging even though it's in `_default` (which targets 1d/3d/5d
+     where funding is 29.9%). Trend 61.6% @3h vs 40.7% @1d ranging — same
+     pattern. Adversarial reviewer compared to `_get_horizon_disabled_signals`
+     (which DOES union) but the two structures have different intent.
+   - Outcome: docstring updated to document the intentional semantics, and
+     a 4-test regression class added to prevent re-flagging.
 
 2. **`ic_computation.py` relative path** (line 19)
    - Silently disables IC weights when CWD differs from repo root

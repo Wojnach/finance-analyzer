@@ -746,6 +746,50 @@ class TestSentimentGatedAt3hRanging:
         assert "sentiment" in gated_default
 
 
+class TestRegimeGatedSemanticsAreReplaceNotUnion:
+    """Regression for adversarial-review carryover finding (04-24 P0-1, 04-29 SC-P1-1,
+    05-01 P0-1 carryover): `_get_regime_gated` returns the horizon override as a
+    REPLACEMENT of `_default`, not a union. This is intentional (BUG-149,
+    2026-03-29). Funding 74.2% @3h_ranging means we WANT it to vote at 3h ranging
+    even though it's in `_default`. Same for trend (61.6% @3h vs 40.7% @1d in ranging).
+
+    If a future review re-flags this as a "union bug", read this test class first.
+    """
+
+    def test_funding_voting_at_3h_ranging(self):
+        """funding is in `_default` for ranging but MUST NOT be gated at 3h."""
+        from portfolio.signal_engine import _get_regime_gated
+        gated = _get_regime_gated("ranging", "3h")
+        assert "funding" not in gated, (
+            "funding 74.2% accuracy at 3h ranging — regression if gated. "
+            "If you tried to fix this with a union, that's the wrong fix. "
+            "See _get_regime_gated docstring."
+        )
+
+    def test_trend_voting_at_3h_ranging(self):
+        """trend has 61.6% accuracy at 3h ranging (BUG-149 docstring) — must vote."""
+        from portfolio.signal_engine import _get_regime_gated
+        gated = _get_regime_gated("ranging", "3h")
+        assert "trend" not in gated, (
+            "trend 61.6% accuracy at 3h ranging (BUG-149) — must NOT be gated. "
+            "If you tried to fix the carryover finding with a union, revert that fix."
+        )
+
+    def test_default_horizon_uses_default_set(self):
+        """When no horizon is given, `_default` IS the gate set."""
+        from portfolio.signal_engine import _get_regime_gated, REGIME_GATED_SIGNALS
+        gated = _get_regime_gated("ranging", None)
+        default_set = REGIME_GATED_SIGNALS["ranging"]["_default"]
+        assert gated == default_set
+
+    def test_long_horizon_uses_default_set(self):
+        """1d horizon is not a key in REGIME_GATED_SIGNALS["ranging"], falls back to _default."""
+        from portfolio.signal_engine import _get_regime_gated, REGIME_GATED_SIGNALS
+        gated = _get_regime_gated("ranging", "1d")
+        default_set = REGIME_GATED_SIGNALS["ranging"]["_default"]
+        assert gated == default_set
+
+
 class TestClaudeFundamentalGatedRangingDefault:
     """2026-04-27: claude_fundamental 40.5% at 1d_recent (1178 sam), 78-83% BUY bias.
     Was only gated at 3h/4h in ranging — now gated at _default too."""
