@@ -136,10 +136,21 @@ def get_stop_losses(ob_id: str) -> list[dict]:
 
 
 def delete_stop_loss(account_id: str, stop_id: str) -> bool:
-    """Delete a stop loss order."""
+    """Delete a stop loss order.
+
+    AV-P1-1 (2026-05-02): Use the canonical 2-segment URL
+    /_api/trading/stoploss/{accountId}/{stopId}. The previous form
+    /_api/trading/stoploss/{stopId} returned 404 silently (the helper
+    treats !ok as a warn-and-continue), leaving stale stops on the
+    position when the monitor tried to retune them on partial fills.
+    The canonical shape matches:
+      - portfolio/avanza_session.cancel_stop_loss (line 911)
+      - portfolio/avanza_control.delete_stop_loss (line 227)
+      - data/metals_avanza_helpers.delete_stop_loss (line 472)
+    """
     try:
         from portfolio.avanza_session import api_delete
-        result = api_delete(f"/_api/trading/stoploss/{stop_id}")
+        result = api_delete(f"/_api/trading/stoploss/{account_id}/{stop_id}")
         ok = result.get("ok", False)
         if not ok:
             log.warning("Delete stop loss %s failed: %s", stop_id, result)
