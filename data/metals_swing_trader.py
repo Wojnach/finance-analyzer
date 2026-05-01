@@ -2525,7 +2525,15 @@ class SwingTrader:
         size this position at N SEK?" can read the Kelly metadata directly
         from metals_swing_trades.jsonl.
         """
-        pos_id = f"pos_{int(time.time())}"
+        # MC-P1-3 (2026-05-02): include ob_id in the key. Mirrors the
+        # 2026-04-15 fix at line 1043 in ingest_position. Two _execute_buy
+        # calls in the same epoch second on different warrants (e.g. a
+        # momentum entry firing the same second as a scheduled cycle) used
+        # to collide, silently overwriting the first position in
+        # self.state["positions"]. The BUY_COOLDOWN_MINUTES gate prevents
+        # two buys for the SAME ob_id within 30 min, so a per-second
+        # ob_id-suffixed key is collision-proof in production.
+        pos_id = f"pos_{int(time.time())}_{warrant['ob_id']}"
 
         _log(f"BUY {warrant['name']}: {units}u @ {ask_price} = {total_cost:.0f} SEK "
              f"(underlying: {underlying_ticker}, dir: {direction}, lev: {warrant['live_leverage']:.1f}x)")
