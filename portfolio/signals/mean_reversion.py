@@ -462,14 +462,25 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
             from portfolio.seasonality import detrend_return
             profile = context["seasonality_profile"]
             _close_col = col_map["close"]
-            returns = df[_close_col].astype(float).pct_change()
+            # P1-6 (2026-05-02 adversarial follow-ups): detrending must NOT
+            # compound across iterations. Capture the ORIGINAL close column
+            # before the loop and reconstruct each detrended bar from its
+            # ORIGINAL i-1 value, not from the just-modified df. The previous
+            # implementation used `df[_close_col].iloc[i-1]` which read the
+            # ALREADY-DETRENDED close from the prior iteration — so the
+            # detrending compounded geometrically (e.g., on flat input with
+            # uniform -0.001 detrend over 100 bars, close drifted ~10%
+            # instead of staying at -0.10%).
+            original_close = df[_close_col].astype(float).copy()
+            returns = original_close.pct_change()
+            close_col_idx = df.columns.get_loc(_close_col)
             for i in range(1, len(df)):
                 hour = df.index[i].hour
                 raw_ret = returns.iloc[i]
                 if np.isfinite(raw_ret):
                     adj_ret = detrend_return(raw_ret, hour, profile)
-                    df.iloc[i, df.columns.get_loc(_close_col)] = (
-                        df[_close_col].iloc[i - 1] * (1 + adj_ret)
+                    df.iloc[i, close_col_idx] = (
+                        original_close.iloc[i - 1] * (1 + adj_ret)
                     )
         except Exception:
             pass  # fall through to raw data
