@@ -29,7 +29,7 @@ $action = New-ScheduledTaskAction -Execute "cmd.exe" `
 $trigger1 = New-ScheduledTaskTrigger -AtLogOn
 $trigger2 = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday -At "07:00"
 
-# Crypto trades 24/7 — Sat+Sun included in the weekly trigger (vs metals
+# Crypto trades 24/7 - Sat+Sun included in the weekly trigger (vs metals
 # weekday-only). Singleton lock prevents double-start when AtLogOn fires
 # while a Saturday-morning trigger also runs.
 $settings = New-ScheduledTaskSettingsSet `
@@ -45,7 +45,7 @@ Register-ScheduledTask -TaskName $TaskName `
     -Action $action -Trigger $trigger1,$trigger2 -Settings $settings `
     -Description "Crypto BTC+ETH paper-mode swing loop. Runs scripts\win\crypto-loop.bat. DRY_RUN=True until manually flipped via data\crypto_swing_config.py."
 
-Write-Host "Registered $TaskName (NOT started — DRY_RUN=True)"
+Write-Host "Registered $TaskName (NOT started - DRY_RUN=True)"
 Write-Host "To start now: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "To stop:      Stop-ScheduledTask -TaskName '$TaskName'"
 Write-Host "Logs:         data\crypto_loop_out.txt"

@@ -35,7 +35,7 @@ Register-ScheduledTask -TaskName $TaskName `
     -Action $action -Trigger $trigger1,$trigger2 -Settings $settings `
     -Description "Oil WTI paper-mode swing loop. Runs scripts\win\oil-loop.bat. DRY_RUN=True until manually flipped via data\oil_swing_config.py."
 
-Write-Host "Registered $TaskName (NOT started — DRY_RUN=True)"
+Write-Host "Registered $TaskName (NOT started - DRY_RUN=True)"
 Write-Host "To start now: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "To stop:      Stop-ScheduledTask -TaskName '$TaskName'"
 Write-Host "Logs:         data\oil_loop_out.txt"
