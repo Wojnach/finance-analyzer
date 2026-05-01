@@ -279,11 +279,86 @@ def _fetch_historical_price(ticker, target_ts):
     return None
 
 
+def _signal_log_lock_path():
+    """Path of the sidecar lockfile shared with atomic_append_jsonl.
+
+    Same convention as portfolio.file_utils.atomic_append_jsonl:
+        ``<dir>/.<filename>.lock`` (e.g. ``data/.signal_log.jsonl.lock``).
+    Held to coordinate read-modify-rewrite of SIGNAL_LOG with concurrent
+    log_signal_snapshot() appenders. SC-P1-3 (2026-05-02 follow-up).
+    """
+    return SIGNAL_LOG.parent / f".{SIGNAL_LOG.name}.lock"
+
+
+@contextlib.contextmanager
+def _hold_signal_log_lock():
+    """Acquire the sidecar lockfile that atomic_append_jsonl uses.
+
+    Cross-platform pattern lifted from portfolio/file_utils.py:
+      - Windows: msvcrt.locking on a 1-byte range
+      - POSIX: fcntl.flock LOCK_EX
+    The lockfile is pre-created with a single null byte if missing so
+    locking never fails on a size-0 file.
+    """
+    try:
+        import msvcrt as _msvcrt  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover - non-Windows
+        _msvcrt = None  # type: ignore[assignment]
+    try:
+        import fcntl as _fcntl  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover - Windows
+        _fcntl = None  # type: ignore[assignment]
+
+    import os as _os
+    lock_path = _signal_log_lock_path()
+    if not lock_path.exists():
+        try:
+            with open(lock_path, "ab") as lf:
+                if lf.tell() == 0:
+                    lf.write(b"\0")
+        except OSError:
+            pass
+
+    with open(lock_path, "rb+") as lock_f:
+        lfd = lock_f.fileno()
+        win_locked = False
+        try:
+            if _msvcrt is not None:
+                _os.lseek(lfd, 0, _os.SEEK_SET)
+                _msvcrt.locking(lfd, _msvcrt.LK_LOCK, 1)  # blocking
+                win_locked = True
+            elif _fcntl is not None:
+                _fcntl.flock(lfd, _fcntl.LOCK_EX)
+            yield
+        finally:
+            if win_locked and _msvcrt is not None:
+                try:
+                    _os.lseek(lfd, 0, _os.SEEK_SET)
+                    _msvcrt.locking(lfd, _msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            # fcntl.flock releases on close.
+
+
 def backfill_outcomes(max_entries=2000):
     """Backfill price outcomes for signal log entries.
 
     Memory-optimized: only parses the last ``max_entries`` lines as JSON.
     Head entries are streamed as raw bytes during rewrite (BUG-112).
+
+    SC-P1-3 (2026-05-02 follow-up): coordinates with concurrent
+    log_signal_snapshot() appenders via the sidecar lock used by
+    atomic_append_jsonl. Pattern:
+      1. Snapshot phase (lock held briefly): record file size at
+         backfill start, then read+parse entries from disk.
+      2. Process phase (lock RELEASED): make slow HTTP calls. Live
+         appenders run normally during this window.
+      3. Rewrite phase (lock re-acquired): re-stat the file. Any bytes
+         past the snapshot size are concurrent appends — copy them
+         verbatim into the rewritten tmp file AFTER the processed tail,
+         then os.replace under the lock so the rename is atomic w.r.t.
+         any further appender. Without this, every entry appended in
+         the process window was clobbered by the os.replace.
 
     Args:
         max_entries: Only process the last N entries to limit memory usage.
@@ -292,33 +367,40 @@ def backfill_outcomes(max_entries=2000):
     if not SIGNAL_LOG.exists():
         return 0
 
-    file_size = SIGNAL_LOG.stat().st_size
-    if file_size == 0:
-        return 0
+    # ---- Phase 1: snapshot read (lock held) ----
+    with _hold_signal_log_lock():
+        file_size = SIGNAL_LOG.stat().st_size
+        if file_size == 0:
+            return 0
 
-    # Phase 1: Count total lines (fast binary scan, no JSON parsing)
-    total_lines = 0
-    with open(SIGNAL_LOG, "rb") as f:
-        for _ in f:
-            total_lines += 1
+        # Phase 1a: Count total lines (fast binary scan, no JSON parsing)
+        total_lines = 0
+        with open(SIGNAL_LOG, "rb") as f:
+            for _ in f:
+                total_lines += 1
 
-    head_count = max(0, total_lines - max_entries) if max_entries else 0
+        head_count = max(0, total_lines - max_entries) if max_entries else 0
 
-    # Phase 2: Skip head lines, parse only the tail as JSON
-    head_end_offset = 0
-    entries = []
-    with open(SIGNAL_LOG, "rb") as f:
-        for _ in range(head_count):
-            f.readline()  # skip without JSON parsing
-        head_end_offset = f.tell()
+        # Phase 1b: Skip head lines, parse only the tail as JSON
+        head_end_offset = 0
+        entries = []
+        with open(SIGNAL_LOG, "rb") as f:
+            for _ in range(head_count):
+                f.readline()  # skip without JSON parsing
+            head_end_offset = f.tell()
 
-        for raw_line in f:
-            stripped = raw_line.strip()
-            if stripped:
-                try:
-                    entries.append(json.loads(stripped))
-                except json.JSONDecodeError:
-                    continue
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if stripped:
+                    try:
+                        entries.append(json.loads(stripped))
+                    except json.JSONDecodeError:
+                        continue
+        # snapshot_size pins the byte boundary of "what we read".
+        # Anything appended past this offset during processing must be
+        # preserved verbatim during the rewrite.
+        snapshot_size = file_size
+        # ---- lock released here for the slow processing window ----
 
     now = datetime.now(UTC)
     now_ts = now.timestamp()
@@ -427,27 +509,56 @@ def backfill_outcomes(max_entries=2000):
     import os
     import tempfile
 
-    fd, tmp = tempfile.mkstemp(dir=SIGNAL_LOG.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as f_out:
-            # Stream head bytes verbatim from original file (no JSON parsing)
-            if head_end_offset > 0:
-                with open(SIGNAL_LOG, "rb") as f_in:
-                    remaining = head_end_offset
-                    while remaining > 0:
-                        chunk = f_in.read(min(65536, remaining))
-                        if not chunk:
-                            break
-                        f_out.write(chunk)
-                        remaining -= len(chunk)
-            # Write modified tail entries
-            for entry in entries:
-                f_out.write((json.dumps(entry) + "\n").encode("utf-8"))
-        os.replace(tmp, SIGNAL_LOG)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    # ---- Phase 3: rewrite (lock re-acquired) ----
+    # SC-P1-3: hold the sidecar lock across the rewrite so that:
+    #   1. We can stat the file and detect concurrent appends past
+    #      snapshot_size without racing a partial append.
+    #   2. The os.replace is atomic w.r.t. any subsequent appender —
+    #      no appender can land bytes between our copy and our rename.
+    with _hold_signal_log_lock():
+        # Re-stat to find any new bytes appended during processing.
+        try:
+            current_size = SIGNAL_LOG.stat().st_size
+        except FileNotFoundError:
+            current_size = snapshot_size  # nothing to preserve
+        concurrent_tail_bytes = max(0, current_size - snapshot_size)
+
+        fd, tmp = tempfile.mkstemp(dir=SIGNAL_LOG.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f_out:
+                # Stream head bytes verbatim from original file (no JSON parsing)
+                if head_end_offset > 0:
+                    with open(SIGNAL_LOG, "rb") as f_in:
+                        remaining = head_end_offset
+                        while remaining > 0:
+                            chunk = f_in.read(min(65536, remaining))
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                            remaining -= len(chunk)
+                # Write modified tail entries
+                for entry in entries:
+                    f_out.write((json.dumps(entry) + "\n").encode("utf-8"))
+                # SC-P1-3: copy bytes appended after our snapshot verbatim
+                # so concurrent log_signal_snapshot() appends survive the
+                # rewrite. We never parse them as JSON — preserves every
+                # byte exactly as the appender wrote it (including the
+                # trailing newline atomic_append_jsonl always emits).
+                if concurrent_tail_bytes > 0:
+                    with open(SIGNAL_LOG, "rb") as f_in:
+                        f_in.seek(snapshot_size)
+                        remaining = concurrent_tail_bytes
+                        while remaining > 0:
+                            chunk = f_in.read(min(65536, remaining))
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                            remaining -= len(chunk)
+            os.replace(tmp, SIGNAL_LOG)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     # Invalidate signal utility cache so the next cycle picks up fresh
     # accuracy data immediately rather than waiting for the 300s TTL.

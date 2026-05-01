@@ -302,3 +302,219 @@ class TestBug220BasePriceNone:
         eth = outcomes.get("ETH-USD", {})
         eth_filled = [h for h in ("3h", "4h", "12h", "1d") if eth.get(h) is not None]
         assert len(eth_filled) == 0, "ETH with None price should get no outcomes"
+
+
+# ============================================================
+# SC-P1-3 (2026-05-02): JSONL race between backfill and live appender
+# ============================================================
+#
+# backfill_outcomes() reads SIGNAL_LOG, processes for many seconds (HTTP
+# calls to Binance / Alpaca / yfinance), then atomically replaces the
+# file via os.replace(tmp, SIGNAL_LOG). During that processing window,
+# Layer 1's log_signal_snapshot() can call atomic_append_jsonl(SIGNAL_LOG,
+# new_entry) — and after the os.replace, that appended entry is GONE.
+#
+# atomic_append_jsonl uses a sidecar lockfile (.signal_log.jsonl.lock).
+# backfill_outcomes did not respect it. Fix: backfill takes the lock
+# in two windows:
+#   1. snapshot read window (file_size, head_end_offset are pinned)
+#   2. rewrite window (acquired again before stat() + tmp write).
+# In window 2 we re-stat the file. If new bytes appeared past the
+# original file size, we copy them verbatim into the rewritten file
+# AFTER the processed tail. The appender is blocked during the rewrite
+# itself (microseconds), so once we've snapshotted-and-copied the
+# concurrent appends, no further appends can race the os.replace.
+
+class TestBackfillVsLiveAppendRace:
+    """SC-P1-3: backfill_outcomes must not lose entries appended by
+    log_signal_snapshot during the processing window."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path):
+        self.log_file = tmp_path / "signal_log.jsonl"
+
+    def test_concurrent_append_preserved(self):
+        """Simulate a write that happens DURING backfill processing.
+
+        Use a patched _fetch_historical_price as the hook: when it's
+        called (mid-processing), append a new entry to the file via the
+        same atomic_append_jsonl path the live writer uses. Then verify
+        that after backfill finishes, the appended entry is still there.
+        """
+        from portfolio.file_utils import atomic_append_jsonl
+
+        # Old entries that need backfill (so processing actually runs)
+        old_entry = _make_entry(hours_ago=48, tickers={
+            "BTC-USD": {"price_usd": 67000.0, "consensus": "BUY"},
+        })
+        _write_signal_log(self.log_file, [old_entry])
+
+        # New entry the "live writer" will append mid-processing
+        late_entry = _make_entry(hours_ago=0, tickers={
+            "ETH-USD": {"price_usd": 3500.0, "consensus": "BUY"},
+        })
+        late_entry["_marker"] = "appended_during_backfill"
+
+        appended = {"done": False}
+
+        def fake_fetch(ticker, target_ts):
+            # Simulate a live append happening during backfill processing.
+            # Only do it once so we don't recurse.
+            if not appended["done"]:
+                atomic_append_jsonl(self.log_file, late_entry)
+                appended["done"] = True
+            # Return a price so backfill writes an outcome too.
+            return 68000.0
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price",
+                   side_effect=fake_fetch):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes(max_entries=100)
+
+        result = _read_signal_log(self.log_file)
+        markers = [e.get("_marker") for e in result]
+        assert "appended_during_backfill" in markers, (
+            "Concurrent append was LOST — race not fixed. "
+            f"Got entries: {[(e.get('ts'), e.get('_marker')) for e in result]}"
+        )
+        assert len(result) == 2  # original + concurrent append
+        # Original entry must still be present and now have outcomes
+        original = [e for e in result if "_marker" not in e]
+        assert len(original) == 1
+        # Should have at least some backfilled horizons (3h, 4h, 12h, 1d)
+        original_outcomes = original[0].get("outcomes", {}).get("BTC-USD", {})
+        filled = [h for h in ("3h", "4h", "12h", "1d") if original_outcomes.get(h)]
+        assert filled, "Original entry's outcomes should be backfilled"
+
+    def test_no_data_loss_when_no_concurrent_writer(self):
+        """Regression: if no one appends during backfill, behaviour is
+        unchanged — entry count and content are preserved.
+
+        Pins that the lock-acquire path doesn't accidentally truncate
+        when the concurrent-tail-bytes branch is unused.
+        """
+        entries = [_make_entry(hours_ago=48 - i) for i in range(5)]
+        _write_signal_log(self.log_file, entries)
+        original_count = len(entries)
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price",
+                   return_value=68000.0):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes(max_entries=100)
+
+        result = _read_signal_log(self.log_file)
+        assert len(result) == original_count
+
+    def test_multiple_concurrent_appends_preserved(self):
+        """Multiple appends during the processing window must all survive."""
+        from portfolio.file_utils import atomic_append_jsonl
+
+        old_entry = _make_entry(hours_ago=48, tickers={
+            "BTC-USD": {"price_usd": 67000.0, "consensus": "BUY"},
+        })
+        _write_signal_log(self.log_file, [old_entry])
+
+        appended_count = {"n": 0}
+        late_entries = []
+        for i in range(3):
+            e = _make_entry(hours_ago=0, tickers={
+                "ETH-USD": {"price_usd": 3500.0 + i, "consensus": "BUY"},
+            })
+            e["_late_idx"] = i
+            late_entries.append(e)
+
+        def fake_fetch(ticker, target_ts):
+            # Drip-feed late entries one per fetch call.
+            if appended_count["n"] < len(late_entries):
+                atomic_append_jsonl(self.log_file, late_entries[appended_count["n"]])
+                appended_count["n"] += 1
+            return 68000.0
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price",
+                   side_effect=fake_fetch):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes(max_entries=100)
+
+        result = _read_signal_log(self.log_file)
+        late_idxs = sorted(e["_late_idx"] for e in result if "_late_idx" in e)
+        assert late_idxs == [0, 1, 2], (
+            f"Some concurrent appends lost — got late_idxs={late_idxs}"
+        )
+
+    def test_concurrent_append_from_other_thread_preserved(self):
+        """A live appender on a different thread must survive backfill.
+
+        Realistic threading scenario: Layer 1 (main loop) calls
+        atomic_append_jsonl on its own thread while a separate
+        outcome-backfill thread runs backfill_outcomes. Slow processing
+        in backfill (fake_fetch sleeps) gives the appender thread
+        plenty of room to sneak in writes.
+
+        With the fix in place, both threads coordinate via the same
+        sidecar lock — appends either land cleanly before the rewrite
+        (and survive verbatim copy) OR block until the rewrite completes.
+        """
+        import threading
+        import time
+
+        from portfolio.file_utils import atomic_append_jsonl
+
+        # 5 old entries needing backfill — each fetch sleeps a bit so the
+        # appender thread has time to interleave writes.
+        old_entries = []
+        for i in range(5):
+            e = _make_entry(hours_ago=48, tickers={
+                "BTC-USD": {"price_usd": 67000.0 + i, "consensus": "BUY"},
+            })
+            old_entries.append(e)
+        _write_signal_log(self.log_file, old_entries)
+
+        # Latch so the appender starts only AFTER backfill begins.
+        backfill_started = threading.Event()
+        appender_done = threading.Event()
+        late_entries = []
+        for i in range(3):
+            e = _make_entry(hours_ago=0, tickers={
+                "ETH-USD": {"price_usd": 3500.0 + i, "consensus": "BUY"},
+            })
+            e["_thread_late_idx"] = i
+            late_entries.append(e)
+
+        def appender():
+            backfill_started.wait(timeout=5)
+            for e in late_entries:
+                atomic_append_jsonl(self.log_file, e)
+                time.sleep(0.01)
+            appender_done.set()
+
+        fetch_calls = {"n": 0}
+
+        def slow_fetch(ticker, target_ts):
+            # First call signals "backfill has started".
+            if fetch_calls["n"] == 0:
+                backfill_started.set()
+            fetch_calls["n"] += 1
+            # Slow each fetch enough that the appender lands at least
+            # one entry mid-processing.
+            time.sleep(0.05)
+            return 68000.0
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price",
+                   side_effect=slow_fetch):
+            from portfolio.outcome_tracker import backfill_outcomes
+            t = threading.Thread(target=appender)
+            t.start()
+            backfill_outcomes(max_entries=100)
+            t.join(timeout=10)
+            appender_done.wait(timeout=10)
+
+        result = _read_signal_log(self.log_file)
+        late_idxs = sorted(e["_thread_late_idx"] for e in result if "_thread_late_idx" in e)
+        assert late_idxs == [0, 1, 2], (
+            f"Cross-thread concurrent appends lost — got late_idxs={late_idxs}, "
+            f"total entries={len(result)}"
+        )
