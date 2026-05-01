@@ -225,6 +225,26 @@ def record_warrant_transaction(config_key, action, units, price_sek, underlying_
                 avg_price = (old_units * old_price + units * price_sek) / new_units
                 existing["units"] = new_units
                 existing["entry_price_sek"] = round(avg_price, 2)
+
+                # PR-P1-1 (2026-05-02): also volume-weight the underlying
+                # entry. Previously this stayed pinned to the FIRST entry's
+                # spot price, causing the metals stop-loss reference (read
+                # from `underlying_entry_price_usd` via warrant_pnl()) to
+                # trip earlier than the VWAP entry implied — partial-add
+                # positions would hard-stop on small underlying drawdowns.
+                # Defensive: if either price is zero, fall back gracefully.
+                # See tests/test_warrant_portfolio.TestWarrantAvgInUnderlyingEntry.
+                old_underlying = existing.get("underlying_entry_price_usd", 0) or 0
+                new_underlying = underlying_price_usd or 0
+                if old_underlying > 0 and new_underlying > 0:
+                    avg_underlying = (
+                        old_units * old_underlying + units * new_underlying
+                    ) / new_units
+                    existing["underlying_entry_price_usd"] = round(avg_underlying, 4)
+                elif new_underlying > 0:
+                    # Existing was 0/missing — adopt the new valid spot.
+                    existing["underlying_entry_price_usd"] = round(new_underlying, 4)
+                # else: both zero — leave existing alone (degenerate input).
         else:
             holdings[config_key] = {
                 "units": units,

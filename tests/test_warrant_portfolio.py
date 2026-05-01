@@ -344,3 +344,115 @@ class TestRecordWarrantTransaction:
         assert txn["name"] == "MINI L SILVER"
         assert txn["underlying"] == "XAG-USD"
         assert "timestamp" in txn
+
+
+# ============================================================
+# PR-P1-1 regression: avg-in must update underlying_entry_price_usd
+# ============================================================
+#
+# Prior bug: record_warrant_transaction averaged in `entry_price_sek` on
+# avg-in but left `underlying_entry_price_usd` pinned at the FIRST entry's
+# spot price. This caused the metals stop-loss reference (which is keyed
+# off underlying_entry_price_usd via warrant_pnl()) to trip earlier than
+# the volume-weighted average implied -- partial-add positions would hard-
+# stop on small underlying drawdowns.
+#
+# Fix: volume-weighted-average the underlying entry price the same way
+# entry_price_sek is averaged. Defensive against zero/missing prices.
+
+class TestWarrantAvgInUnderlyingEntry:
+    """PR-P1-1 regression: avg-in updates underlying_entry_price_usd."""
+
+    @patch("portfolio.warrant_portfolio.save_warrant_state")
+    @patch("portfolio.warrant_portfolio.load_warrant_state")
+    def test_avg_in_updates_underlying_entry_equal_volumes(self, mock_load, mock_save):
+        """Buy 100 @ silver $80, then 100 more @ silver $90 -> underlying_entry == 85."""
+        from portfolio.warrant_portfolio import record_warrant_transaction
+        mock_load.return_value = {
+            "holdings": {
+                "MINI-SILVER": {
+                    "units": 100, "entry_price_sek": 50.0,
+                    "underlying": "XAG-USD", "leverage": 5,
+                    "underlying_entry_price_usd": 80.0,
+                    "name": "MINI L SILVER",
+                }
+            },
+            "transactions": [],
+        }
+
+        record_warrant_transaction("MINI-SILVER", "BUY", 100, 60.0, 90.0, 5)
+
+        state = mock_save.call_args[0][0]
+        # (100*80 + 100*90) / 200 = 85.0
+        assert state["holdings"]["MINI-SILVER"]["underlying_entry_price_usd"] == pytest.approx(85.0)
+
+    @patch("portfolio.warrant_portfolio.save_warrant_state")
+    @patch("portfolio.warrant_portfolio.load_warrant_state")
+    def test_avg_in_unequal_volumes(self, mock_load, mock_save):
+        """Buy 100 @ $80, then 300 more @ $84 -> weighted avg 83 ((100*80 + 300*84)/400)."""
+        from portfolio.warrant_portfolio import record_warrant_transaction
+        mock_load.return_value = {
+            "holdings": {
+                "MINI-SILVER": {
+                    "units": 100, "entry_price_sek": 50.0,
+                    "underlying": "XAG-USD", "leverage": 5,
+                    "underlying_entry_price_usd": 80.0,
+                }
+            },
+            "transactions": [],
+        }
+
+        record_warrant_transaction("MINI-SILVER", "BUY", 300, 60.0, 84.0, 5)
+
+        state = mock_save.call_args[0][0]
+        # (100*80 + 300*84) / 400 = (8000 + 25200) / 400 = 33200/400 = 83.0
+        assert state["holdings"]["MINI-SILVER"]["underlying_entry_price_usd"] == pytest.approx(83.0)
+        # Sanity: also check entry_price_sek averages correctly (existing contract).
+        # (100*50 + 300*60) / 400 = (5000 + 18000) / 400 = 57.5
+        assert state["holdings"]["MINI-SILVER"]["entry_price_sek"] == pytest.approx(57.5)
+
+    @patch("portfolio.warrant_portfolio.save_warrant_state")
+    @patch("portfolio.warrant_portfolio.load_warrant_state")
+    def test_avg_in_zero_underlying_no_change(self, mock_load, mock_save):
+        """Degenerate input: underlying_price_usd=0 keeps existing underlying_entry intact."""
+        from portfolio.warrant_portfolio import record_warrant_transaction
+        mock_load.return_value = {
+            "holdings": {
+                "MINI-SILVER": {
+                    "units": 100, "entry_price_sek": 50.0,
+                    "underlying": "XAG-USD", "leverage": 5,
+                    "underlying_entry_price_usd": 80.0,
+                }
+            },
+            "transactions": [],
+        }
+
+        record_warrant_transaction("MINI-SILVER", "BUY", 100, 60.0, 0, 5)
+
+        state = mock_save.call_args[0][0]
+        # Defensive: don't average in a zero spot price; preserve existing.
+        assert state["holdings"]["MINI-SILVER"]["underlying_entry_price_usd"] == pytest.approx(80.0)
+
+    @patch("portfolio.warrant_portfolio.save_warrant_state")
+    @patch("portfolio.warrant_portfolio.load_warrant_state")
+    def test_avg_in_existing_underlying_zero_falls_back(self, mock_load, mock_save):
+        """If existing underlying_entry is 0 (corrupted state), adopt the new valid spot."""
+        from portfolio.warrant_portfolio import record_warrant_transaction
+        mock_load.return_value = {
+            "holdings": {
+                "MINI-SILVER": {
+                    "units": 100, "entry_price_sek": 50.0,
+                    "underlying": "XAG-USD", "leverage": 5,
+                    "underlying_entry_price_usd": 0,  # corrupted/missing
+                }
+            },
+            "transactions": [],
+        }
+
+        # Should not raise.
+        record_warrant_transaction("MINI-SILVER", "BUY", 100, 60.0, 85.0, 5)
+
+        state = mock_save.call_args[0][0]
+        # When existing is 0 and new is valid, adopt the new spot as the anchor.
+        new_entry = state["holdings"]["MINI-SILVER"]["underlying_entry_price_usd"]
+        assert new_entry == pytest.approx(85.0)
