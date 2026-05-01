@@ -12,6 +12,7 @@ import datetime
 import json
 import logging
 import pathlib
+import threading
 
 from portfolio.file_utils import atomic_append_jsonl, load_json
 
@@ -24,6 +25,18 @@ logger = logging.getLogger(__name__)
 # Invalidated when the file shrinks (log rotation).
 _peak_cache: dict[tuple, dict] = {}
 
+# Adversarial review 04-29 PR-P1-2 (2026-05-02): the main loop's 8-worker
+# ThreadPoolExecutor invokes check_drawdown() concurrently across the
+# patient + bold portfolios, and update_health periodically calls
+# _streaming_max. Without a lock, two threads could last-writer-wins on
+# _peak_cache[cache_key] = {...}, occasionally losing a cached offset and
+# forcing the next call to do a full O(file_size) scan instead of the
+# O(delta) streaming read. Same class of bug as today's commit cdcbbd0f
+# for signal_history.update_history. Lock scope: the entire read-decide-
+# update sequence in _streaming_max — both reading the cached offset and
+# writing back the new offset have to be atomic relative to other workers.
+_peak_cache_lock = threading.Lock()
+
 
 def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> float:
     """A-PR-2 (2026-04-11): Find the maximum value at `value_key` in a JSONL file.
@@ -32,6 +45,10 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
     scan new entries appended since the last call. Falls back to a full scan
     if the file shrinks (rotation) or on any seek error.
 
+    PR-P1-2 (2026-05-02): _peak_cache reads + writes are serialized under
+    _peak_cache_lock to avoid the 8-worker ThreadPoolExecutor losing cached
+    offsets to last-writer-wins races (see lock comment above).
+
     Streams line-by-line so memory stays O(1) regardless of file size.
     Returns `floor` (typically initial_value) if file missing/empty.
     """
@@ -39,24 +56,28 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
         return floor
 
     cache_key = (str(history_path), value_key)
-    cached = _peak_cache.get(cache_key)
 
     try:
         file_size = history_path.stat().st_size
     except OSError:
         file_size = 0
 
-    # Determine where to start reading
-    start_offset = 0
-    peak = floor
-    if cached is not None:
-        if file_size >= cached["offset"]:
-            # File grew or stayed the same — resume from last position
-            start_offset = cached["offset"]
-            peak = cached["peak"]
+    # Snapshot cache under the lock — keeps the (read offset, decide
+    # restart vs resume, hold last good peak) sequence consistent with
+    # the matching write at the bottom of the function.
+    with _peak_cache_lock:
+        cached = _peak_cache.get(cache_key)
+        if cached is not None:
+            if file_size >= cached["offset"]:
+                start_offset = cached["offset"]
+                peak = cached["peak"]
+            else:
+                # File shrank (rotation) — full re-scan
+                start_offset = 0
+                peak = floor
         else:
-            # File shrank (rotation) — full re-scan
             start_offset = 0
+            peak = floor
 
     try:
         with open(history_path, encoding="utf-8") as f:
@@ -76,11 +97,14 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
             end_offset = f.tell()
     except OSError as e:
         logger.warning("Could not stream history file %s: %s", history_path.name, e)
-        if cached is not None:
-            return cached["peak"]
+        with _peak_cache_lock:
+            cached_after = _peak_cache.get(cache_key)
+        if cached_after is not None:
+            return cached_after["peak"]
         return peak
 
-    _peak_cache[cache_key] = {"peak": peak, "offset": end_offset}
+    with _peak_cache_lock:
+        _peak_cache[cache_key] = {"peak": peak, "offset": end_offset}
     return peak
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
