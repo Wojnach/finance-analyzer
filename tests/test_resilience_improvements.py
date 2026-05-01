@@ -246,3 +246,109 @@ class TestHealthCacheWriteBack:
         # Verify the timestamp was written back
         state = json.loads((tmp_path / "health_state.json").read_text(encoding="utf-8"))
         assert state.get("last_invocation_ts") == ts
+
+
+# ===========================================================================
+# Adversarial review 04-29 OR-P1-2: zero-delay spin after crash
+#
+# Existing protection: the per-cycle except in main.loop() calls
+# _crash_alert() (which increments _consecutive_crashes) and _crash_sleep()
+# (which does exponential backoff with jitter, capped at _MAX_CRASH_BACKOFF).
+# Gap: if _crash_alert itself raises (disk full on _save_crash_counter,
+# load_json IO error, etc.), the alert helper bubbles out of the except
+# handler and either kills the loop process entirely OR — if a future
+# refactor catches it — leaves _consecutive_crashes un-incremented and
+# _crash_sleep() doing 10 * 2^(0-1) ≈ 5s, then loops again. Worse, in
+# the original report's reading, a path where _crash_sleep is bypassed
+# (e.g. _consecutive_crashes is somehow reset between alert and sleep)
+# would let _sleep_for_next_cycle compute remaining<0 and skip its
+# sleep entirely, spinning the loop tight.
+#
+# Fix: add a ground-floor minimum sleep at the END of the except handler
+# that fires regardless of whether _crash_alert/_crash_sleep succeeded —
+# `time.sleep(min(2 ** n_failures, 30))` per the plan, where n_failures
+# is _consecutive_crashes (resilient even if alert helper failed before
+# incrementing). The existing _crash_sleep continues to provide longer
+# backoffs for sustained failure; the new floor catches the edge case.
+# ===========================================================================
+
+class TestCrashLoopMinSleepFloor:
+
+    def test_min_sleep_called_when_crash_alert_raises(self):
+        """If _crash_alert raises, the loop must STILL sleep before retrying."""
+        import portfolio.main as m
+
+        sleep_calls = []
+        with mock.patch("portfolio.main._crash_alert", side_effect=RuntimeError("disk full")), \
+             mock.patch("portfolio.main._crash_sleep", side_effect=RuntimeError("sleep also broken")), \
+             mock.patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+            m._safe_crash_recovery("simulated traceback")
+        assert sleep_calls, (
+            "OR-P1-2: a failure in _crash_alert / _crash_sleep must still leave "
+            "AT LEAST ONE time.sleep call so the loop doesn't spin tight on "
+            "persistent failure."
+        )
+        # Floor sleep must be >= 1s (some defense)
+        assert max(sleep_calls) >= 1.0
+
+    def test_floor_sleep_grows_with_consecutive_crashes(self):
+        """Floor sleep should track 2^n with cap (matching plan's
+        time.sleep(min(2 ** n_failures, 30)) suggestion)."""
+        import portfolio.main as m
+
+        orig = m._consecutive_crashes
+        try:
+            sleep_calls = []
+            with mock.patch("portfolio.main._crash_alert", side_effect=RuntimeError("x")), \
+                 mock.patch("portfolio.main._crash_sleep", side_effect=RuntimeError("y")), \
+                 mock.patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+                m._consecutive_crashes = 1
+                m._safe_crash_recovery("traceback")
+                first_sleep = sleep_calls[-1]
+                m._consecutive_crashes = 5
+                m._safe_crash_recovery("traceback")
+                later_sleep = sleep_calls[-1]
+            assert later_sleep > first_sleep, (
+                f"Floor sleep should grow with crash count "
+                f"(crash#1={first_sleep}, crash#5={later_sleep})"
+            )
+        finally:
+            m._consecutive_crashes = orig
+
+    def test_floor_sleep_capped_at_30s(self):
+        """Plan-specified cap: min(2 ** n_failures, 30)."""
+        import portfolio.main as m
+
+        orig = m._consecutive_crashes
+        try:
+            sleep_calls = []
+            with mock.patch("portfolio.main._crash_alert", side_effect=RuntimeError("x")), \
+                 mock.patch("portfolio.main._crash_sleep", side_effect=RuntimeError("y")), \
+                 mock.patch("time.sleep", side_effect=lambda d: sleep_calls.append(d)):
+                m._consecutive_crashes = 50  # 2^50 is astronomical
+                m._safe_crash_recovery("traceback")
+            assert sleep_calls[-1] <= 30.0, (
+                f"Floor sleep must cap at 30s, got {sleep_calls[-1]}"
+            )
+        finally:
+            m._consecutive_crashes = orig
+
+    def test_normal_path_uses_crash_sleep_not_floor(self):
+        """When _crash_sleep works normally, the floor doesn't add extra
+        sleep — _crash_sleep already handles the exponential backoff."""
+        import portfolio.main as m
+
+        orig = m._consecutive_crashes
+        try:
+            sleep_calls = []
+            with mock.patch("portfolio.main._crash_alert", side_effect=lambda x: None), \
+                 mock.patch(
+                     "portfolio.main._crash_sleep",
+                     side_effect=lambda: sleep_calls.append("cs"),
+                 ):
+                m._consecutive_crashes = 1
+                m._safe_crash_recovery("traceback")
+            # _crash_sleep was called — no need for the floor
+            assert "cs" in sleep_calls
+        finally:
+            m._consecutive_crashes = orig
