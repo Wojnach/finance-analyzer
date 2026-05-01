@@ -17,11 +17,20 @@ capped at 0.7 to reflect data staleness.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger("portfolio.signals.cot_positioning")
+
+# SM-P1-4 (2026-05-02 adversarial follow-ups): absolute path resolution.
+# The previous code used relative `Path("data")` / `data/...` which silently
+# broke when the scheduled task CWD differed from the repo root (e.g.
+# PF-DataLoop launched from C:\Windows). The deep context and COT history
+# loaders would return None, the signal would silently fall back to API
+# fetching every cycle. Mirrors the c5b78210 ic_computation fix.
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 _METALS_TICKERS = {"XAU-USD", "XAG-USD"}
 _COMMODITY_MAP = {"XAU-USD": "gold", "XAG-USD": "silver"}
@@ -44,14 +53,18 @@ _CFTC_TIMEOUT = 15
 
 
 def _load_deep_context(ticker: str) -> dict | None:
-    """Load precomputed deep context for the given metal."""
+    """Load precomputed deep context for the given metal.
+
+    SM-P1-4 (2026-05-02): use absolute _DATA_DIR — was relative `f"data/..."`
+    which silently broke when the loop's CWD wasn't the repo root.
+    """
     from portfolio.file_utils import load_json
 
     metal = _COMMODITY_MAP.get(ticker)
     if not metal:
         return None
 
-    path = f"data/{metal}_deep_context.json"
+    path = str(_DATA_DIR / f"{metal}_deep_context.json")
     ctx = load_json(path, default=None)
     if not ctx or not isinstance(ctx, dict):
         logger.debug("Deep context not available: %s", path)
@@ -60,10 +73,14 @@ def _load_deep_context(ticker: str) -> dict | None:
 
 
 def _load_cot_history(metal: str) -> list[dict]:
-    """Load COT history from the local JSONL file."""
+    """Load COT history from the local JSONL file.
+
+    SM-P1-4 (2026-05-02): use absolute _DATA_DIR — was relative
+    `"data/cot_history.jsonl"`.
+    """
     from portfolio.file_utils import load_jsonl
 
-    entries = load_jsonl("data/cot_history.jsonl")
+    entries = load_jsonl(str(_DATA_DIR / "cot_history.jsonl"))
     return [e for e in entries if e.get("metal") == metal]
 
 

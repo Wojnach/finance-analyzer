@@ -376,3 +376,101 @@ class TestSignalInterface:
         )
         result = compute_cot_positioning_signal(_make_df(), ticker="BTC-USD")
         assert result["action"] == "HOLD"
+
+
+class TestDataDirIsAbsolute:
+    """SM-P1-4 (2026-05-02 adversarial follow-ups): _DATA_DIR was previously
+    a CWD-relative `f"data/..."` string passed straight to load_json /
+    load_jsonl. When the loop's CWD differed from the repo root (e.g.
+    PF-DataLoop launched from C:\\Windows), the deep-context loader and
+    COT history loader silently returned None, the signal fell back to
+    API fetching every cycle, and the precomputed cache was never read.
+
+    Mirrors the c5b78210 ic_computation fix.
+    """
+
+    def test_data_dir_is_absolute(self):
+        from portfolio.signals.cot_positioning import _DATA_DIR
+        assert _DATA_DIR.is_absolute(), (
+            f"_DATA_DIR must be absolute, got {_DATA_DIR!r}. "
+            "Did you revert to relative `Path('data')`?"
+        )
+
+    def test_data_dir_matches_repo_data_dir(self):
+        """_DATA_DIR must point at the repo's `data` directory regardless of CWD."""
+        from pathlib import Path
+
+        from portfolio.signals.cot_positioning import _DATA_DIR
+        # Resolve repo root from this test file's location: tests/.. == repo root.
+        repo_root = Path(__file__).resolve().parent.parent
+        expected = repo_root / "data"
+        assert _DATA_DIR == expected, (
+            f"_DATA_DIR={_DATA_DIR!r} doesn't match expected repo data dir "
+            f"{expected!r}."
+        )
+
+    def test_load_deep_context_uses_absolute_path(self, monkeypatch, tmp_path):
+        """White-box: _load_deep_context must call load_json with an absolute
+        path, not the CWD-relative string. Capture the path argument."""
+        from portfolio.signals import cot_positioning
+
+        captured: list[str] = []
+
+        def _capture(path, default=None):
+            captured.append(str(path))
+            return None  # short-circuit
+
+        monkeypatch.setattr(
+            "portfolio.signals.cot_positioning.load_json",
+            _capture,
+            raising=False,
+        )
+        # Patch the lazy import inside _load_deep_context.
+        monkeypatch.setattr(
+            "portfolio.file_utils.load_json", _capture, raising=False,
+        )
+        # Change CWD so a relative path would resolve elsewhere.
+        import os
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            cot_positioning._load_deep_context("XAU-USD")
+        finally:
+            os.chdir(original_cwd)
+
+        assert captured, "load_json was not called"
+        from pathlib import Path
+        for p in captured:
+            assert Path(p).is_absolute(), (
+                f"_load_deep_context passed non-absolute path '{p}' to load_json. "
+                "Will silently fail when CWD != repo root."
+            )
+
+    def test_load_cot_history_uses_absolute_path(self, monkeypatch, tmp_path):
+        """White-box: _load_cot_history must call load_jsonl with an absolute path."""
+        from portfolio.signals import cot_positioning
+
+        captured: list[str] = []
+
+        def _capture(path, default=None):
+            captured.append(str(path))
+            return []  # empty list — short-circuit
+
+        monkeypatch.setattr(
+            "portfolio.file_utils.load_jsonl", _capture, raising=False,
+        )
+
+        import os
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            cot_positioning._load_cot_history("gold")
+        finally:
+            os.chdir(original_cwd)
+
+        assert captured, "load_jsonl was not called"
+        from pathlib import Path
+        for p in captured:
+            assert Path(p).is_absolute(), (
+                f"_load_cot_history passed non-absolute path '{p}' to load_jsonl."
+            )
