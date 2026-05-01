@@ -381,12 +381,21 @@ def _pair_round_trips(transactions):
 
             buy_price = buy["price_per_share"]
             pnl_pct = ((sell_price_per_share - buy_price) / buy_price * 100) if buy_price > 0 else 0
-            pnl_sek = (sell_price_per_share - buy_price) * matched
 
             # Proportional fees — use original buy quantity as denominator
             # to avoid inflating fee allocation on subsequent partial matches
+            # (BUG-37 regression covered by test_equity_curve_fifo.TestBug37FeeDoubleCount).
+            #
+            # P0-6 (2026-05-02): pnl_sek is now NET of buy+sell fees so
+            # downstream metrics (profit_factor, total_pnl_sek, Calmar) report
+            # realised SEK. `pnl_pct` remains the gross price-% (price-move
+            # only) — used for streaks and expectancy. `fee_sek` field still
+            # reports total fees so consumers can reconstruct gross if needed.
+            # See tests/test_equity_curve_fifo.TestPnlSekNetOfFees and
+            # tests/test_portfolio_metrics.TestProfitFactorNetOfFees.
             buy_fee_share = (buy["fee_sek"] * matched / buy["original_shares"]) if buy["original_shares"] > 0 else 0
             sell_fee_share = (sell_fee * matched / sell_shares) if sell_shares > 0 else 0
+            pnl_sek = (sell_price_per_share - buy_price) * matched - buy_fee_share - sell_fee_share
 
             round_trips.append({
                 "ticker": ticker,

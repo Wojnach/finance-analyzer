@@ -218,3 +218,98 @@ class TestComputeTradeMetrics:
         m = compute_trade_metrics(txns)
         assert m["round_trips"] == 1
         assert m["max_consecutive_wins"] == 1
+
+
+# ===================================================================
+# P0-6 cascade: profit_factor / total_pnl_sek / calmar use NET pnl_sek
+# ===================================================================
+#
+# `pnl_sek` was changed to be net of fees (was gross). Downstream
+# metrics in compute_trade_metrics() that consume pnl_sek must reflect
+# the net values. These tests pin the post-fix contract.
+
+class TestProfitFactorNetOfFees:
+    """P0-6 cascade: downstream metrics use net pnl_sek."""
+
+    def test_profit_factor_uses_net_pnl(self):
+        """Controlled fixture: gross profit_factor != net profit_factor.
+
+        2 winning trades (gross +60000 each, fees 1000 per side = -2000 net per win),
+        1 losing trade (gross -40000, fees 1000 per side = -2000 worse).
+
+        Pre-fix (gross): PF = (60000 + 60000) / 40000 = 3.00
+        Post-fix (net):  PF = (58000 + 58000) / 42000 = 116000/42000 ~= 2.762
+        """
+        txns = [
+            # Win 1
+            _make_tx("BTC-USD", "BUY", 1.0, 600000, 600000, fee_sek=1000, ts_offset_hours=0),
+            _make_tx("BTC-USD", "SELL", 1.0, 660000, 660000, fee_sek=1000, ts_offset_hours=24),
+            # Win 2
+            _make_tx("ETH-USD", "BUY", 1.0, 200000, 200000, fee_sek=1000, ts_offset_hours=48),
+            _make_tx("ETH-USD", "SELL", 1.0, 260000, 260000, fee_sek=1000, ts_offset_hours=72),
+            # Loss 1
+            _make_tx("NVDA", "BUY", 1.0, 400000, 400000, fee_sek=1000, ts_offset_hours=96),
+            _make_tx("NVDA", "SELL", 1.0, 360000, 360000, fee_sek=1000, ts_offset_hours=120),
+        ]
+        m = compute_trade_metrics(txns)
+        # Net PF = 116000 / 42000 ~= 2.762, not 3.0
+        assert m["profit_factor"] == pytest.approx(2.762, abs=0.01)
+        # Sanity: not the gross 3.0
+        assert m["profit_factor"] < 3.0
+
+    def test_total_pnl_sek_is_net(self):
+        """compute_trade_metrics.total_pnl_sek == sum of NET round-trip pnl."""
+        txns = [
+            _make_tx("BTC-USD", "BUY", 1.0, 600000, 600000, fee_sek=500, ts_offset_hours=0),
+            _make_tx("BTC-USD", "SELL", 1.0, 660000, 660000, fee_sek=550, ts_offset_hours=24),
+        ]
+        m = compute_trade_metrics(txns)
+        # Gross: 60000. Net: 60000 - 500 - 550 = 58950.
+        assert m["total_pnl_sek"] == pytest.approx(58950.0, abs=0.01)
+
+    def test_expectancy_pct_uses_pnl_pct_not_pnl_sek(self):
+        """expectancy_pct contract: computed from pnl_pct (gross %), unaffected by P0-6.
+
+        This test pins the contract that expectancy is the price-based
+        expected-return %, NOT the SEK-based net expectancy. If you want
+        a SEK-net expectancy, that's a separate metric.
+        """
+        # Same trade with very different fee structures should have
+        # identical expectancy_pct (pct doesn't change with fees).
+        txns_low_fee = [
+            _make_tx("BTC-USD", "BUY", 1.0, 600000, 600000, fee_sek=1, ts_offset_hours=0),
+            _make_tx("BTC-USD", "SELL", 1.0, 660000, 660000, fee_sek=1, ts_offset_hours=24),
+        ]
+        txns_high_fee = [
+            _make_tx("BTC-USD", "BUY", 1.0, 600000, 600000, fee_sek=10000, ts_offset_hours=0),
+            _make_tx("BTC-USD", "SELL", 1.0, 660000, 660000, fee_sek=10000, ts_offset_hours=24),
+        ]
+        m_low = compute_trade_metrics(txns_low_fee)
+        m_high = compute_trade_metrics(txns_high_fee)
+        # Both round trips: pnl_pct = (660000-600000)/600000 * 100 = 10.0%
+        # Expectancy = win_rate(1.0) * avg_win(10) - loss_rate(0) * 0 = 10.0%
+        assert m_low["expectancy_pct"] == pytest.approx(m_high["expectancy_pct"], abs=0.001)
+        # And total_pnl_sek differs because that one IS net.
+        assert m_low["total_pnl_sek"] != m_high["total_pnl_sek"]
+
+    def test_calmar_uses_net_pnl(self):
+        """Calmar's mini equity curve seeds from t['pnl_sek'] which is now net.
+
+        Verify total_pnl_sek (the easy-to-compute proxy) reflects net
+        across a mixed win+loss sequence. Calmar itself depends on a
+        time-span computation; just verify it doesn't crash and is
+        either None or float.
+        """
+        # Build trades where fees materially change the equity curve.
+        txns = [
+            # Win
+            _make_tx("BTC-USD", "BUY", 1.0, 500000, 500000, fee_sek=500, ts_offset_hours=0),
+            _make_tx("BTC-USD", "SELL", 1.0, 600000, 600000, fee_sek=500, ts_offset_hours=24),
+            # Loss
+            _make_tx("ETH-USD", "BUY", 1.0, 200000, 200000, fee_sek=500, ts_offset_hours=48),
+            _make_tx("ETH-USD", "SELL", 1.0, 180000, 180000, fee_sek=500, ts_offset_hours=72),
+        ]
+        m = compute_trade_metrics(txns, initial_value=500000)
+        assert m["calmar_ratio"] is None or isinstance(m["calmar_ratio"], float)
+        # total_pnl_sek must be net: (100000 - 1000) + (-20000 - 1000) = 78000
+        assert m["total_pnl_sek"] == pytest.approx(78000.0, abs=0.01)

@@ -126,13 +126,19 @@ class TestSingleFullMatch:
         assert t["pnl_pct"] == pytest.approx(25.0)
 
     def test_pnl_sek(self):
+        """pnl_sek is net of fees (P0-6, 2026-05-02).
+
+        Pre-2026-05-02 behaviour returned the gross price-difference (5000).
+        Now returns gross minus buy_fee_share + sell_fee_share = 5000 - 45 = 4955.
+        See TestPnlSekNetOfFees below for the full contract.
+        """
         txs = [
             _buy("ETH-USD", 10, 20000, 20, "2026-01-01T12:00:00+00:00"),
             _sell("ETH-USD", 10, 25000, 25, "2026-01-05T12:00:00+00:00"),
         ]
         t = _pair_round_trips(txs)[0]
-        # (2500 - 2000) * 10 = 5000
-        assert t["pnl_sek"] == pytest.approx(5000.0)
+        # Gross: (2500 - 2000) * 10 = 5000. Net: 5000 - 20 - 25 = 4955.
+        assert t["pnl_sek"] == pytest.approx(4955.0)
 
     def test_fee_total(self):
         txs = [
@@ -396,3 +402,93 @@ def test_sell_larger_than_all_buys_partial_match():
     trips = _pair_round_trips(txs)
     assert len(trips) == 1
     assert trips[0]["shares"] == pytest.approx(40.0)
+
+
+# ===================================================================
+# 10. P0-6 regression: pnl_sek MUST be net of fees (2026-05-02)
+# ===================================================================
+#
+# Prior bug: `pnl_sek` reported the gross price-difference times shares,
+# while `fee_sek` was reported separately. Downstream consumers
+# (compute_trade_metrics → profit_factor, total_pnl_sek, calmar) assumed
+# pnl_sek was the realised SEK return after costs. profit_factor was
+# overstated by ~8% on a typical mix.
+#
+# Fix: subtract `buy_fee_share + sell_fee_share` from `pnl_sek` at
+# round-trip construction time. `pnl_pct` is left as the gross price-%
+# (price-move only), and `fee_sek` continues to report total fees.
+
+class TestPnlSekNetOfFees:
+    """P0-6 regression: pnl_sek must be net of buy and sell fees."""
+
+    def test_simple_full_match_pnl_net_of_fees(self):
+        """Single full-match BUY/SELL: pnl_sek = gross - buy_fee - sell_fee."""
+        txs = [
+            _buy("ETH-USD", 10, 20000, 20, "2026-01-01T12:00:00+00:00"),
+            _sell("ETH-USD", 10, 25000, 25, "2026-01-05T12:00:00+00:00"),
+        ]
+        t = _pair_round_trips(txs)[0]
+        # Gross: (2500 - 2000) * 10 = 5000. Net: 5000 - 20 - 25 = 4955.
+        assert t["pnl_sek"] == pytest.approx(4955.0)
+        # fee_sek field unchanged: 20 + 25 = 45.
+        assert t["fee_sek"] == pytest.approx(45.0)
+
+    def test_partial_sell_pnl_net_of_proportional_fees(self):
+        """BUY 100, SELL 30: pnl_sek subtracts 0.3 * buy_fee + full sell_fee."""
+        txs = [
+            _buy("XAG-USD", 100, 10000, 100, "2026-01-01T00:00:00+00:00"),
+            _sell("XAG-USD", 30, 3600, 3.6, "2026-01-02T00:00:00+00:00"),
+        ]
+        t = _pair_round_trips(txs)[0]
+        # Buy price 100/sh, sell price 120/sh, matched 30.
+        # Gross: (120 - 100) * 30 = 600.
+        # Buy fee share: 100 * 30/100 = 30. Sell fee share: 3.6 * 30/30 = 3.6.
+        # Net: 600 - 30 - 3.6 = 566.4.
+        assert t["pnl_sek"] == pytest.approx(566.4, abs=0.01)
+
+    def test_multi_partial_sell_total_pnl_net(self):
+        """Sum of pnl_sek across both partial trips equals gross_total - all fees."""
+        txs = [
+            _buy("BTC-USD", 100, 10000, 10, "2026-01-01T00:00:00+00:00"),
+            _sell("BTC-USD", 50, 6000, 6, "2026-01-02T00:00:00+00:00"),
+            _sell("BTC-USD", 50, 6000, 6, "2026-01-03T00:00:00+00:00"),
+        ]
+        trips = _pair_round_trips(txs)
+        assert len(trips) == 2
+        # Gross per trip: (120 - 100) * 50 = 1000. Total gross: 2000.
+        # Buy fee per trip: 10 * 50/100 = 5. Sell fee per trip: 6 * 50/50 = 6.
+        # Net per trip: 1000 - 5 - 6 = 989. Total net: 1978.
+        assert trips[0]["pnl_sek"] == pytest.approx(989.0, abs=0.01)
+        assert trips[1]["pnl_sek"] == pytest.approx(989.0, abs=0.01)
+        total_net = sum(t["pnl_sek"] for t in trips)
+        assert total_net == pytest.approx(1978.0, abs=0.01)
+
+    def test_zero_fee_pnl_unchanged(self):
+        """fee_sek=0 -> pnl_sek matches old gross behavior (regression baseline)."""
+        txs = [
+            _buy("BTC-USD", 1, 600000, 0, "2026-01-01T00:00:00+00:00"),
+            _sell("BTC-USD", 1, 660000, 0, "2026-01-02T00:00:00+00:00"),
+        ]
+        t = _pair_round_trips(txs)[0]
+        # Gross == net when fees are zero: (660000 - 600000) * 1 = 60000.
+        assert t["pnl_sek"] == pytest.approx(60000.0)
+
+    def test_pnl_pct_unaffected_by_fee_fix(self):
+        """pnl_pct contract: gross price-% only, NOT net-of-fees."""
+        txs = [
+            _buy("ETH-USD", 10, 20000, 20, "2026-01-01T12:00:00+00:00"),
+            _sell("ETH-USD", 10, 25000, 25, "2026-01-05T12:00:00+00:00"),
+        ]
+        t = _pair_round_trips(txs)[0]
+        # Price went from 2000 to 2500: +25% regardless of fees.
+        assert t["pnl_pct"] == pytest.approx(25.0)
+
+    def test_fee_sek_field_unchanged_after_pnl_fix(self):
+        """fee_sek field continues to report total round-trip fees."""
+        txs = [
+            _buy("ETH-USD", 10, 20000, 20, "2026-01-01T12:00:00+00:00"),
+            _sell("ETH-USD", 10, 25000, 25, "2026-01-05T12:00:00+00:00"),
+        ]
+        t = _pair_round_trips(txs)[0]
+        # fee_sek must remain the sum of buy_fee_share + sell_fee_share.
+        assert t["fee_sek"] == pytest.approx(45.0)
