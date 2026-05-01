@@ -1,13 +1,23 @@
-"""Export dashboard API endpoints as static JSON files.
+"""DEPRECATED 2026-04-30 — exported snapshots are no longer served publicly.
 
-Imports the Flask app, uses its test client to call each API endpoint,
-and writes the JSON responses to dashboard/static/api-data/<name>.json.
+Originally, this script wrote each API endpoint's JSON to
+dashboard/static/api-data/<name>.json so the GitHub Pages clone of the
+dashboard could read snapshots when no live backend was available. The
+public dashboard now lives at https://raanman.lol behind a Cloudflare
+tunnel + cookie auth (see docs/TUNNEL_SETUP.md), so the snapshot files
+have no legitimate public consumer — and any *.json under static/ is
+reachable at /static/api-data/<name>.json with NO auth (Flask's default
+static handler), which is a leak.
 
-Run periodically (e.g. via scheduled task) to keep the static site updated.
+The directory dashboard/static/api-data/ is now in .gitignore. Running
+this script locally still produces files there but they are not committed
+and (more importantly) the live deployment no longer has any code path
+that reads them. Kept on disk only because tests/test_dashboard_export_static.py
+imports it.
 
-Usage:
-    python dashboard/export_static.py
-    python dashboard/export_static.py --out /path/to/output  # custom output dir
+If you need a static export for some other purpose, write to a directory
+*outside* dashboard/static/ (e.g. dashboard/_export/) so Flask doesn't
+auto-serve it.
 """
 
 import json

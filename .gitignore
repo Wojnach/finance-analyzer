@@ -29,6 +29,12 @@ secrets.yaml
 *_secrets.py
 api_keys.py
 
+# Static API data — was used by the GH Pages clone (deprecated 2026-04-30).
+# Files here are reachable at /static/api-data/*.json with no auth, so do
+# NOT commit them. The live dashboard serves data via /api/* endpoints
+# (gated by dashboard_token). See docs/TUNNEL_SETUP.md for the architecture.
+dashboard/static/api-data/
+
 # Avanza session data (auth tokens, cookies, credentials)
 data/avanza_session.json
 data/avanza_storage_state.json

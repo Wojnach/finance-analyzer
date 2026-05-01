@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
 
 logger = logging.getLogger(__name__)
@@ -663,6 +663,16 @@ def _build_local_llm_trend_point(entry, ticker=None):
 # Token authentication middleware
 # ---------------------------------------------------------------------------
 
+# Cookie auth (added 2026-04-30): the dashboard is publicly reachable via the
+# Cloudflare tunnel at raanman.lol, so a valid `?token=` in the URL would have
+# to be bookmarked and copy-pasted — long and ugly. Solution: when a valid
+# query token arrives, set a 30-day HTTP-only cookie on the response and (on
+# the index route) redirect to a token-less URL. Future visits from the same
+# browser carry the cookie automatically and the URL stays clean.
+COOKIE_NAME = "pf_dashboard_token"
+COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
+
+
 def _get_dashboard_token():
     """Return the configured dashboard_token, or None if not set."""
     cfg = _get_config()
@@ -670,31 +680,51 @@ def _get_dashboard_token():
 
 
 def require_auth(f):
-    """Decorator: checks ?token= query param or Authorization: Bearer header.
+    """Decorator: check cookie, ?token= query, or Authorization: Bearer header.
 
-    If no dashboard_token is configured, access is allowed (backwards compatible).
-    Returns 401 for invalid tokens.
+    Validation order: cookie → query param → bearer header. On a valid query
+    token, sets a 30-day cookie on the response so future visits work without
+    ?token= in the URL.
+
+    If no dashboard_token is configured, access is allowed (backwards
+    compatible). Returns 401 for invalid/missing tokens.
     """
     @functools.wraps(f)
     def decorated(*args, **kwargs):
         expected = _get_dashboard_token()
         if expected is None:
-            # No token configured — allow unauthenticated access
             return f(*args, **kwargs)
 
-        # Check query param — timing-safe comparison prevents brute-force
+        # 1. Cookie — preferred path (no URL pollution, survives bookmarks)
+        cookie_token = request.cookies.get(COOKIE_NAME)
+        if cookie_token and hmac.compare_digest(cookie_token, expected):
+            return f(*args, **kwargs)
+
+        # 2. Query param — also sets the cookie so next time the URL is clean
         token = request.args.get("token")
         if token and hmac.compare_digest(token, expected):
-            return f(*args, **kwargs)
+            response = make_response(f(*args, **kwargs))
+            response.set_cookie(
+                COOKIE_NAME,
+                expected,
+                max_age=COOKIE_MAX_AGE,
+                httponly=True,
+                secure=True,
+                samesite="Lax",
+            )
+            return response
 
-        # Check Authorization header
+        # 3. Authorization: Bearer header (CLI / script clients)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             bearer_token = auth_header[7:].strip()
             if hmac.compare_digest(bearer_token, expected):
                 return f(*args, **kwargs)
 
-        return jsonify({"error": "Unauthorized", "message": "Invalid or missing token"}), 401
+        return jsonify({
+            "error": "Unauthorized",
+            "message": "Visit /?token=YOUR_TOKEN once to set a 30-day auth cookie.",
+        }), 401
 
     return decorated
 
@@ -704,7 +734,14 @@ def require_auth(f):
 # ---------------------------------------------------------------------------
 
 @app.route("/")
+@require_auth
 def index():
+    # If the user arrived via ?token=XXX, the cookie was just set in
+    # require_auth. Redirect to a token-less URL so the address bar (and
+    # whatever the user bookmarks next) stays clean. The redirect inherits
+    # the Set-Cookie from require_auth's wrapped response.
+    if request.args.get("token"):
+        return redirect("/", code=302)
     return send_from_directory("static", "index.html")
 
 
