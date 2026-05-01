@@ -456,10 +456,19 @@ class TestComputeGateRelaxation:
 
 
 class TestCircuitBreakerHighSampleInteraction:
-    """2026-04-16 review (Reviewer 3 P1-2): verify the tiered high-sample gate
-    (>=10000 samples -> 0.50 floor) correctly subtracts relaxation, not just
-    the standard gate (0.47 floor). Without this test, a logic bug that
-    forgets to apply relaxation to the high-sample tier would go unnoticed."""
+    """SC-P1-2 (2026-05-02 adversarial follow-ups): the tiered high-sample
+    gate (>=10000 samples -> 0.50 floor) is NOT relaxed by the circuit
+    breaker — only the standard tier is.
+
+    Reasoning: a signal with 10K+ samples at sub-50% accuracy has measurable
+    negative edge (10K samples is statistically significant). Relaxing this
+    gate during regime transitions would let demonstrated-poor signals back
+    into voting. The standard tier still relaxes uniformly so newer
+    borderline signals (<10K samples) can be rescued.
+
+    Originally written 2026-04-16 (Reviewer 3 P1-2) to verify uniform
+    relaxation across both tiers; rewritten 2026-05-02 to enforce the
+    asymmetric relaxation."""
 
     def _make_stats(self, acc, total=200):
         return {
@@ -468,26 +477,38 @@ class TestCircuitBreakerHighSampleInteraction:
             "total_buy": total // 2, "total_sell": total // 2,
         }
 
-    def test_high_sample_tier_relaxed_uniformly(self):
-        """A 10K-sample signal at 0.48 should be gated at the 0.50 high-sample
-        floor without relaxation, but pass once the gate is relaxed by 0.02
-        (effective high-sample gate becomes 0.48)."""
+    def test_high_sample_tier_not_relaxed(self):
+        """A 10K-sample signal at 0.48 must remain gated at the 0.50 floor
+        regardless of relaxation. Standard tier (5K samples) at 0.48 should
+        pass with 0.02 relaxation."""
         from portfolio.signal_engine import _count_active_voters_at_gate
-        votes = {"big": "BUY"}
-        accuracy = {"big": self._make_stats(0.48, total=10000)}
-        # No relaxation: effective gate max(0.47, 0.50) = 0.50 > 0.48 -> gated.
+        votes_high = {"big": "BUY"}
+        accuracy_high = {"big": self._make_stats(0.48, total=10000)}
+        # No relaxation: high-sample gate at 0.50 > 0.48 -> gated.
         assert _count_active_voters_at_gate(
-            votes, accuracy, set(), set(), 0.47, 0.0,
+            votes_high, accuracy_high, set(), set(), 0.47, 0.0,
         ) == 0
-        # 0.02 relaxation: effective gate max(0.45, 0.48) = 0.48, NOT < 0.48 -> passes.
+        # 0.02 relaxation: high-sample gate stays at 0.50 (NOT relaxed) > 0.48 -> still gated.
         assert _count_active_voters_at_gate(
-            votes, accuracy, set(), set(), 0.47, 0.02,
+            votes_high, accuracy_high, set(), set(), 0.47, 0.02,
+        ) == 0
+        # Even at max relaxation (0.06), high-sample gate stays at 0.50 -> still gated.
+        assert _count_active_voters_at_gate(
+            votes_high, accuracy_high, set(), set(), 0.47, _GATE_RELAXATION_MAX,
+        ) == 0
+
+        # Standard tier at the same 0.48 accuracy DOES respond to relaxation.
+        votes_low = {"newer": "BUY"}
+        accuracy_low = {"newer": self._make_stats(0.48, total=5000)}
+        # Standard gate 0.47 - 0.02 = 0.45, 0.48 >= 0.45 -> passes (in fact already passes baseline).
+        assert _count_active_voters_at_gate(
+            votes_low, accuracy_low, set(), set(), 0.47, 0.0,
         ) == 1
 
     def test_high_sample_and_low_sample_mixed_scenario(self):
-        """Mixed population: 3 low-sample signals at 0.45 (pass base 0.47-0.02)
-        and 3 high-sample at 0.49 (pass high 0.50-0.02). Floor of 5 requires
-        relaxation exactly 0.02 so all 6 pass."""
+        """Mixed population: 3 standard-tier signals at 0.45 pass at 0.02
+        relaxation, but 3 high-sample at 0.49 stay gated (0.50 floor doesn't
+        budge). Total active = 3, not 6."""
         from portfolio.signal_engine import _count_active_voters_at_gate
         votes = {f"s{i}": "BUY" for i in range(6)}
         accuracy = {}
@@ -495,18 +516,19 @@ class TestCircuitBreakerHighSampleInteraction:
             accuracy[f"s{i}"] = self._make_stats(0.45, total=200)
         for i in range(3, 6):
             accuracy[f"s{i}"] = self._make_stats(0.49, total=10000)
-        # Base: low-sample fail (0.45 < 0.47), high-sample fail (0.49 < 0.50) -> 0 active.
+        # Base gate: low-sample fail (0.45 < 0.47), high-sample fail (0.49 < 0.50) -> 0 active.
         assert _count_active_voters_at_gate(
             votes, accuracy, set(), set(), 0.47, 0.0,
         ) == 0
-        # 0.02 relax: low-sample (0.45 < 0.45 False, passes), high-sample
-        # (0.49 < 0.48 False, passes) -> all 6 active.
+        # 0.02 relax: low-sample (0.45 < 0.45 False, passes); high-sample
+        # (0.49 < 0.50 still True since high gate not relaxed, gated) -> 3 active.
         assert _count_active_voters_at_gate(
             votes, accuracy, set(), set(), 0.47, 0.02,
-        ) == 6
-        # _compute_gate_relaxation should pick exactly 0.02 (smallest that meets floor 5).
-        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        assert rel == pytest.approx(0.02)
+        ) == 3
+        # Even with max relaxation, the 3 high-sample signals stay gated at 0.50.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, _GATE_RELAXATION_MAX,
+        ) == 3
 
 
 class TestCircuitBreakerIntegration:
@@ -666,3 +688,163 @@ class TestBug227PostFilterGates:
             e.get("stage") == "dynamic_min_voters" for e in log
         )
         assert not has_stage4_hold
+
+
+class TestHighSampleGateNotRelaxed:
+    """SC-P1-2 (2026-05-02 adversarial follow-ups): the high-sample 0.50 gate
+    must not be relaxed below 0.50 by the circuit breaker.
+
+    A signal with 10K+ samples whose accuracy is 0.46 has statistically
+    demonstrated negative edge — circuit-breaker relaxation that drops the
+    high-sample gate to e.g. 0.44 would let it vote, despite the very purpose
+    of the high-sample tier being to apply a stricter gate to long-track-record
+    signals. The relaxation should still apply to the standard tier so newer
+    signals with borderline accuracy can be rescued.
+    """
+
+    def _make_stats(self, acc, total=100, buy_acc=None, sell_acc=None):
+        return {
+            "accuracy": acc,
+            "total": total,
+            "buy_accuracy": buy_acc if buy_acc is not None else acc,
+            "sell_accuracy": sell_acc if sell_acc is not None else acc,
+            "total_buy": 50,
+            "total_sell": 50,
+        }
+
+    def test_high_sample_signal_at_046_gated_even_with_max_relaxation(self):
+        """Signal with 20K samples at 0.46 accuracy must stay gated at any
+        relaxation. 0.50 is its absolute floor."""
+        votes = {"long_track": "BUY"}
+        accuracy = {"long_track": self._make_stats(0.46, total=20000)}
+        # Even with max relaxation (currently 0.06pp), high-sample gate stays at 0.50.
+        active = _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, _GATE_RELAXATION_MAX,
+        )
+        assert active == 0, (
+            "High-sample gate (0.50) must not be relaxed; "
+            "a 0.46-accuracy signal with 20K samples must remain gated."
+        )
+
+    def test_high_sample_signal_at_051_passes_with_relaxation(self):
+        """Signal with 20K samples at 0.51 accuracy passes the 0.50 floor
+        regardless of relaxation."""
+        votes = {"long_track": "BUY"}
+        accuracy = {"long_track": self._make_stats(0.51, total=20000)}
+        active = _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.0,
+        )
+        assert active == 1
+
+    def test_standard_tier_still_relaxed(self):
+        """The relaxation must still apply to non-high-sample signals (otherwise
+        the circuit-breaker is broken). A signal at 0.46 with 5K samples
+        (below the 10K high-sample threshold) should pass with 0.02 relaxation."""
+        votes = {"newer_sig": "BUY"}
+        # 5K samples is below _ACCURACY_GATE_HIGH_SAMPLE_MIN (10K).
+        accuracy = {"newer_sig": self._make_stats(0.46, total=5000)}
+        # Without relaxation: gated at 0.47.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.0,
+        ) == 0
+        # With 0.02 relaxation: effective gate 0.45, passes (acc 0.46 >= 0.45).
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.02,
+        ) == 1
+
+    def test_high_sample_tier_at_threshold_passes(self):
+        """Boundary: 0.50 at high-sample tier passes (gate is acc < threshold)."""
+        votes = {"sig": "BUY"}
+        accuracy = {"sig": self._make_stats(0.50, total=15000)}
+        active = _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, _GATE_RELAXATION_MAX,
+        )
+        assert active == 1
+
+
+class TestRescuedFlagInitializedPerIteration:
+    """P1-1 (2026-05-02 adversarial follow-ups): defensive — the `_rescued`
+    flag in `_weighted_consensus`'s voting loop must be initialized at the
+    top of each iteration so future refactors that introduce a fall-through
+    branch don't accidentally read a stale True from a prior iteration.
+
+    In current code the flag is set on both arms of the gate-check (rescue
+    branch sets True, else branch sets False), so the bug doesn't manifest
+    today. The defensive init guards against a future contributor adding
+    a third branch without realising _rescued must be set.
+    """
+
+    def _make_stats(self, acc, total=100, buy_acc=None, sell_acc=None,
+                    total_buy=50, total_sell=50):
+        return {
+            "accuracy": acc,
+            "total": total,
+            "buy_accuracy": buy_acc if buy_acc is not None else acc,
+            "sell_accuracy": sell_acc if sell_acc is not None else acc,
+            "total_buy": total_buy,
+            "total_sell": total_sell,
+        }
+
+    def test_iteration_order_invariance(self):
+        """Buy weight is invariant under iteration order, even when one
+        signal takes the rescue branch and another passes cleanly.
+
+        Builds a 3-signal vote: rescued + clean + sell. Reverses dict order
+        to flip iteration order. With either current code or the defensive
+        init, results must match — but the defensive init makes this
+        guarantee robust to future refactors.
+        """
+        accuracy = {
+            "rescued_sig": self._make_stats(
+                0.40, total=200, buy_acc=0.65, total_buy=50,
+            ),
+            "clean_sig": self._make_stats(
+                0.65, total=200, buy_acc=0.65, total_buy=50,
+            ),
+            "sell_sig": self._make_stats(
+                0.50, total=200, sell_acc=0.50, total_sell=50, total_buy=50,
+            ),
+        }
+        votes_a = {"rescued_sig": "BUY", "clean_sig": "BUY", "sell_sig": "SELL"}
+        votes_b = {"clean_sig": "BUY", "rescued_sig": "BUY", "sell_sig": "SELL"}
+        action_a, conf_a = _weighted_consensus(
+            votes_a, accuracy, regime=None, activation_rates={},
+            accuracy_gate=0.47, ticker=None, horizon=None,
+        )
+        action_b, conf_b = _weighted_consensus(
+            votes_b, accuracy, regime=None, activation_rates={},
+            accuracy_gate=0.47, ticker=None, horizon=None,
+        )
+        assert action_a == action_b
+        assert conf_a == pytest.approx(conf_b, abs=1e-4), (
+            f"Iteration order changed result: a={conf_a}, b={conf_b}. "
+            "_rescued may be leaking across iterations."
+        )
+
+    def test_rescued_init_at_loop_top_structural(self):
+        """Source-level guard: assert that `_rescued = False` appears as the
+        first statement of the voting loop in `_weighted_consensus`. This is
+        the defensive init mandated by the 2026-05-02 follow-ups review.
+
+        A future refactor that removes the init (or adds a branch which
+        bypasses the rescue gate-check, leaking a stale True) will fail
+        this test loudly.
+        """
+        import inspect
+
+        from portfolio import signal_engine
+
+        src = inspect.getsource(signal_engine._weighted_consensus)
+        # The init must appear after the `for signal_name, vote in votes.items():`
+        # line and BEFORE any branch that could set _rescued conditionally.
+        loop_idx = src.find("for signal_name, vote in votes.items():")
+        assert loop_idx != -1, "loop signature changed — review _rescued init"
+        first_set = src.find("_rescued = True", loop_idx)
+        first_init = src.find("_rescued = False", loop_idx)
+        assert first_init != -1, "_rescued = False not present in loop body"
+        # Defensive init must appear BEFORE the first conditional setter.
+        assert first_init < first_set, (
+            f"_rescued = False (idx {first_init}) must appear before any "
+            f"conditional _rescued = True (idx {first_set}) so a stale "
+            "True from a prior iteration cannot leak."
+        )
