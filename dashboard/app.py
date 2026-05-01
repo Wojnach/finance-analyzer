@@ -1331,6 +1331,24 @@ def api_eth():
     })
 
 
+@app.route("/api/loop_health")
+@require_auth
+def api_loop_health():
+    """Cross-loop heartbeat rollup.
+
+    Reads data/{name}_loop.heartbeat for each registered loop (currently
+    crypto + oil; metals/main can be added when they grow heartbeats).
+    Returns per-loop {state, age_seconds, payload, error}, plus a
+    rollup any_unhealthy flag and an unhealthy[] list.
+
+    Same data the loop-health watchdog uses for telegram alerts. Use
+    this endpoint for live dashboard monitoring without waiting for the
+    next watchdog tick.
+    """
+    from portfolio.loop_health import read_loop_health
+    return jsonify(read_loop_health())
+
+
 @app.route("/api/oil")
 @require_auth
 def api_oil():
