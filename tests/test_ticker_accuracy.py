@@ -546,3 +546,206 @@ class TestIntegration:
 
         assert result_1d["rsi"]["accuracy"] == pytest.approx(1.0)  # both correct at 1d
         assert result_3d["rsi"]["accuracy"] == pytest.approx(0.5)  # one correct at 3d
+
+
+# ============================================================
+# P0-1 (2026-05-02): _vote_correct neutral filter
+# ============================================================
+#
+# accuracy_by_ticker_signal() in this module previously counted every
+# non-HOLD vote against the outcome — including outcomes within ±0.05%
+# (the canonical _MIN_CHANGE_PCT noise floor) and outcomes whose
+# change_pct was None (missing backfill data). This overstated per-ticker
+# accuracy because Mode B Telegram and Kelly sizing depend on it.
+# accuracy_stats._vote_correct() centralises the correct semantics:
+#   - change_pct is None        → neutral (skip)
+#   - |change_pct| < threshold  → neutral (skip)
+#   - vote == BUY  and >0       → True
+#   - vote == SELL and <0       → True
+#   - else                      → False
+#
+# These tests pin the new behaviour. Without the fix, the noise/None
+# outcomes inflated `samples` and skewed `accuracy` toward random.
+
+class TestVoteCorrectNeutralFilter:
+    """Per-ticker accuracy must apply the same neutral-outcome filter
+    that signal_accuracy() and per_ticker_accuracy() use."""
+
+    @patch("portfolio.accuracy_stats.load_entries")
+    def test_neutral_outcomes_skipped(self, mock_load):
+        """Outcomes within ±_MIN_CHANGE_PCT (0.05%) must NOT count.
+
+        Previously: 5 BUY votes, 3 with change_pct=+1.0 (correct) and
+        2 with change_pct=+0.01 (counted as correct since >0). Result
+        was accuracy=1.0 over 5 samples.
+
+        After fix: the 0.01% outcomes are noise — neutral, skipped.
+        Accuracy = 3/3 over 3 samples.
+        """
+        from portfolio.ticker_accuracy import accuracy_by_ticker_signal
+
+        entries = []
+        # 3 clear correct BUY votes
+        for i in range(3):
+            entries.append(_make_entry(
+                f"2026-02-20T{i:02d}:00:00+00:00",
+                "XAG-USD", {"rsi": "BUY"}, outcome_1d=1.0,
+            ))
+        # 2 noise BUY votes — change_pct=+0.01% is below 0.05% floor
+        for i in range(3, 5):
+            entries.append(_make_entry(
+                f"2026-02-20T{i:02d}:00:00+00:00",
+                "XAG-USD", {"rsi": "BUY"}, outcome_1d=0.01,
+            ))
+        mock_load.return_value = entries
+
+        result = accuracy_by_ticker_signal("XAG-USD", horizon="1d")
+        assert result["rsi"]["samples"] == 3, \
+            "neutral outcomes (|chg|<0.05%) must not count toward samples"
+        assert result["rsi"]["accuracy"] == pytest.approx(1.0)
+        assert result["rsi"]["correct"] == 3
+
+    @patch("portfolio.accuracy_stats.load_entries")
+    def test_none_change_pct_skipped(self, mock_load):
+        """change_pct=None (missing backfill) must NOT count.
+
+        Without the guard, ``change_pct or 0`` defaults to 0 which is then
+        scored against the BUY/SELL vote — silently bumping samples and
+        miscounting them as wrong. The outcome should be skipped instead.
+        """
+        from portfolio.ticker_accuracy import accuracy_by_ticker_signal
+
+        entries = [
+            _make_entry("2026-02-20T01:00:00+00:00", "XAG-USD",
+                        {"rsi": "BUY"}, outcome_1d=1.5),  # clearly correct
+            _make_entry("2026-02-20T02:00:00+00:00", "XAG-USD",
+                        {"rsi": "BUY"}, outcome_1d=None),  # missing backfill
+        ]
+        mock_load.return_value = entries
+
+        result = accuracy_by_ticker_signal("XAG-USD", horizon="1d")
+        # The None-outcome entry must NOT inflate samples or drop accuracy.
+        assert result["rsi"]["samples"] == 1
+        assert result["rsi"]["accuracy"] == pytest.approx(1.0)
+        assert result["rsi"]["correct"] == 1
+
+    @patch("portfolio.accuracy_stats.load_entries")
+    def test_negative_neutral_outcomes_skipped(self, mock_load):
+        """Negative outcomes within ±_MIN_CHANGE_PCT must also be neutral.
+
+        Symmetric to the positive case — a SELL vote facing -0.02% should
+        not count as correct (or anything) — it's noise.
+        """
+        from portfolio.ticker_accuracy import accuracy_by_ticker_signal
+
+        entries = [
+            _make_entry("2026-02-20T01:00:00+00:00", "XAG-USD",
+                        {"rsi": "SELL"}, outcome_1d=-0.02),  # noise
+            _make_entry("2026-02-20T02:00:00+00:00", "XAG-USD",
+                        {"rsi": "SELL"}, outcome_1d=-1.0),   # correct
+        ]
+        mock_load.return_value = entries
+
+        result = accuracy_by_ticker_signal("XAG-USD", horizon="1d")
+        assert result["rsi"]["samples"] == 1
+        assert result["rsi"]["accuracy"] == pytest.approx(1.0)
+
+    @patch("portfolio.accuracy_stats.load_entries")
+    def test_consistency_with_accuracy_stats_vote_correct(self, mock_load):
+        """Per-ticker accuracy must match accuracy_stats._vote_correct semantics.
+
+        Build a mixed set of outcomes and verify the per-ticker count
+        equals what _vote_correct-based accumulation would produce.
+        """
+        from portfolio.accuracy_stats import _MIN_CHANGE_PCT, _vote_correct
+        from portfolio.ticker_accuracy import accuracy_by_ticker_signal
+
+        # Mixed bag: clear wins, clear losses, neutral noise, None outcomes.
+        scenarios = [
+            ("BUY",  1.50, True),    # correct
+            ("BUY", -1.20, False),   # incorrect
+            ("BUY",  0.02, None),    # neutral noise → skip
+            ("BUY",  None, None),    # missing → skip
+            ("SELL", -0.80, True),   # correct
+            ("SELL",  0.90, False),  # incorrect
+            ("SELL", -0.01, None),   # neutral → skip
+        ]
+        entries = []
+        for i, (vote, chg, _) in enumerate(scenarios):
+            entries.append(_make_entry(
+                f"2026-02-20T{i:02d}:00:00+00:00",
+                "XAG-USD", {"rsi": vote}, outcome_1d=chg,
+            ))
+        mock_load.return_value = entries
+
+        # Compute oracle from _vote_correct directly.
+        expected_total = 0
+        expected_correct = 0
+        for vote, chg, _ in scenarios:
+            v = _vote_correct(vote, chg)
+            if v is None:
+                continue
+            expected_total += 1
+            if v:
+                expected_correct += 1
+        assert _MIN_CHANGE_PCT == 0.05, \
+            "test assumes _MIN_CHANGE_PCT=0.05 (canonical noise floor)"
+
+        result = accuracy_by_ticker_signal("XAG-USD", horizon="1d")
+        assert result["rsi"]["samples"] == expected_total
+        assert result["rsi"]["correct"] == expected_correct
+        assert result["rsi"]["accuracy"] == pytest.approx(
+            expected_correct / expected_total if expected_total else 0.0
+        )
+
+    @patch("portfolio.accuracy_stats.load_entries")
+    def test_direction_probability_propagates_filtered_accuracy(self, mock_load):
+        """Mode B / Kelly path: direction_probability() must consume the
+        filtered per-ticker accuracy.
+
+        With 8 BUY votes — 4 clearly correct (+1%), 4 noise (+0.01%) — pre-fix
+        this looked like 100% (8/8). post-fix it's 100% (4/4) but with HALF
+        the sample count, which materially changes weight (= sqrt(samples)).
+        """
+        from portfolio.ticker_accuracy import direction_probability
+
+        entries = []
+        for i in range(4):
+            entries.append(_make_entry(
+                f"2026-02-20T{i:02d}:00:00+00:00", "XAG-USD",
+                {"rsi": "BUY"}, outcome_1d=1.0,
+            ))
+        for i in range(4, 8):
+            entries.append(_make_entry(
+                f"2026-02-20T{i:02d}:00:00+00:00", "XAG-USD",
+                {"rsi": "BUY"}, outcome_1d=0.02,  # noise
+            ))
+        mock_load.return_value = entries
+
+        votes = {"rsi": "BUY"}
+        result = direction_probability("XAG-USD", votes, horizon="1d",
+                                       days=None, min_samples=3)
+        # Probability still ~1.0 (4/4 of the kept samples were wins) but
+        # total_samples reflects the filter — only 4, not 8.
+        assert result["probability"] == pytest.approx(1.0, abs=0.01)
+        assert result["total_samples"] == 4
+
+    @patch("portfolio.accuracy_stats.load_entries")
+    def test_pure_signal_filter_no_outcome_data_drops_signal(self, mock_load):
+        """Edge case: if every outcome for a signal is neutral/None, the
+        signal must be dropped entirely (not reported as 0/0)."""
+        from portfolio.ticker_accuracy import accuracy_by_ticker_signal
+
+        entries = [
+            _make_entry("2026-02-20T01:00:00+00:00", "XAG-USD",
+                        {"rsi": "BUY"}, outcome_1d=0.01),
+            _make_entry("2026-02-20T02:00:00+00:00", "XAG-USD",
+                        {"rsi": "BUY"}, outcome_1d=None),
+            _make_entry("2026-02-20T03:00:00+00:00", "XAG-USD",
+                        {"rsi": "BUY"}, outcome_1d=-0.04),
+        ]
+        mock_load.return_value = entries
+
+        result = accuracy_by_ticker_signal("XAG-USD", horizon="1d")
+        # All three were neutral or None — no usable samples → dropped.
+        assert "rsi" not in result

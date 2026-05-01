@@ -160,6 +160,17 @@ def _get_ticker_signal_accuracy(agent_summary, ticker):
     Computes a weighted average of signal accuracies, weighted by each signal's
     normalized weight. Only considers signals that are actively voting (non-HOLD).
 
+    P1-11 (2026-05-02 adversarial follow-up): per-signal accuracy is now
+    looked up per-ticker first via `agent_summary["per_ticker_signal_accuracy"]`
+    (produced by `accuracy_stats.accuracy_by_ticker_signal_cached()` upstream).
+    If a ticker/signal isn't present per-ticker, OR has fewer than 5 samples
+    on this ticker, it falls back to the system-wide
+    `signal_accuracy_1d.signals` block. Without this, a signal that's 70%
+    accurate on XAG-USD but 30% on BTC-USD shows up as ~50% in the
+    system-wide aggregate, distorting Kelly sizing on both. The fallback
+    keeps backwards compatibility with older agent_summary writers that
+    don't yet emit the per-ticker block.
+
     Args:
         agent_summary: Parsed agent_summary.json dict.
         ticker: Ticker symbol.
@@ -171,12 +182,19 @@ def _get_ticker_signal_accuracy(agent_summary, ticker):
     sig_accuracies = acc_data.get("signals", {})
     sig_weights = agent_summary.get("signal_weights", {})
 
+    # P1-11: per-ticker per-signal accuracy block (preferred when present).
+    per_ticker_block = agent_summary.get("per_ticker_signal_accuracy", {}) or {}
+    per_ticker_for_ticker = per_ticker_block.get(ticker, {}) or {}
+
     signals = agent_summary.get("signals", {})
     ticker_data = signals.get(ticker, {})
     extra = ticker_data.get("extra", {}) if isinstance(ticker_data, dict) else {}
     votes = extra.get("_votes", {})
 
-    if not votes or not sig_accuracies:
+    if not votes:
+        return None
+    # Either source can satisfy us — only bail if BOTH are empty.
+    if not sig_accuracies and not per_ticker_for_ticker:
         return None
 
     weighted_sum = 0.0
@@ -185,11 +203,20 @@ def _get_ticker_signal_accuracy(agent_summary, ticker):
     for sig_name, vote in votes.items():
         if vote == "HOLD":
             continue
-        sig_acc = sig_accuracies.get(sig_name, {})
-        accuracy = sig_acc.get("accuracy", 0.5)
-        samples = sig_acc.get("samples", 0)
-        if samples < 5:
-            continue  # unreliable
+
+        # Prefer per-ticker accuracy when it has enough samples for THIS
+        # ticker; otherwise fall back to the system-wide row.
+        per_ticker_sig = per_ticker_for_ticker.get(sig_name) or {}
+        per_ticker_samples = per_ticker_sig.get("samples", 0)
+        if per_ticker_samples >= 5:
+            accuracy = per_ticker_sig.get("accuracy", 0.5)
+            samples = per_ticker_samples
+        else:
+            sig_acc = sig_accuracies.get(sig_name, {})
+            accuracy = sig_acc.get("accuracy", 0.5)
+            samples = sig_acc.get("samples", 0)
+            if samples < 5:
+                continue  # unreliable on both axes
 
         weight = sig_weights.get(sig_name, {}).get("normalized_weight", 1.0)
         weighted_sum += accuracy * weight
@@ -244,8 +271,17 @@ def recommended_size(ticker, portfolio_path=None, agent_summary=None, strategy="
 
     # Estimate win probability
     # Priority: ticker-specific weighted signal accuracy > consensus accuracy > 50%
+    # P1-11 (2026-05-02): _get_ticker_signal_accuracy now prefers
+    # per_ticker_signal_accuracy over the system-wide aggregate when a
+    # per-ticker block is supplied in agent_summary. Source string
+    # advertises which path was used so operators can audit the decision.
+    per_ticker_block = agent_summary.get("per_ticker_signal_accuracy", {}) or {}
+    has_per_ticker = bool(per_ticker_block.get(ticker))
     win_prob = _get_ticker_signal_accuracy(agent_summary, ticker)
-    source = f"weighted signal accuracy for {ticker}"
+    if has_per_ticker:
+        source = f"per-ticker weighted signal accuracy for {ticker}"
+    else:
+        source = f"weighted signal accuracy for {ticker} (system-wide fallback)"
 
     if win_prob is None:
         win_prob = _get_signal_accuracy(agent_summary, ticker)
