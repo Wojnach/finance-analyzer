@@ -256,6 +256,140 @@ class TestPlaceStopLoss:
 
 
 # ---------------------------------------------------------------------------
+# delete_order — must hold the cross-process order lock (regression for the
+# 2026-04-13 add of avanza_order_lock to all mutating helpers)
+# ---------------------------------------------------------------------------
+
+class TestDeleteOrder:
+    def test_success(self):
+        from metals_avanza_helpers import delete_order
+
+        cookies = [{"name": "AZACSRF", "value": "csrf123"}]
+        page = _make_page(
+            evaluate_return={
+                "status": 200,
+                "body": json.dumps({"orderRequestStatus": "SUCCESS"}),
+            },
+            cookies=cookies,
+        )
+        success, result = delete_order(page, "ACC123", "ORD-1")
+        assert success is True
+
+    def test_no_csrf(self):
+        from metals_avanza_helpers import delete_order
+
+        page = _make_page(cookies=[])
+        success, _ = delete_order(page, "ACC123", "ORD-1")
+        assert success is False
+
+
+# ---------------------------------------------------------------------------
+# delete_stop_loss — AV-P1-2 regression: must hold the cross-process lock
+# ---------------------------------------------------------------------------
+
+class TestDeleteStopLoss:
+    def test_success(self):
+        from metals_avanza_helpers import delete_stop_loss
+
+        cookies = [{"name": "AZACSRF", "value": "csrf123"}]
+        page = _make_page(
+            evaluate_return={"status": 200, "body": ""},
+            cookies=cookies,
+        )
+        success, result = delete_stop_loss(page, "ACC123", "SL-1")
+        assert success is True
+        assert result["http_status"] == 200
+
+    def test_failure_non_2xx(self):
+        from metals_avanza_helpers import delete_stop_loss
+
+        cookies = [{"name": "AZACSRF", "value": "csrf123"}]
+        page = _make_page(
+            evaluate_return={"status": 500, "body": ""},
+            cookies=cookies,
+        )
+        success, _ = delete_stop_loss(page, "ACC123", "SL-1")
+        assert success is False
+
+    def test_no_csrf(self):
+        from metals_avanza_helpers import delete_stop_loss
+
+        page = _make_page(cookies=[])
+        success, _ = delete_stop_loss(page, "ACC123", "SL-1")
+        assert success is False
+
+    def test_uses_two_segment_url_with_account_id(self):
+        """The DELETE URL must include accountId/stopId (no leading slash on
+        accountId — the JS hard-codes the prefix). This catches the 1-segment
+        regression seen in scripts/fin_fish_monitor.py:142."""
+        from metals_avanza_helpers import delete_stop_loss
+
+        cookies = [{"name": "AZACSRF", "value": "csrf123"}]
+        page = _make_page(
+            evaluate_return={"status": 200, "body": ""},
+            cookies=cookies,
+        )
+        delete_stop_loss(page, "ACC123", "SL-1")
+
+        # The JS source contains the URL template literal.
+        call_args = page.evaluate.call_args
+        js_source = call_args[0][0]
+        assert "/_api/trading/stoploss/" in js_source
+        # accountId and stopId should both be interpolated.
+        assert "accountId" in js_source
+        assert "stopId" in js_source
+
+    def test_holds_avanza_order_lock(self):
+        """AV-P1-2: delete_stop_loss is mutating and must serialize against
+        place_order / delete_order via avanza_order_lock. Without the lock,
+        a stop-loss delete racing against a place_order can leave the
+        position partially unprotected during the gap."""
+        import metals_avanza_helpers
+        from contextlib import contextmanager
+
+        events = []
+
+        @contextmanager
+        def fake_lock(*, op="order", **kw):
+            events.append(("acquire", op))
+            try:
+                yield None
+            finally:
+                events.append(("release", op))
+
+        cookies = [{"name": "AZACSRF", "value": "csrf123"}]
+        page = _make_page(
+            evaluate_return={"status": 200, "body": ""},
+            cookies=cookies,
+        )
+
+        # Inject a recording wrapper around page.evaluate so we can prove
+        # the JS-bridge call happens INSIDE the lock window.
+        original_invoker = page.evaluate
+        def _spying_invoker(*a, **kw):
+            events.append(("api_call", "delete_stop_loss"))
+            return original_invoker(*a, **kw)
+        page.evaluate = _spying_invoker
+
+        from unittest.mock import patch
+        with patch.object(metals_avanza_helpers, "avanza_order_lock", fake_lock):
+            metals_avanza_helpers.delete_stop_loss(page, "ACC123", "SL-1")
+
+        # Lock must wrap the JS-bridge call.
+        ops = [e for e in events if e[0] in ("acquire", "release")]
+        assert len(ops) >= 2, f"Lock not used: {events}"
+        idx_call = events.index(("api_call", "delete_stop_loss"))
+        idx_acquire = next(i for i, e in enumerate(events) if e[0] == "acquire")
+        idx_release = next(i for i, e in enumerate(events) if e[0] == "release")
+        assert idx_acquire < idx_call < idx_release, (
+            f"JS-bridge call must run inside the lock window: events={events}"
+        )
+        # The op label should mention the stop-loss id for diagnostics.
+        assert any("SL-1" in e[1] or "delete_stop_loss" in e[1]
+                   for e in events if e[0] == "acquire"), f"missing op label: {events}"
+
+
+# ---------------------------------------------------------------------------
 # check_session_alive
 # ---------------------------------------------------------------------------
 
