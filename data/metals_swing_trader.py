@@ -1242,7 +1242,30 @@ class SwingTrader:
                     f"for ob {ob_id_str} — no new stop placed"
                 )
             else:
-                self._set_stop_loss(pos_id)
+                # MC-P1-1 (2026-05-02): adopt the orphan with a stop
+                # anchored to the CURRENT bid, not entry_price. An orphan
+                # whose entry was 100 and current bid is 80 used to get a
+                # stop at 100*(1-15%)=85 → triggered immediately on
+                # placement (stop ABOVE current price). Anchoring to bid
+                # gives 80*(1-15%)=68 — properly below current price.
+                #
+                # Best-effort fetch: if it fails, fall back to default
+                # (entry-anchored) stop. Better to have an entry-anchored
+                # stop than no stop at all on an orphan.
+                anchor_bid = None
+                try:
+                    _data = fetch_price(self.page, ob_id_str, meta.get("api_type", "warrant"))
+                    if isinstance(_data, dict):
+                        _bid = _data.get("bid") or 0
+                        if _bid and _bid > 0:
+                            anchor_bid = float(_bid)
+                except Exception:
+                    logger.debug(
+                        "ingest_position: bid fetch for orphan stop anchor "
+                        "raised for ob %s — using entry-price anchor",
+                        ob_id_str, exc_info=True,
+                    )
+                self._set_stop_loss(pos_id, anchor_price=anchor_bid)
 
         stop_txt = ""
         pos_after = self.state["positions"].get(pos_id, {})
@@ -2657,8 +2680,21 @@ class SwingTrader:
         }
         _log_decision(decision)
 
-    def _set_stop_loss(self, pos_id):
-        """Place hardware stop-loss for a position."""
+    def _set_stop_loss(self, pos_id, anchor_price=None):
+        """Place hardware stop-loss for a position.
+
+        ``anchor_price`` (MC-P1-1, 2026-05-02): if provided, the stop is
+        computed relative to this price instead of pos['entry_price'].
+        Use this from ingest_position when adopting an orphan whose
+        current bid is far below its original entry — computing from
+        entry would produce a stop ABOVE current price, which would
+        trigger immediately on placement and cause a forced sell at the
+        worst possible moment.
+
+        For fresh buys (called from _execute_buy with anchor=None) the
+        entry_price IS the current price, so the default behaviour is
+        unchanged.
+        """
         pos = self.state["positions"].get(pos_id)
         if not pos:
             return
@@ -2671,10 +2707,18 @@ class SwingTrader:
             _log("  Cannot set stop: no entry underlying price")
             return
 
+        # MC-P1-1: choose the price the stop is anchored to.
+        if anchor_price is not None and anchor_price > 0:
+            stop_anchor = float(anchor_price)
+            anchor_label = "current bid (orphan ingest)"
+        else:
+            stop_anchor = entry_price
+            anchor_label = "entry"
+
         # Stop at -STOP_LOSS_UNDERLYING_PCT% on underlying, translated to warrant price
         und_drop_pct = STOP_LOSS_UNDERLYING_PCT / 100
         warrant_drop_pct = und_drop_pct * leverage
-        trigger_price = round(entry_price * (1 - warrant_drop_pct), 2)
+        trigger_price = round(stop_anchor * (1 - warrant_drop_pct), 2)
         sell_price = round(trigger_price * 0.99, 2)  # sell 1% below trigger for fill
 
         if trigger_price <= 0:
@@ -2682,7 +2726,8 @@ class SwingTrader:
             return
 
         _log(f"  Setting stop-loss: trigger={trigger_price} sell={sell_price} "
-             f"(und -{STOP_LOSS_UNDERLYING_PCT}% * {leverage:.1f}x lev)")
+             f"(und -{STOP_LOSS_UNDERLYING_PCT}% * {leverage:.1f}x lev, "
+             f"anchor={anchor_label} {stop_anchor})")
 
         if DRY_RUN:
             _log(f"  [DRY RUN] Would place stop-loss @ {trigger_price}")

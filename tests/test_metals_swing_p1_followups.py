@@ -369,7 +369,13 @@ def test_set_stop_loss_uses_anchor_when_provided(monkeypatch):
     stop must be at 80*(1-leverage*und%) = 68 (5x@3%), NOT 100*(1-...)
     = 85 which is ABOVE current price and would trigger immediately."""
     trader = _make_trader()
-    _silence_io(monkeypatch, trader)
+    # NOTE: don't use _silence_io with trader= here — that stubs out
+    # _set_stop_loss, which is the very method we're testing.
+    monkeypatch.setattr(mst, "_log", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_log_trade", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_log_decision", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_send_telegram", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_save_state", lambda *a, **k: None)
     monkeypatch.setattr(mst, "DRY_RUN", True)
 
     # Position with entry well above current bid (orphan ingest scenario).
@@ -433,12 +439,114 @@ def test_set_stop_loss_uses_anchor_when_provided(monkeypatch):
     assert captured["trigger"] < 80.0
 
 
+def test_ingest_orphan_passes_current_bid_as_stop_anchor(monkeypatch):
+    """MC-P1-1 end-to-end: ingest_position fetches the current bid and
+    forwards it to _set_stop_loss as anchor_price. Spies on
+    _set_stop_loss to capture the kwargs."""
+    trader = _make_trader()
+    _silence_io(monkeypatch, trader)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+    monkeypatch.setattr(mst, "_collect_existing_stops_for", lambda ob: [])
+    # Provide a known catalog entry so meta lookup succeeds.
+    trader.warrant_catalog = {
+        "BULL_X5": {
+            "ob_id": "1650161",
+            "api_type": "certificate",
+            "underlying": "XAG-USD",
+            "leverage": 5.0,
+            "name": "BULL SILVER X5 AVA 4",
+        },
+    }
+    monkeypatch.setattr(mst, "_lookup_known_warrant", lambda ob: None)
+    # Current bid is 80, but orphan was originally bought at 100.
+    monkeypatch.setattr(mst, "fetch_price", lambda *a, **k: {"bid": 80.0})
+
+    captured_kwargs = {}
+
+    def _spy_set_stop(pos_id, **kw):
+        captured_kwargs[pos_id] = kw
+        trader.state["positions"][pos_id]["stop_order_id"] = "STOP_SPIED"
+
+    trader._set_stop_loss = _spy_set_stop
+
+    pos_id = trader.ingest_position(
+        ob_id="1650161",
+        units=100,
+        entry_price=100.0,        # original orphan purchase, far above current
+        underlying_price=32.0,
+        set_stop_loss=True,
+    )
+
+    assert pos_id is not None, "ingest should succeed for known orphan"
+    assert pos_id in captured_kwargs, "_set_stop_loss should have been called"
+    assert captured_kwargs[pos_id].get("anchor_price") == 80.0, (
+        f"Expected anchor_price=80.0 (current bid), got "
+        f"{captured_kwargs[pos_id]!r}"
+    )
+
+
+def test_ingest_orphan_falls_back_when_bid_fetch_fails(monkeypatch):
+    """If the bid fetch raises or returns None, ingest still calls
+    _set_stop_loss but with anchor_price=None — _set_stop_loss falls back
+    to the entry-price anchor (current pre-fix behaviour). Better an
+    entry-anchored stop than no stop at all on an orphan."""
+    trader = _make_trader()
+    _silence_io(monkeypatch, trader)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+    monkeypatch.setattr(mst, "_collect_existing_stops_for", lambda ob: [])
+    trader.warrant_catalog = {
+        "BULL_X5": {
+            "ob_id": "1650161",
+            "api_type": "certificate",
+            "underlying": "XAG-USD",
+            "leverage": 5.0,
+            "name": "BULL SILVER X5 AVA 4",
+        },
+    }
+    monkeypatch.setattr(mst, "_lookup_known_warrant", lambda ob: None)
+
+    def _broken_fetch_price(*a, **k):
+        raise ConnectionError("Avanza unreachable")
+
+    monkeypatch.setattr(mst, "fetch_price", _broken_fetch_price)
+
+    captured_kwargs = {}
+
+    def _spy_set_stop(pos_id, **kw):
+        captured_kwargs[pos_id] = kw
+        trader.state["positions"][pos_id]["stop_order_id"] = "STOP_FALLBACK"
+
+    trader._set_stop_loss = _spy_set_stop
+
+    pos_id = trader.ingest_position(
+        ob_id="1650161",
+        units=100,
+        entry_price=100.0,
+        underlying_price=32.0,
+        set_stop_loss=True,
+    )
+
+    assert pos_id is not None
+    assert pos_id in captured_kwargs
+    assert captured_kwargs[pos_id].get("anchor_price") is None, (
+        f"Expected anchor_price=None on fetch failure, got "
+        f"{captured_kwargs[pos_id]!r}"
+    )
+
+
 def test_set_stop_loss_default_path_unchanged(monkeypatch):
     """Without anchor_price, behaviour must match pre-fix: stop computed
     from pos['entry_price']. Pinned so the default code path of fresh
     buys never accidentally regresses."""
     trader = _make_trader()
-    _silence_io(monkeypatch, trader)
+    # Don't stub _set_stop_loss — that's the method under test.
+    monkeypatch.setattr(mst, "_log", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_log_trade", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_log_decision", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_send_telegram", lambda *a, **k: None)
+    monkeypatch.setattr(mst, "_save_state", lambda *a, **k: None)
     monkeypatch.setattr(mst, "DRY_RUN", False)
 
     trader.state["positions"]["pos1"] = {
