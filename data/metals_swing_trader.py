@@ -2824,11 +2824,29 @@ class SwingTrader:
                     # were a silver USD price and computed a -46% "move".
                     # Pass None so the optimizer uses market.price (the correct
                     # underlying USD reference) for the market-exit estimate.
+                    #
+                    # P1-9 (2026-05-02): use live USD/SEK rate, was hardcoded
+                    # 10.85. fetch_usd_sek() already does live fetch + 15-min
+                    # in-process cache + stale-cache fallback + hardcoded 10.85
+                    # last-resort, so this is a strict superset of the previous
+                    # behaviour. Wrapped in try/except so a pathological FX
+                    # module crash still falls back to 10.85 (the documented
+                    # invariant the optimizer was built against).
+                    try:
+                        from portfolio.fx_rates import fetch_usd_sek
+                        live_usdsek = fetch_usd_sek() or 10.85
+                    except Exception:
+                        logger.debug(
+                            "[SWING] _check_exits: fetch_usd_sek raised — "
+                            "falling back to 10.85",
+                            exc_info=True,
+                        )
+                        live_usdsek = 10.85
                     opt_market = MarketSnapshot(
                         asof_ts=_now_utc(),
                         price=underlying_price,
                         bid=None,
-                        usdsek=10.85,
+                        usdsek=live_usdsek,
                     )
                     exit_plan = compute_exit_plan(
                         opt_pos, opt_market, sess.session_end,
