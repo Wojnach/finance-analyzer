@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
-"""End-to-end sanity check for the Cloudflare tunnel + dashboard auth.
+"""End-to-end sanity check for the dashboard + tunnel + CF Access stack.
 
-Architecture as of 2026-04-30:
-  raanman.lol (apex, canonical) -> Cloudflare tunnel -> http://localhost:5055
-  bets.raanman.lol (legacy alias) -> same backend
+Architecture (as of 2026-05-02):
+  Browser → CF Access (edge auth) → Cloudflare tunnel → http://localhost:5055
 
-The dashboard supports three auth paths (in priority order): cookie, ?token=
-query param, Authorization: Bearer header. This verifier asserts each.
+CF Access intercepts external requests and redirects unauthenticated callers
+to a login page, so a script that doesn't have a CF Access service token
+can't directly test the dashboard's auth from outside. This verifier splits
+checks into two halves:
+
+  1. **Local checks** — bypass CF Access by hitting http://localhost:5055
+     directly. Tests every dashboard auth path the user can reach via cookie
+     or token, plus the negative gate. This is the strongest check we can
+     run without a CF Access service token.
+
+  2. **Public liveness checks** — confirm raanman.lol and bets.raanman.lol
+     respond with 2xx/3xx (CF Access intercept counts as healthy). 5xx,
+     timeouts, or DNS failures = real outage.
 
 Run after `setup_tunnel.bat` and after the dashboard is running:
 
@@ -21,12 +31,11 @@ from pathlib import Path
 
 import requests
 
-# Use the project's atomic loader so a concurrent config.json write (loop
-# cycle, hot-reload) can't hand us a partially-written file.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from portfolio.file_utils import load_json  # noqa: E402
 
 CONFIG = Path(__file__).resolve().parents[1] / "config.json"
+LOCAL = "http://localhost:5055"
 APEX = "https://raanman.lol"
 LEGACY = "https://bets.raanman.lol"
 COOKIE_NAME = "pf_dashboard_token"
@@ -56,10 +65,10 @@ def main() -> int:
 
     failures = 0
 
-    section(f"{APEX}  (canonical apex)")
+    section(f"{LOCAL}  (local — bypasses CF Access, full auth coverage)")
     try:
         r = requests.get(
-            f"{APEX}/api/health",
+            f"{LOCAL}/api/health",
             params={"token": token},
             timeout=TIMEOUT,
         )
@@ -68,52 +77,61 @@ def main() -> int:
             r.status_code == 200,
             f"HTTP {r.status_code}",
         )
-        # The whole point of cookie auth: a valid query token must set the
-        # cookie on the response. If it doesn't, the user's URL stays long.
         failures += not check(
             f"sets {COOKIE_NAME} cookie on response",
             COOKIE_NAME in r.cookies,
             f"cookies: {list(r.cookies.keys()) or 'none'}",
         )
     except requests.RequestException as exc:
-        failures += not check("query-token returns 200", False, f"{type(exc).__name__}: {exc}")
+        failures += not check("local query-token", False, f"{type(exc).__name__}: {exc}")
 
     try:
-        r = requests.get(f"{APEX}/api/health", timeout=TIMEOUT)
-        # The negative test: no token → must reject. A regression here would
-        # silently expose the dashboard to anyone who finds the URL.
+        r = requests.get(f"{LOCAL}/api/health", timeout=TIMEOUT)
+        # Negative test: no token → must reject. A regression here would
+        # silently expose the dashboard to anyone on the local network.
         failures += not check(
-            "no token is rejected",
+            "no token is rejected (auth gate fires)",
             r.status_code == 401,
             f"HTTP {r.status_code} (want 401)",
         )
     except requests.RequestException as exc:
-        failures += not check("no token", False, f"{type(exc).__name__}: {exc}")
+        failures += not check("local no-token", False, f"{type(exc).__name__}: {exc}")
 
     try:
         r = requests.get(
-            f"{APEX}/api/health",
+            f"{LOCAL}/api/health",
             cookies={COOKIE_NAME: token},
             timeout=TIMEOUT,
         )
         failures += not check(
-            "cookie-only returns 200",
+            "cookie-only returns 200 (rolling cookie path)",
             r.status_code == 200,
             f"HTTP {r.status_code}",
         )
     except requests.RequestException as exc:
-        failures += not check("cookie-only", False, f"{type(exc).__name__}: {exc}")
+        failures += not check("local cookie-only", False, f"{type(exc).__name__}: {exc}")
 
-    section(f"{LEGACY}  (legacy alias kept in ingress)")
+    section(f"{APEX}  (public — confirms CF edge + tunnel are alive)")
     try:
-        r = requests.get(
-            f"{LEGACY}/api/health",
-            params={"token": token},
-            timeout=TIMEOUT,
-        )
+        # CF Access intercepts. Any 2xx or 3xx = healthy (CF login page or
+        # an authenticated forward to the dashboard). 4xx that isn't 401 is
+        # suspicious; 5xx or connection failure means the tunnel or origin
+        # is down.
+        r = requests.get(APEX, timeout=TIMEOUT, allow_redirects=False)
         failures += not check(
-            "alias still routes to dashboard",
-            r.status_code == 200,
+            "responds with 2xx/3xx (CF Access reachable)",
+            200 <= r.status_code < 400,
+            f"HTTP {r.status_code}",
+        )
+    except requests.RequestException as exc:
+        failures += not check("public reachable", False, f"{type(exc).__name__}: {exc}")
+
+    section(f"{LEGACY}  (legacy alias — also CF-Access-gated)")
+    try:
+        r = requests.get(LEGACY, timeout=TIMEOUT, allow_redirects=False)
+        failures += not check(
+            "alias responds with 2xx/3xx",
+            200 <= r.status_code < 400,
             f"HTTP {r.status_code}",
         )
     except requests.RequestException as exc:
