@@ -1473,3 +1473,195 @@ class TestTradeGuardsBlockGate:
         result = _load_guard_warnings()
         assert len(result["warnings"]) == 1
         assert result["warnings"][0]["severity"] == "block"
+
+
+# ===========================================================================
+# P1-3 (2026-05-02 last-followups): auth-error scan on the timeout-kill path
+# ===========================================================================
+
+class TestKillOverrunAuthScan:
+    """`_kill_overrun_agent` must scan the captured agent.log slice for
+    auth-error markers before forgetting the dead subprocess.
+
+    Background: ``check_agent_completion()`` (the happy completion path)
+    already calls ``detect_auth_failure`` on the new portion of agent.log
+    (line 956). But the timeout-kill path (``_kill_overrun_agent``) only
+    logged ``status="timeout"`` and never inspected what the agent printed.
+    A hung agent that printed "Not logged in" before getting stuck on a
+    network retry would surface as ``timeout``, not ``auth_error`` — and
+    would never land in critical_errors.jsonl. This regression test pins
+    the new behavior so the asymmetry stays closed.
+    """
+
+    def test_auth_marker_in_log_recorded_to_critical_errors(self, tmp_path, monkeypatch):
+        """When agent.log contains an auth marker between
+        _agent_log_start_offset and EOF, the kill path records a
+        critical-error entry via detect_auth_failure."""
+        # Stage the agent.log with an auth marker.
+        agent_log = tmp_path / "agent.log"
+        agent_log.write_text("Not logged in\nstuff\n", encoding="utf-8")
+
+        # Point DATA_DIR (used by check_agent_completion → agent.log)
+        # at our tmp.
+        monkeypatch.setattr("portfolio.agent_invocation.DATA_DIR", tmp_path)
+        # Also patch claude_gate's CRITICAL_ERRORS_LOG so the test doesn't
+        # write to the real journal.
+        monkeypatch.setattr(
+            "portfolio.claude_gate.CRITICAL_ERRORS_LOG",
+            tmp_path / "critical_errors.jsonl",
+        )
+
+        # Set up a "running" mock proc that will be killed by the helper.
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 4242
+        proc.wait.return_value = 0
+        ai._agent_proc = proc
+        ai._agent_log = None  # detached file handle (already closed)
+        ai._agent_log_start_offset = 0  # whole file is "this invocation"
+        ai._agent_start = time.monotonic() - 1000
+        ai._agent_start_wall = time.time() - 1000
+        ai._agent_timeout = 120
+        ai._agent_tier = 2
+        ai._agent_reasons = ["XAG-USD volatility"]
+
+        with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"):
+            ai._kill_overrun_agent()
+
+        # The auth marker should have triggered a critical_errors.jsonl entry.
+        crit_path = tmp_path / "critical_errors.jsonl"
+        assert crit_path.exists(), "expected critical_errors.jsonl to be written"
+        contents = crit_path.read_text(encoding="utf-8")
+        assert "auth_failure" in contents
+        assert "Not logged in" in contents
+        # And the trigger log should still record the timeout (existing behavior).
+
+    def test_no_auth_marker_no_critical_error(self, tmp_path, monkeypatch):
+        """A clean agent.log (no auth marker) leaves critical_errors.jsonl untouched."""
+        agent_log = tmp_path / "agent.log"
+        agent_log.write_text("normal output here\n", encoding="utf-8")
+
+        monkeypatch.setattr("portfolio.agent_invocation.DATA_DIR", tmp_path)
+        monkeypatch.setattr(
+            "portfolio.claude_gate.CRITICAL_ERRORS_LOG",
+            tmp_path / "critical_errors.jsonl",
+        )
+
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 4243
+        proc.wait.return_value = 0
+        ai._agent_proc = proc
+        ai._agent_log = None
+        ai._agent_log_start_offset = 0
+        ai._agent_start = time.monotonic() - 1000
+        ai._agent_start_wall = time.time() - 1000
+        ai._agent_timeout = 120
+        ai._agent_tier = 1
+        ai._agent_reasons = ["health check"]
+
+        with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"):
+            ai._kill_overrun_agent()
+
+        crit_path = tmp_path / "critical_errors.jsonl"
+        assert not crit_path.exists() or "auth_failure" not in crit_path.read_text("utf-8")
+
+    def test_missing_agent_log_does_not_raise(self, tmp_path, monkeypatch):
+        """Timeout-kill path must not raise if agent.log is missing
+        (e.g. subprocess never wrote anything). The kill itself must still
+        complete and return True so the caller knows it can spawn a new
+        agent."""
+        # No agent.log on disk.
+        monkeypatch.setattr("portfolio.agent_invocation.DATA_DIR", tmp_path)
+        monkeypatch.setattr(
+            "portfolio.claude_gate.CRITICAL_ERRORS_LOG",
+            tmp_path / "critical_errors.jsonl",
+        )
+
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 4244
+        proc.wait.return_value = 0
+        ai._agent_proc = proc
+        ai._agent_log = None
+        ai._agent_log_start_offset = 0
+        ai._agent_start = time.monotonic() - 1000
+        ai._agent_start_wall = time.time() - 1000
+        ai._agent_timeout = 120
+        ai._agent_tier = 3
+        ai._agent_reasons = ["x"]
+
+        with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"):
+            result = ai._kill_overrun_agent()
+
+        # Kill completed cleanly.
+        assert result is True
+        # _agent_proc cleared so caller can spawn a replacement.
+        assert ai._agent_proc is None
+
+    def test_offset_respected_only_new_output_scanned(self, tmp_path, monkeypatch):
+        """An auth marker BEFORE _agent_log_start_offset (i.e. from a
+        previous invocation) must NOT be scanned. Only output from the
+        current invocation counts. This mirrors the offset semantics in
+        check_agent_completion()."""
+        agent_log = tmp_path / "agent.log"
+        # Earlier garbage (10 bytes) — _then_ this invocation's output.
+        # The marker is in the EARLIER section, so the scan must skip it.
+        prefix = "earlier   "  # 10 bytes
+        body = "Not logged in\n"  # this is the marker but it sits AFTER offset
+        agent_log.write_text(prefix + body, encoding="utf-8")
+
+        monkeypatch.setattr("portfolio.agent_invocation.DATA_DIR", tmp_path)
+        monkeypatch.setattr(
+            "portfolio.claude_gate.CRITICAL_ERRORS_LOG",
+            tmp_path / "critical_errors.jsonl",
+        )
+
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 4245
+        proc.wait.return_value = 0
+        ai._agent_proc = proc
+        ai._agent_log = None
+        # Offset starts AT the marker so the scan reads "Not logged in\n".
+        ai._agent_log_start_offset = len(prefix)
+        ai._agent_start = time.monotonic() - 1000
+        ai._agent_start_wall = time.time() - 1000
+        ai._agent_timeout = 120
+        ai._agent_tier = 2
+        ai._agent_reasons = ["x"]
+
+        with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"):
+            ai._kill_overrun_agent()
+
+        crit_path = tmp_path / "critical_errors.jsonl"
+        assert crit_path.exists()
+        contents = crit_path.read_text("utf-8")
+        assert "auth_failure" in contents
+
+        # Reset and try again with offset PAST the marker — must NOT match.
+        crit_path.unlink()
+
+        proc2 = MagicMock()
+        proc2.poll.return_value = None
+        proc2.pid = 4246
+        proc2.wait.return_value = 0
+        ai._agent_proc = proc2
+        ai._agent_log = None
+        # Offset past the marker → only blank tail is scanned.
+        ai._agent_log_start_offset = len(prefix) + len(body)
+        ai._agent_start = time.monotonic() - 1000
+        ai._agent_start_wall = time.time() - 1000
+        ai._agent_timeout = 120
+        ai._agent_tier = 2
+        ai._agent_reasons = ["x"]
+
+        with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"):
+            ai._kill_overrun_agent()
+
+        assert not crit_path.exists() or "auth_failure" not in crit_path.read_text("utf-8")
