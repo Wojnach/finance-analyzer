@@ -2,14 +2,29 @@
 
 Workflow:
 1. Layer 2 calls request_order() → saves intent to pending orders, returns details
-2. Layer 2 sends Telegram message with order details + "Reply CONFIRM to execute"
-3. Main loop calls check_pending_orders() each cycle
-4. On CONFIRM reply → execute order via avanza_control, notify via Telegram
-5. On timeout (5 min) → expire the pending order, notify
+   (including a unique 6-hex `confirm_token`).
+2. Layer 2 sends Telegram message with order details + "Reply CONFIRM <token>
+   to execute".
+3. Main loop calls check_pending_orders() each cycle.
+4. On CONFIRM <token> reply → execute the order whose token matches, notify
+   via Telegram.
+5. On timeout (5 min) → expire the pending order, notify.
+
+P1-10 (2026-05-02): per-order `confirm_token` eliminates three races the
+old bare-CONFIRM design suffered from (see test class docstrings):
+- stale-CONFIRM race (replayed CONFIRM confirms a NEWER order)
+- wrong-order race (sort-by-time-DESC matches the wrong order)
+- no-pending-yet race (CONFIRM lands before the order it was for)
+
+Bare CONFIRM (no token) is still accepted but ONLY matches LEGACY orders
+that have no `confirm_token` field — i.e. orders that were already in
+flight when this code was deployed. New orders MUST be confirmed by token.
 """
 
 import contextlib
 import logging
+import re
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,6 +39,30 @@ logger = logging.getLogger("portfolio.avanza_orders")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PENDING_FILE = DATA_DIR / "avanza_pending_orders.json"
 EXPIRY_MINUTES = 5
+
+# P1-10 (2026-05-02): per-order confirmation nonce. 6 hex chars = 24 bits
+# of entropy ≈ ~16M possible tokens. Collision probability across the at-most
+# ~5 in-flight pending orders is effectively zero (birthday bound:
+# ~5^2/(2*16M) ≈ 7.5e-7). Long enough to survive typos, short enough that
+# users will actually type it on a phone keyboard.
+_CONFIRM_TOKEN_HEX_CHARS = 6
+# Token validation: anything outside [0-9a-f] is silently dropped rather
+# than confirmed against an unknown order. This prevents 'CONFIRM xyz' (a
+# typo) from accidentally confirming any order via the legacy bare-CONFIRM
+# path or matching a token-holding order.
+_HEX_TOKEN_RE = re.compile(r"^[0-9a-f]+$")
+# CONFIRM prefix matcher. Word boundary required because "confirmed" /
+# "confirms" / "confirmation" parse to "confirm" + a hex-valid suffix
+# ("ed", "s", "ation") which would silently match against legacy orders
+# or non-existent tokens. Anchored at start since the user is asked to
+# reply with "CONFIRM <token>" as the entire message.
+_CONFIRM_PREFIX_RE = re.compile(r"^confirm(?:\s+|$)")
+
+
+def _generate_confirm_token() -> str:
+    """Return a fresh hex token for a new pending order. Module-level
+    indirection keeps tests deterministic via patch.object if ever needed."""
+    return secrets.token_hex(_CONFIRM_TOKEN_HEX_CHARS // 2)
 
 
 def _load_pending() -> list[dict]:
@@ -59,7 +98,12 @@ def request_order(
         price: Limit price in SEK
 
     Returns:
-        The pending order dict (includes id, total_sek, expires)
+        The pending order dict (includes id, total_sek, expires, and
+        ``confirm_token``). The caller MUST include ``confirm_token`` in
+        the Telegram notification asking the user to reply
+        ``CONFIRM <token>``. Without that, the user sees the prompt but
+        has no way to confirm — bare CONFIRM only matches legacy orders
+        without a token.
     """
     if action not in ("BUY", "SELL"):
         raise ValueError(f"action must be BUY or SELL, got {action!r}")
@@ -69,6 +113,7 @@ def request_order(
         raise ValueError(f"price must be > 0, got {price}")
 
     now = datetime.now(UTC)
+    confirm_token = _generate_confirm_token()
     order = {
         "id": str(uuid.uuid4()),
         "timestamp": now.isoformat(),
@@ -81,13 +126,20 @@ def request_order(
         "total_sek": round(volume * price, 2),
         "status": "pending_confirmation",
         "expires": (now + timedelta(minutes=EXPIRY_MINUTES)).isoformat(),
+        "confirm_token": confirm_token,
     }
 
     pending = _load_pending()
     pending.append(order)
     _save_pending(pending)
-    logger.info("Order requested: %s %dx %s @ %.2f SEK (id=%s)",
-                action, volume, instrument_name, price, order["id"])
+    # Log the token at INFO so an operator reading agent.log can read it
+    # if they need to confirm out-of-band (e.g. the agent's Telegram message
+    # got truncated). The token is per-order, expires in 5 min, and only
+    # confirms one specific order — leak surface is minimal.
+    logger.info(
+        "Order requested: %s %dx %s @ %.2f SEK (id=%s, confirm_token=%s)",
+        action, volume, instrument_name, price, order["id"], confirm_token,
+    )
     return order
 
 
@@ -100,13 +152,21 @@ def check_pending_orders(config: dict) -> list[dict]:
     """Check for Telegram confirmations and expire stale orders.
 
     Called by the main loop each cycle. Polls Telegram getUpdates for
-    CONFIRM replies. Executes confirmed orders and expires timed-out ones.
+    CONFIRM <token> replies. Executes confirmed orders (matched by token)
+    and expires timed-out ones.
+
+    P1-10 (2026-05-02): a CONFIRM <token> reply confirms ONLY the order
+    whose ``confirm_token`` matches. Bare CONFIRM (no token) still works
+    but ONLY matches LEGACY orders without a token field — so freshly
+    created orders cannot be silently confirmed by a stale CONFIRM that
+    was replayed by a getUpdates offset bug.
 
     Args:
-        config: App config dict (with telegram.token, telegram.chat_id)
+        config: App config dict (with telegram.token, telegram.chat_id,
+            and optionally telegram.allowed_user_id for sender auth).
 
     Returns:
-        List of orders that were acted on (confirmed or expired) this cycle
+        List of orders that were acted on (confirmed or expired) this cycle.
     """
     pending = _load_pending()
     if not pending:
@@ -115,25 +175,37 @@ def check_pending_orders(config: dict) -> list[dict]:
     acted_on = []
     now = datetime.now(UTC)
 
-    # Check for CONFIRM replies in Telegram
-    confirmed = _check_telegram_confirm(config)
+    # Set of tokens that arrived this cycle. Bare CONFIRM is "" (empty
+    # string) — only matches legacy orders without a token.
+    confirmed_tokens = _check_telegram_confirm(config)
 
-    # Sort by timestamp descending so CONFIRM matches the most recent pending order
-    pending_sorted = sorted(pending, key=lambda o: o.get("timestamp", ""), reverse=True)
-
-    for order in pending_sorted:
+    for order in pending:
         if order["status"] != "pending_confirmation":
             continue
 
         expires = datetime.fromisoformat(order["expires"])
+        order_token = order.get("confirm_token", "")
 
-        if confirmed:
-            # Confirm the most recent pending order
+        # P1-10: matching rules.
+        # 1. Order has a token AND that token is in confirmed_tokens → confirm.
+        # 2. Order has NO token (legacy in-flight order) AND bare CONFIRM
+        #    arrived ("" in the set) → confirm. This is the backwards-compat
+        #    path for orders that existed before the deploy.
+        # 3. Otherwise → no confirmation this cycle (may still expire).
+        confirmed_by_token = bool(order_token) and order_token in confirmed_tokens
+        confirmed_legacy = (not order_token) and ("" in confirmed_tokens)
+
+        if confirmed_by_token or confirmed_legacy:
             order["status"] = "confirmed"
             acted_on.append(order)
-            confirmed = False  # One CONFIRM per order
+            # Remove the matched token so the same CONFIRM can't double-fire
+            # against another order in the same cycle.
+            if confirmed_by_token:
+                confirmed_tokens.discard(order_token)
+            else:
+                # Legacy bare CONFIRM only matches one legacy order per cycle.
+                confirmed_tokens.discard("")
             _execute_confirmed_order(order, config)
-
         elif now > expires:
             order["status"] = "expired"
             acted_on.append(order)
@@ -143,8 +215,15 @@ def check_pending_orders(config: dict) -> list[dict]:
     return acted_on
 
 
-def _check_telegram_confirm(config: dict) -> bool:
-    """Poll Telegram for a CONFIRM reply from the configured chat.
+def _check_telegram_confirm(config: dict) -> set[str]:
+    """Poll Telegram for CONFIRM <token> replies from the configured chat.
+
+    Returns ``set[str]`` of matched tokens (lowercase hex). Bare CONFIRM
+    (with no token) is represented as ``""`` and matches only LEGACY
+    pending orders without a ``confirm_token`` field. Anything that's not
+    valid hex after CONFIRM (e.g. ``CONFIRM xyz`` typo) is silently
+    dropped — never matched against an order — so a typo doesn't
+    accidentally confirm via the legacy path.
 
     Uses getUpdates with a stored offset to avoid reprocessing old messages.
 
@@ -158,11 +237,15 @@ def _check_telegram_confirm(config: dict) -> bool:
     When ``allowed_user_id`` is unset the chat-only check is preserved
     (backwards-compatible). The offset still advances on dropped messages
     so we don't re-process the rejected update every cycle.
+
+    P1-10 (2026-05-02): return type changed from ``bool`` to ``set[str]``
+    so each pending order can match its own token. Bare CONFIRM is still
+    captured (as ``""``) for the legacy backwards-compat path.
     """
     token = config.get("telegram", {}).get("token", "")
     chat_id = str(config.get("telegram", {}).get("chat_id", ""))
     if not token or not chat_id:
-        return False
+        return set()
 
     # AV-P1-3 (2026-05-02): optional sender allow-list. Accept either int
     # or string in config — Telegram's `from.id` is always int, so coerce
@@ -192,15 +275,15 @@ def _check_telegram_confirm(config: dict) -> bool:
             timeout=5,
         )
         if r is None or not r.ok:
-            return False
+            return set()
         data = r.json()
         if not data.get("ok"):
-            return False
+            return set()
     except Exception as e:
         logger.warning("Telegram getUpdates failed: %s", e)
-        return False
+        return set()
 
-    found_confirm = False
+    found_tokens: set[str] = set()
     for update in data.get("result", []):
         update_id = update.get("update_id", 0)
         # Always advance offset (AV-P1-3: applies to dropped messages too —
@@ -225,9 +308,33 @@ def _check_telegram_confirm(config: dict) -> bool:
                 )
                 continue
 
-        text = (msg.get("text") or "").strip().upper()
-        if text == "CONFIRM":
-            found_confirm = True
+        # P1-10 (2026-05-02): parse "CONFIRM <token>" or bare "CONFIRM".
+        # Lowercase + collapse whitespace so user-typed variants normalize.
+        # Word-boundary match is critical here — without it, "confirmed"
+        # parses as "confirm" + "ed" and "ed" IS valid hex (defense vs an
+        # accidental "confirmed by my broker" message in the chat).
+        text = (msg.get("text") or "").strip().lower()
+        m = _CONFIRM_PREFIX_RE.match(text)
+        if not m:
+            continue
+        # Anything after the matched prefix (which includes the word
+        # "confirm" + whitespace OR end-of-string) is the candidate.
+        rest = text[m.end():].strip()
+        if not rest:
+            # Bare CONFIRM — legacy backwards-compat path.
+            found_tokens.add("")
+            continue
+        # Take the first whitespace-separated token. Anything trailing is
+        # ignored (lets the user paste extra text without breaking the match).
+        candidate = rest.split()[0]
+        if _HEX_TOKEN_RE.match(candidate):
+            found_tokens.add(candidate)
+        else:
+            logger.warning(
+                "Dropping CONFIRM with non-hex token %r (must be lowercase "
+                "[0-9a-f] from request_order's confirm_token)",
+                candidate,
+            )
 
     # Save offset atomically to prevent corruption on crash (BUG-128)
     try:
@@ -235,7 +342,7 @@ def _check_telegram_confirm(config: dict) -> bool:
     except OSError as e:
         logger.warning("Failed to save Telegram offset: %s", e)
 
-    return found_confirm
+    return found_tokens
 
 
 def _execute_confirmed_order(order: dict, config: dict) -> None:

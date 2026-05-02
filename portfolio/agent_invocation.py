@@ -250,6 +250,59 @@ def _safe_elapsed_s():
     return 0.0
 
 
+def _scan_agent_log_for_auth_failure(label: str, extra_context: dict | None = None) -> bool:
+    """Scan the captured agent.log slice for claude-CLI auth-error markers.
+
+    P1-3 (2026-05-02 last-followups): the timeout-kill path
+    (``_kill_overrun_agent``) used to forget the dead subprocess without
+    inspecting what it had printed. ``check_agent_completion()`` already
+    runs this scan on the happy path (line 956), so a hung agent that
+    printed "Not logged in" before getting stuck on a network retry
+    would surface as ``timeout`` (not ``auth_error``) and never land in
+    ``critical_errors.jsonl``. That asymmetry is the same class of silent
+    auth outage that the March-April 2026 incident exposed — the whole
+    point of the journal is to make that failure mode impossible to miss.
+
+    Helper exists at module level so both call sites
+    (``check_agent_completion`` and ``_kill_overrun_agent``) stay in sync
+    if the scan logic ever needs to evolve.
+
+    Returns True iff an auth-error marker was detected in the new slice.
+    Never raises — IO or decode failures are swallowed and logged so a
+    transient log-read problem cannot break the kill / completion paths.
+
+    Args:
+        label: Caller identifier used in the auth-failure record (e.g.
+            ``"layer2_t2_timeout"``). Tier and trigger context are pulled
+            from the module-level ``_agent_tier`` / ``_agent_reasons``.
+        extra_context: Optional dict merged into the auth-failure record's
+            ``context`` field (e.g. ``{"exit_code": 0, "duration_s": 12.3}``
+            on the completion path). Tier/reasons are always included; this
+            is for caller-specific extras.
+    """
+    try:
+        agent_log_path = DATA_DIR / "agent.log"
+        if not agent_log_path.exists():
+            return False
+        with open(agent_log_path, "rb") as f:
+            f.seek(_agent_log_start_offset)
+            new_output = f.read().decode("utf-8", errors="replace")
+        ctx = {
+            "tier": _agent_tier,
+            "reasons": (_agent_reasons or [])[:5],
+        }
+        if extra_context:
+            ctx.update(extra_context)
+        return detect_auth_failure(
+            new_output,
+            caller=label,
+            context=ctx,
+        )
+    except Exception as e:
+        logger.warning("Auth-error scan of agent.log failed (%s): %s", label, e)
+        return False
+
+
 def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
     """Kill the running _agent_proc and clear module state.
 
@@ -261,6 +314,12 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
 
     Logs the trigger with status="timeout" and clears ``_agent_proc`` /
     ``_agent_log`` on the way out.
+
+    P1-3 (2026-05-02 last-followups): also scans the captured agent.log
+    slice for claude-CLI auth-error markers BEFORE clearing module state,
+    so the silent-auth-failure detector covers the timeout path too — not
+    just the happy completion path. See ``_scan_agent_log_for_auth_failure``
+    for full rationale.
 
     Args:
         fallback_reasons: Reason list to use for the trigger log entry if
@@ -315,6 +374,16 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
         except Exception as e:
             logger.warning("Agent log close failed: %s", e)
         _agent_log = None
+
+    # P1-3 (2026-05-02 last-followups): scan the captured agent.log slice
+    # for auth-error markers before forgetting the dead subprocess. Done
+    # AFTER closing _agent_log (so any buffered output is flushed) but
+    # BEFORE _agent_proc / _agent_tier / _agent_reasons are cleared (so
+    # the auth-failure record carries the right tier + trigger context).
+    # Best-effort: failures are swallowed inside the helper so a busted
+    # log read can never break the kill path.
+    auth_label = f"layer2_t{_agent_tier}_timeout" if _agent_tier else "layer2_timeout"
+    _scan_agent_log_for_auth_failure(auth_label)
 
     # BUG-91: Log the timed-out invocation before returning
     _log_trigger(
@@ -946,25 +1015,16 @@ def check_agent_completion():
     # in" to stdout — that's exactly the 3-week silent Layer 2 outage that
     # motivated this detection. We captured _agent_log_start_offset before
     # spawning the subprocess, so we only scan output from this invocation.
-    auth_error_detected = False
-    try:
-        agent_log_path = DATA_DIR / "agent.log"
-        if agent_log_path.exists():
-            with open(agent_log_path, "rb") as f:
-                f.seek(_agent_log_start_offset)
-                new_output = f.read().decode("utf-8", errors="replace")
-            auth_error_detected = detect_auth_failure(
-                new_output,
-                caller=f"layer2_t{_agent_tier}",
-                context={
-                    "tier": _agent_tier,
-                    "exit_code": exit_code,
-                    "duration_s": duration_s,
-                    "reasons": (_agent_reasons or [])[:5],
-                },
-            )
-    except Exception as e:
-        logger.warning("Auth-error scan of agent.log failed: %s", e)
+    #
+    # P1-3 (2026-05-02 last-followups): scan logic extracted to
+    # ``_scan_agent_log_for_auth_failure`` so the timeout-kill path
+    # (``_kill_overrun_agent``) can share the exact same semantics. Without
+    # the helper, fixing one path and forgetting the other would re-open
+    # the same asymmetry the timeout path used to have.
+    auth_error_detected = _scan_agent_log_for_auth_failure(
+        f"layer2_t{_agent_tier}",
+        extra_context={"exit_code": exit_code, "duration_s": duration_s},
+    )
 
     # Determine status
     if auth_error_detected:
