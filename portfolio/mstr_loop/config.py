@@ -16,7 +16,7 @@ Phase = Literal["shadow", "paper", "live"]
 # ---------------------------------------------------------------------------
 # Phase switch (override with MSTR_LOOP_PHASE env var)
 # ---------------------------------------------------------------------------
-PHASE: Phase = os.environ.get("MSTR_LOOP_PHASE", "shadow")  # type: ignore[assignment]
+PHASE: Phase = (os.environ.get("MSTR_LOOP_PHASE") or "shadow").strip()  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Instruments (live-verified 2026-04-17)
