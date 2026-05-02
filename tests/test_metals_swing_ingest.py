@@ -244,11 +244,15 @@ def test_ingest_calls_set_stop_loss_when_requested(tmp_path, monkeypatch, patche
 
     called = []
 
-    def _capture(pos_id):
+    # MC-P1-1 (2026-05-02): accept anchor_price kwarg from new signature.
+    def _capture(pos_id, **kw):
         called.append(pos_id)
         trader.state["positions"][pos_id]["stop_order_id"] = "STOP_FAKE_123"
 
     trader._set_stop_loss = _capture
+    # MC-P1-1: ingest_position now does a best-effort fetch_price for the
+    # stop anchor — stub to avoid the Playwright object dependency.
+    monkeypatch.setattr(mst, "fetch_price", lambda *a, **k: {"bid": 14.70})
 
     pos_id = trader.ingest_position(
         ob_id="2379768",
@@ -267,7 +271,8 @@ def test_ingest_skips_set_stop_loss_on_dry_run(tmp_path, monkeypatch, patched_st
     monkeypatch.setattr(mst, "DRY_RUN", True)
 
     called = []
-    trader._set_stop_loss = lambda pos_id: called.append(pos_id)
+    # MC-P1-1: accept new anchor_price kwarg from updated signature.
+    trader._set_stop_loss = lambda pos_id, **kw: called.append(pos_id)
 
     pos_id = trader.ingest_position(
         ob_id="2379768", units=97, entry_price=14.70,
@@ -991,9 +996,12 @@ def test_ingest_places_new_stop_when_no_existing(tmp_path, monkeypatch, patched_
     trader = _make_trader(tmp_path)
     monkeypatch.setattr(mst, "DRY_RUN", False)
     monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+    # MC-P1-1 (2026-05-02): ingest_position now does a best-effort
+    # fetch_price for the stop anchor before calling _set_stop_loss.
+    monkeypatch.setattr(mst, "fetch_price", lambda *a, **k: {"bid": 14.7})
 
     set_stop_calls = []
-    def _fake_set(pid):
+    def _fake_set(pid, **kw):
         set_stop_calls.append(pid)
         trader.state["positions"][pid]["stop_order_id"] = "NEW_STOP_123"
     trader._set_stop_loss = _fake_set

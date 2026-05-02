@@ -1242,7 +1242,30 @@ class SwingTrader:
                     f"for ob {ob_id_str} — no new stop placed"
                 )
             else:
-                self._set_stop_loss(pos_id)
+                # MC-P1-1 (2026-05-02): adopt the orphan with a stop
+                # anchored to the CURRENT bid, not entry_price. An orphan
+                # whose entry was 100 and current bid is 80 used to get a
+                # stop at 100*(1-15%)=85 → triggered immediately on
+                # placement (stop ABOVE current price). Anchoring to bid
+                # gives 80*(1-15%)=68 — properly below current price.
+                #
+                # Best-effort fetch: if it fails, fall back to default
+                # (entry-anchored) stop. Better to have an entry-anchored
+                # stop than no stop at all on an orphan.
+                anchor_bid = None
+                try:
+                    _data = fetch_price(self.page, ob_id_str, meta.get("api_type", "warrant"))
+                    if isinstance(_data, dict):
+                        _bid = _data.get("bid") or 0
+                        if _bid and _bid > 0:
+                            anchor_bid = float(_bid)
+                except Exception:
+                    logger.debug(
+                        "ingest_position: bid fetch for orphan stop anchor "
+                        "raised for ob %s — using entry-price anchor",
+                        ob_id_str, exc_info=True,
+                    )
+                self._set_stop_loss(pos_id, anchor_price=anchor_bid)
 
         stop_txt = ""
         pos_after = self.state["positions"].get(pos_id, {})
@@ -2525,7 +2548,15 @@ class SwingTrader:
         size this position at N SEK?" can read the Kelly metadata directly
         from metals_swing_trades.jsonl.
         """
-        pos_id = f"pos_{int(time.time())}"
+        # MC-P1-3 (2026-05-02): include ob_id in the key. Mirrors the
+        # 2026-04-15 fix at line 1043 in ingest_position. Two _execute_buy
+        # calls in the same epoch second on different warrants (e.g. a
+        # momentum entry firing the same second as a scheduled cycle) used
+        # to collide, silently overwriting the first position in
+        # self.state["positions"]. The BUY_COOLDOWN_MINUTES gate prevents
+        # two buys for the SAME ob_id within 30 min, so a per-second
+        # ob_id-suffixed key is collision-proof in production.
+        pos_id = f"pos_{int(time.time())}_{warrant['ob_id']}"
 
         _log(f"BUY {warrant['name']}: {units}u @ {ask_price} = {total_cost:.0f} SEK "
              f"(underlying: {underlying_ticker}, dir: {direction}, lev: {warrant['live_leverage']:.1f}x)")
@@ -2649,8 +2680,21 @@ class SwingTrader:
         }
         _log_decision(decision)
 
-    def _set_stop_loss(self, pos_id):
-        """Place hardware stop-loss for a position."""
+    def _set_stop_loss(self, pos_id, anchor_price=None):
+        """Place hardware stop-loss for a position.
+
+        ``anchor_price`` (MC-P1-1, 2026-05-02): if provided, the stop is
+        computed relative to this price instead of pos['entry_price'].
+        Use this from ingest_position when adopting an orphan whose
+        current bid is far below its original entry — computing from
+        entry would produce a stop ABOVE current price, which would
+        trigger immediately on placement and cause a forced sell at the
+        worst possible moment.
+
+        For fresh buys (called from _execute_buy with anchor=None) the
+        entry_price IS the current price, so the default behaviour is
+        unchanged.
+        """
         pos = self.state["positions"].get(pos_id)
         if not pos:
             return
@@ -2663,10 +2707,18 @@ class SwingTrader:
             _log("  Cannot set stop: no entry underlying price")
             return
 
+        # MC-P1-1: choose the price the stop is anchored to.
+        if anchor_price is not None and anchor_price > 0:
+            stop_anchor = float(anchor_price)
+            anchor_label = "current bid (orphan ingest)"
+        else:
+            stop_anchor = entry_price
+            anchor_label = "entry"
+
         # Stop at -STOP_LOSS_UNDERLYING_PCT% on underlying, translated to warrant price
         und_drop_pct = STOP_LOSS_UNDERLYING_PCT / 100
         warrant_drop_pct = und_drop_pct * leverage
-        trigger_price = round(entry_price * (1 - warrant_drop_pct), 2)
+        trigger_price = round(stop_anchor * (1 - warrant_drop_pct), 2)
         sell_price = round(trigger_price * 0.99, 2)  # sell 1% below trigger for fill
 
         if trigger_price <= 0:
@@ -2674,7 +2726,8 @@ class SwingTrader:
             return
 
         _log(f"  Setting stop-loss: trigger={trigger_price} sell={sell_price} "
-             f"(und -{STOP_LOSS_UNDERLYING_PCT}% * {leverage:.1f}x lev)")
+             f"(und -{STOP_LOSS_UNDERLYING_PCT}% * {leverage:.1f}x lev, "
+             f"anchor={anchor_label} {stop_anchor})")
 
         if DRY_RUN:
             _log(f"  [DRY RUN] Would place stop-loss @ {trigger_price}")
@@ -2816,11 +2869,29 @@ class SwingTrader:
                     # were a silver USD price and computed a -46% "move".
                     # Pass None so the optimizer uses market.price (the correct
                     # underlying USD reference) for the market-exit estimate.
+                    #
+                    # P1-9 (2026-05-02): use live USD/SEK rate, was hardcoded
+                    # 10.85. fetch_usd_sek() already does live fetch + 15-min
+                    # in-process cache + stale-cache fallback + hardcoded 10.85
+                    # last-resort, so this is a strict superset of the previous
+                    # behaviour. Wrapped in try/except so a pathological FX
+                    # module crash still falls back to 10.85 (the documented
+                    # invariant the optimizer was built against).
+                    try:
+                        from portfolio.fx_rates import fetch_usd_sek
+                        live_usdsek = fetch_usd_sek() or 10.85
+                    except Exception:
+                        logger.debug(
+                            "[SWING] _check_exits: fetch_usd_sek raised — "
+                            "falling back to 10.85",
+                            exc_info=True,
+                        )
+                        live_usdsek = 10.85
                     opt_market = MarketSnapshot(
                         asof_ts=_now_utc(),
                         price=underlying_price,
                         bid=None,
-                        usdsek=10.85,
+                        usdsek=live_usdsek,
                     )
                     exit_plan = compute_exit_plan(
                         opt_pos, opt_market, sess.session_end,
@@ -2969,6 +3040,26 @@ class SwingTrader:
                         exit_reason = f"MOMENTUM_EXIT: 3 rising checks ({move_rate:+.2f}%)"
 
             if exit_reason:
+                # MC-P1-4 (2026-05-02): zero-price sell guard. fetch_price
+                # at line ~2786 returns 0 for current_bid when the Avanza
+                # call fails or returns a dict missing "bid". Falling
+                # through to _execute_sell with price=0 either rejects at
+                # Avanza (best case) or fills at the bid (worst case if
+                # Avanza interprets price=0 as "any price"). Defer the
+                # sell to the next cycle when (hopefully) the price fetch
+                # succeeds. If the position truly needs out, the same
+                # exit_reason will fire again next tick with a real bid.
+                if current_bid <= 0:
+                    _log(
+                        f"  ABORT SELL {pos.get('warrant_name', pos_id)}: "
+                        f"current_bid={current_bid} (fetch_price failed) — "
+                        f"deferring exit '{exit_reason}' to next cycle"
+                    )
+                    _send_telegram(
+                        f"_SWING: deferred exit for {pos.get('warrant_name', pos_id)} — "
+                        f"warrant price unavailable (will retry)_"
+                    )
+                    continue
                 try:
                     self._execute_sell(pos_id, pos, current_bid, underlying_price, exit_reason)
                     to_remove.append(pos_id)

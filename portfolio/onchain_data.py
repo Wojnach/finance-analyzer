@@ -54,6 +54,16 @@ def _coerce_epoch(value) -> float:
             return datetime.fromisoformat(iso).timestamp()
         except (ValueError, TypeError):
             pass
+    # P1-14 (2026-05-02): defensive fall-through. Returning 0.0 silently
+    # forces a cache miss, which costs one extra API call but never breaks
+    # the on-chain voter. Log at DEBUG so operators investigating "why is
+    # the BGeometrics 15-req/day budget burning every restart?" can see
+    # this firing in the logs without breaking the safe-default behaviour.
+    logger.debug(
+        "_coerce_epoch: unparseable value type=%s repr=%.50r — returning 0.0",
+        type(value).__name__,
+        value,
+    )
     return 0.0
 
 BASE_DIR = Path(__file__).resolve().parent.parent
