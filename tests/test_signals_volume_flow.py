@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from portfolio.signals.volume_flow import (
     MIN_ROWS,
@@ -892,3 +893,109 @@ class TestReproducibility:
         original_close = df["close"].copy()
         compute_volume_flow_signal(df)
         pd.testing.assert_series_equal(df["close"], original_close)
+
+
+# =============================================================================
+# P1-4 (2026-05-02 adversarial follow-ups): VWAP session boundary reset
+# =============================================================================
+
+class TestVWAPSessionReset:
+    """P1-4: `_compute_vwap` must reset cumulative sums at session boundaries.
+
+    A pure session VWAP resets at the start of each trading session (00:00 UTC
+    for crypto/metals 24/7 markets). Without a reset, the VWAP becomes a
+    "lifetime" cumulative average that drifts further from the latest price
+    each day, making the signal increasingly unresponsive to current
+    intraday action.
+
+    The bug is that the original implementation called `cumsum()` over the
+    entire dataframe with no resets — see the SM-P1-3 / P1-4 finding.
+    """
+
+    def _make_three_day_df(self) -> pd.DataFrame:
+        """Three days of 1-hour bars, each day with a distinct price level.
+
+        Day 1 (Jan 1 UTC): trades around 100
+        Day 2 (Jan 2 UTC): trades around 200
+        Day 3 (Jan 3 UTC): trades around 50
+        """
+        idx = pd.date_range("2024-01-01 00:00", periods=72, freq="1h", tz="UTC")
+        prices = (
+            [100.0] * 24       # Day 1
+            + [200.0] * 24     # Day 2
+            + [50.0] * 24      # Day 3
+        )
+        return pd.DataFrame({
+            "high": prices, "low": prices, "close": prices,
+            "volume": [1000.0] * 72,
+        }, index=idx)
+
+    def test_session_vwap_resets_at_midnight_utc(self):
+        """The VWAP at the LAST bar of Day 3 (price=50) should reflect Day 3
+        only — not the cumulative average of Days 1-3 (= 116.67).
+
+        With session reset: vwap[-1] == 50.
+        Without (cumulative): vwap[-1] approaches mean(100, 200, 50) ≈ 116.67.
+        """
+        df = self._make_three_day_df()
+        vwap = _compute_vwap(df["high"], df["low"], df["close"], df["volume"])
+        # Cumulative-VWAP would give ~116.67 over the 72 bars.
+        # Session-VWAP gives 50 at the last bar (only Day 3 contributes).
+        assert vwap.iloc[-1] == pytest.approx(50.0, abs=0.01), (
+            f"VWAP at last bar = {vwap.iloc[-1]}; expected ~50 (Day 3 only). "
+            "Cumulative-VWAP without session reset would yield ~116.67."
+        )
+
+    def test_session_vwap_first_bar_of_session_equals_typical_price(self):
+        """At the first bar of a session (00:00 UTC), the VWAP must equal that
+        bar's typical price exactly — no carry-over from prior session."""
+        df = self._make_three_day_df()
+        vwap = _compute_vwap(df["high"], df["low"], df["close"], df["volume"])
+        # Day 2 starts at index 24 (Jan 2 00:00 UTC), price=200, typical=200.
+        assert vwap.iloc[24] == pytest.approx(200.0, abs=0.01), (
+            f"VWAP at first bar of session = {vwap.iloc[24]}; expected 200 "
+            "(typical price of that bar, no prior-session carry-over)."
+        )
+        # Day 3 starts at index 48 (Jan 3 00:00 UTC), price=50.
+        assert vwap.iloc[48] == pytest.approx(50.0, abs=0.01)
+
+    def test_session_vwap_within_session_accumulates(self):
+        """Within a single session, VWAP must still accumulate normally.
+        Half-session check: at the 12th bar of Day 1, all prices are 100, so
+        VWAP=100. Then we shift Day 1 prices and verify accumulation."""
+        idx = pd.date_range("2024-01-01 00:00", periods=24, freq="1h", tz="UTC")
+        # First 12 bars at 100, next 12 at 200 — same session.
+        prices = [100.0] * 12 + [200.0] * 12
+        df = pd.DataFrame({
+            "high": prices, "low": prices, "close": prices,
+            "volume": [1000.0] * 24,
+        }, index=idx)
+        vwap = _compute_vwap(df["high"], df["low"], df["close"], df["volume"])
+        # At end of session: cumulative VWAP = mean = 150.
+        assert vwap.iloc[-1] == pytest.approx(150.0, abs=0.01)
+
+    def test_naive_index_handled_gracefully(self):
+        """If timestamps are tz-naive but daily-aligned, session detection
+        should still work via the date component (no crash)."""
+        idx = pd.date_range("2024-01-01 00:00", periods=48, freq="1h")  # tz-naive
+        prices = [100.0] * 24 + [200.0] * 24
+        df = pd.DataFrame({
+            "high": prices, "low": prices, "close": prices,
+            "volume": [1000.0] * 48,
+        }, index=idx)
+        vwap = _compute_vwap(df["high"], df["low"], df["close"], df["volume"])
+        # Day 2 last bar should be ~200 (not the cumulative 150).
+        assert vwap.iloc[-1] == pytest.approx(200.0, abs=0.01)
+
+    def test_no_datetime_index_falls_back_to_cumulative(self):
+        """If the index isn't datetime-like, gracefully fall back to the
+        original cumulative behavior. Don't crash — log and continue."""
+        df = pd.DataFrame({
+            "high": [100.0, 200.0, 300.0],
+            "low":  [100.0, 200.0, 300.0],
+            "close":[100.0, 200.0, 300.0],
+            "volume":[1000.0, 1000.0, 1000.0],
+        })  # default RangeIndex
+        # Should not raise. Falls back to cumulative: mean = 200.
+        vwap = _compute_vwap(df["high"], df["low"], df["close"], df["volume"])
+        assert vwap.iloc[-1] == pytest.approx(200.0, abs=0.01)

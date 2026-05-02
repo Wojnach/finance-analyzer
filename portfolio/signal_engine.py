@@ -1419,7 +1419,13 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
     Returns int — the number of signals still voting BUY/SELL.
     """
     gate_val = base_gate - relaxation
-    high_gate_val = _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation
+    # SC-P1-2 (2026-05-02 adversarial follow-ups): high-sample tier is NOT
+    # relaxed. A signal with 10K+ samples at sub-50% accuracy has measurable
+    # negative edge — circuit-breaker relaxation must not promote it back to
+    # voting. Standard tier (under 10K samples) still relaxes so borderline
+    # newer signals can be rescued during regime transitions. Must mirror
+    # the same logic in `_weighted_consensus` (line ~2068).
+    high_gate_val = _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
     active = 0
     for signal_name, vote in votes.items():
         if vote == "HOLD":
@@ -2048,6 +2054,14 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     ic_per_ticker = ic_cache.get("per_ticker", {}) if ic_cache else {}
 
     for signal_name, vote in votes.items():
+        # P1-1 (2026-05-02 adversarial follow-ups): defensive — initialize
+        # _rescued at the TOP of every iteration so a future contributor who
+        # adds a third branch to the gate-check below cannot leak a stale
+        # True from a prior iteration into line 2123 (`if _rescued: weight
+        # *= _DIRECTIONAL_RESCUE_WEIGHT_PENALTY`). Today both arms of the
+        # if/else at line 2072 set _rescued, so the bug doesn't manifest in
+        # production — but the structural guarantee is now hardcoded.
+        _rescued = False
         if vote == "HOLD":
             continue
         if signal_name in excluded:
@@ -2061,13 +2075,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         samples = stats.get("total", 0)
         # Accuracy gate: skip signals that are below threshold with enough data.
         # Tiered: established signals (10000+ samples) use a tighter 50% gate;
-        # newer signals use the standard 47% gate. Circuit-breaker relaxation
-        # (Batch 2 2026-04-16) subtracts uniformly from both tiers.
+        # newer signals use the standard 47% gate.
+        # SC-P1-2 (2026-05-02 adversarial follow-ups): the high-sample tier
+        # (10K+ samples, 0.50 gate) is NOT relaxed. A signal with 10K+ samples
+        # at sub-50% accuracy has statistically demonstrated negative edge —
+        # circuit-breaker relaxation must not let it back in. The standard
+        # tier still relaxes uniformly so newer borderline signals can be
+        # rescued during regime transitions.
         effective_gate = gate - relaxation
         if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
             effective_gate = max(
                 gate - relaxation,
-                _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation,
+                _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD,
             )
         if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
             # Directional rescue: before gating, check if the vote direction

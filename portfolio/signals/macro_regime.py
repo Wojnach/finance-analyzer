@@ -177,9 +177,16 @@ def _yield_10y_momentum(macro: dict | None) -> tuple[str, dict]:
     spends most of its time between 3.5-5.0% where absolute thresholds
     produce permanent HOLD.
 
-    Yields rising sharply (change_5d > +1.5%) = SELL (tightening).
-    Yields falling sharply (change_5d < -1.5%) = BUY (easing).
+    Yields rising sharply (change_5d > +0.15% = +15bps) = SELL (tightening).
+    Yields falling sharply (change_5d < -0.15% = -15bps) = BUY (easing).
     Otherwise HOLD.
+
+    P1-7 (2026-05-02 adversarial follow-ups): threshold lowered from
+    1.5 (150bps) to 0.15 (15bps). 150bps over 5 days is an extreme yield
+    move that happens at most a few times per decade — the previous gate
+    was effectively permanent HOLD because the realistic 5-day yield
+    change distribution sits well within ±50bps. 15bps is the right
+    scale for "sharp" 5-day moves.
     """
     indicators: dict = {"treasury_10y": np.nan, "treasury_10y_change_5d": np.nan}
 
@@ -200,9 +207,9 @@ def _yield_10y_momentum(macro: dict | None) -> tuple[str, dict]:
 
     indicators["treasury_10y_change_5d"] = change_5d
 
-    if change_5d > 1.5:
+    if change_5d > 0.15:
         return "SELL", indicators
-    if change_5d < -1.5:
+    if change_5d < -0.15:
         return "BUY", indicators
     return "HOLD", indicators
 

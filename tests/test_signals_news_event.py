@@ -170,6 +170,87 @@ class TestSentimentShift:
         action, ind = _sentiment_shift(headlines)
         assert action == "HOLD"
 
+    # SM-P1-1 (2026-05-02 adversarial follow-ups): the "cut" keyword
+    # previously defaulted to POSITIVE except for "guidance cut". This treated
+    # bearish phrases ("earnings cut", "dividend cut", "production cut",
+    # "forecast cut", "outlook cut", "salary cut") as bullish.
+
+    def test_rate_cut_remains_positive(self):
+        """Whitelist phrase: 'rate cut' is bullish (Fed/central bank easing)."""
+        headlines = _make_headlines([
+            "Fed signals rate cut next month",
+            "Powell hints rate cut coming",
+            "Central bank rate cut likely",
+        ])
+        action, _ = _sentiment_shift(headlines)
+        assert action == "BUY"
+
+    def test_tax_cut_remains_positive(self):
+        """Whitelist phrase: 'tax cut' is bullish (fiscal stimulus)."""
+        # Use 'tax cut' but force severity by adding rate words that score.
+        headlines = _make_headlines([
+            "Tax cut bill passes amid recession fears",
+            "Tax cut announced on tariff easing",
+            "Tax cut clears senate as inflation drops",
+        ])
+        action, _ = _sentiment_shift(headlines)
+        # All have rate-related severity ("recession", "tariff", "inflation"
+        # are critical/high). "tax cut" should not flip them to BUY but it
+        # should at minimum not be SOLD as a bearish "cut" — direction depends
+        # on the dominant keyword, but the "cut" branch must classify
+        # "tax cut" as positive.
+        assert action in ("BUY", "HOLD"), (
+            f"'tax cut' incorrectly classified as bearish (action={action})"
+        )
+
+    def test_guidance_cut_is_negative(self):
+        """Bearish phrase: 'guidance cut' = lowered forward expectations."""
+        headlines = _make_headlines([
+            "Acme issues guidance cut citing recession",
+            "Beta announces guidance cut on inflation pressure",
+            "Gamma guidance cut hits stock as tariff bites",
+        ])
+        action, _ = _sentiment_shift(headlines)
+        assert action == "SELL"
+
+    def test_dividend_cut_is_negative(self):
+        """Bearish phrase: 'dividend cut' should not be classified as bullish.
+        With the bug, 'cut' alone defaulted to positive."""
+        headlines = _make_headlines([
+            "Acme announces dividend cut amid recession fears",
+            "Beta dividend cut shocks investors as inflation rises",
+            "Gamma dividend cut as tariff uncertainty grows",
+        ])
+        action, _ = _sentiment_shift(headlines)
+        assert action == "SELL", (
+            "'dividend cut' should be classified as bearish, not bullish. "
+            "The bare 'cut' keyword must not default to pos."
+        )
+
+    def test_earnings_cut_is_negative(self):
+        """Bearish phrase: 'earnings cut' (lowered forecasts)."""
+        headlines = _make_headlines([
+            "Acme earnings cut spooks investors amid recession",
+            "Beta cuts earnings outlook as inflation persists",
+            "Gamma slashes earnings forecast on tariff risks",
+        ])
+        action, _ = _sentiment_shift(headlines)
+        assert action == "SELL"
+
+    def test_production_cut_is_negative_or_hold(self):
+        """'Production cut' — generally bearish for the producer."""
+        headlines = _make_headlines([
+            "Acme production cut shrinks output amid recession",
+            "Beta announces production cut citing inflation",
+            "Gamma production cut as tariff pressure mounts",
+        ])
+        action, _ = _sentiment_shift(headlines)
+        # Should NOT be BUY (the bare "cut" bug previously classified it positive).
+        assert action != "BUY", (
+            f"'production cut' classified as BUY (action={action}); "
+            "the bare 'cut' default must not flip these to bullish."
+        )
+
 
 class TestSourceWeightVote:
     def test_credible_negative_sells(self):

@@ -247,20 +247,50 @@ def _sentiment_shift(headlines: list[dict]) -> tuple[str, dict]:
     """
     pos = 0
     neg = 0
+    # SM-P1-1 (2026-05-02 adversarial follow-ups): the bare "cut" keyword
+    # used to default to POSITIVE when no specific phrase matched, which
+    # incorrectly classified "dividend cut", "earnings cut", "production cut",
+    # "forecast cut", "salary cut", etc. as bullish. The fix:
+    #   - Whitelist the small set of "cut" phrases that ARE bullish
+    #     ("rate cut" = central bank easing, "tax cut" = fiscal stimulus).
+    #   - Blacklist the common bearish "cut" phrases explicitly.
+    #   - Treat any unmatched "cut" as bearish (default neg) — empirically
+    #     "cut" in finance headlines almost always means cost/dividend/
+    #     earnings/forecast cuts which are bearish.
+    _BULLISH_CUT_PHRASES = ("rate cut", "tax cut")
+    _BEARISH_CUT_PHRASES = (
+        "guidance cut", "dividend cut", "earnings cut", "forecast cut",
+        "outlook cut", "production cut", "salary cut", "wage cut",
+        "job cut", "jobs cut", "workforce cut", "budget cut", "spending cut",
+        "cuts earnings", "cuts dividend", "cuts guidance", "cuts forecast",
+        "cuts outlook", "cuts production", "slashes earnings",
+        "slashes dividend", "slashes guidance", "slashes forecast",
+    )
+    _POSITIVE_KEYWORDS = (
+        "beat", "upgrade", "approval", "approved", "raise", "buyback", "split",
+    )
     for h in headlines:
         title = h.get("title", "").lower()
         sev = keyword_severity(h.get("title", ""))
         if sev != "normal":
-            # Check direction
-            if any(kw in title for kw in ("beat", "upgrade", "approval", "approved",
-                                           "raise", "buyback", "split", "cut")):
-                # "rate cut" is positive for markets
-                if "rate cut" in title:
-                    pos += 1
-                elif "guidance cut" in title:
-                    neg += 1
-                else:
-                    pos += 1
+            # Check for explicit positive phrases first
+            has_positive = any(kw in title for kw in _POSITIVE_KEYWORDS)
+            has_bullish_cut = any(p in title for p in _BULLISH_CUT_PHRASES)
+            has_bearish_cut = any(p in title for p in _BEARISH_CUT_PHRASES)
+            has_bare_cut = "cut" in title
+
+            if has_bearish_cut:
+                # Bearish "cut" phrase wins even if a generic positive
+                # keyword also appears (e.g., "Acme dividend cut as upgrade
+                # missed expectations" — the cut is the lead item).
+                neg += 1
+            elif has_positive or has_bullish_cut:
+                pos += 1
+            elif has_bare_cut:
+                # Unmatched "cut" — default to bearish. In financial
+                # headlines, bare "cut" overwhelmingly refers to cost /
+                # capacity / staff / dividend cuts which are bearish.
+                neg += 1
             else:
                 neg += 1
 

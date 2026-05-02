@@ -60,10 +60,45 @@ def _compute_obv(close: pd.Series, volume: pd.Series) -> tuple[pd.Series, pd.Ser
 
 def _compute_vwap(high: pd.Series, low: pd.Series, close: pd.Series,
                   volume: pd.Series) -> pd.Series:
-    """Session VWAP: cumulative(volume * typical_price) / cumulative(volume)."""
+    """Session VWAP: cumulative(volume * typical_price) / cumulative(volume),
+    RESET at session boundaries (00:00 UTC).
+
+    P1-4 (2026-05-02 adversarial follow-ups): the previous implementation
+    cumulated over the entire dataframe with no session reset, which made
+    the VWAP a "lifetime" average that drifted further from intraday price
+    each day. A pure session VWAP must reset every UTC midnight so the
+    intraday signal stays responsive.
+
+    Crypto/metals trade 24/7 with the convention that the daily session
+    boundary is 00:00 UTC. US stocks have a separate convention (13:30 UTC
+    open) but this module is primarily volume-flow on hourly+ bars where
+    the daily-aligned reset is the right granularity for both.
+
+    Falls back to the lifetime-cumulative behavior when the index is not
+    datetime-like (no crash, no log spam — that path is exercised only by
+    tests/synthetic data).
+    """
     typical_price = (high + low + close) / 3.0
-    cum_vol = volume.cumsum()
-    cum_vp = (volume * typical_price).cumsum()
+    vp = volume * typical_price
+
+    # Build a per-bar session id from the index date. groupby+cumsum gives
+    # us cumulative-within-session sums in a single vectorized pass.
+    idx = high.index
+    if isinstance(idx, pd.DatetimeIndex):
+        # tz-aware: normalize to UTC so the session boundary is consistent.
+        # tz-naive: assume UTC (or at least daily-aligned) — extract date directly.
+        if idx.tz is not None:
+            session_id = idx.tz_convert("UTC").date
+        else:
+            session_id = idx.date
+        session_id = pd.Index(session_id)
+        cum_vol = volume.groupby(session_id).cumsum()
+        cum_vp = vp.groupby(session_id).cumsum()
+    else:
+        # Non-datetime index — fall back to the lifetime cumulative behavior.
+        cum_vol = volume.cumsum()
+        cum_vp = vp.cumsum()
+
     # Avoid division by zero
     vwap = cum_vp / cum_vol.replace(0, np.nan)
     return _safe_series(vwap)
