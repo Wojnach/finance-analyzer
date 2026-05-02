@@ -2193,14 +2193,20 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Correlation penalty: secondary signals in a group get reduced weight
         if signal_name in penalized_signals:
             weight *= penalized_signals[signal_name]
-        # Directional bias penalty: signals with extreme BUY/SELL bias get
-        # an additional penalty beyond normalized_weight's built-in bias_penalty.
-        # This catches cases where a signal always votes one direction and its
-        # "accuracy" merely reflects market drift rather than genuine edge.
+        # Directional bias penalty (2026-05-02 research): signals with extreme
+        # BUY/SELL bias get penalized ONLY when voting in their bias direction.
+        # Contrarian votes (rare, high-value) keep full weight.
+        # E.g., calendar is 100% BUY — its BUY votes get 0.5x, but a rare
+        # SELL (if it ever emits one) keeps 1.0x because that's genuinely
+        # informative. Previous version penalized ALL votes equally.
         signal_bias = act_data.get("bias", 0.0)
         signal_samples = act_data.get("samples", 0)
         if signal_samples >= _BIAS_MIN_ACTIVE and signal_bias > _BIAS_THRESHOLD:
-            weight *= _BIAS_PENALTY
+            buy_rate = act_data.get("buy_rate", 0.0)
+            sell_rate = act_data.get("sell_rate", 0.0)
+            bias_direction = "BUY" if buy_rate >= sell_rate else "SELL"
+            if vote == bias_direction:
+                weight *= _BIAS_PENALTY
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":

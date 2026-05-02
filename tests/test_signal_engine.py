@@ -151,38 +151,125 @@ class TestCorrelationGroups:
 
 class TestDirectionalBiasPenalty:
 
-    def test_extreme_bias_reduces_weight(self):
-        """Signals with bias > 85% should get _BIAS_PENALTY applied."""
+    def test_extreme_bias_reduces_in_bias_weight(self):
+        """Signals with bias > 85% should get _BIAS_PENALTY when voting WITH bias."""
         from portfolio.signal_engine import _weighted_consensus
 
         votes = {"rsi": "BUY", "calendar": "BUY"}
         accuracy_data = {
-            "rsi": {"accuracy": 0.55, "total": 100},
-            "calendar": {"accuracy": 0.60, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100,
+                    "buy_accuracy": 0.55, "total_buy": 50},
+            "calendar": {"accuracy": 0.60, "total": 100,
+                         "buy_accuracy": 0.60, "total_buy": 50},
         }
-        # calendar has extreme bias (>85%), rsi does not
+        # calendar has extreme BUY bias (>85%), rsi does not
         activation_rates = {
             "rsi": {"bias": 0.1, "samples": 100, "normalized_weight": 1.0,
-                    "activation_rate": 0.3},
+                    "activation_rate": 0.3, "buy_rate": 0.15, "sell_rate": 0.15},
             "calendar": {"bias": 0.95, "samples": 100, "normalized_weight": 0.25,
-                         "activation_rate": 0.08},
+                         "activation_rate": 0.08, "buy_rate": 0.08, "sell_rate": 0.0},
         }
         result = _weighted_consensus(
             votes, accuracy_data, "ranging",
             activation_rates=activation_rates,
         )
-        # Both BUY → should still return BUY
+        # Both BUY → should still return BUY (calendar penalized but still BUY)
         assert result[0] == "BUY"
+
+    def test_contrarian_vote_not_penalized(self):
+        """BUY-biased signal voting SELL (contrarian) keeps full weight."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        # Use "unknown" regime to avoid REGIME_WEIGHTS confounding
+        # Two signals with equal accuracy — calendar SELL is contrarian
+        accuracy_data = {
+            "calendar": {"accuracy": 0.60, "total": 100,
+                         "sell_accuracy": 0.60, "total_sell": 50},
+            "rsi": {"accuracy": 0.60, "total": 100,
+                    "buy_accuracy": 0.60, "total_buy": 50},
+        }
+        activation_rates = {
+            "calendar": {"bias": 0.95, "samples": 100, "normalized_weight": 1.0,
+                         "activation_rate": 0.08, "buy_rate": 0.08, "sell_rate": 0.0},
+            "rsi": {"bias": 0.1, "samples": 100, "normalized_weight": 1.0,
+                    "activation_rate": 0.3, "buy_rate": 0.15, "sell_rate": 0.15},
+        }
+        # calendar SELL (contrarian) vs rsi BUY — equal accuracy, equal norm_weight
+        # With direction-aware penalty: calendar NOT penalized → equal weights → HOLD
+        # Old behavior: calendar penalized regardless → rsi BUY wins → BUY
+        votes = {"calendar": "SELL", "rsi": "BUY"}
+        result = _weighted_consensus(
+            votes, accuracy_data, "unknown",
+            activation_rates=activation_rates,
+        )
+        assert result[0] == "HOLD", (
+            f"Contrarian SELL from BUY-biased signal should keep full weight "
+            f"(equal to opponent), producing HOLD — got {result[0]}"
+        )
+
+    def test_in_bias_vote_penalized_loses_to_equal_opponent(self):
+        """BUY-biased signal voting BUY (in-bias) gets penalized → opponent wins."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        accuracy_data = {
+            "calendar": {"accuracy": 0.60, "total": 100,
+                         "buy_accuracy": 0.60, "total_buy": 50},
+            "rsi": {"accuracy": 0.60, "total": 100,
+                    "sell_accuracy": 0.60, "total_sell": 50},
+        }
+        activation_rates = {
+            "calendar": {"bias": 0.95, "samples": 100, "normalized_weight": 1.0,
+                         "activation_rate": 0.08, "buy_rate": 0.08, "sell_rate": 0.0},
+            "rsi": {"bias": 0.1, "samples": 100, "normalized_weight": 1.0,
+                    "activation_rate": 0.3, "buy_rate": 0.15, "sell_rate": 0.15},
+        }
+        # calendar BUY (in-bias → penalized 0.5x) vs rsi SELL (full weight)
+        # calendar weight = 0.60 * 0.5 = 0.30, rsi weight = 0.60 → SELL wins
+        votes = {"calendar": "BUY", "rsi": "SELL"}
+        result = _weighted_consensus(
+            votes, accuracy_data, "unknown",
+            activation_rates=activation_rates,
+        )
+        assert result[0] == "SELL", (
+            f"In-bias BUY from BUY-biased signal should be penalized, "
+            f"letting equal-accuracy opponent win — got {result[0]}"
+        )
+
+    def test_sell_biased_contrarian_buy_not_penalized(self):
+        """SELL-biased signal voting BUY (contrarian) keeps full weight."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        accuracy_data = {
+            "news_event": {"accuracy": 0.60, "total": 100,
+                           "buy_accuracy": 0.60, "total_buy": 50},
+            "rsi": {"accuracy": 0.60, "total": 100,
+                    "sell_accuracy": 0.60, "total_sell": 50},
+        }
+        activation_rates = {
+            "news_event": {"bias": 0.99, "samples": 100, "normalized_weight": 1.0,
+                           "activation_rate": 0.05, "buy_rate": 0.0, "sell_rate": 0.05},
+            "rsi": {"bias": 0.1, "samples": 100, "normalized_weight": 1.0,
+                    "activation_rate": 0.3, "buy_rate": 0.15, "sell_rate": 0.15},
+        }
+        # news_event BUY (contrarian) vs rsi SELL — equal accuracy
+        # Contrarian not penalized → HOLD
+        votes = {"news_event": "BUY", "rsi": "SELL"}
+        result = _weighted_consensus(
+            votes, accuracy_data, "unknown",
+            activation_rates=activation_rates,
+        )
+        assert result[0] == "HOLD"
 
     def test_no_penalty_below_threshold(self):
         """Signals with bias <= 85% should NOT get extra penalty."""
         from portfolio.signal_engine import _weighted_consensus
 
         votes = {"rsi": "BUY"}
-        accuracy_data = {"rsi": {"accuracy": 0.55, "total": 100}}
+        accuracy_data = {"rsi": {"accuracy": 0.55, "total": 100,
+                                 "buy_accuracy": 0.55, "total_buy": 50}}
         activation_rates = {
             "rsi": {"bias": 0.5, "samples": 100, "normalized_weight": 1.0,
-                    "activation_rate": 0.3},
+                    "activation_rate": 0.3, "buy_rate": 0.15, "sell_rate": 0.15},
         }
         # With bias=0.5 (< 0.85), no extra penalty should apply
         result = _weighted_consensus(
@@ -196,10 +283,12 @@ class TestDirectionalBiasPenalty:
         from portfolio.signal_engine import _BIAS_MIN_ACTIVE, _weighted_consensus
 
         votes = {"rsi": "BUY"}
-        accuracy_data = {"rsi": {"accuracy": 0.55, "total": 100}}
+        accuracy_data = {"rsi": {"accuracy": 0.55, "total": 100,
+                                 "buy_accuracy": 0.55, "total_buy": 50}}
         activation_rates = {
             "rsi": {"bias": 0.99, "samples": _BIAS_MIN_ACTIVE - 1,
-                    "normalized_weight": 1.0, "activation_rate": 0.3},
+                    "normalized_weight": 1.0, "activation_rate": 0.3,
+                    "buy_rate": 0.28, "sell_rate": 0.02},
         }
         result = _weighted_consensus(
             votes, accuracy_data, "ranging",
