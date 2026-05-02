@@ -17,7 +17,7 @@ def client():
     """
     from dashboard.app import app
     app.config["TESTING"] = True
-    with patch("dashboard.app._get_dashboard_token", return_value=None), app.test_client() as c:
+    with patch("dashboard.auth._get_dashboard_token", return_value=None), app.test_client() as c:
         yield c
 
 

@@ -39,21 +39,27 @@ def fake_house_root(tmp_path: Path) -> Path:
     slug_b = "lagenhet-3rum-test-slug-b-456"
     (runs / "_manifest.json").write_text(json.dumps([slug_a, slug_b]))
 
-    # _summary.thesis.md (preferred over .md)
+    # _summary.thesis.md (preferred over .md). Explicit utf-8 encoding —
+    # without it Windows writes cp1252 by default, which then fails the
+    # route's read_text(encoding="utf-8") on the non-ASCII characters
+    # (`—`, `friköpt`).
     (runs / "_summary.thesis.md").write_text(
         "# /findapartments — thesis-weighted ranking\n\n"
         "| Rank | Address | Tenure |\n|---|---|---|\n"
-        "| 1 | Test Address 1 | friköpt |\n"
+        "| 1 | Test Address 1 | friköpt |\n",
+        encoding="utf-8",
     )
 
     # Per-candidate reports
     (runs / f"{slug_a}.thesis.md").write_text(
         "# #1: Test Address — composite 66\n\n"
-        "## Thesis fit\n\n- friköpt + skuldfri\n"
+        "## Thesis fit\n\n- friköpt + skuldfri\n",
+        encoding="utf-8",
     )
     # Slug B has only the legacy non-thesis report; verify fallback works.
     (runs / f"{slug_b}.md").write_text(
-        "# Test Address B\n\nLegacy report.\n"
+        "# Test Address B\n\nLegacy report.\n",
+        encoding="utf-8",
     )
 
     # _raw/<slug>/data.json
@@ -82,7 +88,12 @@ def client(fake_house_root: Path):
     def fake_get_config():
         return {"dashboard_token": _TOKEN, "house_root": str(fake_house_root)}
 
-    with patch("dashboard.app._get_config", fake_get_config), \
+    # Patch auth's _get_config so require_auth's token check uses the fake;
+    # patch house_blueprint's _get_config so route handlers (e.g. _house_root)
+    # also see the fake. Both are necessary after the 2026-05-02 refactor that
+    # split auth out of dashboard.app — neither module looks at app.py's
+    # _get_config anymore.
+    with patch("dashboard.auth._get_config", fake_get_config), \
          patch("dashboard.house_blueprint._get_config", fake_get_config), \
          app.test_client() as c:
         yield c

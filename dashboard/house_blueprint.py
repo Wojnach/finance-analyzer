@@ -41,7 +41,7 @@ from werkzeug.utils import secure_filename
 
 import markdown as md_lib  # type: ignore[import-not-found]
 
-from dashboard.app import _get_config, require_auth
+from dashboard.auth import _get_config, require_auth
 
 bp = Blueprint("house", __name__, url_prefix="/house")
 

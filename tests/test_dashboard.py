@@ -92,27 +92,27 @@ class TestReadJsonl:
 class TestAuth:
     def test_no_token_configured_allows_access(self, client, tmp_data):
         """No dashboard_token in config = open access."""
-        with patch("dashboard.app._get_dashboard_token", return_value=None):
+        with patch("dashboard.auth._get_dashboard_token", return_value=None):
             resp = client.get("/api/invocations")
             assert resp.status_code == 200
 
     def test_valid_query_token(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret123"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret123"):
             resp = client.get("/api/invocations?token=secret123")
             assert resp.status_code == 200
 
     def test_invalid_query_token(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret123"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret123"):
             resp = client.get("/api/invocations?token=wrong")
             assert resp.status_code == 401
 
     def test_missing_token_returns_401(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret123"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret123"):
             resp = client.get("/api/invocations")
             assert resp.status_code == 401
 
     def test_valid_bearer_header(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret123"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret123"):
             resp = client.get(
                 "/api/invocations",
                 headers={"Authorization": "Bearer secret123"},
@@ -120,7 +120,7 @@ class TestAuth:
             assert resp.status_code == 200
 
     def test_invalid_bearer_header(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret123"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret123"):
             resp = client.get(
                 "/api/invocations",
                 headers={"Authorization": "Bearer wrong"},
@@ -132,7 +132,7 @@ class TestCORS:
     """BUG-230: CORS must not use wildcard origin."""
 
     def test_allowed_origin_reflected(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value=None):
+        with patch("dashboard.auth._get_dashboard_token", return_value=None):
             resp = client.get(
                 "/api/invocations",
                 headers={"Origin": "http://localhost:5055"},
@@ -140,7 +140,7 @@ class TestCORS:
             assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:5055"
 
     def test_disallowed_origin_not_reflected(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value=None):
+        with patch("dashboard.auth._get_dashboard_token", return_value=None):
             resp = client.get(
                 "/api/invocations",
                 headers={"Origin": "http://evil.example.com"},
@@ -148,12 +148,12 @@ class TestCORS:
             assert "Access-Control-Allow-Origin" not in resp.headers
 
     def test_no_origin_no_cors_header(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value=None):
+        with patch("dashboard.auth._get_dashboard_token", return_value=None):
             resp = client.get("/api/invocations")
             assert "Access-Control-Allow-Origin" not in resp.headers
 
     def test_credentials_header_set_false(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value=None):
+        with patch("dashboard.auth._get_dashboard_token", return_value=None):
             resp = client.get(
                 "/api/invocations",
                 headers={"Origin": "http://localhost:5055"},
@@ -168,7 +168,11 @@ class TestCORS:
 
 class TestIndex:
     def test_index_returns_html(self, client):
-        resp = client.get("/")
+        # Bypass auth for the content check — index is gated by require_auth
+        # since 2026-04-30 (commit 27398d44 closed the /static/* leak).
+        # Auth behavior is tested separately in TestAuth.
+        with patch("dashboard.auth._get_dashboard_token", return_value=None):
+            resp = client.get("/")
         assert resp.status_code == 200
         assert b"html" in resp.data.lower()
 
@@ -179,7 +183,7 @@ class TestIndex:
 
 
 def _no_auth():
-    return patch("dashboard.app._get_dashboard_token", return_value=None)
+    return patch("dashboard.auth._get_dashboard_token", return_value=None)
 
 
 class TestApiSummary:
@@ -581,7 +585,7 @@ class TestApiMetalsAccuracy:
         assert data["stats"] == {}
 
     def test_requires_auth_when_configured(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret"):
             resp = client.get("/api/metals-accuracy")
         assert resp.status_code == 401
 
@@ -1093,7 +1097,7 @@ class TestApiWarrants:
         assert result["holdings"] == {}
 
     def test_requires_auth_when_configured(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret"):
             resp = client.get("/api/warrants")
         assert resp.status_code == 401
 
@@ -1102,7 +1106,7 @@ class TestApiWarrants:
             json.dumps({"holdings": {"X": {"units": 1}}, "transactions": []}),
             encoding="utf-8",
         )
-        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret"):
             resp = client.get("/api/warrants?token=secret")
         assert resp.status_code == 200
 
@@ -1155,7 +1159,7 @@ class TestApiRisk:
         assert result["monte_carlo"] == {}
 
     def test_requires_auth_when_configured(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret"):
             resp = client.get("/api/risk")
         assert resp.status_code == 401
 
@@ -1229,13 +1233,13 @@ class TestApiMetals:
         assert data["decisions"][2]["ts"] == "2026-03-02T10:00:00+00:00"
 
     def test_requires_auth_when_configured(self, client, tmp_data):
-        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret"):
             resp = client.get("/api/metals")
         assert resp.status_code == 401
 
     def test_auth_with_token(self, client, tmp_data):
         (tmp_data / "metals_context.json").write_text('{"positions": {}}', encoding="utf-8")
-        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+        with patch("dashboard.auth._get_dashboard_token", return_value="secret"):
             resp = client.get("/api/metals?token=secret")
         assert resp.status_code == 200
 

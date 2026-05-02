@@ -663,108 +663,22 @@ def _build_local_llm_trend_point(entry, ticker=None):
 # Token authentication middleware
 # ---------------------------------------------------------------------------
 
-# Cookie auth (added 2026-04-30, rolling refresh added 2026-05-02): the
-# dashboard is publicly reachable via the Cloudflare tunnel at raanman.lol,
-# so putting `?token=` in every bookmark is long and ugly. Solution: when
-# any valid token arrives (query, cookie, or bearer), set/refresh a long-
-# lived HTTP-only cookie on the response. Combined with rolling refresh on
-# every authenticated request, the cookie functionally never expires for an
-# active user — they re-auth only if they take a >COOKIE_MAX_AGE break, lose
-# the cookie store, or switch browsers.
-#
-# 365 days is intentionally just under Chrome's silent 400-day max-age cap
-# (introduced 2022); any longer would be clamped by the browser anyway.
-COOKIE_NAME = "pf_dashboard_token"
-COOKIE_MAX_AGE = 365 * 24 * 3600  # 1 year, refreshed on every authed request
-
-
-def _get_dashboard_token():
-    """Return the configured dashboard_token, or None if not set."""
-    cfg = _get_config()
-    return cfg.get("dashboard_token") or None
-
-
-def _refresh_cookie(response, token):
-    """Refresh the auth cookie's expiry on `response`.
-
-    Called on every successfully-authenticated request so the cookie's
-    1-year expiry slides forward — an active user never re-auths.
-    """
-    response.set_cookie(
-        COOKIE_NAME,
-        token,
-        max_age=COOKIE_MAX_AGE,
-        httponly=True,
-        secure=True,
-        samesite="Lax",
-    )
-    return response
-
-
-def require_auth(f):
-    """Decorator: check Cloudflare Access header, cookie, query, or bearer.
-
-    Validation order:
-      0. Cf-Access-Authenticated-User-Email header — Cloudflare Access has
-         already authenticated and policy-checked this request. Trust it.
-      1. Cookie (`pf_dashboard_token`) — for repeat visits.
-      2. ?token= query param — for first-visit-from-a-new-browser.
-      3. Authorization: Bearer header — for CLI / script clients.
-
-    On any successful path 0-2, refreshes the cookie's 1-year expiry so it
-    slides forward — an active user effectively never re-authenticates.
-
-    If no dashboard_token is configured, access is allowed (backwards
-    compatible). Returns 401 for invalid/missing tokens.
-    """
-    @functools.wraps(f)
-    def decorated(*args, **kwargs):
-        expected = _get_dashboard_token()
-        if expected is None:
-            return f(*args, **kwargs)
-
-        # 0. Cloudflare Access — added 2026-05-02. CF strips any inbound
-        # Cf-Access-* headers at its edge and re-injects them only after a
-        # successful Access policy evaluation, so seeing this header means
-        # the request went through CF Access AND matched the application
-        # policy. Trust it as proof of identity. Spoofing it requires
-        # bypassing CF Access entirely, which our DNS + tunnel topology
-        # doesn't allow from the public internet.
-        if request.headers.get("Cf-Access-Authenticated-User-Email"):
-            return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
-
-        # 1. Cookie — preferred fallback path. Refresh expiry so the cookie
-        # doesn't decay for users who visit regularly without going through
-        # Cloudflare Access (e.g. localhost, or if CF Access is bypassed).
-        cookie_token = request.cookies.get(COOKIE_NAME)
-        if cookie_token and hmac.compare_digest(cookie_token, expected):
-            return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
-
-        # 2. Query param — sets the cookie so the URL stays clean next time
-        token = request.args.get("token")
-        if token and hmac.compare_digest(token, expected):
-            return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
-
-        # 3. Authorization: Bearer header (CLI / script clients — no cookie
-        # since these clients usually don't carry one across requests anyway)
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            bearer_token = auth_header[7:].strip()
-            if hmac.compare_digest(bearer_token, expected):
-                return f(*args, **kwargs)
-
-        return jsonify({
-            "error": "Unauthorized",
-            "message": (
-                "Visit /?token=YOUR_TOKEN once to set a 1-year rolling auth "
-                "cookie. Replace YOUR_TOKEN with the dashboard_token from "
-                "config.json. (If you arrived here through Cloudflare Access, "
-                "this means Access didn't inject its identity header — "
-                "contact the app owner.)"
-            ),
-        }), 401
-
-    return decorated
+# Auth + cookie machinery moved to dashboard/auth.py on 2026-05-02 to break
+# the circular import with dashboard/house_blueprint.py. We re-import here
+# so existing references (`require_auth`, `COOKIE_NAME`, etc.) keep working
+# inside this module's body, and so any lingering external code that does
+# `from dashboard.app import require_auth` still resolves. Tests should
+# patch `dashboard.auth.*` directly — patches on `dashboard.app.*` will not
+# take effect since require_auth resolves names via dashboard.auth's
+# module globals.
+from dashboard.auth import (  # noqa: E402
+    COOKIE_MAX_AGE,
+    COOKIE_NAME,
+    _get_config as _auth_get_config,  # noqa: F401 — kept for compat
+    _get_dashboard_token,
+    _refresh_cookie,
+    require_auth,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1514,21 +1428,14 @@ def api_market_health():
 # ---------------------------------------------------------------------------
 # Blueprint: /house — read-only viewer over the househunting project
 # (data/findapartments runs + innerstad heatmap). Reuses pf_dashboard_token
-# auth. Path roots come from config.json[house_root]. See
-# dashboard/house_blueprint.py for routes.
+# auth via dashboard.auth.require_auth. Path roots come from
+# config.json[house_root]. See dashboard/house_blueprint.py for routes.
 #
-# Alias __main__ as dashboard.app in sys.modules BEFORE importing the
-# blueprint. When app.py is run as __main__ (PF-Dashboard scheduled task),
-# Python doesn't register it under `dashboard.app`, so house_blueprint's
-# `from dashboard.app import ...` triggers a fresh import of this file,
-# recursing until ImportError. Aliasing breaks the circle. Discovered
-# 2026-05-02 after a markdown package + house_blueprint were added in a
-# concurrent session and the dashboard wouldn't start as a service.
+# House_blueprint imports `_get_config` and `require_auth` from
+# dashboard.auth (NOT dashboard.app), so importing it here at module-init
+# time no longer causes a circular import — auth.py has no back-reference
+# to app.py. The sys.modules alias hack added 2026-05-02 has been removed.
 # ---------------------------------------------------------------------------
-import sys as _sys  # noqa: E402
-
-_sys.modules.setdefault("dashboard.app", _sys.modules[__name__])
-
 from dashboard.house_blueprint import bp as _house_bp  # noqa: E402
 
 app.register_blueprint(_house_bp)
