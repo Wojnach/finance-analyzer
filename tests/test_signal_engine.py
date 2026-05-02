@@ -1009,6 +1009,40 @@ class TestMSTRSignalBlacklist:
         assert "credit_spread_risk" in _TICKER_DISABLED_SIGNALS["MSTR"]
 
 
+class TestMay2BlacklistExpansion:
+    """2026-05-02 after-hours: expanded per-ticker blacklists based on
+    signal_log.db accuracy audit (all-time 1d, large samples).
+    """
+
+    def test_xag_sentiment_disabled(self):
+        # sentiment 33.3% 1d on XAG-USD (285 sam), 94% BUY-only.
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "sentiment" in _TICKER_DISABLED_SIGNALS["XAG-USD"]
+
+    def test_mstr_statistical_jump_regime_disabled(self):
+        # statistical_jump_regime 27.0% 1d on MSTR (74 sam).
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "statistical_jump_regime" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_realized_skewness_disabled(self):
+        # realized_skewness 36.0% 1d on MSTR (50 sam).
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "realized_skewness" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_macro_regime_disabled_at_1d(self):
+        # macro_regime 40.3% 1d on MSTR (1475 sam) — moved to 1d-only
+        # to preserve good 3h performance.
+        from portfolio.signal_engine import _get_horizon_disabled_signals
+        disabled = _get_horizon_disabled_signals("MSTR", "1d")
+        assert "macro_regime" in disabled
+
+    def test_mstr_macro_regime_not_disabled_at_3h(self):
+        # macro_regime kept at 3h for MSTR (good short-horizon accuracy).
+        from portfolio.signal_engine import _get_horizon_disabled_signals
+        disabled = _get_horizon_disabled_signals("MSTR", "3h")
+        assert "macro_regime" not in disabled
+
+
 class TestCorrelationPenaltyMultiGroup:
     """Signals in multiple correlation groups get the harshest penalty."""
 

@@ -411,6 +411,7 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
                               "metals_cross_asset", "smart_money",
                               "structure",     # 29.9% 1d (723 sam)
                               "ema",           # 14.7% 1d (34 sam)
+                              "sentiment",     # 33.3% 1d (285 sam), 94% BUY-only
                               }),
         "XAU-USD": frozenset({"ministral", "metals_cross_asset",
                               "structure",           # 30.4% 1d (827 sam)
@@ -419,7 +420,10 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
                               }),
         # 2026-04-16: trimmed from 7 to 2 (Batch 1). Full history in commit
         # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
-        "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
+        "MSTR": frozenset({"claude_fundamental", "credit_spread_risk",
+                          "statistical_jump_regime",  # 27.0% 1d (74 sam)
+                          "realized_skewness",        # 36.0% 1d (50 sam)
+                          }),
     },
     # 2026-04-16 after-hours audit: signals that PASS global gate (>0.47)
     # but FAIL per-ticker (<0.45 with >=50 samples).
@@ -507,6 +511,7 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
                            "heikin_ashi",         # 38.2% 1d_recent (709 sam)
                            "smart_money",         # 34.2% 1d_recent (155 sam)
                            "structure",           # 33.1% 1d_recent (758 sam)
+                           "macro_regime",        # 40.3% 1d (1475 sam) — moved from _default to preserve 3h
                            }),
     },
     "3d": {},
