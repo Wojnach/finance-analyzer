@@ -160,3 +160,45 @@ After both fixes, run the full test suite parallel to verify no regression:
 One commit per finding:
 - `fix(agent_invocation): P1-3 — auth-scan on Layer 2 timeout-kill path`
 - `fix(avanza_orders): P1-10 — per-order CONFIRM nonce eliminates race`
+
+## Outcome (2026-05-02)
+
+| # | Finding | Status | Commit |
+|---|---------|--------|--------|
+| 1 | P1-3 Layer 2 timeout-kill path missing auth-scan | FIXED + 4 tests + helper extracted, completion-path call site dedupe'd | `5682dca0` |
+| 2 | P1-10 CONFIRM races (3 of them) | FIXED + 16 tests added, 12 existing tests adapted | `513645cb` |
+| 3 | (Codex-style self-review) CONFIRM word boundary | FIXED + 1 test (`confirmed`/`confirms`/`confirmation` no longer match) | `7e2a4bb9` |
+
+Total: 21 new tests (16 P1-10, 4 P1-3, 1 typo-defense), 12 existing
+tests adapted from bool to set return type, 0 production regressions.
+
+### Key design decisions
+
+- **Did not route Layer 2 through `claude_gate.invoke_claude`.** That
+  helper is blocking with a timeout; Layer 2 must be non-blocking so the
+  60s loop can keep ticking. The MOST important gate signal — auth-failure
+  detection — is now wired on every Layer 2 exit path (completion AND
+  timeout-kill), which captures the silent-auth-outage failure mode that
+  the gate was originally designed for.
+- **Did not break existing CONFIRM UX.** Bare CONFIRM still works for
+  legacy in-flight orders (those without a `confirm_token` field). New
+  orders MUST be confirmed by their specific token, which the user reads
+  from the same Telegram message that prompted the confirmation. No new
+  out-of-band lookup required.
+- **Word-boundary CONFIRM regex.** Discovered during my own code review
+  that `confirmed`/`confirms` parse as `confirm` + `ed`/`s` and `ed`
+  IS valid hex. Tightened parser to `^confirm(?:\s+|$)` so a chat message
+  like "I confirmed by my broker" can never register CONFIRM intent.
+- **Token entropy: 24 bits = 16M values.** Birthday-bound for 5 in-flight
+  orders is ~7.5e-7 collision rate. 6 hex chars is short enough to type
+  on a phone, long enough that typos go to "unknown token" not "wrong
+  order".
+
+### Test status
+
+- 149/149 tests pass in touched files (`test_avanza_orders.py`,
+  `test_agent_invocation.py`, `test_claude_gate.py`,
+  `test_auth_failure_bypass.py`).
+- Full suite: 8523 passed, 59 pre-existing xdist isolation failures
+  (unrelated; documented in `docs/TESTING.md`). None of the failures
+  involve the files I touched.
