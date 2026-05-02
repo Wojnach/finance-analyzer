@@ -9,6 +9,7 @@ joblib
 
 # Web Dashboard
 flask
+markdown  # used by dashboard/house_blueprint.py for the /house viewer
 
 # Testing
 pytest
