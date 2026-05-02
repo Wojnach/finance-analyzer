@@ -814,6 +814,28 @@ class TestCheckTelegramConfirmTokens:
         # 'xyz' is not valid hex — drop.
         assert result == set()
 
+    def test_confirms_typo_does_not_match_bare(self, tmp_data_dir):
+        """'CONFIRMS' (extra letter) MUST NOT be treated as bare CONFIRM.
+        Otherwise an unrelated message starting with 'confirm' would match
+        legacy orders. Defensive — typo plus accidental fat-finger could
+        execute real money."""
+        config = {"telegram": {"token": "fake-token", "chat_id": "123456"}}
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {"update_id": 100, "message": {"chat": {"id": 123456}, "text": "CONFIRMS"}},
+                {"update_id": 101, "message": {"chat": {"id": 123456}, "text": "confirmed"}},
+                {"update_id": 102, "message": {"chat": {"id": 123456}, "text": "confirmation"}},
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp):
+            result = mod._check_telegram_confirm(config)
+        # 'confirms' / 'confirmed' / 'confirmation' all parse to non-hex
+        # remainders ('s' / 'ed' / 'ation'); none should match bare.
+        assert result == set()
+
 
 class TestCheckPendingOrdersTokenMatching:
     """`check_pending_orders` must match the SPECIFIC order whose

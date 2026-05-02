@@ -51,6 +51,12 @@ _CONFIRM_TOKEN_HEX_CHARS = 6
 # typo) from accidentally confirming any order via the legacy bare-CONFIRM
 # path or matching a token-holding order.
 _HEX_TOKEN_RE = re.compile(r"^[0-9a-f]+$")
+# CONFIRM prefix matcher. Word boundary required because "confirmed" /
+# "confirms" / "confirmation" parse to "confirm" + a hex-valid suffix
+# ("ed", "s", "ation") which would silently match against legacy orders
+# or non-existent tokens. Anchored at start since the user is asked to
+# reply with "CONFIRM <token>" as the entire message.
+_CONFIRM_PREFIX_RE = re.compile(r"^confirm(?:\s+|$)")
 
 
 def _generate_confirm_token() -> str:
@@ -304,12 +310,16 @@ def _check_telegram_confirm(config: dict) -> set[str]:
 
         # P1-10 (2026-05-02): parse "CONFIRM <token>" or bare "CONFIRM".
         # Lowercase + collapse whitespace so user-typed variants normalize.
+        # Word-boundary match is critical here — without it, "confirmed"
+        # parses as "confirm" + "ed" and "ed" IS valid hex (defense vs an
+        # accidental "confirmed by my broker" message in the chat).
         text = (msg.get("text") or "").strip().lower()
-        if not text.startswith("confirm"):
+        m = _CONFIRM_PREFIX_RE.match(text)
+        if not m:
             continue
-        # Strip the leading "confirm" + any whitespace; what remains should
-        # be the token (possibly with extra whitespace) or empty for bare.
-        rest = text[len("confirm"):].strip()
+        # Anything after the matched prefix (which includes the word
+        # "confirm" + whitespace OR end-of-string) is the candidate.
+        rest = text[m.end():].strip()
         if not rest:
             # Bare CONFIRM — legacy backwards-compat path.
             found_tokens.add("")
