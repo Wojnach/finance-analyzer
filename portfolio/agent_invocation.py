@@ -190,6 +190,57 @@ def _load_guard_warnings():
     }
 
 
+def _build_decision_feedback(ticker, max_entries=5):
+    """Build recent-decision feedback for the trigger ticker.
+
+    Scans layer2_journal.jsonl (most-recent-first) for entries mentioning
+    *ticker* in the trigger string or the tickers dict.  Returns a formatted
+    block that Layer 2 can use to calibrate against its own prior calls, or
+    an empty string when no relevant history exists.
+
+    Token budget: ≤15 lines.  Never fails the invocation on error.
+    """
+    try:
+        entries = load_jsonl(JOURNAL_FILE)
+    except Exception:
+        return ""
+    if not entries:
+        return ""
+
+    relevant = []
+    for e in reversed(entries):  # most recent first
+        trigger = e.get("trigger", "")
+        tickers = e.get("tickers", {})
+        if ticker in trigger or ticker in tickers:
+            relevant.append(e)
+            if len(relevant) >= max_entries:
+                break
+
+    if not relevant:
+        return ""
+
+    lines = [f"[RECENT DECISIONS FOR {ticker}]"]
+    for e in relevant:
+        ts = e.get("ts", "?")[:16]
+        decisions = e.get("decisions", {})
+        prices = e.get("prices", {})
+        price = prices.get(ticker)
+
+        parts = []
+        for strat, d in decisions.items():
+            action = d.get("action", "HOLD")
+            parts.append(f"{strat}={action}")
+        action_str = ", ".join(parts) if parts else "?"
+        price_str = f"${price:,.2f}" if isinstance(price, (int, float)) else "?"
+        lines.append(f"  - {ts}: {action_str} @ {price_str}")
+
+    lines.append(
+        "  Review: were these decisions correct given current price? "
+        "Has the thesis changed?"
+    )
+    return "\n".join(lines)
+
+
 def _last_jsonl_ts(path):
     """Return the 'ts' value from the last entry of a JSONL file, or None.
 
@@ -641,6 +692,17 @@ def invoke_agent(reasons, tier=3):
     # check_overtrading_guards anyway.
     if _guard_context:
         prompt += "\n\n[TRADE GUARDS]" + _guard_context
+
+    # Decision feedback loop (2026-05-02 research): inject recent decisions
+    # for the trigger ticker so Layer 2 can see its own track record and
+    # calibrate (e.g., "I said SELL at $73 — price is now $75, was I wrong?").
+    try:
+        feedback_ticker = _extract_ticker(reasons)
+        _feedback = _build_decision_feedback(feedback_ticker)
+        if _feedback:
+            prompt += "\n\n" + _feedback
+    except Exception as e:
+        logger.debug("decision feedback failed (non-fatal): %s", e)
 
     max_turns = tier_cfg["max_turns"]
 

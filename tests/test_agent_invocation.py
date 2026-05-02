@@ -1665,3 +1665,119 @@ class TestKillOverrunAuthScan:
             ai._kill_overrun_agent()
 
         assert not crit_path.exists() or "auth_failure" not in crit_path.read_text("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Decision feedback loop (2026-05-02 research)
+# ---------------------------------------------------------------------------
+
+class TestDecisionFeedback:
+    """Tests for _build_decision_feedback()."""
+
+    def test_returns_empty_on_no_journal(self, tmp_path):
+        """No journal file → empty string."""
+        with patch.object(ai, "JOURNAL_FILE", tmp_path / "missing.jsonl"):
+            result = ai._build_decision_feedback("BTC-USD")
+        assert result == ""
+
+    def test_returns_empty_on_empty_journal(self, tmp_path):
+        """Empty journal → empty string."""
+        jf = tmp_path / "journal.jsonl"
+        jf.write_text("")
+        with patch.object(ai, "JOURNAL_FILE", jf):
+            result = ai._build_decision_feedback("BTC-USD")
+        assert result == ""
+
+    def test_returns_empty_when_no_matching_ticker(self, tmp_path):
+        """Journal exists but has no entries for the requested ticker."""
+        import json
+        jf = tmp_path / "journal.jsonl"
+        entry = {
+            "ts": "2026-05-01T12:00:00+00:00",
+            "trigger": "ETH-USD consensus BUY",
+            "tickers": {"ETH-USD": {"outlook": "bullish"}},
+            "decisions": {"patient": {"action": "BUY"}},
+            "prices": {"ETH-USD": 2500.0},
+        }
+        jf.write_text(json.dumps(entry) + "\n")
+        with patch.object(ai, "JOURNAL_FILE", jf):
+            result = ai._build_decision_feedback("XAG-USD")
+        assert result == ""
+
+    def test_formats_matching_entries(self, tmp_path):
+        """Entries mentioning the ticker appear in the feedback."""
+        import json
+        jf = tmp_path / "journal.jsonl"
+        entries = [
+            {
+                "ts": "2026-05-01T10:00:00+00:00",
+                "trigger": "BTC-USD consensus BUY",
+                "tickers": {"BTC-USD": {}},
+                "decisions": {
+                    "patient": {"action": "HOLD"},
+                    "bold": {"action": "BUY 5%"},
+                },
+                "prices": {"BTC-USD": 75000.0},
+            },
+            {
+                "ts": "2026-05-01T14:00:00+00:00",
+                "trigger": "BTC-USD flipped SELL",
+                "tickers": {"BTC-USD": {}},
+                "decisions": {
+                    "patient": {"action": "HOLD"},
+                    "bold": {"action": "SELL 50%"},
+                },
+                "prices": {"BTC-USD": 76000.0},
+            },
+        ]
+        jf.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+        with patch.object(ai, "JOURNAL_FILE", jf):
+            result = ai._build_decision_feedback("BTC-USD")
+        assert "[RECENT DECISIONS FOR BTC-USD]" in result
+        assert "$75,000.00" in result
+        assert "$76,000.00" in result
+        assert "bold=BUY 5%" in result
+        assert "bold=SELL 50%" in result
+
+    def test_limits_to_max_entries(self, tmp_path):
+        """Only the most recent max_entries are included."""
+        import json
+        jf = tmp_path / "journal.jsonl"
+        lines = []
+        for i in range(10):
+            lines.append(json.dumps({
+                "ts": f"2026-05-01T{i:02d}:00:00+00:00",
+                "trigger": "XAG-USD signal",
+                "tickers": {"XAG-USD": {}},
+                "decisions": {"patient": {"action": "HOLD"}},
+                "prices": {"XAG-USD": 70.0 + i},
+            }))
+        jf.write_text("\n".join(lines) + "\n")
+        with patch.object(ai, "JOURNAL_FILE", jf):
+            result = ai._build_decision_feedback("XAG-USD", max_entries=3)
+        # Should have header + 3 entries + review line = 5 lines
+        result_lines = [l for l in result.split("\n") if l.strip()]
+        assert len(result_lines) == 5
+        # Most recent entries (hours 9, 8, 7)
+        assert "$79.00" in result
+        assert "$78.00" in result
+        assert "$77.00" in result
+        # Older entry should NOT be present
+        assert "$70.00" not in result
+
+    def test_handles_missing_price_gracefully(self, tmp_path):
+        """Missing price for ticker → shows '?' instead of crashing."""
+        import json
+        jf = tmp_path / "journal.jsonl"
+        entry = {
+            "ts": "2026-05-01T12:00:00+00:00",
+            "trigger": "MSTR consensus SELL",
+            "tickers": {"MSTR": {}},
+            "decisions": {"patient": {"action": "SELL"}},
+            "prices": {},  # no price data
+        }
+        jf.write_text(json.dumps(entry) + "\n")
+        with patch.object(ai, "JOURNAL_FILE", jf):
+            result = ai._build_decision_feedback("MSTR")
+        assert "?" in result
+        assert "MSTR" in result
