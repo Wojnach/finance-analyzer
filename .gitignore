@@ -112,6 +112,36 @@ data/loop_out.txt
 data/loop_err.txt
 data/loop_err.log
 data/loop.log
+
+# Loop runtime artifacts (heartbeats, locks, per-process logs, swing
+# state). The catalogs (crypto_warrant_catalog.json, oil_warrant_catalog.json)
+# are deliberately tracked as committed scaffolds — runtime updates show
+# as "modified" so they're a deliberate choice to commit, not an accident.
+data/crypto_loop.heartbeat
+data/oil_loop.heartbeat
+data/crypto_loop_out.txt
+data/oil_loop_out.txt
+data/crypto_loop.lock
+data/oil_loop.lock
+data/crypto_swing_state.json
+data/oil_swing_state.json
+data/crypto_swing_decisions.jsonl
+data/oil_swing_decisions.jsonl
+data/crypto_swing_trades.jsonl
+data/oil_swing_trades.jsonl
+data/crypto_value_history.jsonl
+data/oil_value_history.jsonl
+data/crypto_signal_log.jsonl
+data/oil_signal_log.jsonl
+data/crypto_signal_outcomes.jsonl
+data/oil_signal_outcomes.jsonl
+data/crypto_risk.json
+data/oil_risk.json
+data/crypto_momentum_state.json
+data/oil_momentum_state.json
+data/loop_health_watchdog_state.json
+data/oil_loop_scorecard.json
+data/mstr_loop_scorecard.json
 data/backtest_klines_*.csv
 data/backtest_funding_*.csv
 data/_test_*
