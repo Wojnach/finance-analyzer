@@ -18,15 +18,15 @@ import * as router from "./router.js";
 import * as polling from "./polling.js";
 import { initTheme, toggleTheme } from "./theme.js";
 
-// ---- View imports (added by subsequent batches) -----------------------------
+// ---- View imports ---------------------------------------------------------
+// Each view module self-registers with router.register() on import.
+// Adding a view to the bottom-nav routes is just a one-line import here.
+//
 // Batch 4: views/home.js
-// Batch 5: views/decisions.js, views/decision-detail.js
-// Batch 6: views/signals.js
-// Batch 7: views/more.js, views/health.js, views/messages.js, views/settings.js
-// Batch 8: views/metals.js, views/golddigger.js, views/equity.js
-// As views register themselves with router.register(), they appear in the
-// bottom-nav routes. Until then, the router's "not implemented" fallback
-// (see router.js _handleChange) directs the user to /legacy.
+// Batch 5+: decisions, signals, more, etc.
+// Until a route is implemented, router.js renders a fallback that links to /legacy.
+
+import "./views/home.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
