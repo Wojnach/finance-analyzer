@@ -37,12 +37,18 @@ logger = logging.getLogger("loop_health")
 # they want tighter or looser bounds.
 STALE_THRESHOLD_SECONDS = 300
 
-# Map of loop_name -> heartbeat file path (relative to repo root). Add
-# more loops here when they grow heartbeat support (metals, main loop).
+# Map of loop_name -> heartbeat file path (relative to repo root). The
+# main loop (PF-DataLoop) is intentionally NOT here — it has its own
+# liveness mechanism via data/health_state.json + loop_contract.py
+# invariants. Duplicating coverage would risk alert-fatigue on the same
+# incident. To extend: add the new loop's heartbeat write at the end of
+# its cycle and register the path here.
 DEFAULT_HEARTBEAT_FILES: dict[str, str] = {
     "crypto": "data/crypto_loop.heartbeat",
     "oil": "data/oil_loop.heartbeat",
     "mstr": "data/mstr_loop.heartbeat",
+    "metals": "data/metals_loop.heartbeat",
+    "golddigger": "data/golddigger_loop.heartbeat",
 }
 
 
@@ -170,9 +176,60 @@ def read_loop_health(
     }
 
 
+def write_heartbeat(
+    path: str | Path,
+    cycle: int,
+    *,
+    ok: bool = True,
+    n_positions: int = 0,
+    extra: dict[str, Any] | None = None,
+    now: datetime.datetime | None = None,
+) -> bool:
+    """Write a watchdog-compatible heartbeat file.
+
+    Centralised so loops don't reinvent the schema. Best-effort by design:
+    swallows all exceptions and returns False — the caller (a live
+    trading loop) must never crash because telemetry failed.
+
+    Args:
+        path: Destination heartbeat path (typically `data/{name}_loop.heartbeat`).
+        cycle: Monotonic cycle counter from the loop. Operator-facing.
+        ok: Whether the cycle ran cleanly. Operator-facing.
+        n_positions: Currently-open position count. Operator-facing.
+        extra: Additional fields merged into the payload (e.g. phase).
+        now: Override timestamp (for tests). Defaults to UTC now.
+
+    Returns:
+        True if the file was written, False if anything failed.
+
+    NOTE: New loops should call this helper. Existing crypto_loop /
+    oil_loop / mstr_loop ship their own private wrappers (predate this
+    function); migrating them is a no-op refactor for a future PR.
+    """
+    try:
+        from portfolio.file_utils import atomic_write_json
+        ts = (now or _now_utc()).isoformat()
+        payload: dict[str, Any] = {
+            "ts": ts,
+            "status": "ok",
+            "cycle": cycle,
+            "ok": ok,
+            "n_positions": n_positions,
+        }
+        if extra:
+            payload.update(extra)
+        atomic_write_json(str(path), payload)
+        return True
+    except Exception:
+        # Best-effort: never crash the loop on telemetry failure.
+        logger.debug("write_heartbeat failed for %s", path, exc_info=True)
+        return False
+
+
 __all__ = [
     "STALE_THRESHOLD_SECONDS",
     "DEFAULT_HEARTBEAT_FILES",
     "read_loop_status",
     "read_loop_health",
+    "write_heartbeat",
 ]

@@ -120,6 +120,8 @@ data/loop.log
 data/crypto_loop.heartbeat
 data/oil_loop.heartbeat
 data/mstr_loop.heartbeat
+data/metals_loop.heartbeat
+data/golddigger_loop.heartbeat
 data/crypto_loop_out.txt
 data/oil_loop_out.txt
 data/crypto_loop.lock

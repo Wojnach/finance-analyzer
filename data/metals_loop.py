@@ -533,6 +533,27 @@ POSITIONS_DEFAULTS = {
     },
 }
 POSITIONS_STATE_FILE = "data/metals_positions_state.json"
+HEARTBEAT_FILE = "data/metals_loop.heartbeat"
+
+
+def _write_heartbeat(cycle_count: int, positions: dict | None) -> None:
+    """Write loop_health watchdog heartbeat after each successful cycle.
+
+    Thin wrapper over `portfolio.loop_health.write_heartbeat` — counts
+    only `active=True` positions (metals POSITIONS dict tracks both
+    active and inactive instruments together) and delegates the actual
+    write. Best-effort: never raises, never crashes live trading.
+    """
+    n_pos = sum(1 for p in (positions or {}).values()
+                 if isinstance(p, dict) and p.get("active"))
+    try:
+        from portfolio.loop_health import write_heartbeat
+        write_heartbeat(HEARTBEAT_FILE, cycle_count, n_positions=n_pos)
+    except Exception:
+        # Defence in depth — write_heartbeat already swallows, but if the
+        # import itself ever fails we still must not propagate.
+        logging.getLogger(__name__).debug(
+            "metals_loop: heartbeat dispatch failed", exc_info=True)
 
 
 def _load_json_state(path, default, label):
@@ -7631,6 +7652,9 @@ Positions: {pos_summary}{prob_summary}""")
                                    verify_fn=verify_metals_contract, loop_name="metals")
                 except Exception as _e:
                     log(f"Contract check failed: {_e}")
+
+                # Heartbeat for loop_health watchdog. Best-effort, never raises.
+                _write_heartbeat(check_count, POSITIONS)
 
                 _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
 
