@@ -155,3 +155,102 @@ tests/test_signal_utility.py
 dede91ec fix(review): address adversarial review findings on b2bd9dce
 scripts/perf/profile_utility_overlay.py
 tests/test_signal_utility.py
+
+### 2026-05-03 21:55 UTC | feat/gpu-gate-sweeper-2026-05-03
+b258b37f plan: gpu_gate background sweeper for stale locks
+docs/plans/2026-05-03-gpu-gate-sweeper.md
+
+### 2026-05-03 ~21:30-23:40 CEST | fix/fingpt-batch-observability-2026-05-03 → main aa804a7f
+8642e243 docs(plan): fingpt batch observability fix
+b3b5c687 fix(llm_batch): make fingpt batch outcome legible from logs
+aa804a7f fix(llm_batch): address codex P2+P3 — empty-text guard, log unit consistency
+docs/PLAN_fingpt_observability.md
+portfolio/llm_batch.py
+tests/test_llm_batch.py
+
+**What this was:** /fin-status caught what looked like a fingpt silent
+failure in `data/loop_out.txt`: `"LLM batch: 0 results in 10.4s
+(M:0 Q:0 F:6)"`. After ~30 min of wrong-direction probing (including a
+`/v1/chat/completions` test that hit Qwen3 thinking-mode and returned
+empty `message.content`), traced to the misleading log line at
+`portfolio/llm_batch.py:258` — `results` only counted Phase 1+2
+(Ministral/Qwen3); Phase 3 (fingpt) stashes via
+`sentiment._stash_fingpt_result` and never appears in `results`. So a
+fingpt-only cycle (every 3rd LLM cycle in the rotation) ALWAYS logged
+"0 results" — whether fingpt produced 6 valid sentiments or silently
+failed. Confirmed by grepping `data/sentiment_ab_log.jsonl` and finding
+4 valid fingpt entries timestamped to the exact cycle that "reported"
+0 results.
+
+**What changed:**
+- `_flush_fingpt_phase` now returns a metrics dict on every code path:
+  `{queries, received, parsed, stashed_groups, exception}`. Implicit
+  `None` return is gone.
+- Summary log replaced with `"LLM batch: M=%d/%d Q=%d/%d F=%d/%d in
+  %.1fs"` (parsed/queued for each phase). F=0/N now flags real silent
+  failures.
+- Per-failure-mode warnings inside `_flush_fingpt_phase`:
+  - `"fingpt: server returned None for all N prompts"`
+    (server/swap broke)
+  - `"fingpt: parser returned None for K/N completions (>50%)"` (parser
+    regression — same fingerprint as the 2026-04-09
+    parser-defaulting-neutral incident)
+  - top-level `except` now logs `repr(e)` for one-line operator triage
+- `_parse_fingpt_completion` now treats empty/whitespace text as parse
+  failure (codex P2). Production `fingpt_infer._parse_sentiment` falls
+  back to "neutral" for unparseable input AND `llama_server._query_http`
+  returns `""` (not None) for HTTP 200 with empty body. Without this
+  guard, empty cycles silently scored as neutral parses.
+- Phase-start log renamed `"%d fingpt queries"` → `"%d fingpt groups"`
+  (codex P3) — `len(f_batch)` counts groups, not prompts.
+- 10 new tests in `tests/test_llm_batch.py` (TestFingptPhaseMetrics +
+  TestFlushLlmBatchSummaryLog), 36 total in the file. Existing 26 tests
+  still pass.
+
+**Codex adversarial review:** codex-rescue at effort xhigh returned
+1×P2 + 2×P3. P2 was the empty-text false-success path. P3a was the
+unit drift between phase-start and summary log denominators. P3b was
+test-coverage gaps for realistic degradation paths (empty text, mixed
+`[None, "", garbage, clean]`, import failure). All three addressed in
+commit `aa804a7f` with 3 additional tests.
+
+**Verification (LIVE in production at 23:38-23:40 CEST):**
+```
+23:38:25  LLM batch start: rotation_slot=warmup counter=0 queues M=4 Q=4 F=4
+23:38:25  LLM batch: 4 Ministral queries
+23:39:16  LLM batch: 4 Qwen3 queries
+23:39:57  LLM batch: 4 fingpt groups          ← new label
+23:40:04  LLM batch: M=4/4 Q=4/4 F=43/45 in 98.4s   ← new format
+```
+F=43/45 is the first real production data point — 2 fingpt prompts
+produced empty/None content. The OLD format would have logged
+"8 results" and hidden those two; the NEW format makes them visible.
+Exactly what the fix is for.
+
+**No live trading behavior changed.** Only loop logging + observability.
+
+**Loop restart was bumpy:** `schtasks /end /tn PF-DataLoop` did not
+kill the old loop process — singleton lock from PID 16396 persisted
+(mtime 20:35) for ~80 min. The bat wrapper's auto-restart eventually
+won at 23:37:52 when the old process finally died. Lesson: on Windows
+the singleton lock can outlast the process if the OS hasn't reaped
+file handles, and `schtasks /end` doesn't force-kill — for fast
+restart use `taskkill /F /PID <loop-pid>`.
+
+**Saved memory:** `reference_worktree_symlinks.md` — git worktrees
+don't replicate the `config.json` symlink, causing 30-50 false test
+failures in worktree pytest runs. Targeted tests still work; full
+suite passes after merge.
+
+## What's next (optional follow-ups, NOT in this PR)
+
+- **Persist fingpt health to data/fingpt_health.json + contract alert:**
+  metrics now exist per-cycle but aren't aggregated. If
+  `parsed/queries < 0.5` for K consecutive cycles, the contract
+  dispatcher should fire. Would have caught the 2026-04-09
+  parser-defaulting-neutral regression weeks earlier.
+- **Distinguish empty-text from server-None in warnings:** currently
+  both flow through the parser-majority warning. A third category for
+  "all responses non-None but empty content" would identify model
+  truncation / Qwen3-thinking-mode-style failures separately from
+  server connectivity.
