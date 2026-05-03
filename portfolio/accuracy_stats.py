@@ -85,6 +85,15 @@ _signal_utility_cache_lock = threading.Lock()
 _SIGNAL_UTILITY_DISK_TTL = 3600.0
 SIGNAL_UTILITY_CACHE_FILE = DATA_DIR / "signal_utility_cache.json"
 
+# Separate from _signal_utility_cache_lock — that one only guards the in-memory
+# dict swap. This one serializes the read-modify-write of the disk file so two
+# threads computing DIFFERENT horizons don't lose each other's writes (the
+# benign-race assumption only holds for same-horizon races; cross-horizon
+# races would lose 3 of 4 horizons on a 4-thread cold-start cycle, defeating
+# the L2 cache's purpose). Disk write is ~10-50ms — keeping this lock
+# separate from the L1 lock means L1 reads aren't blocked behind disk IO.
+_signal_utility_disk_lock = threading.Lock()
+
 
 def _load_signal_utility_disk(horizon: str) -> dict | None:
     """Return cached utility dict for horizon if disk cache is fresh, else None.
@@ -106,22 +115,28 @@ def _load_signal_utility_disk(horizon: str) -> dict | None:
 def _write_signal_utility_disk(horizon: str, data: dict) -> None:
     """Persist cached utility dict for horizon. Merges with existing horizons.
 
-    Read-modify-write is NOT lock-protected — two concurrent writers can each
-    read+merge+write and the last write wins. Both threads write the same
-    `data` for the same `horizon`, so the race is benign (idempotent).
-    Atomic write via _atomic_write_json prevents torn reads.
+    Holds _signal_utility_disk_lock through the read-modify-write so two
+    threads computing DIFFERENT horizons don't lose each other's writes.
+    The earlier lock-free version assumed all races would be same-horizon
+    (idempotent), but a 4-thread cold-start cycle realistically has 4
+    different horizons in flight; the lockless last-writer-wins kept only
+    1 of 4 horizons on disk and forced the other 3 to recompute next cycle.
+
+    Atomic write via _atomic_write_json prevents torn reads even outside
+    the lock.
 
     Failures are swallowed — a stale L2 cache is harmless (TTL expires) and
     must never crash the live signal pipeline (would re-trigger BUG-178's
     silent-failure pattern).
     """
     try:
-        cache = load_json(SIGNAL_UTILITY_CACHE_FILE, default={})
-        if not isinstance(cache, dict):
-            cache = {}
-        cache[horizon] = data
-        cache["time"] = time.time()
-        _atomic_write_json(SIGNAL_UTILITY_CACHE_FILE, cache)
+        with _signal_utility_disk_lock:
+            cache = load_json(SIGNAL_UTILITY_CACHE_FILE, default={})
+            if not isinstance(cache, dict):
+                cache = {}
+            cache[horizon] = data
+            cache["time"] = time.time()
+            _atomic_write_json(SIGNAL_UTILITY_CACHE_FILE, cache)
     except Exception:
         logger.debug("signal_utility disk cache write failed", exc_info=True)
 
@@ -712,9 +727,20 @@ def _compute_signal_utility(horizon, entries):
 def invalidate_signal_utility_cache():
     """Clear both the in-memory L1 and the disk-backed L2 signal_utility cache.
 
-    Primarily exists so tests and outcome-backfill code can force a refresh
-    after writing new outcomes. Production code does NOT need to call this —
-    the 300s L1 TTL and 3600s L2 TTL are the source of truth.
+    Cross-process scope:
+      - L1 in-memory clear is process-local. Other processes (crypto_loop,
+        oil_loop, metals_loop) keep their own L1 until their TTL expires.
+      - L2 disk delete is shared. After this call, the next call from ANY
+        process for any horizon misses L2 and recomputes.
+
+    Intended caller: outcome_tracker (which runs as the PF-OutcomeCheck
+    daily scheduled task) after backfilling new outcomes — at that point
+    the cached utility values are stale by definition and forcing recompute
+    across all processes is correct. The satellite loops do not call this
+    function (verified 2026-05-03 grep) and should not start to: a delete
+    from one would force the others to pay the cold-compute cost on their
+    next cycle. If a satellite ever needs to invalidate its own L1 only,
+    add a separate L1-only function rather than reusing this one.
 
     Disk file removal is best-effort and silent on failure: a stale L2 file
     expires by TTL anyway and must never crash the caller.

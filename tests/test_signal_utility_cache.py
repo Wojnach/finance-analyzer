@@ -240,6 +240,30 @@ class TestSignalUtilityDiskCache:
         assert "1d" in on_disk
         assert "3h" in on_disk
 
+    def test_l2_concurrent_different_horizons_all_persist(self):
+        """4 threads writing 4 DIFFERENT horizons simultaneously: all 4
+        must survive in the file. Earlier lock-free version dropped 3 of 4
+        because each thread's load-merge-write raced — last writer kept
+        only its own horizon.
+
+        Regression guard for the BUG-178 follow-up review finding."""
+        from concurrent.futures import ThreadPoolExecutor
+        horizons = ["3h", "4h", "12h", "1d"]
+
+        def _write(h):
+            # Use the disk writer directly to avoid the L1 cache fast-path
+            # masking the race we're actually testing.
+            acc_mod._write_signal_utility_disk(h, {f"data_{h}": {"samples": 1}})
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            list(ex.map(_write, horizons))
+
+        from portfolio.file_utils import load_json
+        on_disk = load_json(acc_mod.SIGNAL_UTILITY_CACHE_FILE)
+        for h in horizons:
+            assert h in on_disk, f"horizon {h} lost to concurrent-write race"
+            assert f"data_{h}" in on_disk[h]
+
     def test_l2_write_failure_does_not_crash(self):
         """If _atomic_write_json raises, signal_utility must still return
         the freshly-computed value (no propagating exception)."""
