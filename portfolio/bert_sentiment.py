@@ -131,6 +131,41 @@ def _resolve_finbert_snapshot(cache_dir: str, subdir: str) -> str | None:
     return snapshots[0] if snapshots else None
 
 
+def _accelerate_version() -> str | None:
+    """Return the installed accelerate version string for diagnostic logging,
+    or None if accelerate isn't importable. Used in the meta-tensor retry
+    error message so future regressions can be correlated with library
+    upgrades.
+    """
+    try:
+        import accelerate
+        return getattr(accelerate, "__version__", "unknown")
+    except ImportError:
+        return None
+
+
+def _model_load_kwargs(name: str, config: dict, cache_dir: str) -> tuple[str, dict]:
+    """Resolve the from_pretrained() positional path + kwargs for `name`.
+
+    Returns (load_path, kwargs). FinBERT uses a snapshot path (no
+    cache_dir/local_files_only); others use cache_dir + local_files_only.
+    Falls back to the Hub name for FinBERT if no local snapshot exists.
+
+    Extracted 2026-05-04 (fix/bert-meta-tensor) so the same dispatch can
+    be reused by the meta-tensor recovery retry path without duplicating
+    the FinBERT-vs-others branching.
+    """
+    if name == "FinBERT":
+        snapshot = _resolve_finbert_snapshot(cache_dir, config["snapshot_subdir"])
+        if snapshot is not None:
+            return snapshot, {}
+        return config["hf_name"], {}
+    return config["hf_name"], {
+        "cache_dir": cache_dir,
+        "local_files_only": config.get("local_files_only", False),
+    }
+
+
 def _load_model(name: str) -> tuple[Any, Any, str, threading.Lock]:
     """Load a BERT model + tokenizer. Called under _init_lock.
 
@@ -145,31 +180,65 @@ def _load_model(name: str) -> tuple[Any, Any, str, threading.Lock]:
     config = _MODEL_CONFIGS[name]
     cache_dir = _resolve_cache_dir(config)
     hf_name = config["hf_name"]
+    load_path, load_kwargs = _model_load_kwargs(name, config, cache_dir)
 
-    # FinBERT: resolve the snapshot subdir if present, else fall back to the
-    # Hub-cached name for the online download path.
-    if name == "FinBERT":
-        snapshot = _resolve_finbert_snapshot(cache_dir, config["snapshot_subdir"])
-        if snapshot is not None:
-            logger.info("Loading BERT model %s from snapshot %s", name, snapshot)
-            tokenizer = AutoTokenizer.from_pretrained(snapshot)
-            model = AutoModelForSequenceClassification.from_pretrained(snapshot)
-        else:
-            logger.info("Loading BERT model %s via hub name %s (no local snapshot found)", name, hf_name)
-            tokenizer = AutoTokenizer.from_pretrained(hf_name)
-            model = AutoModelForSequenceClassification.from_pretrained(hf_name)
+    if name == "FinBERT" and load_path == hf_name:
+        logger.info("Loading BERT model %s via hub name %s (no local snapshot found)", name, hf_name)
+    elif name == "FinBERT":
+        logger.info("Loading BERT model %s from snapshot %s", name, load_path)
     else:
         logger.info("Loading BERT model %s from %s", name, cache_dir)
-        tokenizer = AutoTokenizer.from_pretrained(
-            hf_name,
-            cache_dir=cache_dir,
-            local_files_only=config.get("local_files_only", False),
+
+    tokenizer = AutoTokenizer.from_pretrained(load_path, **{
+        k: v for k, v in load_kwargs.items()
+        if k in ("cache_dir", "local_files_only")
+    })
+    model = AutoModelForSequenceClassification.from_pretrained(load_path, **load_kwargs)
+
+    # 2026-05-04 (fix/bert-meta-tensor): defensive meta-tensor recovery.
+    #
+    # Race between Chronos's CUDA load and concurrent BERT loads (commit
+    # 789cc91c, 2026-05-03 21:08, swapped Chronos/Kronos order so Chronos
+    # now loads on the first ticker's forecast call concurrent with the
+    # sentiment phase's BERT loads via main.py's ThreadPoolExecutor) can
+    # leave some FinBERT weights on the `meta` device when accelerate's
+    # lazy init interleaves with CUDA init on another thread. Without
+    # this guard, predict-time forward passes silently fail per-text
+    # ("Tensor on device meta is not on the expected device cpu!") and
+    # the per-text fallback writes a zero-confidence neutral placeholder
+    # for every headline, polluting sentiment_ab_log.jsonl until the
+    # next process restart.
+    #
+    # Detection at load time + one retry with eager-init kwargs flips
+    # this from silent A/B-log corruption into either a self-healed
+    # cycle (warning + clean reload) or a loud RuntimeError that the
+    # caller's _get_model() doesn't cache, so subsequent predict calls
+    # try again from scratch instead of compounding the corruption.
+    #
+    # Cost: one is_meta walk over ~200 parameters per load (<1ms).
+    # Triggered: only when accelerate's race actually leaves meta tensors,
+    # which is rare and load-time-only — never during steady-state
+    # inference.
+    if any(p.is_meta for p in model.parameters()):
+        logger.warning(
+            "BERT %s loaded with meta tensors (likely accelerate race with "
+            "concurrent CUDA load); retrying with eager init",
+            name,
         )
+        eager_kwargs = {
+            **load_kwargs,
+            "torch_dtype": torch.float32,
+            "low_cpu_mem_usage": False,
+        }
         model = AutoModelForSequenceClassification.from_pretrained(
-            hf_name,
-            cache_dir=cache_dir,
-            local_files_only=config.get("local_files_only", False),
+            load_path, **eager_kwargs,
         )
+        if any(p.is_meta for p in model.parameters()):
+            raise RuntimeError(
+                f"BERT {name} still has meta tensors after retry "
+                f"(accelerate version: {_accelerate_version() or 'not installed'}, "
+                f"load_path={load_path!r})"
+            )
 
     # Put the model into inference mode. finbert_infer.py historically
     # uses the equivalent .train(False) spelling — same effect, and we

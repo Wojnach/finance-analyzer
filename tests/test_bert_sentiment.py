@@ -24,6 +24,12 @@ def fake_torch_and_transformers(monkeypatch):
     # --- Fake torch ---
     fake_torch = types.ModuleType("torch")
     fake_torch._cuda_available = True  # test can flip this
+    # Sentinel for the meta-tensor recovery path (2026-05-04). The real
+    # bert_sentiment._load_model passes torch_dtype=torch.float32 when
+    # retrying after detecting meta tensors. Tests don't introspect the
+    # value — only that the kwarg is forwarded — so a marker object is
+    # enough.
+    fake_torch.float32 = "float32"
 
     class _FakeNoGradCtx:
         def __enter__(self):
@@ -131,6 +137,14 @@ def fake_torch_and_transformers(monkeypatch):
         def train(self, flag):
             # flag=False is PyTorch's inference-mode toggle
             return self
+
+        def parameters(self):
+            # Used by the 2026-05-04 meta-tensor defensive check in
+            # _load_model. Default fixture fakes have no meta tensors;
+            # the new TestMetaTensorRecovery tests below override
+            # from_pretrained to return models with controllable meta
+            # state via _make_fake_model_with_params.
+            return iter([])
 
         def to(self, device):
             self._device = device
@@ -446,3 +460,207 @@ def test_per_text_fallback_handles_single_failure(fake_torch_and_transformers):
     finally:
         type(model).__call__ = original_call
         FakeModel._batched_raises = False
+
+
+# ---------------------------------------------------------------------------
+# Meta-tensor recovery (fix/bert-meta-tensor, 2026-05-04)
+# ---------------------------------------------------------------------------
+#
+# Race between Chronos's CUDA load and concurrent BERT loads (commit
+# 789cc91c, 2026-05-03 21:08) can leave some FinBERT weights on the
+# `meta` device when accelerate's lazy init interleaves with CUDA init
+# on another thread. _load_model now detects this at load time and
+# retries once with explicit eager-init kwargs. Tests below stub
+# from_pretrained to control the meta-tensor state per call so the
+# defensive path is exercised without needing the real race.
+
+
+class _FakeParam:
+    """Minimal stand-in for a torch.nn.Parameter used by the meta-tensor
+    detection code (`p.is_meta` attribute access only).
+    """
+
+    def __init__(self, is_meta: bool):
+        self.is_meta = is_meta
+
+
+def _make_fake_model_with_params(meta_count: int, total: int = 5):
+    """Build a fake model whose `.parameters()` yields `total` _FakeParam
+    instances, the first `meta_count` of which have is_meta=True. Returns
+    a _FakeModel-like object with .parameters() and .train() defined.
+    """
+    class _FakeModelWithParams:
+        load_count_local = 0
+
+        def __init__(self):
+            self._params = [
+                _FakeParam(is_meta=(i < meta_count))
+                for i in range(total)
+            ]
+            self._device = "cpu"
+
+        def parameters(self):
+            return iter(self._params)
+
+        def train(self, _flag):
+            return self
+
+        def to(self, device):
+            self._device = device
+            return self
+
+        def __call__(self, **inputs):
+            # Minimal forward — not used by these tests.
+            raise RuntimeError("meta-tensor tests don't exercise forward pass")
+
+    return _FakeModelWithParams()
+
+
+class TestMetaTensorRecovery:
+    """Defensive load-time detection + retry for meta-tensor corruption.
+    Race-induced bug in 2026-05-03; predict-time symptom is a per-text
+    "Tensor on device meta is not on the expected device cpu!" warning
+    on every headline. The fix detects at load time and retries with
+    eager-init kwargs.
+    """
+
+    def test_clean_load_does_not_retry(self, fake_torch_and_transformers):
+        """Happy path: from_pretrained returns a model with no meta
+        params; the defensive check is a no-op and from_pretrained is
+        called exactly once.
+        """
+        from portfolio import bert_sentiment
+        FakeAutoModel = fake_torch_and_transformers["FakeAutoModel"]
+
+        call_log: list[dict] = []
+
+        def fake_from_pretrained(*args, **kwargs):
+            call_log.append({"args": args, "kwargs": dict(kwargs)})
+            return _make_fake_model_with_params(meta_count=0)
+
+        FakeAutoModel.from_pretrained = staticmethod(fake_from_pretrained)
+        bert_sentiment._reset_for_tests()
+
+        bert_sentiment.predict("CryptoBERT", ["warmup"])
+
+        assert len(call_log) == 1, f"expected 1 from_pretrained call, got {len(call_log)}"
+        # Eager-init kwargs should NOT appear in the (single, clean) call.
+        assert "torch_dtype" not in call_log[0]["kwargs"]
+        assert "low_cpu_mem_usage" not in call_log[0]["kwargs"]
+
+    def test_load_with_meta_tensors_retries_with_eager_init(
+        self, fake_torch_and_transformers, caplog,
+    ):
+        """First from_pretrained returns a model with one meta param;
+        the retry call with eager-init kwargs returns a clean model.
+        Assert: two from_pretrained calls, second one carries
+        torch_dtype + low_cpu_mem_usage=False, and a warning was logged.
+        """
+        from portfolio import bert_sentiment
+        FakeAutoModel = fake_torch_and_transformers["FakeAutoModel"]
+
+        call_log: list[dict] = []
+
+        def fake_from_pretrained(*args, **kwargs):
+            call_idx = len(call_log)
+            call_log.append({"args": args, "kwargs": dict(kwargs)})
+            if call_idx == 0:
+                # First call: simulate the race — return a model with a
+                # meta param (1 of 5).
+                return _make_fake_model_with_params(meta_count=1)
+            # Retry call: clean.
+            return _make_fake_model_with_params(meta_count=0)
+
+        FakeAutoModel.from_pretrained = staticmethod(fake_from_pretrained)
+        bert_sentiment._reset_for_tests()
+
+        with caplog.at_level("WARNING", logger="portfolio.bert_sentiment"):
+            bert_sentiment.predict("CryptoBERT", ["warmup"])
+
+        assert len(call_log) == 2, (
+            f"expected 1 initial + 1 retry, got {len(call_log)}: {call_log}"
+        )
+        # Retry call must include eager-init kwargs
+        retry_kwargs = call_log[1]["kwargs"]
+        assert retry_kwargs.get("low_cpu_mem_usage") is False, retry_kwargs
+        assert "torch_dtype" in retry_kwargs, retry_kwargs
+        # Warning was logged with model name + meta-tensor mention
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any(
+            "CryptoBERT" in m and "meta tensors" in m for m in warnings
+        ), warnings
+
+    def test_load_with_persistent_meta_tensors_raises(
+        self, fake_torch_and_transformers,
+    ):
+        """Both calls return models with meta tensors → RuntimeError.
+        The caller's _get_model() doesn't catch this, so the model is
+        NOT cached in _models; subsequent predict calls retry from
+        scratch instead of compounding a corrupted load.
+        """
+        from portfolio import bert_sentiment
+        FakeAutoModel = fake_torch_and_transformers["FakeAutoModel"]
+
+        def fake_from_pretrained(*args, **kwargs):
+            return _make_fake_model_with_params(meta_count=2)
+
+        FakeAutoModel.from_pretrained = staticmethod(fake_from_pretrained)
+        bert_sentiment._reset_for_tests()
+
+        with pytest.raises(RuntimeError) as excinfo:
+            bert_sentiment.predict("CryptoBERT", ["warmup"])
+        # Error message should be informative for triage
+        assert "still has meta tensors after retry" in str(excinfo.value)
+        assert "CryptoBERT" in str(excinfo.value)
+        # Bad model must NOT have been cached
+        assert "CryptoBERT" not in bert_sentiment._models
+
+    def test_finbert_retry_uses_snapshot_path(
+        self, fake_torch_and_transformers, monkeypatch, tmp_path,
+    ):
+        """When FinBERT loads from a resolved snapshot, the retry must
+        pass the same snapshot path (not the hub name) as the positional
+        load_path so the second from_pretrained still finds the local
+        weights.
+        """
+        from portfolio import bert_sentiment
+        FakeAutoModel = fake_torch_and_transformers["FakeAutoModel"]
+
+        # Fake the snapshot resolver so we don't depend on real files
+        fake_snap = str(tmp_path / "fake-finbert-snapshot")
+        monkeypatch.setattr(
+            bert_sentiment, "_resolve_finbert_snapshot",
+            lambda *_a, **_k: fake_snap,
+        )
+
+        call_log: list = []
+
+        def fake_from_pretrained(*args, **kwargs):
+            call_log.append({"args": args, "kwargs": dict(kwargs)})
+            # Simulate: first call leaves meta tensors, retry is clean.
+            if len(call_log) == 1:
+                return _make_fake_model_with_params(meta_count=1)
+            return _make_fake_model_with_params(meta_count=0)
+
+        FakeAutoModel.from_pretrained = staticmethod(fake_from_pretrained)
+        bert_sentiment._reset_for_tests()
+
+        bert_sentiment.predict("FinBERT", ["warmup"])
+
+        assert len(call_log) == 2
+        # Both calls must use the snapshot path as positional arg, not the
+        # hub name (the hub path doesn't have local weights and would 404).
+        assert call_log[0]["args"][0] == fake_snap
+        assert call_log[1]["args"][0] == fake_snap
+        # Retry must have the eager kwargs
+        assert call_log[1]["kwargs"].get("low_cpu_mem_usage") is False
+
+
+def test_accelerate_version_returns_string_or_none():
+    """Smoke test for the diagnostic helper used in the meta-tensor
+    RuntimeError message. Returns either a version string or None
+    depending on whether accelerate is installed in the test venv.
+    """
+    from portfolio.bert_sentiment import _accelerate_version
+    result = _accelerate_version()
+    assert result is None or isinstance(result, str)
