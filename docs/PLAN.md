@@ -1,114 +1,231 @@
-# PLAN — midfinance follow-ups (2026-05-02)
+# PLAN — Mobile-First Dashboard Redesign
 
-**Date:** 2026-05-02
-**Branch:** `feat/midfinance-followups-2026-05-02`
-**Goal:** Resolve all remaining code-side items from the 2026-05-01 midfinance merge punch list. Three batches:
-1. Back-port the warrant-sizing P1 fix from oil → crypto.
-2. Add a stale-heartbeat watchdog so the heartbeats actually do something.
-3. Stabilise the 3 documented xdist test flakes (4th is an external module, correctly --ignore'd).
+**Date:** 2026-05-03
+**Branch:** `feat/mobile-dashboard-redesign-2026-05-03`
+**Worktree:** `/mnt/q/finance-analyzer/.worktrees/mobile-dashboard-2026-05-03`
+**Goal:** Replace the desktop-first 3,211-line single-file dashboard with a
+mobile-first, ES-module, PWA-capable dashboard while preserving all existing
+functionality and zero-changing the Flask `/api/*` surface.
 
 ---
 
 ## Context
 
-After the 2026-05-01 multi-asset merge (commit `0c00ac8c`), 3 code-side items
-remained (see prior session summary):
+Current state:
+- `dashboard/app.py` — 1,445 lines, 38 routes, healthy. **No changes here**
+  except adding a `/legacy` route in Batch 1.
+- `dashboard/static/index.html` — 3,211 lines, single file (CSS+JS+HTML),
+  Chart.js CDN. Top-nav with 10 tabs that horizontally scrolls on phone.
+  Three `@media` blocks (1200/800/480) that mostly shrink fonts.
+- The user has stated they want the dashboard primarily phone-displayed.
 
-- **Crypto sizing latent bug** — `data/crypto_swing_trader.py:491` still has
-  `warrant.get("ask") or warrant.get("last") or 1.0`. Codex caught this in
-  oil; same pattern exists in crypto, just predates the codex review.
-  Crypto also ships DRY_RUN so behavioural blast-radius is zero today, but
-  the latent bug would fire the moment DRY_RUN is flipped.
-- **Heartbeats are written, never read** — `data/{crypto,oil}_loop.heartbeat`
-  are JSON-formatted but no watchdog reads them. The dashboard `/api/oil`
-  surfaces it as a field but nothing alerts when it goes stale.
-- **3 documented xdist flakes** in `docs/TESTING.md`:
-  - `test_consensus.py::TestStockConsensus::test_stock_buy_with_3_voters`
-    — passes in isolation, fails under `-n auto` (signal_engine cache leak).
-  - `test_fg_regime_gating.py::TestFGGatedTrendingUp::test_extreme_fear_gated_trending_up`
-    — needs investigation.
-  - `test_backtester.py::TestRunBacktest::test_days_filter_applied` — needs
-    investigation.
-  - `tests/integration/test_strategy.py::test_strategy_loads` — missing
-    `ta_base_strategy` (Freqtrade), correctly ignored via `--ignore=tests/integration`.
-    Out of scope here.
+Research deliverables (Tracks 1-6) under `docs/research/2026-05-03-mobile-dashboard/`:
+- `00-synthesis.md` — research summary + final design decisions.
+- `01-current-inventory.md` — 39 widgets, 33 endpoints catalogued.
+- `02-usage-signal.md` — no usage data; recommend opt-in access log (deferred).
+- `03-user-moments.md` — 7 user moments (M1-M7) drive home priorities.
+- `04-telegram-overlap.md` — top 5 mobile widgets; 42% of TG is saved-only.
+- `05-comparable-products.md` — 9 apps surveyed; heatmap pattern, anti-patterns.
+- `06-tech-constraints.md` — stack/PWA/charts/auth/polling decisions.
+
+Design spec at `docs/superpowers/specs/2026-05-03-mobile-dashboard-redesign-design.md`.
+
+Old plan (`midfinance follow-ups`) was completed and merged 2026-05-02 (commit
+`40197785`); this plan supersedes it.
 
 ---
 
 ## What this PR does
 
-### Batch A — Crypto sizing back-port
+The plan ships in 9 batches. Each batch is committed independently; tests run
+between batches per `/fgl` protocol. After all batches: Codex adversarial
+review, fix findings, merge to main, push.
 
-| File | Change |
-|---|---|
-| `data/crypto_swing_trader.py` | Refuse to size when `warrant.get("ask")` and `warrant.get("last")` are both missing/zero. Mirror the oil fix verbatim — same reason text. |
-| `data/crypto_warrant_refresh.py` | Persist `bid`, `ask`, `last` into each catalog entry (parity with `oil_warrant_refresh.py` Batch C). |
-| `tests/test_crypto_swing_trader.py` | Add a regression test asserting BUY refused when warrant has no live quote. |
+### Batch 1 — Skeleton + foundation modules (~9 files)
 
-### Batch B — Loop health rollup + watchdog
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/index.html` | rewrite | ~120-line skeleton: `<head>` (manifest, viewport-fit=cover, apple-touch-icon, Chart.js UMD), header shell, `<main id="root">`, bottom-nav placeholder, `<script type="module" src="/static/js/main.js">`. |
+| `dashboard/static/index_legacy.html` | new from current | Preserve the existing experience under `/legacy`. |
+| `dashboard/static/css/tokens.css` | new | CSS variables (palette extracted from current `:root` + `html.light`, plus new spacing/typography tokens). |
+| `dashboard/static/css/base.css` | new | reset, body, scrollbar, `font-variant-numeric: tabular-nums` defaults. |
+| `dashboard/static/css/layout.css` | new | header, bottom-nav, view container, `safe-area-inset-*`, `overscroll-behavior-y: contain`. |
+| `dashboard/static/css/components.css` | new | cards, chips, badges, accordion, bottom sheet, signal heatmap cells, color-flash animation. |
+| `dashboard/static/css/responsive.css` | new | mobile-first media queries → tablet → desktop. |
+| `dashboard/app.py` | edit | Add `@app.route("/legacy")` returning `index_legacy.html`. ≤8 LOC. |
+| `tests/test_dashboard_legacy_route.py` | new | Verify `/legacy` returns the old file when authed. |
 
-| File | Change |
-|---|---|
-| `portfolio/loop_health.py` | New module. `read_loop_health()` returns a dict keyed by loop_name → {is_alive, age_seconds, is_fresh, payload}. Reads all `data/*_loop.heartbeat` files (currently crypto + oil; metals + main loops can be added later when they grow heartbeats). |
-| `dashboard/app.py` | New `/api/loop_health` endpoint returning the rollup. |
-| `scripts/loop_health_watchdog.py` | One-shot script that reads heartbeats, sends a telegram alert if any loop is stale (>5 min) or missing. Designed for a periodic scheduled task (suggest every 30 min). Has a per-loop cooldown so a dead loop doesn't spam telegram every 30 min. |
-| `scripts/win/install-loop-health-watchdog-task.ps1` | Registers `PF-LoopHealthWatchdog` (every 30 min, AtLogOn). User runs to enable. |
-| `tests/test_loop_health.py` | Cover: fresh, stale, missing, malformed JSON, file-IO failure paths. |
-| `tests/test_loop_health_watchdog.py` | Cover: alert-fires-on-stale, no-alert-when-fresh, cooldown gate. |
+Risk: `index.html` rewrite is destructive but `/legacy` route preserves
+fallback. Tests cover it.
 
-### Batch C — Test flake stabilisation
+### Batch 2 — Core JS modules (~7 files)
 
-| File | Change |
-|---|---|
-| `tests/conftest.py` | Extend `_reset_module_state` autouse fixture to reset more signal_engine caches (the consensus-test leak source per `docs/TESTING.md:52`). |
-| `tests/test_consensus.py` | Add explicit `_state_reset.reset_all()` call to TestStockConsensus class setUp. |
-| `tests/test_fg_regime_gating.py` | Investigate + fix root cause. Likely shared signal-engine state. |
-| `tests/test_backtester.py` | Investigate + fix root cause. May be tmp_path patch missing. |
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/js/main.js` | new | Entry: register SW, init state/theme, init router, mount initial view. |
+| `dashboard/static/js/state.js` | new | Singleton state object (replaces 30 bare globals from current `index.html:834-848`). |
+| `dashboard/static/js/fetch.js` | new | `fj()` fetch wrapper with retry, ttl cache, error surface. |
+| `dashboard/static/js/format.js` | new | `fn`/`fs`/`fp`/`ft` formatters (extracted from current 853-879). |
+| `dashboard/static/js/theme.js` | new | `initTheme`, `toggleTheme`, `getChartColors` (extracted from current 927-944). |
+| `dashboard/static/js/router.js` | new | Hash router; mount/unmount lifecycle for views. |
+| `dashboard/static/js/polling.js` | new | Interval registry, Page Visibility API hook, per-section cadence. |
 
-If a flake's root cause is genuinely module-level shared state we can't reset (e.g. C-extension cache), document it explicitly in `docs/TESTING.md` with a `pytest -n auto --ignore=...` recipe, then close out.
+These modules are zero-render — no DOM mutations yet. Tests after this batch
+just confirm the JS parses (one Python test that fetches each module path
+through Flask and checks 200 + JS content type).
+
+### Batch 3 — Reusable components (~10 files)
+
+All under `dashboard/static/js/components/`:
+
+- `pnl-card.js` — three-number card + delta + sparkline option.
+- `position-card.js` — ticker/side/P&L%/sparkline/distance-to-stop bar.
+- `consensus-chip.js` — action + vote count + 7-tf strip.
+- `decision-card.js` — chip-action/ticker/ts/reason → tap drill.
+- `signal-row.js` — name/B-S-H badge/accuracy bar/sample count.
+- `pulse-dot.js` — single colored dot with hover label.
+- `mini-chart.js` — Chart.js wrapper applying mobile defaults (DPR cap,
+  animation: 0, interaction.mode: 'index', maintainAspectRatio: false).
+- `accordion.js` — collapsible card.
+- `filter-chip.js` — toggleable chip.
+- `bottom-sheet.js` — universal long-press drill; backdrop + swipe-down dismiss.
+- `empty-state.js`, `error-banner.js` — small.
+
+Each component exports a render function returning a DOM node. No event
+handlers attached automatically — caller wires them.
+
+### Batch 4 — Home view + bottom-nav (~3 files)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/js/views/home.js` | new | Mounts the 5 home cards; subscribes to polling for `/api/summary`, `/api/risk`, `/api/warrants`, `/api/loop_health`. |
+| `dashboard/static/js/charts/mini-sparkline.js` | new | 24h equity sparkline used on the Home P&L card. |
+| `dashboard/static/js/charts/chart-config.js` | new | Shared Chart.js mobile defaults. |
+
+After this batch the bare-minimum mobile dashboard works for the most
+frequent moments (M1, M3, M4). Subsequent batches add depth.
+
+### Batch 5 — Decisions + decision-detail (~3 files)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/js/views/decisions.js` | new | Filter chips at top + decision card list; pull `/api/decisions`. |
+| `dashboard/static/js/views/decision-detail.js` | new | Full Layer 2 decision detail (Patient + Bold blocks, ticker outlooks, watchlist). |
+| `dashboard/static/js/render/decisions.js` | new | Render helpers extracted from current `loadDecisions`/`renderDecisions` (lines 2730-3034). |
+
+### Batch 6 — Signals heatmap + accuracy (~4 files)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/js/views/signals.js` | new | Heatmap (default) + per-signal accuracy + history sub-sections. |
+| `dashboard/static/js/render/signal-cards.js` | new | rCards/rHeat/rMkt extracted from current 1041-1213. |
+| `dashboard/static/js/render/accuracy.js` | new | Accuracy + accuracy-history rendering extracted from current 1595-2625. |
+| `dashboard/static/js/charts/accuracy-chart.js` | new | Chart.js config for accuracy history. |
+
+### Batch 7 — More + Health + Messages + Settings (~5 files)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/js/views/more.js` | new | List view of sub-sections; routes to /#more/<sub>. |
+| `dashboard/static/js/views/health.js` | new | KPI grid + module failures + recent errors digest badge. |
+| `dashboard/static/js/views/messages.js` | new | Existing card-list pattern + Saved-only filter chip (Track 4). |
+| `dashboard/static/js/views/settings.js` | new | Theme, refresh interval, pause, logout, /legacy link. |
+| `dashboard/static/js/render/telegrams.js` | new | rTel extracted from 1298. |
+
+### Batch 8 — Metals + GoldDigger + Equity + LoRA (~6 files)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/js/views/metals.js` | new | Re-laid-out metals view (cards from existing data). |
+| `dashboard/static/js/views/golddigger.js` | new | GoldDigger view. |
+| `dashboard/static/js/views/equity.js` | new | Full equity curve view (Chart.js single-axis, large). |
+| `dashboard/static/js/render/portfolio.js` | new | rTrades/rBoldSummary/rHoldings/loadWarrants/loadRisk. |
+| `dashboard/static/js/render/lora.js` | new | rLora (desktop-only — hidden under 1024px). |
+| `dashboard/static/js/charts/{equity,metals,gd}-chart.js` | new | Chart configs (3 small files). |
+
+### Batch 9 — PWA + tests + docs (~10 files)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `dashboard/static/manifest.webmanifest` | new | name/short_name/display=standalone/theme/icons. |
+| `dashboard/static/sw.js` | new | Service worker: precache shell + Chart.js, network-first for `/api/*`, offline fallback page. |
+| `dashboard/static/icons/icon-192.png` | new | PWA icon (placeholder generated in this PR). |
+| `dashboard/static/icons/icon-512.png` | new | PWA icon. |
+| `dashboard/static/icons/icon-512-maskable.png` | new | maskable variant. |
+| `dashboard/static/icons/apple-touch-icon-180.png` | new | iOS icon. |
+| `tests/test_dashboard_static_assets.py` | new | Verify manifest, sw.js, icons all served. |
+| `tests/test_dashboard_skeleton.py` | new | Verify index.html parses, has manifest link, viewport-fit=cover, links Chart.js + main.js. |
+| `docs/CHANGELOG.md` | edit | Entry. |
+| `docs/SESSION_PROGRESS.md` | edit | Session note. |
+| `docs/TESTING.md` | edit | Manual phone smoke-test checklist. |
+
+### Codex adversarial review
+
+After Batch 9, run:
+```
+/codex:adversarial-review --wait --scope branch --effort xhigh
+```
+Address P1/P2 findings. Document P3 decisions in a follow-up commit.
+
+### Test, merge, push
+
+- `.venv/Scripts/python.exe -m pytest tests/ -n auto`
+- All current tests must remain green (backend untouched).
+- New static-asset and skeleton tests pass.
+- Merge into main.
+- Push via Windows git: `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`
+- `git worktree remove /mnt/q/finance-analyzer/.worktrees/mobile-dashboard-2026-05-03 && git branch -d feat/mobile-dashboard-redesign-2026-05-03`
 
 ---
 
-## What this PR does NOT do
+## Risks (from spec §11) and mitigations
 
-- **Does not flip DRY_RUN to False anywhere.**
-- **Does not auto-register any scheduled tasks.** Provides install scripts.
-- **Does not touch oil/MSTR loops** (those are stable from the 2026-05-01 merge).
-- **Does not implement Brent expansion** — the catalog already labels OLJA warrants as `OIL-USD` underlying despite tracking Brent under the hood. Cleanest fix is to reclassify, but that requires a live Avanza probe to confirm which warrants track WTI vs Brent. Defer until the user runs that probe (per OIL_LOOP_NOTES.md).
-- **Does not add new oil signal modules** (`oil_cross_asset` etc.) — `oil_precompute.py` already produces the deep context the swing trader needs; adding voters risks over-fitting on a 30-day window.
-- **Does not touch `tests/integration/test_strategy.py`** — `ta_base_strategy` (Freqtrade) is an external module dependency, correctly --ignore'd per `docs/TESTING.md:36`.
+| Risk | Mitigation |
+|------|------------|
+| User opens dashboard during cut-over and it breaks | `/legacy` route preserves the old file; mention in TG. |
+| Service worker caches an old shell | Versioned cache name; `skipWaiting` + `clients.claim` on install/activate; `?nosw=1` bypass. |
+| Chart.js perf on phone | Mobile defaults (animation:0, DPR cap); evaluate after live test. Swap to uPlot/Lightweight in v2 only if needed. |
+| Polling drains battery | Page Visibility API; per-section cadence; pause when hidden. |
+| CF Access redirect breaks on cellular | Existing 1-year cookie + `?token=` fallback; auth.py unchanged. |
+| Tests don't catch UI regressions | Add manual phone smoke-test checklist to TESTING.md. |
 
----
+## What could break (concrete)
 
-## Risks
+- **`index.html` rewrite** is the highest-blast-radius change. Mitigation:
+  preserve the current file as `index_legacy.html`, add `/legacy` route,
+  test before merging.
+- **Chart instance lifecycle** when a view unmounts must dispose the Chart.js
+  instance to avoid memory leaks (current code's `equityChartInstance` global
+  has no dispose path). `mini-chart.js` will own this.
+- **Polling registration** must unregister on view unmount or the closed-view
+  endpoints keep firing. `polling.js` controller enforces this.
+- **`pf_dashboard_token` cookie** must continue to be sent on all `/api/*`
+  fetches. Default `credentials: 'same-origin'` covers it; do not write
+  `credentials: 'omit'` anywhere.
 
-1. **conftest.py global fixture changes** can affect every test in the repo. Mitigation: keep additions strictly additive (only add new resets, never remove existing ones); pytest -n auto regression run before merge.
-2. **Loop health watchdog spamming telegram** if heartbeats are persistently stale. Mitigation: cooldown logic in `scripts/loop_health_watchdog.py` (default 4h between alerts per-loop).
-3. **Crypto warrant catalog migration** — entries written before this PR don't have bid/ask/last. The trader gracefully refuses to size (Batch A fix), so existing catalog files won't crash; they'll just block BUYs until refresh runs. This is the same behaviour that already shipped for oil and is the correct conservative default.
+## Execution order rationale
 
----
+Batches 1-2 are pure foundation (no UI yet); they don't break anything and
+can ship independently. Batches 3-4 build the home screen, the highest-
+value moment. Batches 5-8 fill out the remaining views. Batch 9 ships PWA
++ tests + docs.
 
-## Execution order
+If we run out of session before completing all 9, stop at the latest
+clean-state batch (home works, /legacy preserves the rest) and ship as a
+partial release. The user will already see the new home view; everything
+else falls back to the legacy file via the More tab's "Legacy view" link.
 
-| Batch | Files | LOC | Tests | Commit prefix |
-|---|---|---|---|---|
-| **A** | crypto_swing_trader + crypto_warrant_refresh + 1 test | ~80 | yes | `fix(crypto): back-port warrant-sizing safety (Batch A)` |
-| **B** | loop_health + dashboard + watchdog + install.ps1 + 2 test files | ~700 | yes | `feat(ops): loop health rollup + watchdog (Batch B)` |
-| **C** | conftest.py + 3 test fixes + TESTING.md | ~200 | yes | `fix(tests): stabilise xdist flakes (Batch C)` |
+## Outcomes (filled in during execution)
 
-After Batch C:
-1. **Codex review** on the worktree branch.
-2. Address P1/P2 findings.
-3. **Full pytest** with `-n auto`. The benchmark is "≤4 known flakes from before this PR"; aim for 0 with these fixes.
-4. **Merge** to main.
-5. **Push** via Windows git.
-6. **Clean up** worktree + branch.
-
----
-
-## Why this design
-
-1. **Back-port the proven fix** — codex already validated the oil fix; crypto gets the exact same treatment, no design debate.
-2. **Heartbeats become useful** — already write them, may as well alert on staleness. Single new module + small dashboard endpoint.
-3. **Stabilise tests, don't redesign them** — add state resets to existing fixtures rather than rewriting test files. Leave the 4th flake (Freqtrade external dep) alone since it's correctly classified.
-4. **No new features, no new flips** — pure operational hardening. Same risk profile as the 2026-05-01 merge.
+- Batch 1 — *pending*
+- Batch 2 — *pending*
+- Batch 3 — *pending*
+- Batch 4 — *pending*
+- Batch 5 — *pending*
+- Batch 6 — *pending*
+- Batch 7 — *pending*
+- Batch 8 — *pending*
+- Batch 9 — *pending*
+- Codex review — *pending*
+- Tests — *pending*
+- Merge + push — *pending*
