@@ -12,19 +12,31 @@ import { getChartColors } from "../theme.js";
 
 /**
  * @param {{ history: object[], topN?: number, height?: number }} props
- *   history: array of snapshots, each { date, signals: { signal: pct } }
+ *   history: array of snapshots written by the daily accuracy job. Each
+ *   snapshot has a `signals: { signal_name: { accuracy: 0..1, total: int, pct?: 0..100 } }`
+ *   subdocument plus a `ts` timestamp.
  * @returns {{ element: HTMLElement, dispose: () => void }}
  */
 export function accuracyChart({ history = [], topN = 8, height = 240 } = {}) {
   const c = getChartColors();
   const palette = [c.cyan, c.green, c.orange, c.yellow, c.blue, c.red, "#a855f7", "#ec4899"];
 
-  // Aggregate signals by sample count to pick top-N.
+  // Snapshots may arrive out of order; sort ascending by timestamp so the
+  // line goes left-to-right.
+  const sorted = [...history].sort((a, b) => {
+    const av = String(a?.ts || a?.date || "");
+    const bv = String(b?.ts || b?.date || "");
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  });
+
+  // Aggregate signals by sample count to pick top-N. The snapshot writer
+  // uses `total` for sample count; older drafts assumed `samples` / `n`,
+  // which never matched the live data and produced an empty chart.
   const counts = Object.create(null);
-  for (const snap of history) {
+  for (const snap of sorted) {
     const sigs = snap?.signals || {};
     for (const [name, info] of Object.entries(sigs)) {
-      const n = Number(info?.samples ?? info?.n ?? 0);
+      const n = Number(info?.total ?? info?.samples ?? info?.n ?? 0);
       if (!Number.isFinite(n)) continue;
       counts[name] = (counts[name] || 0) + n;
     }
@@ -34,18 +46,29 @@ export function accuracyChart({ history = [], topN = 8, height = 240 } = {}) {
     .slice(0, topN)
     .map(([name]) => name);
 
+  // Snapshots store accuracy as either `pct` (0..100) or `accuracy` (0..1
+  // fraction). Normalize to a 0..100 percentage so the chart's y-axis is
+  // honest. Showing 0.55 on a 0..100 scale was the pre-fix bug.
+  function _toPct(info) {
+    if (!info) return null;
+    if (Number.isFinite(Number(info.pct))) return Number(info.pct);
+    if (Number.isFinite(Number(info.accuracy_pct))) return Number(info.accuracy_pct);
+    if (Number.isFinite(Number(info.accuracy))) {
+      const a = Number(info.accuracy);
+      return a <= 1.5 ? a * 100 : a;  // tolerate either scale
+    }
+    return null;
+  }
+
   // Build one dataset per top signal.
-  const labels = history.map((h) => h.date || h.ts || "");
+  const labels = sorted.map((h) => h.date || h.ts || "");
   const datasets = top.map((name, i) => ({
     label: name,
-    data: history.map((h) => {
-      const v = h?.signals?.[name];
-      return v && (v.pct ?? v.accuracy ?? v.accuracy_pct);
-    }),
+    data: sorted.map((h) => _toPct(h?.signals?.[name])),
     borderColor: palette[i % palette.length],
     backgroundColor: palette[i % palette.length],
     borderWidth: 1.4,
-    pointRadius: 0,
+    pointRadius: sorted.length < 6 ? 3 : 0,  // show dots when sparse
     tension: 0.2,
     spanGaps: true,
   }));

@@ -182,6 +182,20 @@ async function _renderHistoryTab(slot) {
     slot.append(emptyState("No accuracy history data yet."));
     return;
   }
+
+  // Surface a hint when there are too few snapshots to be a useful line
+  // chart. Without this an empty-looking chart is confusing — the
+  // accuracy_snapshots writer needs ~7+ daily entries before trend lines
+  // tell you anything beyond the per-signal accuracy panel.
+  if (arr.length < 5) {
+    const hint = document.createElement("div");
+    hint.className = "banner banner--info";
+    hint.textContent =
+      `Only ${arr.length} accuracy snapshot${arr.length === 1 ? "" : "s"} so far. `
+      + "Trend lines need ~7+ daily snapshots; check back in a few days.";
+    slot.append(hint);
+  }
+
   const built = accuracyChart({ history: arr, topN: 8, height: 260 });
   slot.append(built.element);
   _disposeChart = built.dispose;
