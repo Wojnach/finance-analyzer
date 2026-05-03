@@ -33,6 +33,9 @@ import "./views/more.js";
 import "./views/health.js";
 import "./views/messages.js";
 import "./views/settings.js";
+import "./views/equity.js";
+import "./views/metals.js";
+import "./views/golddigger.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
