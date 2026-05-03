@@ -1,0 +1,90 @@
+/*
+ * main.js — module entry. Bootstraps the mobile dashboard.
+ *
+ * Responsibilities:
+ *  - Init theme.
+ *  - Wire up bottom-nav clicks → router.navigate.
+ *  - Init router (hashchange listener + initial mount).
+ *  - Subscribe to error state → render banner.
+ *  - Register service worker (gracefully — SW is optional in batch 9+).
+ *
+ * Views register themselves with the router (see js/views/*). Views are
+ * imported here rather than by lazy dynamic import to keep the dependency
+ * graph explicit. Each subsequent batch in PLAN.md adds a new view import.
+ */
+
+import * as state from "./state.js";
+import * as router from "./router.js";
+import * as polling from "./polling.js";
+import { initTheme, toggleTheme } from "./theme.js";
+
+// ---- View imports (added by subsequent batches) -----------------------------
+// Batch 4: views/home.js
+// Batch 5: views/decisions.js, views/decision-detail.js
+// Batch 6: views/signals.js
+// Batch 7: views/more.js, views/health.js, views/messages.js, views/settings.js
+// Batch 8: views/metals.js, views/golddigger.js, views/equity.js
+// As views register themselves with router.register(), they appear in the
+// bottom-nav routes. Until then, the router's "not implemented" fallback
+// (see router.js _handleChange) directs the user to /legacy.
+
+document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
+
+  // Wire bottom-nav buttons → hash routes.
+  document.querySelectorAll(".bottom-nav__item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const route = btn.dataset.route || "home";
+      router.navigate(route);
+    });
+  });
+
+  // Update active state on bottom-nav as the route changes.
+  state.subscribe(state.Slots.ROUTE, (parsed) => {
+    document.querySelectorAll(".bottom-nav__item").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.route === (parsed?.name || "home"));
+    });
+  });
+
+  // Surface fetch/auth errors as a banner above the view.
+  state.subscribe(state.Slots.ERROR, (msg) => {
+    const root = document.getElementById("root");
+    if (!root) return;
+    const existing = root.querySelector(".banner--error.global-error");
+    if (msg) {
+      if (existing) {
+        existing.textContent = msg;
+      } else {
+        const b = document.createElement("div");
+        b.className = "banner banner--error global-error";
+        b.textContent = msg;
+        root.prepend(b);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  });
+
+  // Init the router last so views see a fully-built shell.
+  const root = document.getElementById("root");
+  router.init(root);
+
+  // Service-worker registration is deferred to batch 9. When sw.js exists
+  // the registration code below activates it without blocking first paint.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("/static/sw.js")
+        .catch(() => {/* sw not yet shipped — ignore */});
+    });
+  }
+});
+
+// Expose a tiny debug surface for the browser console only.
+// (Intentional global; safe because it only re-exports read APIs.)
+window.__pi = Object.freeze({
+  state,
+  router,
+  polling,
+  toggleTheme,
+});
