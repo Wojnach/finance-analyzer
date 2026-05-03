@@ -7181,6 +7181,9 @@ Positions: {pos_summary}{prob_summary}""")
                                        verify_fn=verify_metals_contract, loop_name="metals")
                     except Exception as _e:
                         log(f"Contract check failed: {_e}")
+                    # Heartbeat: outside market hours is still a healthy
+                    # cycle from the watchdog's POV — loop is alive.
+                    _write_heartbeat(check_count, POSITIONS)
                     _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
@@ -7197,6 +7200,9 @@ Positions: {pos_summary}{prob_summary}""")
                                     peak_bids[key] = bid
                 except Exception as e:
                     log(f"Price error: {e}")
+                    # Heartbeat even on transient price-fetch error: the
+                    # main loop ticked, only a single source failed.
+                    _write_heartbeat(check_count, POSITIONS)
                     _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
@@ -7381,6 +7387,8 @@ Positions: {pos_summary}{prob_summary}""")
                 if startup_grace:
                     startup_grace = False
                     log(f"#{check_count} Baseline established (grace period)")
+                    # Heartbeat: grace exit is still a successful first cycle.
+                    _write_heartbeat(check_count, POSITIONS)
                     _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
