@@ -745,19 +745,23 @@ def _bias_rate_from_entries(entries: list, tier: str, ticker: str | None = None)
 def _is_tier_biased(tier: str) -> bool:
     """Detect BUY or SELL bias from recent journal entries (global, all tickers).
 
-    If a tier has >75% of its recent non-abstention votes in one direction,
+    If a tier has >70% of its recent non-abstention votes in one direction,
     it's structurally biased and should be downweighted in the cascade.
-    Uses the last 30 journal entries for the tier.
 
     2026-04-25: Added to fix Sonnet (83% BUY) and Opus (78% BUY) bias that
     collapsed claude_fundamental from 59.4% to 37.9% recent accuracy.
+    2026-05-03: Tightened threshold 75% -> 70% after Opus reached 95% BUY
+    bias and Sonnet 73% BUY bias. The 75% threshold was too loose — a tier
+    at 74% is still heavily biased. Also increased lookback from 200 to 400
+    entries to capture more per-tier data (Opus refreshes every 2h so only
+    ~40 entries per day).
     """
-    _BIAS_THRESHOLD = 0.75
+    _BIAS_THRESHOLD = 0.70
     _BIAS_MIN_SAMPLES = 10
 
     try:
         from portfolio.file_utils import load_jsonl_tail
-        entries = load_jsonl_tail(_CF_LOG, max_entries=200)
+        entries = load_jsonl_tail(_CF_LOG, max_entries=400)
     except Exception:
         return False
 
