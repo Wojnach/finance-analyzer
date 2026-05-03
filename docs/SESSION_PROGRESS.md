@@ -378,3 +378,178 @@ CLAUDE.md
 ### 2026-05-03 22:31 UTC | feat/loop-infra-cleanup-2026-05-04
 3b0a3d78 test(prewarm): bypass disk lazy-load in TestDashboardAccuracyPrewarm reset
 tests/test_accuracy_compute_lock.py
+
+### 2026-05-03 22:32 UTC | main
+8558fb5a docs(session): cold-start perf follow-ups + ops lesson
+docs/SESSION_PROGRESS.md
+
+### 2026-05-03 23:00 UTC | fix/bert-meta-tensor-2026-05-04
+88c2a827 docs(plan): bert_sentiment meta-tensor defensive load
+docs/PLAN_bert_meta_fix.md
+
+### 2026-05-03 23:01 UTC | main
+faaa32e6 fix(dashboard): _read_jsonl seeks from end of file — 139x speedup on /api/golddigger
+dashboard/app.py
+tests/test_dashboard.py
+
+### 2026-05-03 23:03 UTC | fix/bert-meta-tensor-2026-05-04
+a03a5f14 fix(bert_sentiment): defensive meta-tensor detection at load time
+portfolio/bert_sentiment.py
+tests/test_bert_sentiment.py
+
+### 2026-05-03 23:10 UTC | feat/dashboard-avanza-view-2026-05-04
+c6ccb642 feat(dashboard): Avanza account view + click-feedback on refresh buttons
+dashboard/app.py
+dashboard/static/js/main.js
+dashboard/static/js/views/avanza.js
+dashboard/static/js/views/more.js
+dashboard/static/js/views/settings.js
+tests/test_dashboard_avanza_account.py
+
+### 2026-05-03 23:11 UTC | fix/bert-meta-tensor-2026-05-04
+2c646026 fix(bert_sentiment): also walk buffers for meta-tensor check
+portfolio/bert_sentiment.py
+tests/test_bert_sentiment.py
+
+### 2026-05-03 23:11 UTC | 
+c6581c5f docs(plan): bert_sentiment meta-tensor defensive load
+docs/PLAN_bert_meta_fix.md
+
+### 2026-05-03 23:11 UTC | 
+b46553db fix(bert_sentiment): defensive meta-tensor detection at load time
+portfolio/bert_sentiment.py
+tests/test_bert_sentiment.py
+
+### 2026-05-03 23:11 UTC | 
+f1a406b4 fix(bert_sentiment): also walk buffers for meta-tensor check
+portfolio/bert_sentiment.py
+tests/test_bert_sentiment.py
+
+### 2026-05-03 23:13 UTC | main
+f77de36a fix(conftest): redirect SIGNAL_UTILITY_CACHE_FILE to session tmpdir
+tests/conftest.py
+
+### 2026-05-03 23:13 UTC | fix/codex-review-followups-2026-05-04
+4fcb4104 plan: codex review followups (2026-05-04)
+docs/plans/2026-05-04-codex-review-followups.md
+
+### 2026-05-03 23:23 UTC | fix/codex-review-followups-2026-05-04
+c2bdfd18 fix(codex-review): 4 findings from adversarial review of 8558fb5a..faaa32e6
+.gitignore
+dashboard/app.py
+data/crypto_loop.py
+data/oil_loop.py
+portfolio/accuracy_stats.py
+portfolio/file_utils.py
+tests/test_accuracy_compute_lock.py
+tests/test_dashboard.py
+tests/test_loop_health_write_heartbeat.py
+
+### 2026-05-03 23:24 UTC | feat/dashboard-avanza-view-2026-05-04
+5c7bdde7 fix(dashboard): codex P1+P2 fixes for avanza view + Live prices + Assets + history hint
+dashboard/app.py
+dashboard/static/js/charts/accuracy-chart.js
+dashboard/static/js/main.js
+dashboard/static/js/views/assets.js
+dashboard/static/js/views/avanza.js
+dashboard/static/js/views/more.js
+dashboard/static/js/views/prices.js
+dashboard/static/js/views/signals.js
+tests/test_dashboard_avanza_account.py
+
+### 2026-05-03 23:32 UTC | main
+b0048e1d fix(dashboard): switch /api/avanza_account to portfolio.avanza_session
+dashboard/app.py
+tests/test_dashboard_avanza_account.py
+
+### 2026-05-04 ~01:00-01:13 CEST | fix/bert-meta-tensor-2026-05-04 → main f1a406b4
+c6581c5f docs(plan): bert_sentiment meta-tensor defensive load (post-rebase)
+b46553db fix(bert_sentiment): defensive meta-tensor detection at load time (post-rebase)
+2c646026 fix(bert_sentiment): also walk buffers for meta-tensor check
+docs/PLAN_bert_meta_fix.md
+portfolio/bert_sentiment.py
+tests/test_bert_sentiment.py
+
+**What this was:** /fin-status caught a BERT FinBERT meta-device warning
+in `data/loop_out.txt` at 00:27:34: `BERT FinBERT batched predict failed:
+Tensor on device meta is not on the expected device cpu!`. ~20-30 such
+warnings per cycle since the loop restart at 23:38:02 — every FinBERT
+prediction silently failed and wrote a zero-confidence neutral
+placeholder to `data/sentiment_ab_log.jsonl`.
+
+**Root cause:** race between Chronos's CUDA load and concurrent BERT
+loads via `main.py`'s ThreadPoolExecutor. Triggering commit was
+`789cc91c` (perf/forecast Chronos-before-Kronos) at 21:08 UTC on
+2026-05-03 — that commit moved Chronos's load into the parallel
+ticker phase concurrent with BERT loads from `sentiment.py`.
+`accelerate`'s lazy init can leave some FinBERT weights on the `meta`
+device when CUDA init runs on another thread. Standalone repro of
+FinBERT alone works fine; needs the loop's specific concurrent timing.
+
+**Why FinBERT only:** loaded from a snapshot path
+(`Q:\models\finbert\models--ProsusAI--finbert\snapshots\<hash>`)
+without `cache_dir`/`local_files_only` kwargs. The snapshot dir
+contains `pytorch_model.bin` + `flax_model.msgpack` + `tf_model.h5`,
+which routes transformers into a path more sensitive to accelerate's
+lazy init. CryptoBERT and Trading-Hero-LLM use the standard
+`cache_dir + hf_name` pattern and don't hit it.
+
+**What changed:**
+- New `_has_meta_tensor(model)` walks both `parameters()` and
+  `buffers()` (LayerNorm running mean/var live as buffers, not
+  parameters; would slip past a parameters-only check).
+- New `_model_load_kwargs(name, config, cache_dir)` extracts the
+  FinBERT-vs-others dispatch so the same path resolution can be
+  reused by the retry without duplicating the branching.
+- After `from_pretrained(...)`, run `_has_meta_tensor`. If True:
+  log a WARNING naming the model + race hypothesis, retry once with
+  `torch_dtype=torch.float32, low_cpu_mem_usage=False`. If retry
+  still has meta tensors, raise `RuntimeError(...)` with accelerate
+  version + load_path for diagnostic correlation.
+- `_get_model()` doesn't catch the RuntimeError, so the bad model is
+  NOT cached; subsequent predict calls retry from scratch instead of
+  compounding corruption.
+- New `_accelerate_version()` helper used in the error message.
+- 6 new tests in `TestMetaTensorRecovery` + smoke test for
+  `_accelerate_version`. 21/21 bert_sentiment tests pass.
+
+**Codex adversarial review:** spawned codex-rescue at effort xhigh
+with 8 questions. Hit usage limit before emitting findings — the
+streaming log shows it completed Phase 1 (code/diff/library
+inspection) but didn't reach the final report. Self-reviewed my own
+8 questions and found one valid concern (parameters() doesn't
+include buffers); commit `2c646026` extends `_has_meta_tensor` to
+walk both. Other 7 questions checked clean.
+
+**Verification (LIVE in production at 01:12 CEST):**
+```
+01:12:18  GPU gate ACQUIRED by chronos
+01:12:22  Loading BERT model Trading-Hero-LLM
+01:12:23  Loading Chronos-2 model amazon/chronos-2 on cuda...   ← race window
+01:12:24  Loading BERT model FinBERT from snapshot              ← race window
+01:12:26  Chronos-2 model loaded
+01:12:49  LLM batch: 4 Ministral queries                        ← cycle running
+```
+The race window was active (BERT/Chronos loads overlapped — same
+fingerprint as the broken 23:38 load) but **zero `predict failed`
+lines**, **zero `loaded with meta tensors` warnings**. Either the
+race didn't trigger meta corruption this time, or it did and the
+defensive check silently retried — either way, the symptom is gone.
+
+**Loop restart procedure:** `taskkill /F /PID <loop-pid>` (per the
+ops lesson from earlier tonight — `schtasks /end` can leave the
+singleton lock held by a zombie file handle for 80+ min). Loop's
+bat wrapper auto-restarted in <30s.
+
+## What's next (optional follow-ups)
+
+- **Serialize Chronos vs BERT loads** in `main.py` to eliminate the
+  underlying race entirely. Cleaner than defensive detection but
+  adds startup latency. Not urgent — defensive check handles it.
+- **Watch for the WARN line in production:** `tail -F data/loop_out.txt
+  | grep -aE "BERT.*meta tensors"`. If the race ever triggers in a
+  way that needs the retry, you'll see one warning + clean recovery
+  instead of 30 silent prediction failures per cycle.
+- **Audit other `from_pretrained` call sites** for the same lazy-meta
+  vulnerability if they run concurrently with CUDA-loading models.
+  Quick grep: `grep -rn "from_pretrained" portfolio/ | grep -v test`.
