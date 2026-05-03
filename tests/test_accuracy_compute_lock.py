@@ -103,6 +103,42 @@ class TestAccuracyComputeLock:
         assert counter.calls == 1
         assert elapsed < 0.9
 
+    def test_get_or_compute_consensus_serializes_on_miss(self, monkeypatch, tmp_path):
+        """2026-05-03: consensus wrapper added to fix /api/accuracy timeout.
+        Same thundering-herd guarantee as the others."""
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        fake_result = {"correct": 7, "total": 10, "accuracy": 0.7, "pct": 70.0}
+        counter = _CallCounter(lambda h: fake_result, sleep_s=0.3)
+        monkeypatch.setattr(acc_mod, "consensus_accuracy", counter)
+
+        results, elapsed = self._race(
+            lambda: acc_mod.get_or_compute_consensus_accuracy("1d")
+        )
+
+        assert len(results) == 5
+        for r in results:
+            assert r == fake_result
+        assert counter.calls == 1
+        assert elapsed < 0.9
+
+    def test_get_or_compute_consensus_returns_cache_on_hit(self, monkeypatch, tmp_path):
+        """Hot path: cached result returns without calling consensus_accuracy."""
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        # Pre-populate cache.
+        cached_result = {"correct": 4, "total": 5, "accuracy": 0.8, "pct": 80.0}
+        acc_mod.write_accuracy_cache("consensus_1d", cached_result)
+
+        # If consensus_accuracy gets called we'd see this fake result instead.
+        called = {"n": 0}
+        def _shouldnt_run(*_a, **_kw):
+            called["n"] += 1
+            return {"correct": 0, "total": 0, "accuracy": 0.0, "pct": 0.0}
+        monkeypatch.setattr(acc_mod, "consensus_accuracy", _shouldnt_run)
+
+        result = acc_mod.get_or_compute_consensus_accuracy("1d")
+        assert result == cached_result
+        assert called["n"] == 0
+
     def test_cache_hit_does_not_acquire_compute_lock(self, monkeypatch, tmp_path):
         """Hot path: when cache is populated, the slow compute must NOT run."""
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")

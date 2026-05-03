@@ -870,27 +870,50 @@ def api_signal_log():
     return jsonify(entries)
 
 
+_API_ACCURACY_CACHE: dict = {"ts": 0.0, "data": None}
+_API_ACCURACY_TTL_SEC = 60.0
+
+
 @app.route("/api/accuracy")
 @require_auth
 def api_accuracy():
+    """Aggregate accuracy report across 4 horizons.
+
+    2026-05-03: previously took >15s (timed out from clients) because
+    each request did 12 full signal-log scans (4 horizons × 3 metrics).
+    Now backed by accuracy_stats.get_or_compute_*() which read
+    accuracy_cache.json on the hot path, plus a 60s in-process TTL
+    that coalesces burst requests during dashboard polling.
+    """
+    import time
+    now = time.time()
+    if (_API_ACCURACY_CACHE["data"] is not None
+            and (now - _API_ACCURACY_CACHE["ts"]) < _API_ACCURACY_TTL_SEC):
+        return jsonify(_API_ACCURACY_CACHE["data"])
+
     try:
         from portfolio.accuracy_stats import (
-            consensus_accuracy,
-            per_ticker_accuracy,
-            signal_accuracy,
+            get_or_compute_accuracy,
+            get_or_compute_consensus_accuracy,
+            get_or_compute_per_ticker_accuracy,
         )
 
         result = {}
         for horizon in ["1d", "3d", "5d", "10d"]:
-            sa = signal_accuracy(horizon)
-            ca = consensus_accuracy(horizon)
-            ta = per_ticker_accuracy(horizon)
-            if ca["total"] > 0:
+            sa = get_or_compute_accuracy(horizon)
+            ca = get_or_compute_consensus_accuracy(horizon)
+            ta = get_or_compute_per_ticker_accuracy(horizon)
+            # ca/sa/ta may be None when the underlying cache miss returned
+            # no data (cold cache + no signal-log entries yet); skip those
+            # horizons entirely so the response stays well-formed.
+            if ca and ca.get("total", 0) > 0:
                 result[horizon] = {
-                    "signals": sa,
+                    "signals": sa or {},
                     "consensus": ca,
-                    "per_ticker": ta,
+                    "per_ticker": ta or {},
                 }
+        _API_ACCURACY_CACHE["data"] = result
+        _API_ACCURACY_CACHE["ts"] = now
         return jsonify(result)
     except Exception:
         logger.exception("accuracy endpoint error")

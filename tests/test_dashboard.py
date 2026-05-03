@@ -350,21 +350,107 @@ class TestApiSignalLog:
 
 
 class TestApiAccuracy:
+    def _reset_endpoint_cache(self):
+        """The endpoint has a 60s in-process TTL cache. Reset it so tests
+        don't see leakage from prior runs in the same process."""
+        import dashboard.app as app_mod
+        app_mod._API_ACCURACY_CACHE["data"] = None
+        app_mod._API_ACCURACY_CACHE["ts"] = 0.0
+
     def test_returns_accuracy_data(self, client, tmp_data):
-        with _no_auth(), patch("dashboard.app.Path"):
-            # Mock the accuracy_stats imports
-            mock_sa = {"rsi": {"correct": 10, "total": 20, "accuracy": 0.5}}
-            mock_ca = {"correct": 50, "total": 100, "accuracy": 0.5}
-            mock_ta = {"BTC-USD": {"correct": 5, "total": 10}}
-            with patch.dict("sys.modules", {
-                "portfolio.accuracy_stats": MagicMock(
-                    signal_accuracy=MagicMock(return_value=mock_sa),
-                    consensus_accuracy=MagicMock(return_value=mock_ca),
-                    per_ticker_accuracy=MagicMock(return_value=mock_ta),
-                )
-            }):
-                resp = client.get("/api/accuracy")
+        self._reset_endpoint_cache()
+        # The endpoint now uses get_or_compute_* wrappers (2026-05-03 perf
+        # fix); patch those entry points instead of the raw functions.
+        mock_sa = {"rsi": {"correct": 10, "total": 20, "accuracy": 0.5}}
+        mock_ca = {"correct": 50, "total": 100, "accuracy": 0.5}
+        mock_ta = {"BTC-USD": {"correct": 5, "total": 10}}
+        with _no_auth(), patch.dict("sys.modules", {
+            "portfolio.accuracy_stats": MagicMock(
+                get_or_compute_accuracy=MagicMock(return_value=mock_sa),
+                get_or_compute_consensus_accuracy=MagicMock(return_value=mock_ca),
+                get_or_compute_per_ticker_accuracy=MagicMock(return_value=mock_ta),
+            )
+        }):
+            resp = client.get("/api/accuracy")
         assert resp.status_code == 200
+        body = resp.get_json()
+        # All four horizons populated since each ca has total > 0.
+        for h in ("1d", "3d", "5d", "10d"):
+            assert h in body
+            assert body[h]["consensus"]["total"] == 100
+
+    def test_uses_in_process_ttl_cache(self, client, tmp_data):
+        """Burst requests within TTL must hit the in-process cache, not
+        re-import accuracy_stats. 2026-05-03: TTL added so dashboard
+        polling (one client per page-load) doesn't fan out to 12 SQLite
+        scans every refresh."""
+        self._reset_endpoint_cache()
+        compute_calls = {"n": 0}
+
+        def _track_call(*_a, **_kw):
+            compute_calls["n"] += 1
+            return {"correct": 1, "total": 2, "accuracy": 0.5}
+
+        with _no_auth(), patch.dict("sys.modules", {
+            "portfolio.accuracy_stats": MagicMock(
+                get_or_compute_accuracy=MagicMock(side_effect=_track_call),
+                get_or_compute_consensus_accuracy=MagicMock(side_effect=_track_call),
+                get_or_compute_per_ticker_accuracy=MagicMock(side_effect=_track_call),
+            )
+        }):
+            resp1 = client.get("/api/accuracy")
+            resp2 = client.get("/api/accuracy")
+            resp3 = client.get("/api/accuracy")
+
+        # First request fans out to 12 calls (4 horizons × 3 wrappers).
+        # Calls 2 and 3 must serve from the TTL cache — zero new compute calls.
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
+        assert resp3.status_code == 200
+        assert compute_calls["n"] == 12, (
+            f"Expected 12 wrapper calls (one full fanout), got {compute_calls['n']}"
+        )
+
+    def test_skips_horizon_with_no_data(self, client, tmp_data):
+        """A horizon whose consensus has total=0 (cold-cache, no entries)
+        should be omitted from the response, not crash."""
+        self._reset_endpoint_cache()
+
+        def _ca_for(horizon):
+            # 1d has data; 3d/5d/10d are cold.
+            if horizon == "1d":
+                return {"correct": 5, "total": 10, "accuracy": 0.5}
+            return {"correct": 0, "total": 0, "accuracy": 0.0}
+
+        with _no_auth(), patch.dict("sys.modules", {
+            "portfolio.accuracy_stats": MagicMock(
+                get_or_compute_accuracy=MagicMock(return_value={}),
+                get_or_compute_consensus_accuracy=MagicMock(side_effect=_ca_for),
+                get_or_compute_per_ticker_accuracy=MagicMock(return_value={}),
+            )
+        }):
+            resp = client.get("/api/accuracy")
+        body = resp.get_json()
+        assert "1d" in body
+        assert "3d" not in body
+        assert "5d" not in body
+        assert "10d" not in body
+
+    def test_handles_none_from_cache_miss(self, client, tmp_data):
+        """Cold cache returning None must not crash — responses default to
+        empty dicts for sa/ta and skip the horizon when ca is None/empty."""
+        self._reset_endpoint_cache()
+        with _no_auth(), patch.dict("sys.modules", {
+            "portfolio.accuracy_stats": MagicMock(
+                get_or_compute_accuracy=MagicMock(return_value=None),
+                get_or_compute_consensus_accuracy=MagicMock(return_value=None),
+                get_or_compute_per_ticker_accuracy=MagicMock(return_value=None),
+            )
+        }):
+            resp = client.get("/api/accuracy")
+        assert resp.status_code == 200
+        # All horizons skipped because ca is None.
+        assert resp.get_json() == {}
 
 
 class TestApiIskbets:

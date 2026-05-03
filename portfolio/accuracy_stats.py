@@ -1071,6 +1071,34 @@ def get_or_compute_per_ticker_accuracy(horizon: str):
         return result
 
 
+def get_or_compute_consensus_accuracy(horizon: str):
+    """Cached aggregate consensus accuracy, computed at most once.
+
+    2026-05-03: added to fix /api/accuracy timeout (>15s). The dashboard
+    requests 4 horizons × 3 metrics = 12 lookups; previously consensus
+    was the only one without a cache, forcing a full signal-log scan
+    per horizon per request.
+
+    Cache key: `consensus_{horizon}`. Mirrors get_or_compute_accuracy
+    semantics — double-checked locking, written on first miss.
+    """
+    cache_key = f"consensus_{horizon}"
+    cached = load_cached_accuracy(cache_key)
+    if cached:
+        return cached
+    with _accuracy_compute_lock:
+        cached = load_cached_accuracy(cache_key)
+        if cached:
+            return cached
+        result = consensus_accuracy(horizon)
+        # consensus_accuracy always returns a dict (even with total=0);
+        # write all of them so a horizon with zero scored entries doesn't
+        # re-compute on every request.
+        if result is not None:
+            write_accuracy_cache(cache_key, result)
+        return result
+
+
 def _count_entries_with_outcomes(entries, horizon):
     count = 0
     for entry in entries:
