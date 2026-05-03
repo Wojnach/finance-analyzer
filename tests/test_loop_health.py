@@ -161,13 +161,16 @@ class TestReadLoopHealthRollup:
         """Sanity: the default DEFAULT_HEARTBEAT_FILES paths exist as keys
         with the expected names. The actual files may or may not exist
         depending on whether loops have run."""
-        assert "crypto" in loop_health.DEFAULT_HEARTBEAT_FILES
-        assert "oil" in loop_health.DEFAULT_HEARTBEAT_FILES
-        assert "mstr" in loop_health.DEFAULT_HEARTBEAT_FILES
+        for name in ("crypto", "oil", "mstr", "metals", "golddigger"):
+            assert name in loop_health.DEFAULT_HEARTBEAT_FILES, name
         assert loop_health.DEFAULT_HEARTBEAT_FILES["crypto"].endswith(
             "crypto_loop.heartbeat")
         assert loop_health.DEFAULT_HEARTBEAT_FILES["mstr"].endswith(
             "mstr_loop.heartbeat")
+        assert loop_health.DEFAULT_HEARTBEAT_FILES["metals"].endswith(
+            "metals_loop.heartbeat")
+        assert loop_health.DEFAULT_HEARTBEAT_FILES["golddigger"].endswith(
+            "golddigger_loop.heartbeat")
 
     def test_rollup_includes_checked_at_and_threshold(self, tmp_path, fixed_now):
         rollup = loop_health.read_loop_health(

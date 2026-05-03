@@ -38,7 +38,24 @@ MAX_CONSECUTIVE_ERRORS = 5
 BACKOFF_BASE = 10  # seconds
 BACKOFF_MAX = 300  # 5 minutes
 SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+HEARTBEAT_FILE = "data/golddigger_loop.heartbeat"
 _singleton_lock_fh = None
+
+
+def _write_heartbeat(cycle_count: int, has_position: bool) -> None:
+    """Write loop_health watchdog heartbeat after each successful cycle.
+
+    Thin wrapper over `portfolio.loop_health.write_heartbeat`. Best-effort:
+    never raises, never crashes the bot.
+    """
+    try:
+        from portfolio.loop_health import write_heartbeat
+        write_heartbeat(
+            HEARTBEAT_FILE, cycle_count,
+            n_positions=1 if has_position else 0,
+        )
+    except Exception:
+        logger.debug("golddigger: heartbeat dispatch failed", exc_info=True)
 
 
 def _load_config() -> dict:
@@ -357,6 +374,8 @@ def run(live: bool = False, once: bool = False):
                 with contextlib.suppress(Exception):
                     verify_and_act(_report, config or {}, tracker=_contract_tracker,
                                    verify_fn=verify_bot_contract, loop_name="golddigger")
+                # Heartbeat for loop_health watchdog. Best-effort, never raises.
+                _write_heartbeat(_cycle_count, bot.state.has_position())
                 time.sleep(cfg.poll_seconds)
 
             except KeyboardInterrupt:
