@@ -189,6 +189,10 @@ class TestDashboardAccuracyPrewarm:
         # call's now=any-value passes the interval check. Setting to 0.0
         # would not work for now<3600 in test (interval is 1h).
         acc_mod._last_dashboard_prewarm_ts = -10000.0
+        # 2026-05-04: also bypass the lazy-load from disk, which would
+        # otherwise read the real data/dashboard_prewarm_state.json and
+        # pin the gate to "recently fired".
+        acc_mod._dashboard_prewarm_loaded = True
 
     def test_first_call_fires_and_warms_all_12_keys(self, monkeypatch, tmp_path):
         """Cold start: one call should populate consensus / signal /
