@@ -606,8 +606,14 @@ def _compute_signal_utility(horizon, entries):
                 continue
 
             change_pct = outcome.get("change_pct", 0)
-            if abs(change_pct) < _MIN_CHANGE_PCT:
-                continue  # neutral outcome — skip
+            # 2026-05-03: None-guard mirrors _vote_correct (line 112) and the
+            # 2026-04-22 outcome-backfill regression. Without this, every
+            # cold compute crashes on 4h+ horizons that haven't backfilled
+            # yet — silently swallowed by signal_engine.py:3486's broad
+            # except, so the in-memory cache never populates and every call
+            # pays cold cost (~2.5s). That's the entire BUG-178 cache regression.
+            if change_pct is None or abs(change_pct) < _MIN_CHANGE_PCT:
+                continue  # neutral / unknown outcome — skip
 
             signals = tdata.get("signals", {})
             for sig_name in SIGNAL_NAMES:

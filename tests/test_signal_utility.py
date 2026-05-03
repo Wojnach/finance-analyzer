@@ -227,6 +227,34 @@ class TestNeutralOutcomesSkipped:
         assert abs(rsi["avg_return"] - 2.0) < 1e-9
 
 
+class TestNoneChangePct:
+    """change_pct=None appears for 4h+ horizons when outcome backfill hasn't
+    populated yet. _vote_correct grew a None-guard on 2026-04-22 but
+    _compute_signal_utility was missed — every cold compute crashed, the
+    cache never populated, so cold cost paid every cycle.
+    """
+
+    def test_none_change_pct_does_not_crash(self):
+        entries = _make_entries([
+            ("BTC-USD", "rsi", "BUY", None),
+        ])
+        with patch("portfolio.accuracy_stats.load_entries", return_value=entries):
+            result = signal_utility("1d")
+        assert result["rsi"]["samples"] == 0
+
+    def test_none_change_pct_skipped_like_neutral(self):
+        entries = _make_entries([
+            ("BTC-USD", "rsi", "BUY", None),
+            ("BTC-USD", "rsi", "BUY", 2.0),
+            ("BTC-USD", "rsi", "BUY", None),
+        ])
+        with patch("portfolio.accuracy_stats.load_entries", return_value=entries):
+            result = signal_utility("1d")
+        rsi = result["rsi"]
+        assert rsi["samples"] == 1
+        assert abs(rsi["avg_return"] - 2.0) < 1e-9
+
+
 # ---------------------------------------------------------------------------
 # 7. utility_score = avg_return * sqrt(samples)
 # ---------------------------------------------------------------------------
