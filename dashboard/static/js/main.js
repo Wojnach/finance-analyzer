@@ -27,6 +27,7 @@ import { initTheme, toggleTheme } from "./theme.js";
 // Until a route is implemented, router.js renders a fallback that links to /legacy.
 
 import "./views/home.js";
+import "./views/decisions.js"; // also imports decision-detail.js internally
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
