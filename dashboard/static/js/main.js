@@ -28,6 +28,7 @@ import { initTheme, toggleTheme } from "./theme.js";
 
 import "./views/home.js";
 import "./views/decisions.js"; // also imports decision-detail.js internally
+import "./views/signals.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
