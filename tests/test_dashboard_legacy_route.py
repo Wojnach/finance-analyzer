@@ -60,3 +60,25 @@ class TestLegacyRoute:
             resp = client.get("/")
         assert resp.status_code == 200
         assert b"/legacy" in resp.data
+
+
+class TestLogoutRoute:
+    """The Settings → Sign out button needs a server-side logout because
+    the pf_dashboard_token cookie is HttpOnly and JS cannot expire it.
+    Codex P2 finding 2026-05-03."""
+
+    def test_logout_redirects_to_root(self, client):
+        # No auth check — /logout is intentionally unauthenticated; CF Access
+        # still gates anything sensitive on the way to /.
+        resp = client.get("/logout", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/")
+
+    def test_logout_clears_cookie(self, client):
+        resp = client.get("/logout", follow_redirects=False)
+        # A Set-Cookie that wipes the cookie has Max-Age=0.
+        cookie_headers = resp.headers.getlist("Set-Cookie")
+        assert any(
+            "pf_dashboard_token=" in c and ("Max-Age=0" in c or "Expires=" in c)
+            for c in cookie_headers
+        ), f"expected expiring pf_dashboard_token cookie, got: {cookie_headers!r}"

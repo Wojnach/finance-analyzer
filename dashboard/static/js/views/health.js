@@ -79,10 +79,11 @@ function _renderBody() {
     }
   }
 
-  // Loop health rollup
-  const lh = state.get(state.Slots.LOOP_HEALTH);
-  if (lh && typeof lh === "object" && Object.keys(lh).length) {
-    slot.append(_section("Loop heartbeats", _loopList(lh)));
+  // Loop health rollup. Endpoint shape: {checked_at, loops:{name:{state, age_seconds, ...}}, any_unhealthy, unhealthy[]}.
+  const rollup = state.get(state.Slots.LOOP_HEALTH);
+  const loops = rollup?.loops;
+  if (loops && typeof loops === "object" && Object.keys(loops).length) {
+    slot.append(_section("Loop heartbeats", _loopList(loops, rollup)));
   }
 }
 
@@ -176,12 +177,20 @@ function _errorList(items) {
   return wrap;
 }
 
-function _loopList(lh) {
+function _loopList(loops, rollup) {
   const wrap = document.createElement("div");
   wrap.style.display = "flex";
   wrap.style.flexDirection = "column";
   wrap.style.gap = "var(--sp-1)";
-  for (const [name, info] of Object.entries(lh)) {
+
+  if (rollup?.any_unhealthy) {
+    const banner = document.createElement("div");
+    banner.className = "banner banner--error";
+    banner.textContent = "Unhealthy loops: " + (rollup.unhealthy || []).join(", ");
+    wrap.append(banner);
+  }
+
+  for (const [name, info] of Object.entries(loops)) {
     const row = document.createElement("div");
     row.style.display = "flex";
     row.style.alignItems = "center";
@@ -194,16 +203,31 @@ function _loopList(lh) {
     left.style.display = "flex";
     left.style.alignItems = "center";
     left.style.gap = "var(--sp-2)";
-    const stateName = !info?.is_alive ? "fail" : !info?.is_fresh ? "warn" : "ok";
-    left.append(pulseDot({ state: stateName }), Object.assign(document.createElement("span"), { textContent: name }));
+    const stateName = _loopStateClass(info?.state);
+    left.append(
+      pulseDot({ state: stateName }),
+      Object.assign(document.createElement("span"), { textContent: name }),
+    );
     const right = document.createElement("div");
     right.style.fontSize = "var(--ty-xs)";
     right.style.color = "var(--txm)";
-    right.textContent = `age ${info?.age_seconds ?? "?"}s · ` + fAgo(Date.now() - 1000 * (info?.age_seconds || 0));
+    const ageS = info?.age_seconds;
+    right.textContent = `${info?.state ?? "?"} · age ${ageS ?? "?"}s`
+      + (Number.isFinite(Number(ageS)) ? ` (${fAgo(Date.now() - 1000 * ageS)})` : "");
     row.append(left, right);
     wrap.append(row);
   }
   return wrap;
+}
+
+function _loopStateClass(state) {
+  switch ((state || "").toLowerCase()) {
+    case "fresh":   return "ok";
+    case "stale":   return "warn";
+    case "missing": return "fail";
+    case "unparseable": return "fail";
+    default:        return "idle";
+  }
 }
 
 function _statusColor(s) {

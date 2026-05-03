@@ -144,13 +144,21 @@ function _renderPnL() {
     deltaPct: wPct,
   };
 
-  // Sparkline from equity-curve fetch (deferred — best-effort fallback to none)
+  // Sparkline from equity-curve fetch (deferred — best-effort fallback to none).
+  // Field names match portfolio_value_history.jsonl: patient_value_sek + bold_value_sek.
   let sparkEl = null;
   if (_disposeSparkline) { try { _disposeSparkline(); } catch (_) {} _disposeSparkline = null; }
   const eq = state.get(state.Slots.EQUITY_CURVE);
   if (Array.isArray(eq) && eq.length > 1) {
     const recent = eq.slice(-96); // last ~24h at 15min cadence
-    const values = recent.map(r => num(r?.total_sek)).filter((x) => x != null);
+    const values = recent
+      .map((r) => {
+        const p = num(r?.patient_value_sek);
+        const b = num(r?.bold_value_sek);
+        if (p == null && b == null) return null;
+        return (p || 0) + (b || 0);
+      })
+      .filter((x) => x != null);
     if (values.length > 1) {
       const sp = miniSparkline({ values, height: 36 });
       sparkEl = sp.element;
@@ -384,8 +392,12 @@ function _renderPulse() {
   const slot = _slot("pulse"); if (!slot) return;
   while (slot.firstChild) slot.removeChild(slot.firstChild);
 
-  const lh = state.get(state.Slots.LOOP_HEALTH);
-  if (!lh || typeof lh !== "object") return;
+  const rollup = state.get(state.Slots.LOOP_HEALTH);
+  // /api/loop_health returns {checked_at, loops:{name:{state, age_seconds, payload, error, path}}, any_unhealthy, unhealthy[]}.
+  // Earlier versions iterated the rollup directly; that broke pulse-dot
+  // colors and the home-screen badge.  Codex P1 finding 2026-05-03.
+  const loops = rollup?.loops;
+  if (!loops || typeof loops !== "object" || !Object.keys(loops).length) return;
 
   const title = document.createElement("div");
   title.className = "section-title";
@@ -397,18 +409,27 @@ function _renderPulse() {
   wrap.style.flexWrap = "wrap";
   wrap.style.gap = "var(--sp-2)";
 
-  for (const [name, info] of Object.entries(lh)) {
-    const fresh = !!info?.is_fresh;
-    const alive = !!info?.is_alive;
-    const state_ = !alive ? "fail" : !fresh ? "warn" : "ok";
+  for (const [name, info] of Object.entries(loops)) {
+    const stateName = _loopStateClass(info?.state);
     wrap.append(pulseDot({
-      state: state_,
+      state: stateName,
       label: name.replace(/^PF-?/i, ""),
-      title: `age: ${info?.age_seconds ?? "?"}s, alive: ${alive}, fresh: ${fresh}`,
-      onTap: () => router.navigate("more", "health"),
+      title: `state: ${info?.state ?? "?"}, age ${info?.age_seconds ?? "?"}s`
+        + (info?.error ? ` · ${info.error}` : ""),
+      onTap: () => router.navigate("health"),
     }));
   }
   slot.append(wrap);
+}
+
+function _loopStateClass(state) {
+  switch ((state || "").toLowerCase()) {
+    case "fresh":   return "ok";
+    case "stale":   return "warn";
+    case "missing": return "fail";
+    case "unparseable": return "fail";
+    default:        return "idle";
+  }
 }
 
 function _renderRefreshDot() {

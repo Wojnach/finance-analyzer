@@ -707,6 +707,34 @@ def index_legacy():
     return send_from_directory("static", "index_legacy.html")
 
 
+@app.route("/logout")
+def logout():
+    """Clear the pf_dashboard_token cookie and redirect to /.
+
+    The auth cookie is HttpOnly, so client JS cannot expire it via
+    document.cookie — the browser ignores any attempt to write a name that
+    Set-Cookie marked HttpOnly. The mobile Settings → Sign out button
+    therefore has to navigate here so the server can emit the matching
+    Set-Cookie with Max-Age=0. (Codex P2 finding 2026-05-03.)
+
+    No `require_auth`: an unauthenticated visitor hitting /logout still gets
+    the cookie wiped (harmless — they had no valid cookie anyway) and
+    Cloudflare Access still gates the redirected destination.
+    """
+    response = redirect("/", code=302)
+    # Match every flag we set on the original cookie except expiry.
+    response.set_cookie(
+        "pf_dashboard_token",
+        "",
+        max_age=0,
+        expires=0,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+    )
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Routes — API (all require auth)
 # ---------------------------------------------------------------------------

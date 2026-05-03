@@ -7,7 +7,7 @@ import { getChartColors } from "../theme.js";
 
 /**
  * @param {{
- *   curve: object[],   // [{ts, total_sek, total_sek_bold?}]
+ *   curve: object[],   // [{ts, patient_value_sek, bold_value_sek}] from portfolio_value_history.jsonl
  *   trades?: object[], // [{ts, action: "BUY"|"SELL", strategy: "patient"|"bold"}]
  *   height?: number,
  * }} props
@@ -16,10 +16,14 @@ import { getChartColors } from "../theme.js";
 export function equityChart({ curve = [], trades = [], height = 260 } = {}) {
   const c = getChartColors();
   const labels = curve.map((p) => p.ts || p.timestamp || "");
+  // Field names match `portfolio_value_history.jsonl`: `patient_value_sek`
+  // and `bold_value_sek`. The earlier `total_sek` / `total_sek_bold`
+  // assumption in the redesign produced an empty chart on real data
+  // (Codex P1 finding 2026-05-03).
   const datasets = [
     {
       label: "Patient",
-      data: curve.map((p) => Number(p.total_sek)),
+      data: curve.map((p) => Number(p.patient_value_sek ?? p.total_sek)),
       borderColor: c.cyan,
       backgroundColor: "rgba(6,182,212,0.10)",
       borderWidth: 1.6,
@@ -30,7 +34,7 @@ export function equityChart({ curve = [], trades = [], height = 260 } = {}) {
     },
     {
       label: "Bold",
-      data: curve.map((p) => Number(p.total_sek_bold)),
+      data: curve.map((p) => Number(p.bold_value_sek ?? p.total_sek_bold)),
       borderColor: c.orange,
       backgroundColor: "rgba(249,115,22,0.10)",
       borderWidth: 1.6,

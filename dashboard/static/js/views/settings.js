@@ -124,10 +124,11 @@ function _logoutRow() {
   btn.style.minWidth = "auto";
   btn.textContent = "Sign out";
   btn.addEventListener("click", () => {
-    // Clear the auth cookie by setting it expired with the same flags.
-    document.cookie = "pf_dashboard_token=; Max-Age=0; path=/; secure; samesite=Lax";
-    location.href = "/";
+    // The auth cookie is HttpOnly, so the server has to expire it. Navigate
+    // to /logout which sends Set-Cookie: pf_dashboard_token=; Max-Age=0
+    // and redirects to /. Pure JS document.cookie cannot do this.
+    location.href = "/logout";
   });
   return _row("Sign out", btn,
-    "Clears the dashboard cookie and redirects to /. CF Access still applies.");
+    "Server-side logout: clears the HttpOnly auth cookie and redirects to /. CF Access still applies.");
 }

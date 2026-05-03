@@ -25,19 +25,17 @@ const DEFAULT_TICKERS = ["BTC-USD", "ETH-USD", "MSTR", "XAG-USD", "XAU-USD"];
 const HORIZONS = ["1d", "3d", "5d", "10d"];
 
 let _root = null;
-let _activeTicker = null;
 let _activeHorizon = "1d";
 let _activeTab = "heatmap";          // heatmap | accuracy | history
 let _disposeChart = null;
 let _unsubs = [];
 
 export const view = {
-  mount(rootEl, params) {
+  mount(rootEl, _params) {
+    // Note: home cards may navigate with a ticker param (e.g. /#signals/BTC-USD)
+    // for future drill-by-ticker. The heatmap currently shows all tickers
+    // as columns, so the param is informational only — not yet used.
     _root = rootEl;
-
-    // params can be a single ticker (e.g. /#signals/BTC-USD) — drill from Home
-    if (typeof params === "string" && params) _activeTicker = params;
-
     while (_root.firstChild) _root.removeChild(_root.firstChild);
     _root.append(_renderShell());
 
@@ -115,30 +113,17 @@ function _renderActiveTab() {
 
 function _renderHeatmapTab(slot) {
   const data = state.get(state.Slots.SIGNAL_HEATMAP);
-  const tickers = (Array.isArray(data?.tickers) && data.tickers.length)
-    ? data.tickers : DEFAULT_TICKERS;
-  if (!_activeTicker) _activeTicker = tickers[0];
-
-  // Ticker chip strip
-  const tickerStrip = document.createElement("div");
-  tickerStrip.className = "chip-strip";
-  tickers.forEach((t) => {
-    tickerStrip.append(filterChip({
-      label: t.replace(/-USD$/, ""),
-      active: t === _activeTicker,
-      value: t,
-      onToggle: () => {
-        _activeTicker = t;
-        _renderActiveTab();
-      },
-    }));
-  });
-  slot.append(tickerStrip);
-
   if (!data) {
     slot.append(emptyState("Loading heatmap…"));
     return;
   }
+
+  // /api/signal-heatmap shape is {heatmap: {ticker: {signal: "BUY"|"SELL"|"HOLD"}}}
+  // — no per-timeframe nesting. We render rows=signals × cols=tickers and
+  // use the chip-bar to filter accuracy-data scope only (drill content),
+  // not the heatmap shape.
+  const tickers = (Array.isArray(data?.tickers) && data.tickers.length)
+    ? data.tickers : DEFAULT_TICKERS;
 
   // Pull per-ticker accuracy for the bottom-sheet drill content.
   const accAll = state.get(state.Slots.ACCURACY) || {};
@@ -152,8 +137,8 @@ function _renderHeatmapTab(slot) {
   const disabled = new Set(data?.disabled_signals || []);
 
   slot.append(renderHeatmap({
-    ticker: _activeTicker,
     data,
+    tickers,
     accuracy: accuracyMap,
     disabled,
   }));

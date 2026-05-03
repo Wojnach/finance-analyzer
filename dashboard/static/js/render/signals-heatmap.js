@@ -1,36 +1,51 @@
 /*
- * render/signals-heatmap.js — Track-5 transposed heatmap.
+ * render/signals-heatmap.js — signal × ticker heatmap.
  *
- * Rows = signals, columns = timeframes, one ticker at a time. Sticky
- * leftmost column (signal name) and sticky top row (timeframe header).
- * Cells are color-only with a 5-class scale (strong-buy → strong-sell).
- * Long-press a cell → bottom sheet with detail.
+ * Adapts to the actual /api/signal-heatmap shape, which is a flat
+ * {heatmap: {ticker: {signal: "BUY"|"SELL"|"HOLD"}}} matrix without a
+ * timeframe dimension. We render rows=signals × cols=tickers, color-only
+ * cells per Track-5. Long-press / tap a cell opens a bottom-sheet with
+ * the signal name, ticker, vote, and recent accuracy.
+ *
+ * Earlier (uncommitted) drafts assumed per-timeframe nested cell objects,
+ * which left every cell as cell--hold against the live data.  Codex P1
+ * finding 2026-05-03 — fixed here.
  */
 
 import { open as openSheet, bindLongPress } from "../components/bottom-sheet.js";
-import { fpct } from "../format.js";
 
 /**
  * @param {{
- *   ticker: string,
- *   data: object,                 // /api/signal-heatmap response slice for this ticker
- *   timeframes?: string[],
- *   accuracy?: Record<string, number>, // signal -> accuracy %
- *   disabled?: Set<string>,            // disabled signal names (force-HOLD)
+ *   data: object,                       // /api/signal-heatmap full response
+ *   tickers?: string[],                 // override column order
+ *   accuracy?: Record<string, number>,  // signal -> accuracy %
+ *   disabled?: Set<string>,             // disabled signal names (force-HOLD)
  * }} props
  * @returns {HTMLElement}
  */
-export function renderHeatmap({ ticker, data, timeframes = null, accuracy = {}, disabled = new Set() }) {
+export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = new Set() }) {
   const wrap = document.createElement("div");
   wrap.className = "heatmap-wrap";
 
-  const tfs = timeframes || _defaultTimeframes(data);
-  const signals = _signalsFor(data, ticker);
-
-  if (!signals.length) {
+  if (!data || typeof data !== "object" || !data.heatmap) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No heatmap data for " + ticker;
+    empty.textContent = "No heatmap data.";
+    wrap.append(empty);
+    return wrap;
+  }
+
+  const colTickers = (Array.isArray(tickers) && tickers.length)
+    ? tickers
+    : (Array.isArray(data.tickers) && data.tickers.length)
+      ? data.tickers
+      : Object.keys(data.heatmap);
+
+  const allSignals = _signalOrder(data);
+  if (!allSignals.length || !colTickers.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No heatmap rows / columns.";
     wrap.append(empty);
     return wrap;
   }
@@ -38,47 +53,46 @@ export function renderHeatmap({ ticker, data, timeframes = null, accuracy = {}, 
   const table = document.createElement("table");
   table.className = "heatmap";
 
-  // Header
   const thead = document.createElement("thead");
   const trH = document.createElement("tr");
-  const cornerTh = document.createElement("th");
-  cornerTh.textContent = "Signal";
-  trH.append(cornerTh);
-  for (const tf of tfs) {
+  const corner = document.createElement("th");
+  corner.textContent = "Signal";
+  trH.append(corner);
+  for (const t of colTickers) {
     const th = document.createElement("th");
-    th.textContent = tf;
+    th.textContent = t.replace(/-USD$/, "");
+    th.title = t;
     trH.append(th);
   }
   thead.append(trH);
   table.append(thead);
 
-  // Body
   const tbody = document.createElement("tbody");
-  for (const sigName of signals) {
+  for (const sigName of allSignals) {
     const tr = document.createElement("tr");
+
     const tdName = document.createElement("td");
     tdName.textContent = _truncate(sigName, 14);
     tdName.title = sigName;
     tr.append(tdName);
 
-    for (const tf of tfs) {
+    for (const ticker of colTickers) {
       const cell = document.createElement("td");
-      const cellData = _cellData(data, ticker, sigName, tf);
-      const klass = _classForCell(cellData, disabled.has(sigName));
-      cell.className = klass;
+      const value = data.heatmap?.[ticker]?.[sigName];
+      const isDisabled = disabled.has(sigName) || _looksDisabled(value);
+      cell.className = _classForValue(value, isDisabled);
       cell.dataset.signal = sigName;
-      cell.dataset.tf = tf;
-      // Long-press / tap drill
+      cell.dataset.ticker = ticker;
+      cell.title = `${sigName} · ${ticker}: ${value || "—"}`;
+
       bindLongPress(cell, () => ({
-        title: `${sigName} @ ${tf} — ${ticker}`,
-        content: _detailNode(sigName, tf, ticker, cellData, accuracy[sigName]),
+        title: `${sigName} — ${ticker}`,
+        content: _detailNode(sigName, ticker, value, accuracy[sigName]),
       }));
-      // Plain tap also opens the sheet (Track 5: long-press preferred,
-      // but tap is more discoverable on phones).
       cell.addEventListener("click", () => {
         openSheet({
-          title: `${sigName} @ ${tf} — ${ticker}`,
-          content: _detailNode(sigName, tf, ticker, cellData, accuracy[sigName]),
+          title: `${sigName} — ${ticker}`,
+          content: _detailNode(sigName, ticker, value, accuracy[sigName]),
         });
       });
       tr.append(cell);
@@ -92,52 +106,33 @@ export function renderHeatmap({ ticker, data, timeframes = null, accuracy = {}, 
 
 // ---------------------------------------------------------------------------
 
-function _defaultTimeframes(data) {
-  // Walk the heatmap to find timeframes present in any cell.
-  if (data && Array.isArray(data.timeframes)) return data.timeframes;
-  return ["now", "12h", "2d", "7d", "1mo", "3mo", "6mo"];
+function _signalOrder(data) {
+  if (Array.isArray(data?.signals) && data.signals.length) return data.signals;
+  const core = Array.isArray(data?.core_signals) ? data.core_signals : [];
+  const enh  = Array.isArray(data?.enhanced_signals) ? data.enhanced_signals : [];
+  if (core.length || enh.length) return [...core, ...enh];
+
+  // Fallback: union of signal keys across tickers.
+  const seen = new Set();
+  for (const ticker of Object.keys(data?.heatmap || {})) {
+    for (const s of Object.keys(data.heatmap[ticker] || {})) seen.add(s);
+  }
+  return [...seen];
 }
 
-function _signalsFor(data, _ticker) {
-  // Two shapes are common in /api/signal-heatmap:
-  //  A) { signals: [...], heatmap: { ticker: { signal: { tf: action } } } }
-  //  B) { tickers: [...], rows: [{ signal, ticker, tf, action }, ...] }
-  if (Array.isArray(data?.signals)) return data.signals;
-  if (Array.isArray(data?.core_signals) || Array.isArray(data?.enhanced_signals)) {
-    return [...(data.core_signals || []), ...(data.enhanced_signals || [])];
-  }
-  // Fallback: derive from heatmap object keys
-  const ticker = _ticker;
-  const heat = data?.heatmap?.[ticker];
-  if (heat && typeof heat === "object") return Object.keys(heat);
-  return [];
-}
-
-function _cellData(data, ticker, signal, tf) {
-  // Try several shapes
-  const heat = data?.heatmap?.[ticker]?.[signal];
-  if (heat) {
-    const v = heat[tf] || heat[`${tf}`];
-    if (v && typeof v === "object") return v;
-    if (typeof v === "string") return { action: v };
-  }
-  // rows shape
-  if (Array.isArray(data?.rows)) {
-    const row = data.rows.find((r) =>
-      r.ticker === ticker && r.signal === signal && r.tf === tf);
-    if (row) return row;
-  }
-  return null;
-}
-
-function _classForCell(cellData, isDisabled) {
+function _classForValue(value, isDisabled) {
   if (isDisabled) return "cell--disabled";
-  const action = (cellData?.action || cellData?.consensus || "").toUpperCase();
-  const conf = Number(cellData?.confidence || cellData?.weight || 0);
-  if (action === "BUY")  return conf >= 0.6 ? "cell--strong-buy"  : "cell--buy";
-  if (action === "SELL") return conf >= 0.6 ? "cell--strong-sell" : "cell--sell";
-  if (action === "HOLD") return "cell--hold";
-  return "cell--hold"; // unknown
+  const v = String(value || "").toUpperCase();
+  if (v === "STRONG_BUY")  return "cell--strong-buy";
+  if (v === "BUY")          return "cell--buy";
+  if (v === "SELL")         return "cell--sell";
+  if (v === "STRONG_SELL")  return "cell--strong-sell";
+  if (v === "HOLD")         return "cell--hold";
+  return "cell--hold";
+}
+
+function _looksDisabled(value) {
+  return value === "DISABLED" || value === "N/A" || value === "n/a";
 }
 
 function _truncate(s, n) {
@@ -145,33 +140,31 @@ function _truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function _detailNode(signal, tf, ticker, cellData, accPct) {
+function _detailNode(signal, ticker, value, accPct) {
   const wrap = document.createElement("div");
   const meta = document.createElement("div");
   meta.style.fontSize = "var(--ty-sm)";
   meta.style.color = "var(--txd)";
-  meta.textContent =
-    `${ticker} · ${tf} · vote: ${cellData?.action || "—"}`
-    + (cellData?.confidence != null ? ` · conf ${(cellData.confidence * 100).toFixed(0)}%` : "");
+  meta.textContent = `${ticker} · vote: ${value || "—"}`;
   wrap.append(meta);
 
-  if (accPct != null) {
+  if (accPct != null && Number.isFinite(Number(accPct))) {
     const acc = document.createElement("div");
     acc.style.fontSize = "var(--ty-sm)";
     acc.style.marginTop = "var(--sp-2)";
     acc.style.color = accPct >= 47 ? "var(--grn)" : "var(--red)";
-    acc.textContent = `Recent accuracy: ${accPct.toFixed(0)}%`;
+    acc.textContent = `Recent accuracy: ${Number(accPct).toFixed(0)}%`;
     wrap.append(acc);
   }
 
-  if (cellData?.rationale || cellData?.reasoning) {
-    const r = document.createElement("p");
-    r.style.fontSize = "var(--ty-sm)";
-    r.style.lineHeight = "1.6";
-    r.style.marginTop = "var(--sp-2)";
-    r.style.color = "var(--tx)";
-    r.textContent = cellData.rationale || cellData.reasoning;
-    wrap.append(r);
-  }
+  const note = document.createElement("p");
+  note.style.fontSize = "var(--ty-sm)";
+  note.style.color = "var(--txm)";
+  note.style.lineHeight = "1.5";
+  note.style.marginTop = "var(--sp-2)";
+  note.textContent =
+    "Tip: drill into Per-signal accuracy (sub-tab above) for the full sample size + " +
+    "calibration. Underlying timeframe-by-timeframe alignment is on /legacy.";
+  wrap.append(note);
   return wrap;
 }

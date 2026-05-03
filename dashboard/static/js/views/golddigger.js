@@ -88,13 +88,17 @@ function _renderSummary(data) {
   grid.style.gridTemplateColumns = "repeat(auto-fit, minmax(110px, 1fr))";
   grid.style.gap = "var(--sp-2)";
 
+  // /api/golddigger normalizes to: composite_score, session_active,
+  // gold_price, usdsek, confirm_count, z_gold, z_fx, z_yield. Earlier
+  // drafts read s_t / session_open / gold_usd / usd_sek / confirms which
+  // never resolve. Codex P2 finding 2026-05-03.
   grid.append(
-    _kpi("S(t)",       _fmtNum(s.composite_score ?? s.s_t, 3)),
-    _kpi("Mode",       String(s.mode ?? "—")),
-    _kpi("Session",    String(s.session_open ? "OPEN" : "CLOSED")),
-    _kpi("XAU/USD",    fp(num(s.xau_usd ?? s.gold_usd))),
-    _kpi("USD/SEK",    fp(num(s.usd_sek))),
-    _kpi("Confirms",   String(s.confirms ?? 0)),
+    _kpi("S(t)",     _fmtNum(s.composite_score, 3)),
+    _kpi("Session",  s.session_active ? "ACTIVE" : "CLOSED"),
+    _kpi("XAU/USD",  fp(num(s.gold_price))),
+    _kpi("USD/SEK",  fp(num(s.usdsek))),
+    _kpi("Confirms", `${s.confirm_count ?? 0} / ${s.confirm_required ?? "?"}`),
+    _kpi("θ in/out", `${_fmtNum(s.theta_in, 2)} / ${_fmtNum(s.theta_out, 2)}`),
   );
   card.append(grid);
   slot.append(card);
@@ -103,8 +107,19 @@ function _renderSummary(data) {
 function _renderSignal(data) {
   const slot = _root.querySelector('[data-slot="signal"]');
   while (slot.firstChild) slot.removeChild(slot.firstChild);
-  const s = data.state?.signal || data.state?.composite_breakdown;
-  if (!s || typeof s !== "object") return;
+  // Build a synthesized signal-breakdown card from the normalized
+  // z-score fields (z_gold / z_fx / z_yield) at the state root. Earlier
+  // drafts looked for `state.signal` or `composite_breakdown`, neither
+  // of which exists in `_normalize_golddigger_state`'s output.
+  const s = data.state || {};
+  const breakdown = {
+    z_gold: s.z_gold,
+    z_fx:   s.z_fx,
+    z_yield: s.z_yield,
+  };
+  const present = Object.entries(breakdown).filter(([, v]) => Number.isFinite(Number(v)));
+  if (!present.length) return;
+
   const card = document.createElement("article");
   card.className = "card";
   const t = document.createElement("div");
@@ -112,8 +127,8 @@ function _renderSignal(data) {
   t.textContent = "Signal breakdown";
   card.append(t);
 
-  for (const [k, v] of Object.entries(s)) {
-    if (typeof v !== "number" || !Number.isFinite(v)) continue;
+  for (const [k, v] of present) {
+    const n = Number(v);
     const row = document.createElement("div");
     row.style.display = "flex";
     row.style.justifyContent = "space-between";
@@ -124,8 +139,8 @@ function _renderSignal(data) {
     a.style.color = "var(--txd)";
     const b = document.createElement("span");
     b.className = "num num--sm";
-    b.textContent = v.toFixed(3);
-    b.style.color = v > 0 ? "var(--grn)" : v < 0 ? "var(--red)" : "var(--txm)";
+    b.textContent = n.toFixed(3);
+    b.style.color = n > 0 ? "var(--grn)" : n < 0 ? "var(--red)" : "var(--txm)";
     row.append(a, b);
     card.append(row);
   }
@@ -169,7 +184,8 @@ function _renderChart(data) {
   if (log.length < 2) return;
 
   const c = getChartColors();
-  const series = log.map((e) => num(e.composite_score ?? e.s_t)).filter((x) => x != null);
+  // Normalized log entries expose `composite_score`; raw entries fall back to `S`.
+  const series = log.map((e) => num(e.composite_score ?? e.S)).filter((x) => x != null);
   if (series.length < 2) return;
 
   const title = document.createElement("div");
