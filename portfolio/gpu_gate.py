@@ -5,6 +5,15 @@ before and after each model load for monitoring.
 
 Uses a threading lock for in-process concurrency (ThreadPoolExecutor workers)
 plus a file-based lock at Q:/models/.gpu_lock for cross-process protection.
+
+Stale-lock recovery (2026-05-03):
+- Reactive: ``gpu_gate()`` calls ``_try_break_stale_lock()`` when another
+  caller blocks on the lock — same predicate as before BUG-182.
+- Background: a daemon thread (lazily spawned on first ``gpu_gate()`` call)
+  runs the same predicate every 30 s. This closes the liveness hole that
+  let the loop wedge for ~25 hours after chronos pid 13152 died holding
+  the lock 2026-05-02 02:14 (no other acquirer = no break = no recovery).
+  See ``docs/plans/2026-05-03-gpu-gate-sweeper.md``.
 """
 
 import logging
@@ -24,6 +33,12 @@ _THREAD_LOCK = threading.Lock()
 _GPU_LOCK_DIR = Path("Q:/models")
 _GPU_LOCK_FILE = _GPU_LOCK_DIR / ".gpu_lock"
 _STALE_SECONDS = 300  # 5 min
+
+# Stale-lock sweeper daemon (2026-05-03). Module-level singleton so subprocess
+# workers that import this module only spawn one sweeper, not one per import.
+_SWEEPER_INTERVAL_SECONDS = 30
+_SWEEPER_LOCK = threading.Lock()
+_sweeper_thread: "threading.Thread | None" = None
 
 
 def get_vram_usage() -> dict:
@@ -57,7 +72,7 @@ def _is_stale() -> bool:
 
 def _pid_alive(pid: int) -> bool:
     """Check if a process is still running. BUG-182."""
-    if not pid:
+    if not pid or pid < 0:
         return False
     try:
         import psutil
@@ -92,6 +107,82 @@ def _release_lock():
         _GPU_LOCK_FILE.unlink(missing_ok=True)
 
 
+def _try_break_stale_lock() -> bool:
+    """Reap the lock file iff stale-by-mtime AND owner pid is dead.
+
+    Returns True if the lock was broken (caller can retry acquire), False
+    otherwise. Defensive: never raises — the sweeper daemon depends on this.
+
+    Called from two paths:
+    - Reactive: ``gpu_gate()`` retry loop, when another caller is waiting.
+    - Sweeper: the background daemon, when no one is waiting.
+
+    Both paths must agree on the predicate so behaviour is identical
+    regardless of which path reaped the lock. Emits the same
+    ``Breaking stale GPU lock`` warning either way so log-grep tools and
+    postmortem audits work uniformly.
+    """
+    try:
+        if not _GPU_LOCK_FILE.exists():
+            return False
+        if not _is_stale():
+            return False
+        info = _read_lock()
+        pid = info.get("pid", 0)
+        if _pid_alive(pid):
+            return False
+        logger.warning("Breaking stale GPU lock: %s (pid=%s, dead)",
+                       info.get("model"), pid)
+        _release_lock()
+        return True
+    except Exception as exc:
+        # The sweeper must NEVER crash — a dead daemon stops sweeping forever.
+        logger.debug("Stale-lock sweep error: %s", exc)
+        return False
+
+
+def _sweeper_loop():
+    """Background daemon: reap stale-dead locks every 30 s.
+
+    Wedge-recovery story (2026-05-02): chronos pid 13152 died holding the
+    lock at 02:14. No one tried to acquire while the loop was stuck inside
+    its LLM batch, so ``_is_stale()`` was never checked. Loop wedged for
+    ~25 hours until a system reboot. This daemon closes that hole.
+    """
+    while True:
+        try:
+            time.sleep(_SWEEPER_INTERVAL_SECONDS)
+            _try_break_stale_lock()
+        except Exception as exc:
+            # Defence-in-depth — _try_break_stale_lock already swallows but
+            # any future code added here must also keep the daemon alive.
+            logger.debug("Sweeper loop error: %s", exc)
+
+
+def _start_sweeper():
+    """Spawn the sweeper daemon (idempotent, thread-safe).
+
+    Lazily called from ``gpu_gate()`` so:
+    - Subprocess workers that import this module but never call
+      ``gpu_gate()`` (e.g. ``portfolio.signal_engine``'s import-time scan)
+      do NOT spawn a redundant daemon.
+    - Tests can reset ``_sweeper_thread = None`` and re-trigger spawn.
+
+    If the daemon ever dies (it shouldn't — both layers swallow exceptions)
+    a future call will respawn it.
+    """
+    global _sweeper_thread
+    with _SWEEPER_LOCK:
+        if _sweeper_thread is None or not _sweeper_thread.is_alive():
+            t = threading.Thread(
+                target=_sweeper_loop,
+                name="gpu-gate-sweeper",
+                daemon=True,
+            )
+            _sweeper_thread = t
+            t.start()
+
+
 @contextmanager
 def gpu_gate(model_name: str, timeout: float = 60):
     """Acquire exclusive GPU access, log VRAM before/after.
@@ -107,6 +198,10 @@ def gpu_gate(model_name: str, timeout: float = 60):
     Yields:
         True if acquired, False if timed out.
     """
+    # Lazy-spawn the stale-lock sweeper. Idempotent so no cost after the
+    # first call. See _start_sweeper() for the rationale.
+    _start_sweeper()
+
     deadline = time.time() + timeout
 
     # Layer 1: In-process thread lock (prevents ThreadPoolExecutor races)
@@ -132,17 +227,16 @@ def gpu_gate(model_name: str, timeout: float = 60):
                 file_acquired = True
                 break
             except FileExistsError:
-                # Lock file exists — check if stale or same process
+                # Lock file exists — check if same process (re-entry) or stale.
                 info = _read_lock()
                 if info.get("pid") == os.getpid():
                     # Re-entry from same process (shouldn't happen with thread lock, but safe)
                     file_acquired = True
                     break
-                if _is_stale() and not _pid_alive(info.get("pid", 0)):
-                    # BUG-182: Only break stale lock if owning process is dead
-                    logger.warning("Breaking stale GPU lock: %s (pid=%s, dead)",
-                                   info.get("model"), info.get("pid"))
-                    _release_lock()
+                # BUG-182: Only break stale lock if owning process is dead.
+                # Helper is shared with the sweeper daemon so the two paths
+                # agree on the predicate.
+                if _try_break_stale_lock():
                     continue  # retry atomic create
                 logger.debug("GPU file-locked by %s, waiting...", info.get("model", "?"))
                 time.sleep(1.0)
