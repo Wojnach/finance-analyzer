@@ -306,6 +306,15 @@ def _run_post_cycle(config, report=None):
                maybe_send_degradation_summary, config)
     except Exception as e_deg:
         logger.warning("accuracy degradation import failed: %s", e_deg)
+    # 2026-05-04: pre-warm the four dashboard horizons (1d/3d/5d/10d)
+    # for /api/accuracy so the first request after a dashboard restart
+    # doesn't spend seconds scanning the signal log. Self-gates to once
+    # per hour internally — cheap on every other cycle.
+    try:
+        from portfolio.accuracy_stats import maybe_prewarm_dashboard_accuracy
+        _track("dashboard_accuracy_prewarm", maybe_prewarm_dashboard_accuracy)
+    except Exception as e_pw:
+        logger.warning("dashboard accuracy prewarm import failed: %s", e_pw)
     try:
         from portfolio.message_throttle import flush_and_send
         _track("message_throttle", flush_and_send, config)

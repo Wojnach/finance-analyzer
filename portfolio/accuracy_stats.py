@@ -1099,6 +1099,52 @@ def get_or_compute_consensus_accuracy(horizon: str):
         return result
 
 
+# Dashboard /api/accuracy serves these four horizons; the loop's normal
+# operation only warms 1d / 3h / their _recent variants. Without an
+# explicit prewarm, 3d / 5d / 10d are cold and the first dashboard
+# request after a restart spends seconds re-scanning the signal log.
+_DASHBOARD_PREWARM_HORIZONS: tuple = ("1d", "3d", "5d", "10d")
+_DASHBOARD_PREWARM_INTERVAL_SEC = 3600.0  # 1 hour
+_dashboard_prewarm_lock = threading.Lock()
+_last_dashboard_prewarm_ts: float = 0.0
+
+
+def maybe_prewarm_dashboard_accuracy(now: float | None = None) -> bool:
+    """Periodically pre-warm accuracy_cache.json for the dashboard endpoint.
+
+    Self-gating to once per hour so the loop's per-cycle call is cheap
+    on the steady-state path. On miss, fans out to 12 cache reads + at
+    most 12 underlying computes — the same fanout the dashboard endpoint
+    would otherwise pay on its first request after a restart.
+
+    Internally uses the existing get_or_compute_* helpers, so it
+    respects the BUG-178 thundering-herd lock and won't fight with
+    in-loop callers that hit the same cache from ticker threads.
+
+    Args:
+        now: Override clock for tests. Defaults to time.time().
+
+    Returns:
+        True if prewarm fired this call, False if gated by the interval.
+    """
+    global _last_dashboard_prewarm_ts
+    t = now if now is not None else time.time()
+    with _dashboard_prewarm_lock:
+        if t - _last_dashboard_prewarm_ts < _DASHBOARD_PREWARM_INTERVAL_SEC:
+            return False
+        _last_dashboard_prewarm_ts = t
+    try:
+        for h in _DASHBOARD_PREWARM_HORIZONS:
+            get_or_compute_accuracy(h)
+            get_or_compute_consensus_accuracy(h)
+            get_or_compute_per_ticker_accuracy(h)
+        return True
+    except Exception:
+        # Best-effort: telemetry + cache pre-warm must never crash the loop.
+        logger.debug("maybe_prewarm_dashboard_accuracy failed", exc_info=True)
+        return False
+
+
 def _count_entries_with_outcomes(entries, horizon):
     count = 0
     for entry in entries:
