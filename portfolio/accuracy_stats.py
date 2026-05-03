@@ -70,6 +70,61 @@ _SIGNAL_UTILITY_CACHE_TTL = 300.0
 _signal_utility_cache: dict[str, tuple[float, dict]] = {}
 _signal_utility_cache_lock = threading.Lock()
 
+# L2 disk-backed cache (added 2026-05-03, BUG-178 follow-up).
+# Survives process restart so the first cycle after a `schtasks /run` doesn't
+# pay the ~49s parallel-cold-compute cost we measured under 4-thread
+# contention (PASS 4 of scripts/perf/profile_utility_overlay.py). Mirrors the
+# existing pattern at regime_accuracy_cache.json: single "time" key gates TTL,
+# per-horizon data persists across writes via load-merge-write.
+#
+# 1-hour TTL matches ACCURACY_CACHE_TTL and is appropriate because outcome
+# backfill runs daily — a fresh-after-restart cache from earlier today is
+# more accurate than a freshly-computed cache from a partially-loaded SQLite.
+# Atomic writes via _atomic_write_json so concurrent writers race to be last
+# without producing torn reads.
+_SIGNAL_UTILITY_DISK_TTL = 3600.0
+SIGNAL_UTILITY_CACHE_FILE = DATA_DIR / "signal_utility_cache.json"
+
+
+def _load_signal_utility_disk(horizon: str) -> dict | None:
+    """Return cached utility dict for horizon if disk cache is fresh, else None.
+
+    Single global "time" timestamp gates TTL for all horizons (matches
+    regime_accuracy_cache pattern). Per-horizon data persists across writes,
+    so a horizon that hasn't been recomputed since the last process can
+    still be served from disk as long as the file's "time" is fresh.
+    """
+    cache = load_json(SIGNAL_UTILITY_CACHE_FILE)
+    if not isinstance(cache, dict):
+        return None
+    if time.time() - cache.get("time", 0) >= _SIGNAL_UTILITY_DISK_TTL:
+        return None
+    cached = cache.get(horizon)
+    return cached if isinstance(cached, dict) else None
+
+
+def _write_signal_utility_disk(horizon: str, data: dict) -> None:
+    """Persist cached utility dict for horizon. Merges with existing horizons.
+
+    Read-modify-write is NOT lock-protected — two concurrent writers can each
+    read+merge+write and the last write wins. Both threads write the same
+    `data` for the same `horizon`, so the race is benign (idempotent).
+    Atomic write via _atomic_write_json prevents torn reads.
+
+    Failures are swallowed — a stale L2 cache is harmless (TTL expires) and
+    must never crash the live signal pipeline (would re-trigger BUG-178's
+    silent-failure pattern).
+    """
+    try:
+        cache = load_json(SIGNAL_UTILITY_CACHE_FILE, default={})
+        if not isinstance(cache, dict):
+            cache = {}
+        cache[horizon] = data
+        cache["time"] = time.time()
+        _atomic_write_json(SIGNAL_UTILITY_CACHE_FILE, cache)
+    except Exception:
+        logger.debug("signal_utility disk cache write failed", exc_info=True)
+
 
 def load_entries():
     """Load signal log entries. Prefers SQLite if available, falls back to JSONL."""
@@ -574,11 +629,20 @@ def signal_utility(horizon="1d", entries=None):
             cached = _signal_utility_cache.get(horizon)
             if cached and now - cached[0] < _SIGNAL_UTILITY_CACHE_TTL:
                 return cached[1]
-        # Cache miss or expired — compute outside the lock to avoid
-        # serializing all threads behind the slow path.
+        # L1 miss — try L2 disk cache before paying the cold compute. After
+        # a process restart this is what saves us the ~49s parallel-cold
+        # cost: thread-1 reads disk (~ms), populates L1, threads 2-4 hit L1.
+        disk_cached = _load_signal_utility_disk(horizon)
+        if disk_cached is not None:
+            with _signal_utility_cache_lock:
+                _signal_utility_cache[horizon] = (time.time(), disk_cached)
+            return disk_cached
+        # L1 + L2 miss — compute outside the lock to avoid serializing all
+        # threads behind the slow path. Populate both caches on success.
         result = _compute_signal_utility(horizon, None)
         with _signal_utility_cache_lock:
             _signal_utility_cache[horizon] = (time.time(), result)
+        _write_signal_utility_disk(horizon, result)
         return result
     # Explicit entries — bypass cache (caller controls the dataset).
     return _compute_signal_utility(horizon, entries)
@@ -646,14 +710,22 @@ def _compute_signal_utility(horizon, entries):
 
 
 def invalidate_signal_utility_cache():
-    """Clear the signal_utility in-memory cache.
+    """Clear both the in-memory L1 and the disk-backed L2 signal_utility cache.
 
     Primarily exists so tests and outcome-backfill code can force a refresh
     after writing new outcomes. Production code does NOT need to call this —
-    the 300s TTL is the source of truth.
+    the 300s L1 TTL and 3600s L2 TTL are the source of truth.
+
+    Disk file removal is best-effort and silent on failure: a stale L2 file
+    expires by TTL anyway and must never crash the caller.
     """
     with _signal_utility_cache_lock:
         _signal_utility_cache.clear()
+    try:
+        if SIGNAL_UTILITY_CACHE_FILE.exists():
+            SIGNAL_UTILITY_CACHE_FILE.unlink()
+    except Exception:
+        logger.debug("signal_utility disk cache delete failed", exc_info=True)
 
 
 def best_worst_signals(horizon="1d", acc=None):
