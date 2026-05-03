@@ -42,6 +42,15 @@ JS_MODULES = [
     "/static/js/polling.js",
 ]
 
+PWA_FILES = [
+    ("/static/manifest.webmanifest", "manifest"),
+    ("/static/sw.js",                "javascript"),
+    ("/static/icons/icon-192.png",   "image"),
+    ("/static/icons/icon-512.png",   "image"),
+    ("/static/icons/icon-512-maskable.png", "image"),
+    ("/static/icons/apple-touch-icon-180.png", "image"),
+]
+
 
 @pytest.mark.parametrize("path", CSS_FILES)
 def test_css_file_served(client, path):
@@ -87,3 +96,22 @@ def test_index_links_all_css(client):
     body = resp.data
     for path in CSS_FILES:
         assert path.encode() in body, f"index.html missing link to {path}"
+
+
+@pytest.mark.parametrize("path,kind_hint", PWA_FILES)
+def test_pwa_file_served(client, path, kind_hint):
+    """Manifest, service worker, and icons must resolve."""
+    with _no_auth():
+        resp = client.get(path)
+    assert resp.status_code == 200, f"{path} returned {resp.status_code}"
+    assert len(resp.data) > 0, f"{path} is empty"
+    ct = resp.headers.get("Content-Type", "").lower()
+    # We only require the broad type match — Flask sets concrete subtypes.
+    if kind_hint == "manifest":
+        # Some Flask versions return application/json for .webmanifest;
+        # accept either as long as it's json-ish or manifest.
+        assert "manifest" in ct or "json" in ct, f"{path} ct {ct!r}"
+    elif kind_hint == "javascript":
+        assert "javascript" in ct or "ecmascript" in ct, f"{path} ct {ct!r}"
+    elif kind_hint == "image":
+        assert "image" in ct, f"{path} ct {ct!r}"

@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026-05-03 (mobile-first dashboard redesign)
+
+The desktop-first 3,211-line `dashboard/static/index.html` is replaced
+with a mobile-first ES-module dashboard at the same URL. The previous
+single-file dashboard is preserved at `/legacy` for the rollout window.
+No `/api/*` endpoints change.
+
+**What ships:**
+- Mobile-first skeleton (`dashboard/static/index.html`, 91 lines)
+  with viewport-fit=cover, theme-color metas, manifest +
+  apple-touch-icon, Chart.js v4 UMD, and a `<script type="module">`
+  bootstrap. Shell shows a "Loading…" message + /legacy link if JS
+  fails or modules 404.
+- Tokenised CSS architecture under `dashboard/static/css/` (5 files,
+  ~860 lines). Variables preserve the legacy palette + add
+  spacing/typography/touch-target/radius/z-index/motion tokens.
+- ES-module JS under `dashboard/static/js/` — 7 core modules
+  (state, fetch, format, theme, router, polling, main), 11 reusable
+  components (pnl-card, position-card, consensus-chip, decision-card,
+  signal-row, pulse-dot, mini-chart, accordion, filter-chip,
+  bottom-sheet, empty-state, error-banner), 11 views (home,
+  decisions, decision-detail, signals, more, health, messages,
+  settings, equity, metals, golddigger), 5 chart helpers.
+- Bottom-nav with 4 thumb-zone destinations (Home / Decisions /
+  Signals / More); promotes to top-tab strip ≥1024px viewport.
+- Signal heatmap: Track-5 transposed pattern — rows=signals,
+  cols=timeframes, one ticker at a time via chip-bar, sticky
+  leftmost + top, color-only cells, long-press → bottom sheet drill.
+- Polling: Page Visibility API hooked, per-section cadence
+  (60s hot endpoints, 5min slow ones), pause-on-hide, pause-toggle
+  in Settings.
+- PWA: manifest, service worker (cache-first shell + Chart.js,
+  network-first /api/*, navigation fallback to cached shell), 4
+  PNG icons (192/512/maskable/apple-touch-180), installable
+  add-to-home-screen on iOS + Android.
+- New `/legacy` route serving `index_legacy.html` (the previous
+  dashboard). Cookie auth unchanged; `?token=` clean-redirect.
+- 30+ new tests across `test_dashboard_legacy_route.py`,
+  `test_dashboard_static_assets.py`, `test_dashboard_skeleton.py`.
+
+**Research deliverables (`docs/research/2026-05-03-mobile-dashboard/`):**
+- `00-synthesis.md`, `01-current-inventory.md`, `02-usage-signal.md`,
+  `03-user-moments.md`, `04-telegram-overlap.md`,
+  `05-comparable-products.md`, `06-tech-constraints.md`.
+
+**Spec:** `docs/superpowers/specs/2026-05-03-mobile-dashboard-redesign-design.md`.
+
+**Plan:** `docs/PLAN.md`.
+
+**Known follow-ups (out of scope of this PR):**
+- `data/metals_loop.py:959` send_telegram bypass (no `category` field).
+- LOOP CONTRACT alert spam (~50/day) — digest at the source.
+- Optional `/api/*` request-log instrumentation (Track 2 recommendation).
+- v2 features: SSE for trigger pushes, custom pull-to-refresh,
+  per-user card reordering, possible Chart.js → uPlot/Lightweight swap.
+
 ## 2026-05-01 (oil swing subsystem + crypto/MSTR scheduled-task plumbing)
 
 Completes the multi-asset swing-trader rollout started 2026-04-30 (merge

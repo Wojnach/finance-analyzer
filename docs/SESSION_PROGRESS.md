@@ -1,4 +1,43 @@
-# Session Progress — Auto-Improve Session (2026-05-01)
+# Session Progress — Mobile Dashboard Redesign (2026-05-03)
+
+**Session start:** 2026-05-03 ~20:30 UTC
+**Status:** in worktree `feat/mobile-dashboard-redesign-2026-05-03`
+**Goal:** replace desktop-first single-file dashboard with a mobile-first
+ES-module + PWA dashboard, preserving every endpoint and every
+functional surface.
+
+## Phases
+
+1. Research (Tracks 1-6, 4 parallel agents + me) → 7 deliverables under
+   `docs/research/2026-05-03-mobile-dashboard/`.
+2. Spec at `docs/superpowers/specs/2026-05-03-mobile-dashboard-redesign-design.md`.
+3. PLAN.md committed before any code changes (per `/fgl`).
+4. Nine implementation batches:
+   - Batch 1: skeleton + /legacy fallback + CSS tokens
+   - Batch 2: state/fetch/router/polling/format/theme/main JS modules
+   - Batch 3: 10 reusable UI components
+   - Batch 4: Home view + Chart.js wrapper + sparkline
+   - Batch 5: Decisions list + drill-down detail
+   - Batch 6: Signals heatmap (transposed) + accuracy + history
+   - Batch 7: More + Health + Messages + Settings views
+   - Batch 8: Metals + GoldDigger + Equity views + chart configs
+   - Batch 9: PWA manifest + service worker + icons + skeleton tests + docs.
+5. Codex adversarial review (next).
+6. Test, merge, push, cleanup.
+
+## Test status
+144 dashboard tests pass after batch 9 (was 105 before redesign).
+
+## What's next
+- /codex:adversarial-review --wait --scope branch --effort xhigh
+- Address P1/P2 findings; document P3.
+- pytest -n auto across the full suite.
+- Merge to main; push via Windows git.
+- git worktree remove + branch -d.
+
+---
+
+## Previous: Auto-Improve Session (2026-05-01)
 
 **Session start:** 2026-05-01 ~08:00 UTC
 **Status:** COMPLETE
