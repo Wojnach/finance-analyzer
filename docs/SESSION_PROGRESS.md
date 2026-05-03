@@ -87,6 +87,95 @@ class of regression appears.
 
 ---
 
+## 2026-05-03 night — Cold-start performance follow-ups
+
+After the utility_overlay fix landed, cycles 1 of subsequent restarts still
+paid two distinct cold-start costs that became dominant once
+`utility_overlay` was no longer the long pole:
+
+### Issue A — GPU contention from Kronos subprocess
+Forecast phase took ~210 s on cold-start. Kronos (subprocess that holds
+the GPU file-lock during model-load + inference) ran first across 4
+ticker threads in parallel. Chronos (in-process, ~50 ms warm, ~1.7 s
+cold-load) timed out behind it on a 120 s gate.
+
+**Fix** (`789cc91c`): swap the order in `portfolio/signals/forecast.py`
+so Chronos runs first. Chronos pipelines through GPU in seconds for all
+4 tickers; Kronos shadow then runs and threads that can't grab the gate
+within 90 s skip silently — fine because Kronos is in shadow mode and
+its sub-signals are filtered from live consensus.
+
+Block-move only, no logic change. Adversarial review (fresh
+code-reviewer subagent): clean, no findings.
+
+### Issue B — Per-restart cold-compute on `signal_utility`
+Even after the None-guard fix, every process restart paid ~49 s under
+4-thread contention because `_signal_utility_cache` is in-memory only —
+empty on every fresh process.
+
+**Fix** (`7416a6fd` + `5c476cbc`): persist `signal_utility` results to
+disk as an L2 cache at `data/signal_utility_cache.json`, mirroring the
+`regime_accuracy_cache.json` pattern: single global "time" key gates
+TTL (3600 s, matches `ACCURACY_CACHE_TTL`), per-horizon data persists
+via load-merge-write. Lookup order: L1 in-memory → L2 disk → compute.
+Both layers populate on successful compute.
+
+Adversarial review (fresh code-reviewer subagent) flagged 2 P2 findings,
+both fixed in `5c476cbc`:
+1. **Multi-horizon write race**: lockless read-merge-write would lose
+   3 of 4 horizons on a 4-thread cold cycle (each thread overwrites
+   the others' merges). Added `_signal_utility_disk_lock` separate from
+   the L1 lock so disk IO doesn't block L1 reads. New regression test
+   `test_l2_concurrent_different_horizons_all_persist` spawns 4
+   ThreadPoolExecutor writers and asserts all 4 horizons survive.
+2. **Cross-process invalidation scope**: `invalidate_signal_utility_cache`
+   deletes the shared L2 file. Verified by grep that satellite loops
+   (crypto/oil/metals) don't call it; only `outcome_tracker.py` does
+   (which runs as the daily PF-OutcomeCheck task — exactly the right
+   caller). Updated docstring with explicit cross-process scope.
+
+### Live verification (cold-start cycle 1, all fixes deployed)
+
+| Stage | Cycle wall | utility_overlay phase |
+|---|---|---|
+| Pre-everything | 387.7 s | ~110 s × 4 |
+| + None-guard fix | 332.1 s | 9–17 s × 2 |
+| + Chronos-first swap | 140.4 s | 58–62 s × 4 |
+| + L2 disk cache | **131.1 s** | **0.0 s × 4** |
+
+The remaining 131 s is genuinely-required cold-start work (BERT, Chronos
+model load, llama-server warmup, LLM batch). None of my fixes target it
+because all of those are first-call costs that warm-cycles already avoid.
+
+### Operational lesson learned
+
+`schtasks /end` terminates the scheduled-task wrapper, not the
+worker python.exe. The worker holds the singleton lock at
+`data/main_loop.singleton.lock`. Subsequent `schtasks /run` instances
+detect the lock and exit with code 11. **You must `taskkill /pid <pid> /f`
+the worker python.exe directly before running `schtasks /run`**, or the
+new code is never loaded — even though `schtasks /query` shows "Running"
+and a Get-CimInstance for python.exe shows fresh PIDs (those are stale
+launchers, not the active worker).
+
+This is documented at `docs/GUIDELINES.md` step 9 but easy to skip. Cost
+this evening: ~3 hours of confused observations before realizing the live
+loop was running pre-Chronos-swap, pre-L2 code despite three "successful"
+restart cycles.
+
+### Commits this session
+
+| SHA | Subject |
+|---|---|
+| `b2bd9dce` | fix(BUG-178): None-guard in _compute_signal_utility |
+| `dede91ec` | fix(review): test cache-leakage + profile harness write |
+| `2a6da0fa` | docs(session): record utility_overlay perf fix |
+| `789cc91c` | perf(forecast): run Chronos before Kronos |
+| `7416a6fd` | perf(accuracy_stats): persist signal_utility cache to disk |
+| `5c476cbc` | fix(review): multi-horizon write race + cross-process docstring |
+
+---
+
 ## What was done
 
 ### Phase 0-4: Research (8-phase protocol)
@@ -254,3 +343,38 @@ suite passes after merge.
   "all responses non-None but empty content" would identify model
   truncation / Qwen3-thinking-mode-style failures separately from
   server connectivity.
+
+### 2026-05-03 22:04 UTC | main
+bcd919e0 feat(loop): pre-warm dashboard accuracy cache once per hour
+portfolio/accuracy_stats.py
+portfolio/main.py
+tests/test_accuracy_compute_lock.py
+
+### 2026-05-03 22:23 UTC | main
+99115711 fix(dashboard): dual-stack IPv4+IPv6 bind — eliminates Windows localhost 2s delay
+dashboard/app.py
+
+### 2026-05-03 22:26 UTC | feat/loop-infra-cleanup-2026-05-04
+21fbec8f plan: loop-infra cleanup (2026-05-04)
+docs/plans/2026-05-04-loop-infra-cleanup.md
+
+### 2026-05-03 22:27 UTC | feat/loop-infra-cleanup-2026-05-04
+e9d5e0d1 refactor(loops): migrate crypto/oil/mstr write_heartbeat shims to shared helper
+data/crypto_loop.py
+data/oil_loop.py
+portfolio/mstr_loop/loop.py
+tests/test_loop_health_write_heartbeat.py
+
+### 2026-05-03 22:30 UTC | feat/loop-infra-cleanup-2026-05-04
+9d5e5328 feat(accuracy): persist dashboard prewarm timestamp across loop restarts
+.gitignore
+portfolio/accuracy_stats.py
+tests/test_accuracy_compute_lock.py
+
+### 2026-05-03 22:30 UTC | feat/loop-infra-cleanup-2026-05-04
+55692d86 docs(claude.md): replace stale dashboard endpoint list with reconciled 32
+CLAUDE.md
+
+### 2026-05-03 22:31 UTC | feat/loop-infra-cleanup-2026-05-04
+3b0a3d78 test(prewarm): bypass disk lazy-load in TestDashboardAccuracyPrewarm reset
+tests/test_accuracy_compute_lock.py
