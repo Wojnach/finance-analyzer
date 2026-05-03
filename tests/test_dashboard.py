@@ -1745,3 +1745,69 @@ class TestDashboardCache:
 
         assert len(r3) == 3
         assert len(r5) == 5
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-04 codex P2-1: _read_jsonl must not under-deliver when callers
+# request a large window of large rows.
+# ---------------------------------------------------------------------------
+
+class TestReadJsonlGrowsTailBytes:
+    def _entry(self, i: int, padding: int) -> str:
+        """One JSONL row with a payload of `padding` bytes."""
+        return json.dumps({"i": i, "blob": "x" * padding})
+
+    def test_grows_tail_when_initial_under_delivers(self, tmp_path):
+        """100 rows of 8KB each = 800KB, but initial heuristic for limit=100
+        is max(512KB, 100*1KB) = 512KB which only contains the last 64 rows.
+        The grow-and-retry path must reach the requested 100."""
+        f = tmp_path / "big_rows.jsonl"
+        rows = [self._entry(i, padding=7800) for i in range(100)]
+        f.write_text("\n".join(rows), encoding="utf-8")
+        # Cache must be clean for an honest measurement.
+        from dashboard import app as app_mod
+        app_mod._cache.clear()
+
+        result = _read_jsonl(f, limit=100)
+        assert len(result) == 100
+        # Chronological order preserved (oldest → newest).
+        assert [e["i"] for e in result] == list(range(100))
+
+    def test_falls_back_to_full_scan_when_tail_helper_keeps_underdelivering(
+        self, tmp_path, monkeypatch
+    ):
+        """If load_jsonl_tail still under-delivers after exhausting the
+        file, _read_tail_with_growth must call load_jsonl_impl as a
+        last resort. (Simulated: monkeypatch the tail helper to always
+        return [] regardless of tail_bytes.)"""
+        f = tmp_path / "fallback.jsonl"
+        f.write_text("\n".join(json.dumps({"i": i}) for i in range(20)),
+                     encoding="utf-8")
+
+        from dashboard import app as app_mod
+        # Tail helper "broken": always returns empty, simulating the
+        # boundary-bug behavior on every retry.
+        monkeypatch.setattr(app_mod, "_load_jsonl_tail_impl",
+                             lambda *a, **kw: [])
+        full_calls = {"n": 0}
+        original_full = app_mod._load_jsonl_impl
+        def _track(*a, **kw):
+            full_calls["n"] += 1
+            return original_full(*a, **kw)
+        monkeypatch.setattr(app_mod, "_load_jsonl_impl", _track)
+        app_mod._cache.clear()
+
+        result = _read_jsonl(f, limit=10)
+        assert len(result) == 10
+        assert full_calls["n"] == 1, "fallback to full-scan must fire exactly once"
+
+    def test_returns_at_most_full_file_when_short(self, tmp_path):
+        """A file with 5 rows + a request for 100 returns 5, not an error."""
+        f = tmp_path / "short.jsonl"
+        f.write_text("\n".join(json.dumps({"i": i}) for i in range(5)),
+                     encoding="utf-8")
+        from dashboard import app as app_mod
+        app_mod._cache.clear()
+
+        result = _read_jsonl(f, limit=100)
+        assert len(result) == 5

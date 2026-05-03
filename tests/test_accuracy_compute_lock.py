@@ -194,10 +194,21 @@ class TestDashboardAccuracyPrewarm:
         # pin the gate to "recently fired".
         acc_mod._dashboard_prewarm_loaded = True
 
+    def _isolate_lock(self, monkeypatch, tmp_path):
+        """Point the cross-process file-lock and persistence file at
+        tmp_path so concurrent test runs (or stale lock files in
+        data/) don't suppress prewarm. Added with the 2026-05-04 codex
+        P2-2 fix that introduced acquire_lock_file."""
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_LOCK_FILE",
+                             tmp_path / "prewarm.lock")
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE",
+                             tmp_path / "prewarm_state.json")
+
     def test_first_call_fires_and_warms_all_12_keys(self, monkeypatch, tmp_path):
         """Cold start: one call should populate consensus / signal /
         per_ticker for all 4 horizons = 12 cache keys."""
         self._reset_prewarm()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
 
         # Stub the underlying compute fns so we don't hit the real signal log.
@@ -227,6 +238,7 @@ class TestDashboardAccuracyPrewarm:
     def test_within_interval_does_not_fire(self, monkeypatch, tmp_path):
         """Self-gating: calls within 1h do nothing."""
         self._reset_prewarm()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
 
         call_count = {"n": 0}
@@ -256,6 +268,7 @@ class TestDashboardAccuracyPrewarm:
         passes) but the underlying compute is never called — the
         get_or_compute_* helpers short-circuit on cache hit."""
         self._reset_prewarm()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
 
         # Pre-populate all 12 keys.
@@ -280,9 +293,8 @@ class TestDashboardAccuracyPrewarm:
         """Best-effort: any failure in the underlying compute must not
         propagate. The loop calls this every cycle and cannot crash."""
         self._reset_prewarm()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
-        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE",
-                             tmp_path / "prewarm.json")
 
         def _boom(*_a, **_kw):
             raise RuntimeError("simulated compute failure")
@@ -304,6 +316,13 @@ class TestDashboardPrewarmPersistence:
         acc_mod._last_dashboard_prewarm_ts = 0.0
         acc_mod._dashboard_prewarm_loaded = False
 
+    def _isolate_lock(self, monkeypatch, tmp_path):
+        """Point the cross-process file-lock at tmp_path so the real
+        production lock file in data/ doesn't suppress prewarm during
+        concurrent test runs."""
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_LOCK_FILE",
+                             tmp_path / "prewarm.lock")
+
     def _stub_compute(self, monkeypatch):
         monkeypatch.setattr(acc_mod, "signal_accuracy", lambda h: {"x": 1})
         monkeypatch.setattr(acc_mod, "per_ticker_accuracy", lambda h: {"x": 1})
@@ -313,6 +332,7 @@ class TestDashboardPrewarmPersistence:
     def test_first_fire_writes_persisted_state(self, monkeypatch, tmp_path):
         """After prewarm fires, dashboard_prewarm_state.json must exist."""
         self._reset_module_state()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
         state_file = tmp_path / "prewarm.json"
         monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
@@ -328,6 +348,7 @@ class TestDashboardPrewarmPersistence:
         """A 'restart' (reset module state) reads back persisted ts and
         suppresses the prewarm if still within interval."""
         self._reset_module_state()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
         state_file = tmp_path / "prewarm.json"
         monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
@@ -350,6 +371,7 @@ class TestDashboardPrewarmPersistence:
         """A 'restart' >1h after the persisted ts should allow prewarm
         to fire (the persisted gate has expired)."""
         self._reset_module_state()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
         state_file = tmp_path / "prewarm.json"
         monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
@@ -365,6 +387,7 @@ class TestDashboardPrewarmPersistence:
         """A malformed state file shouldn't pin the gate forever — fall
         back to 0 so the next call fires."""
         self._reset_module_state()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
         state_file = tmp_path / "prewarm.json"
         monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
@@ -378,6 +401,7 @@ class TestDashboardPrewarmPersistence:
     def test_negative_or_invalid_ts_falls_back_to_zero(self, monkeypatch, tmp_path):
         """Hostile / corrupt content (negative, string, missing) -> 0."""
         self._reset_module_state()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
         state_file = tmp_path / "prewarm.json"
         monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
@@ -392,6 +416,7 @@ class TestDashboardPrewarmPersistence:
         """The persistence read is lazy — happens once per process, not
         per call. After load, gating uses the in-memory ts."""
         self._reset_module_state()
+        self._isolate_lock(monkeypatch, tmp_path)
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
         state_file = tmp_path / "prewarm.json"
         monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
@@ -412,3 +437,96 @@ class TestDashboardPrewarmPersistence:
 
         # Disk read happened exactly once (the lazy-load).
         assert load_calls["n"] == 1
+
+
+class TestDashboardPrewarmFileLock:
+    """2026-05-04 codex P2-2: cross-process file lock around the prewarm
+    gate. A second process trying to fire while the first is mid-fanout
+    must skip cleanly, not duplicate the work."""
+
+    def _reset(self):
+        acc_mod._last_dashboard_prewarm_ts = -10000.0
+        acc_mod._dashboard_prewarm_loaded = True
+
+    def test_concurrent_caller_skips_when_lock_held(self, monkeypatch, tmp_path):
+        """Acquire the lock externally first; the prewarm call should
+        return False (treats as gated) rather than waiting or
+        duplicating the fanout."""
+        from portfolio.process_lock import acquire_lock_file, release_lock_file
+
+        self._reset()
+        lock_file = tmp_path / "prewarm.lock"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_LOCK_FILE", lock_file)
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE",
+                             tmp_path / "prewarm_state.json")
+
+        # Stubs that would FAIL the test if invoked.
+        def _shouldnt_run(*_a, **_kw):
+            raise AssertionError("compute should not run when lock held by other process")
+        monkeypatch.setattr(acc_mod, "signal_accuracy", _shouldnt_run)
+        monkeypatch.setattr(acc_mod, "consensus_accuracy", _shouldnt_run)
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", _shouldnt_run)
+
+        # Simulate "other process holds the lock".
+        held = acquire_lock_file(lock_file, owner="external_test")
+        assert held is not None, "couldn't acquire lock for setup"
+
+        try:
+            # Our caller should see the lock held and skip.
+            result = acc_mod.maybe_prewarm_dashboard_accuracy(now=10000.0)
+            assert result is False
+        finally:
+            release_lock_file(held)
+
+    def test_disk_re_read_does_not_clobber_negative_seed(self, monkeypatch, tmp_path):
+        """The layer-2 re-read inside the file lock honors a positive
+        disk ts (newer racer write), but a missing-file 0 must NOT
+        overwrite a deliberately-old in-memory ts."""
+        self._reset()  # seeds _last_dashboard_prewarm_ts = -10000.0
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_LOCK_FILE",
+                             tmp_path / "prewarm.lock")
+        # State file does NOT exist — disk_ts will be 0.
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE",
+                             tmp_path / "missing_state.json")
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+
+        fired = {"n": 0}
+        def _fire(*_a, **_kw):
+            fired["n"] += 1
+            return {"correct": 1, "total": 2, "accuracy": 0.5, "pct": 50.0}
+        monkeypatch.setattr(acc_mod, "signal_accuracy", _fire)
+        monkeypatch.setattr(acc_mod, "consensus_accuracy", _fire)
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", _fire)
+
+        # Test invokes with now=1000.0; without the >0 guard, the
+        # in-memory -10000 would be replaced with 0, and 1000-0=1000
+        # would fail the 3600 gate. With the guard, fires.
+        result = acc_mod.maybe_prewarm_dashboard_accuracy(now=1000.0)
+        assert result is True
+        assert fired["n"] == 12  # 4 horizons × 3 wrappers
+
+    def test_releases_lock_even_on_compute_exception(self, monkeypatch, tmp_path):
+        """If get_or_compute_* raises, the file lock must still release
+        so the next caller isn't permanently blocked."""
+        from portfolio.process_lock import acquire_lock_file, release_lock_file
+
+        self._reset()
+        lock_file = tmp_path / "prewarm.lock"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_LOCK_FILE", lock_file)
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE",
+                             tmp_path / "prewarm_state.json")
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+
+        def _boom(*_a, **_kw):
+            raise RuntimeError("forced failure")
+        monkeypatch.setattr(acc_mod, "signal_accuracy", _boom)
+        monkeypatch.setattr(acc_mod, "consensus_accuracy", _boom)
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", _boom)
+
+        # First call: compute raises but exception is swallowed.
+        assert acc_mod.maybe_prewarm_dashboard_accuracy(now=1000.0) is False
+
+        # Lock should be released — verify by acquiring it from outside.
+        fh = acquire_lock_file(lock_file, owner="external_release_check")
+        assert fh is not None, "lock not released after compute exception"
+        release_lock_file(fh)

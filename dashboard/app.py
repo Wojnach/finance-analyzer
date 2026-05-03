@@ -104,32 +104,67 @@ def _read_json(path, ttl=_DEFAULT_TTL):
 def _read_jsonl(path, limit=100, ttl=_DEFAULT_TTL):
     """Cached JSONL read returning the last `limit` entries.
 
-    2026-05-04: switched from load_jsonl(limit=) (which scans the entire
-    file then keeps the tail in a deque) to load_jsonl_tail (which
-    seeks from the end of the file). For an 80MB log the difference is
-    ~880ms vs ~5ms — every endpoint reading recent entries from a
-    large JSONL benefits.
+    Switched from load_jsonl(limit=) (full scan + deque) to
+    load_jsonl_tail (seek from end). For an 80MB log the difference is
+    ~880ms vs ~5ms.
 
-    `tail_bytes` is sized to `limit * 1KB` with a 512KB floor and a
-    4MB ceiling so larger limits get proportionally more bytes. If a
-    callsite passes an absurd limit and the typical entry is huge, the
-    4MB ceiling could under-deliver — but no current caller does that.
-    The legacy load_jsonl path (no limit) stays available via the
-    direct module import for callers that need the whole file.
+    2026-05-04 codex P2-1 follow-up: the original 4 MB tail-bytes
+    ceiling could silently under-deliver entries when callers ask for
+    a large window AND individual rows are large (e.g. /api/telegrams
+    requests 5000 entries × up to 4 KB each ≈ 20 MB needed). The
+    fetcher now grows tail_bytes adaptively — doubling on each retry
+    until either `limit` rows are parsed or the whole file has been
+    pulled — and falls through to the full-scan path as a final
+    safety net. Cache key bumped to v2 so old (potentially
+    under-delivered) entries don't survive the deploy.
     """
     if limit and limit > 0:
-        # Heuristic: ~1KB per entry, with bounds. Most JSONL entries in
-        # this codebase are 200-500 bytes; this leaves headroom.
-        tail_bytes = max(512_000, min(4_000_000, limit * 1024))
         return _cached_read(
-            f"jsonl_tail:{path}:{limit}",
+            f"jsonl_tail_v2:{path}:{limit}",
             ttl,
-            lambda: _load_jsonl_tail_impl(path, max_entries=limit,
-                                            tail_bytes=tail_bytes),
+            lambda: _read_tail_with_growth(path, limit),
         )
     return _cached_read(
         f"jsonl:{path}:{limit}", ttl, lambda: _load_jsonl_impl(path, limit=limit)
     )
+
+
+def _read_tail_with_growth(path, limit):
+    """Read tail entries, doubling tail_bytes until we have `limit`
+    parsed rows or the whole file has been consumed.
+
+    Falls back to the full-scan load_jsonl path if even reading the
+    full file via the tail helper still yields < limit entries —
+    that case implies the tail helper's first-line-drop heuristic is
+    chewing through real data and we should bypass it entirely.
+    """
+    try:
+        file_size = Path(path).stat().st_size
+    except (FileNotFoundError, OSError):
+        return []
+    if file_size == 0:
+        return []
+
+    # Initial budget: ~1 KB per entry with a 512 KB floor.
+    tail_bytes = max(512_000, limit * 1024)
+    # Cap retry budget at 64 MB to avoid runaway reads on a corrupt or
+    # absurdly-sized file. Most logs in this codebase are < 100 MB and
+    # 64 MB will hold ~64 K typical-sized entries.
+    max_retry_bytes = 64 * 1024 * 1024
+    while True:
+        capped = min(tail_bytes, file_size, max_retry_bytes)
+        rows = _load_jsonl_tail_impl(path, max_entries=limit,
+                                       tail_bytes=capped)
+        if len(rows) >= limit or capped >= file_size or capped >= max_retry_bytes:
+            break
+        tail_bytes *= 2
+
+    # Last-chance fallback: if even the full-file tail came up short,
+    # the issue isn't byte budget — it's the first-line-drop heuristic.
+    # Fall through to the canonical full-scan reader.
+    if len(rows) < limit and capped >= file_size:
+        rows = _load_jsonl_impl(path, limit=limit)
+    return rows
 
 
 def _get_config():
