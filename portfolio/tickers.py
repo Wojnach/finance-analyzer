@@ -121,6 +121,15 @@ DISABLED_SIGNALS = {
     "smart_money",      # 2026-04-24: below 40% on ALL Tier 1 tickers at 1d — BTC 39.8% (123),
                         # ETH 34.9% (146), MSTR 33.3% (264), XAU N/A. Not salvageable.
                         # Cross-ticker consistent failure. 51.6% aggregate masks per-ticker disaster.
+    "claude_fundamental",  # 2026-05-03: CRASHED to 19.8% recent 1d (222 sam) from 57.9%
+                        # all-time. Root cause: Opus tier has 95% BUY bias (76/80 votes BUY),
+                        # Sonnet 73% BUY bias. Haiku 83% abstention (useless). In ranging
+                        # market these BUY calls are mostly wrong. Bias detectors (added
+                        # 2026-04-25) couldn't prevent structural LLM bullish lean.
+                        # Re-enable after fixing bias detector thresholds.
+    "sentiment",        # 2026-05-03: 33.8% at 3h recent (3629 sam), 45.9% all-time (39579 sam).
+                        # CryptoBERT predictions are noise. High-volume signal actively hurting
+                        # consensus. Always in macro_external cluster but dragging down peers.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
