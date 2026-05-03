@@ -261,7 +261,12 @@ def flush_llm_batch():
                    # the fingpt parser stage that produces one parsed dict
                    # per prompt.
     if f_batch:
-        logger.info("LLM batch: %d fingpt queries", len(f_batch))
+        # 2026-05-03 (fix/fingpt-batch-observability codex P3): renamed from
+        # "%d fingpt queries" because each f_batch entry can fan out to many
+        # per-headline prompts in _flush_fingpt_phase. The old wording showed
+        # "1 fingpt queries" right next to a summary line claiming "F=10/10",
+        # which was confusing — "groups" matches what's being counted.
+        logger.info("LLM batch: %d fingpt groups", len(f_batch))
         # 2026-05-03 (fix/fingpt-batch-observability): _flush_fingpt_phase now
         # returns a metrics dict on every code path. Used in the summary log
         # below so a fingpt-only cycle no longer reports "0 results" when
@@ -498,8 +503,19 @@ def _parse_fingpt_completion(text: str | None, fingpt_infer) -> dict | None:
     is a completion model and the new few-shot plain-text templates make
     it emit clean sentiment words. See /mnt/q/models/fingpt_infer.py for
     the parser + template changes.
+
+    2026-05-03 (fix/fingpt-batch-observability codex P2): also reject
+    empty / whitespace-only text. The production fingpt_infer._parse_sentiment
+    falls back to "neutral" for any unparseable input rather than raising,
+    AND llama_server._query_http returns "" (not None) for HTTP 200 with
+    empty body — so without this guard, an empty completion silently scores
+    as a neutral-with-low-confidence parse and the new "parsed" metric in
+    _flush_fingpt_phase looks healthy (parsed == queries) when in fact
+    nothing was produced. Treating empty-text as a parse failure makes the
+    silent-failure path show up as F=0/N in the summary log, which is the
+    whole point of this PR.
     """
-    if text is None:
+    if text is None or not text.strip():
         return None
     try:
         sentiment = fingpt_infer._parse_sentiment(text)

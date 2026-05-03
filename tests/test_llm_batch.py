@@ -782,6 +782,101 @@ class TestFingptPhaseMetrics:
             "parser returned None for 4/4" in m for m in warnings
         ), warnings
 
+    def test_metrics_treats_empty_text_as_unparsed(
+        self, fake_fingpt_infer, fake_llama_server, stash_recorder, caplog,
+    ):
+        """Codex P2: production llama_server._query_http returns "" for HTTP
+        200 with empty body, and production _parse_sentiment falls back to
+        "neutral" for any unparseable text. Without an empty-text guard in
+        _parse_fingpt_completion, an all-empty cycle would log F=N/N (looks
+        healthy) while actually producing nothing useful. After the guard,
+        empty-text → parsed=0 → silent failure visible.
+        """
+        fake_llama_server["response"] = ["", "   ", "\n\n"]
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        with caplog.at_level("WARNING", logger="portfolio.llm_batch"):
+            metrics = _flush_fingpt_phase([
+                ("BTC:empty", "headlines",
+                 {"mode": "headlines", "ticker": "BTC",
+                  "texts": ["h1", "h2", "h3"]}),
+            ])
+
+        assert metrics["queries"] == 3
+        assert metrics["received"] == 3   # the strings came back, not None
+        assert metrics["parsed"] == 0     # but empty-after-strip → unparsed
+        assert metrics["exception"] is None
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        # Parser-majority warning should fire for 3/3 unparsed
+        assert any("parser returned None for 3/3" in m for m in warnings), warnings
+
+    def test_metrics_on_mixed_degraded_responses(
+        self, fake_fingpt_infer, fake_llama_server, stash_recorder,
+    ):
+        """Realistic mixed bag: one None, one empty, one garbage-but-no-label,
+        one clean answer. parsed should equal exactly 2 — the garbage gets
+        a fallback "neutral" label from the production parser, and the clean
+        answer is the explicit hit. The empty and None texts are filtered.
+
+        Note: the fake _parse_sentiment in this file is more lenient than
+        production — it falls back to neutral for any non-empty text. So the
+        garbage string still parses into a dict. The empty string however is
+        rejected by the empty-text guard added in this PR.
+        """
+        # Order matches the headlines list below
+        fake_llama_server["response"] = [
+            None,            # server failure
+            "",              # HTTP 200 empty body — silent failure
+            "garbage text",  # parses to neutral via fuzzy fallback (production behavior)
+            "positive",      # clean
+        ]
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        metrics = _flush_fingpt_phase([
+            ("ETH:mixed", "headlines",
+             {"mode": "headlines", "ticker": "ETH",
+              "texts": ["h1", "h2", "h3", "h4"]}),
+        ])
+
+        assert metrics["queries"] == 4
+        assert metrics["received"] == 3   # everything except None
+        assert metrics["parsed"] == 2     # garbage→neutral + positive (empty rejected)
+        assert metrics["exception"] is None
+
+    def test_metrics_on_fingpt_infer_import_failure(
+        self, fake_llama_server, stash_recorder, caplog, monkeypatch,
+    ):
+        """Codex P3: cover the fingpt_infer import failure path — when
+        Q:\\models is missing or fingpt_infer.py raises at import time, the
+        bare except catches it and metrics records the exception class.
+        Other LLM phases are unaffected since fingpt is shadow-only.
+        """
+        import builtins
+        import sys
+        # Wipe any previously-imported fingpt_infer so the next import re-runs.
+        sys.modules.pop("fingpt_infer", None)
+
+        real_import = builtins.__import__
+        def explode_on_fingpt_infer(name, *args, **kwargs):
+            if name == "fingpt_infer":
+                raise ImportError("simulated: Q:/models not on sys.path")
+            return real_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", explode_on_fingpt_infer)
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        with caplog.at_level("WARNING", logger="portfolio.llm_batch"):
+            metrics = _flush_fingpt_phase([
+                ("BTC:imp", "headlines",
+                 {"mode": "headlines", "ticker": "BTC", "texts": ["h1"]}),
+            ])
+
+        assert metrics["exception"] == "ImportError"
+        assert metrics["queries"] == 0      # never got to prompt building
+        assert metrics["received"] == 0
+        assert metrics["parsed"] == 0
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("simulated: Q:/models" in m for m in warnings), warnings
+
     def test_metrics_on_top_level_exception(
         self, fake_fingpt_infer, stash_recorder, caplog, monkeypatch,
     ):
