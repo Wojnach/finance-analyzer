@@ -1105,8 +1105,30 @@ def get_or_compute_consensus_accuracy(horizon: str):
 # request after a restart spends seconds re-scanning the signal log.
 _DASHBOARD_PREWARM_HORIZONS: tuple = ("1d", "3d", "5d", "10d")
 _DASHBOARD_PREWARM_INTERVAL_SEC = 3600.0  # 1 hour
+_DASHBOARD_PREWARM_STATE_FILE = DATA_DIR / "dashboard_prewarm_state.json"
 _dashboard_prewarm_lock = threading.Lock()
 _last_dashboard_prewarm_ts: float = 0.0
+_dashboard_prewarm_loaded: bool = False
+
+
+def _load_prewarm_ts_from_disk() -> float:
+    """Read the persisted prewarm ts, returning 0.0 if missing/corrupt."""
+    state = load_json(_DASHBOARD_PREWARM_STATE_FILE, default={}) or {}
+    ts = state.get("last_prewarm_ts")
+    if isinstance(ts, (int, float)) and ts > 0:
+        return float(ts)
+    return 0.0
+
+
+def _save_prewarm_ts_to_disk(ts: float) -> None:
+    """Persist the latest prewarm ts. Best-effort — never raises."""
+    try:
+        _atomic_write_json(
+            _DASHBOARD_PREWARM_STATE_FILE,
+            {"last_prewarm_ts": float(ts)},
+        )
+    except Exception:
+        logger.debug("prewarm-ts persist failed", exc_info=True)
 
 
 def maybe_prewarm_dashboard_accuracy(now: float | None = None) -> bool:
@@ -1121,15 +1143,28 @@ def maybe_prewarm_dashboard_accuracy(now: float | None = None) -> bool:
     respects the BUG-178 thundering-herd lock and won't fight with
     in-loop callers that hit the same cache from ticker threads.
 
+    2026-05-04: persistence layer. The interval gate now seeds itself
+    from `data/dashboard_prewarm_state.json` on first call, and atomic-
+    writes the ts back when prewarm fires. This means a loop restart
+    no longer triggers an extra cold-cache prewarm — the persisted ts
+    survives. Stale-on-corruption-or-missing falls back to 0 (i.e.,
+    fires on next call), which is the safe direction.
+
     Args:
         now: Override clock for tests. Defaults to time.time().
 
     Returns:
         True if prewarm fired this call, False if gated by the interval.
     """
-    global _last_dashboard_prewarm_ts
+    global _last_dashboard_prewarm_ts, _dashboard_prewarm_loaded
     t = now if now is not None else time.time()
     with _dashboard_prewarm_lock:
+        # Lazy-load the persisted ts on first call per process. Subsequent
+        # calls use the in-memory value, which is faster and avoids
+        # reading the file every cycle.
+        if not _dashboard_prewarm_loaded:
+            _last_dashboard_prewarm_ts = _load_prewarm_ts_from_disk()
+            _dashboard_prewarm_loaded = True
         if t - _last_dashboard_prewarm_ts < _DASHBOARD_PREWARM_INTERVAL_SEC:
             return False
         _last_dashboard_prewarm_ts = t
@@ -1138,6 +1173,9 @@ def maybe_prewarm_dashboard_accuracy(now: float | None = None) -> bool:
             get_or_compute_accuracy(h)
             get_or_compute_consensus_accuracy(h)
             get_or_compute_per_ticker_accuracy(h)
+        # Persist after the actual fanout completes so a crash mid-fanout
+        # doesn't pin the gate (next process will retry).
+        _save_prewarm_ts_to_disk(t)
         return True
     except Exception:
         # Best-effort: telemetry + cache pre-warm must never crash the loop.

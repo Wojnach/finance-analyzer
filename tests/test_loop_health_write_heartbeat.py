@@ -127,3 +127,95 @@ def test_round_trips_through_read_loop_health(tmp_path):
     assert rollup["any_unhealthy"] is False, rollup["unhealthy"]
     for name in loop_health.DEFAULT_HEARTBEAT_FILES:
         assert rollup["loops"][name]["state"] == "fresh", name
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-04 wrapper-migration contract tests.
+# crypto_loop / oil_loop / mstr_loop now delegate to loop_health.write_heartbeat;
+# verify each shim still produces a payload that read_loop_status accepts as
+# fresh and that the schema (ts/status/cycle/ok/n_positions) is preserved.
+# ---------------------------------------------------------------------------
+
+class TestWrapperShims:
+    def test_crypto_wrapper_produces_compatible_payload(self, tmp_path, monkeypatch):
+        """data/crypto_loop.write_heartbeat unpacks `extra` correctly."""
+        from data import crypto_loop
+        hb = tmp_path / "crypto_loop.heartbeat"
+        monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
+
+        crypto_loop.write_heartbeat({"cycle": 7, "ok": True, "n_positions": 2})
+
+        payload = _read(hb)
+        assert payload["cycle"] == 7
+        assert payload["ok"] is True
+        assert payload["n_positions"] == 2
+        assert payload["status"] == "ok"
+        # Schema is consumable by read_loop_status.
+        status = loop_health.read_loop_status("crypto", hb)
+        assert status["state"] == "fresh"
+
+    def test_crypto_wrapper_passes_through_unknown_keys(self, tmp_path, monkeypatch):
+        """Extra keys not in the canonical set ride along as context."""
+        from data import crypto_loop
+        hb = tmp_path / "crypto_loop.heartbeat"
+        monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
+
+        crypto_loop.write_heartbeat({
+            "cycle": 1, "ok": True, "n_positions": 0,
+            "fast_tick_alerts": 3, "slow_phase_seen": False,
+        })
+        payload = _read(hb)
+        assert payload["fast_tick_alerts"] == 3
+        assert payload["slow_phase_seen"] is False
+
+    def test_oil_wrapper_produces_compatible_payload(self, tmp_path, monkeypatch):
+        from data import oil_loop
+        hb = tmp_path / "oil_loop.heartbeat"
+        monkeypatch.setattr(oil_loop, "HEARTBEAT_FILE", str(hb))
+
+        oil_loop.write_heartbeat({"cycle": 42, "ok": False, "n_positions": 1})
+
+        payload = _read(hb)
+        assert payload["cycle"] == 42
+        assert payload["ok"] is False
+        assert payload["n_positions"] == 1
+        status = loop_health.read_loop_status("oil", hb)
+        assert status["state"] == "fresh"
+
+    def test_mstr_wrapper_produces_compatible_payload(self, tmp_path, monkeypatch):
+        """portfolio.mstr_loop._write_heartbeat threads phase through extra."""
+        from portfolio.mstr_loop import config as mstr_config
+        from portfolio.mstr_loop import loop as mstr_loop
+        from portfolio.mstr_loop.state import default_state
+
+        hb = tmp_path / "mstr_loop.heartbeat"
+        monkeypatch.setattr(mstr_config, "HEARTBEAT_FILE", str(hb))
+
+        mstr_loop._write_heartbeat(default_state(), cycle_count=99)
+
+        payload = _read(hb)
+        assert payload["cycle"] == 99
+        assert payload["ok"] is True
+        assert payload["n_positions"] == 0
+        assert payload["phase"] == mstr_config.PHASE
+        status = loop_health.read_loop_status("mstr", hb)
+        assert status["state"] == "fresh"
+
+    def test_wrapper_failure_does_not_raise(self, tmp_path, monkeypatch):
+        """Defence in depth: even if the shared helper imports fail, the
+        wrapper must not propagate. (Real-world this would be a circular
+        import or sys.modules tampering.)"""
+        from data import crypto_loop
+
+        # Force the inner import to fail.
+        import builtins
+        real_import = builtins.__import__
+
+        def _failing_import(name, *args, **kwargs):
+            if name == "portfolio.loop_health":
+                raise ImportError("simulated")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _failing_import)
+        # Must not raise.
+        crypto_loop.write_heartbeat({"cycle": 1})

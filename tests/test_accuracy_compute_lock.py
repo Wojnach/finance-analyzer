@@ -189,6 +189,10 @@ class TestDashboardAccuracyPrewarm:
         # call's now=any-value passes the interval check. Setting to 0.0
         # would not work for now<3600 in test (interval is 1h).
         acc_mod._last_dashboard_prewarm_ts = -10000.0
+        # 2026-05-04: also bypass the lazy-load from disk, which would
+        # otherwise read the real data/dashboard_prewarm_state.json and
+        # pin the gate to "recently fired".
+        acc_mod._dashboard_prewarm_loaded = True
 
     def test_first_call_fires_and_warms_all_12_keys(self, monkeypatch, tmp_path):
         """Cold start: one call should populate consensus / signal /
@@ -277,6 +281,8 @@ class TestDashboardAccuracyPrewarm:
         propagate. The loop calls this every cycle and cannot crash."""
         self._reset_prewarm()
         monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE",
+                             tmp_path / "prewarm.json")
 
         def _boom(*_a, **_kw):
             raise RuntimeError("simulated compute failure")
@@ -287,3 +293,122 @@ class TestDashboardAccuracyPrewarm:
         # Must not raise.
         result = acc_mod.maybe_prewarm_dashboard_accuracy()
         assert result is False  # caught the exception
+
+
+class TestDashboardPrewarmPersistence:
+    """2026-05-04: prewarm ts persists to disk so loop restarts don't
+    re-fire the prewarm immediately. Otherwise every loop restart pays
+    one extra cold-cache fanout."""
+
+    def _reset_module_state(self):
+        acc_mod._last_dashboard_prewarm_ts = 0.0
+        acc_mod._dashboard_prewarm_loaded = False
+
+    def _stub_compute(self, monkeypatch):
+        monkeypatch.setattr(acc_mod, "signal_accuracy", lambda h: {"x": 1})
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", lambda h: {"x": 1})
+        monkeypatch.setattr(acc_mod, "consensus_accuracy",
+                             lambda h: {"correct": 1, "total": 2, "accuracy": 0.5, "pct": 50.0})
+
+    def test_first_fire_writes_persisted_state(self, monkeypatch, tmp_path):
+        """After prewarm fires, dashboard_prewarm_state.json must exist."""
+        self._reset_module_state()
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        state_file = tmp_path / "prewarm.json"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
+        self._stub_compute(monkeypatch)
+
+        assert acc_mod.maybe_prewarm_dashboard_accuracy(now=10000.0) is True
+        assert state_file.exists()
+        import json as _json
+        persisted = _json.loads(state_file.read_text())
+        assert persisted["last_prewarm_ts"] == 10000.0
+
+    def test_persisted_state_seeds_in_memory_gate(self, monkeypatch, tmp_path):
+        """A 'restart' (reset module state) reads back persisted ts and
+        suppresses the prewarm if still within interval."""
+        self._reset_module_state()
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        state_file = tmp_path / "prewarm.json"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
+
+        # Pre-existing persisted ts: prewarm fired 30 minutes ago.
+        from portfolio.file_utils import atomic_write_json as _aw
+        _aw(state_file, {"last_prewarm_ts": 10000.0})
+
+        # Stubs that would fail the test if invoked.
+        def _shouldnt_run(*_a, **_kw):
+            raise AssertionError("compute should not run inside interval")
+        monkeypatch.setattr(acc_mod, "signal_accuracy", _shouldnt_run)
+        monkeypatch.setattr(acc_mod, "consensus_accuracy", _shouldnt_run)
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", _shouldnt_run)
+
+        # 30 min later — within 1h gate, so must NOT fire.
+        assert acc_mod.maybe_prewarm_dashboard_accuracy(now=10000.0 + 1800) is False
+
+    def test_persisted_state_allows_fire_after_interval(self, monkeypatch, tmp_path):
+        """A 'restart' >1h after the persisted ts should allow prewarm
+        to fire (the persisted gate has expired)."""
+        self._reset_module_state()
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        state_file = tmp_path / "prewarm.json"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
+
+        # Persisted ts from 2 hours ago.
+        from portfolio.file_utils import atomic_write_json as _aw
+        _aw(state_file, {"last_prewarm_ts": 10000.0})
+        self._stub_compute(monkeypatch)
+
+        assert acc_mod.maybe_prewarm_dashboard_accuracy(now=10000.0 + 7200) is True
+
+    def test_corrupt_state_falls_back_to_zero(self, monkeypatch, tmp_path):
+        """A malformed state file shouldn't pin the gate forever — fall
+        back to 0 so the next call fires."""
+        self._reset_module_state()
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        state_file = tmp_path / "prewarm.json"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
+        # Malformed JSON.
+        state_file.write_text("not json at all", encoding="utf-8")
+        self._stub_compute(monkeypatch)
+
+        # Should treat as no persisted state, fire prewarm.
+        assert acc_mod.maybe_prewarm_dashboard_accuracy(now=10000.0) is True
+
+    def test_negative_or_invalid_ts_falls_back_to_zero(self, monkeypatch, tmp_path):
+        """Hostile / corrupt content (negative, string, missing) -> 0."""
+        self._reset_module_state()
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        state_file = tmp_path / "prewarm.json"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
+        from portfolio.file_utils import atomic_write_json as _aw
+        _aw(state_file, {"last_prewarm_ts": -1})
+        self._stub_compute(monkeypatch)
+
+        # Negative ts treated as 0, prewarm fires.
+        assert acc_mod.maybe_prewarm_dashboard_accuracy(now=10000.0) is True
+
+    def test_disk_state_only_loaded_once_per_process(self, monkeypatch, tmp_path):
+        """The persistence read is lazy — happens once per process, not
+        per call. After load, gating uses the in-memory ts."""
+        self._reset_module_state()
+        monkeypatch.setattr(acc_mod, "ACCURACY_CACHE_FILE", tmp_path / "acc.json")
+        state_file = tmp_path / "prewarm.json"
+        monkeypatch.setattr(acc_mod, "_DASHBOARD_PREWARM_STATE_FILE", state_file)
+        from portfolio.file_utils import atomic_write_json as _aw
+        _aw(state_file, {"last_prewarm_ts": 10000.0})
+
+        # Patch _load_prewarm_ts_from_disk to count invocations.
+        load_calls = {"n": 0}
+        original = acc_mod._load_prewarm_ts_from_disk
+        def _counting():
+            load_calls["n"] += 1
+            return original()
+        monkeypatch.setattr(acc_mod, "_load_prewarm_ts_from_disk", _counting)
+
+        # 5 calls within the interval.
+        for _ in range(5):
+            acc_mod.maybe_prewarm_dashboard_accuracy(now=10001.0)
+
+        # Disk read happened exactly once (the lazy-load).
+        assert load_calls["n"] == 1
