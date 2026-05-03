@@ -173,6 +173,42 @@ restart cycles.
 | `789cc91c` | perf(forecast): run Chronos before Kronos |
 | `7416a6fd` | perf(accuracy_stats): persist signal_utility cache to disk |
 | `5c476cbc` | fix(review): multi-horizon write race + cross-process docstring |
+| `8558fb5a` | docs(session): cold-start perf follow-ups + ops lesson |
+| `f77de36a` | fix(conftest): redirect SIGNAL_UTILITY_CACHE_FILE to session tmpdir |
+
+### 2026-05-04 01:00 — L2 cache disappearance bug found via live observation
+
+After shipping all three optimizations, the L2 disk cache file kept
+disappearing between loop cycles. Cycles 1, 2, 7 paid full ~50 s
+cold-compute on `utility_overlay` even though cycles 3-6 hit cache
+cleanly. Pattern: cycle writes file, something deletes it, next cycle
+re-computes.
+
+Diagnosed by tracing every caller of `invalidate_signal_utility_cache`:
+
+- Production callers: only `outcome_tracker.backfill_outcomes` (which
+  runs in the daily PF-OutcomeCheck task, not normal cycles).
+- **Test caller**: `tests/conftest.py:_isolate_signal_utility_cache`
+  autouse fixture invalidates around every test.
+
+Pre my L2 change, conftest's invalidation only cleared in-memory state —
+harmless. Post my change, `invalidate_signal_utility_cache` also deletes
+the disk file. Every pytest run in this session was wiping the
+production L2 file. The cache was *working correctly* — it was getting
+deleted by every test invocation.
+
+Fix (`f77de36a`): added session-scoped autouse fixture in `conftest.py`
+that monkeypatches `acc_mod.SIGNAL_UTILITY_CACHE_FILE` to a
+`tmp_path_factory.mktemp` directory at session start. All subsequent
+test invalidate calls operate on the tmpdir's file, never on production.
+Verified: 42 signal_utility tests pass and the production file mtime is
+unchanged across the test run.
+
+**Lesson**: when a function gains side effects beyond its previous
+contract (this one went from "clear in-memory state" to "clear
+in-memory state AND delete disk file"), audit all callers — especially
+test-infrastructure ones — for assumptions they made about the previous
+contract.
 
 ---
 
@@ -553,3 +589,7 @@ bat wrapper auto-restarted in <30s.
 - **Audit other `from_pretrained` call sites** for the same lazy-meta
   vulnerability if they run concurrently with CUDA-loading models.
   Quick grep: `grep -rn "from_pretrained" portfolio/ | grep -v test`.
+
+### 2026-05-03 23:38 UTC | main
+e0de9b2f docs(session): record bert-meta-tensor session entry + flush auto-log
+docs/SESSION_PROGRESS.md
