@@ -102,10 +102,29 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - Entry: `scripts/win/metals-loop.bat`
 
 ### Dashboard (`dashboard/app.py`)
-- Flask REST API on port 5055 (optional token auth)
-- Key endpoints: `/api/portfolio`, `/api/summary`, `/api/accuracy`, `/api/trades`,
-  `/api/decisions`, `/api/health`, `/api/metals`, `/api/crypto`, `/api/btc`,
-  `/api/eth`, `/api/mstr`, `/api/oil`, `/api/forecast`, `/api/prophecy`
+- Flask REST API on port 5055, dual-stack IPv4+IPv6 bind (token-cookie auth)
+- Auth: `?token=<dashboard_token>` once, then 1-year rolling cookie. Bearer
+  header for CLI clients. Cloudflare Access header bypasses local auth.
+- 32 endpoints. Last reconciled with code 2026-05-04 — re-grep
+  `@app.route('/api/...` if this list looks stale.
+
+  **Health & ops:** `/api/health`, `/api/loop_health`, `/api/lora-status`,
+  `/api/market-health`
+
+  **Portfolio & trading:** `/api/portfolio`, `/api/portfolio-bold`,
+  `/api/trades`, `/api/decisions`, `/api/invocations`, `/api/risk`,
+  `/api/triggers`, `/api/equity-curve`, `/api/warrants`,
+  `/api/validate-portfolio` (POST)
+
+  **Per-instrument:** `/api/btc`, `/api/eth`, `/api/mstr`,
+  `/api/mstr_loop`, `/api/oil`, `/api/metals`, `/api/crypto`,
+  `/api/golddigger`
+
+  **Signals & accuracy:** `/api/summary`, `/api/signals`,
+  `/api/signal-log`, `/api/signal-heatmap`, `/api/accuracy`,
+  `/api/accuracy-history`, `/api/metals-accuracy`
+
+  **Other:** `/api/iskbets`, `/api/local-llm-trends`, `/api/telegrams`
 
 ### Multi-asset swing loops (paper-mode by default)
 - **Crypto loop** (`data/crypto_loop.py`): BTC + ETH 60s cycle, DRY_RUN=True.
