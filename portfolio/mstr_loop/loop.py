@@ -26,23 +26,21 @@ logger = logging.getLogger(__name__)
 def _write_heartbeat(bot_state: state.BotState, cycle_count: int) -> None:
     """Write the loop_health watchdog heartbeat after a successful cycle.
 
-    Mirrors crypto_loop / oil_loop. The watchdog only requires `ts`; the
-    other fields are operator-facing context. Failure here must never
-    crash the loop — it's best-effort telemetry.
+    2026-05-04: thin shim over `portfolio.loop_health.write_heartbeat`
+    — schema lives there. Phase rides along as operator-facing context.
+    Failure path swallows like before.
     """
     try:
-        from portfolio.file_utils import atomic_write_json
-        payload = {
-            "ts": datetime.datetime.now(datetime.UTC).isoformat(),
-            "status": "ok",
-            "cycle": cycle_count,
-            "ok": True,
-            "phase": config.PHASE,
-            "n_positions": len(bot_state.positions or {}),
-        }
-        atomic_write_json(config.HEARTBEAT_FILE, payload)
+        from portfolio.loop_health import write_heartbeat as _shared
+        _shared(
+            config.HEARTBEAT_FILE,
+            cycle=cycle_count,
+            ok=True,
+            n_positions=len(bot_state.positions or {}),
+            extra={"phase": config.PHASE},
+        )
     except Exception:
-        logger.debug("loop: heartbeat write failed", exc_info=True)
+        logger.debug("loop: heartbeat dispatch failed", exc_info=True)
 
 
 def _log_poll(bundle_or_none, reason: str, cycle_count: int) -> None:
