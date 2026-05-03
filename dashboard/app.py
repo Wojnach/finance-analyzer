@@ -697,6 +697,16 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+@app.route("/legacy")
+@require_auth
+def index_legacy():
+    # Pre-redesign single-file dashboard preserved as a fallback during the
+    # 2026-05-03 mobile-first rollout. See docs/PLAN.md.
+    if request.args.get("token"):
+        return redirect("/legacy", code=302)
+    return send_from_directory("static", "index_legacy.html")
+
+
 # ---------------------------------------------------------------------------
 # Routes — API (all require auth)
 # ---------------------------------------------------------------------------
