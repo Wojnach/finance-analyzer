@@ -215,17 +215,24 @@ clean-state batch (home works, /legacy preserves the rest) and ship as a
 partial release. The user will already see the new home view; everything
 else falls back to the legacy file via the More tab's "Legacy view" link.
 
-## Outcomes (filled in during execution)
+## Outcomes
 
-- Batch 1 — *pending*
-- Batch 2 — *pending*
-- Batch 3 — *pending*
-- Batch 4 — *pending*
-- Batch 5 — *pending*
-- Batch 6 — *pending*
-- Batch 7 — *pending*
-- Batch 8 — *pending*
-- Batch 9 — *pending*
-- Codex review — *pending*
-- Tests — *pending*
-- Merge + push — *pending*
+- Batch 1 — committed `ee80fae5` (skeleton + /legacy + CSS, 110 tests).
+- Batch 2 — committed `eb397855` (7 core JS modules + 8 static-asset tests, 124 tests).
+- Batch 3 — committed `1256326f` (10 components, 124 tests).
+- Batch 4 — committed `d421e5bc` (Home view + Chart.js wrapper + sparkline, 124 tests).
+- Batch 5 — committed `69807200` (Decisions + decision-detail, 124 tests).
+- Batch 6 — committed `23ac44d8` (Signals heatmap + accuracy + history, 124 tests).
+- Batch 7 — committed `e5363f8e` (More + Health + Messages + Settings, 124 tests).
+- Batch 8 — committed `5a6fcaab` (Metals + GoldDigger + Equity + chart configs, 124 tests).
+- Batch 9 — committed `f7c42f89` (PWA manifest + sw + icons + skeleton tests + docs, 150 tests).
+- Codex review — `codex review --base main` flagged 5 findings (3 P1,
+  2 P2, 1 P3). Fixes committed `ed67c288` (loop_health rollup unwrap,
+  signal-heatmap shape, equity field names, GoldDigger normalized
+  fields, /logout server endpoint for HttpOnly cookie clear, pulse
+  navigation). 161 dashboard tests pass.
+- Tests — full suite shows 53 pre-existing failures (verified on main
+  HEAD via `cd ../.. && pytest <same tests>`). All dashboard tests are
+  green.
+- Merge + push — see commit log on branch
+  `feat/mobile-dashboard-redesign-2026-05-03`.
