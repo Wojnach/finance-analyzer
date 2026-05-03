@@ -94,9 +94,23 @@ function _refreshRow() {
   btn.style.minWidth = "auto";
   btn.style.padding = "var(--sp-2) var(--sp-3)";
   btn.textContent = "Refresh now";
+  let resetTimer = null;
   btn.addEventListener("click", () => {
     dropCache();
     polling.fireAll();
+    // Visual confirmation that the click registered: flash to green +
+    // checkmark, revert ~1.4s later. Without this the button looks like
+    // it did nothing because the network round-trip is async.
+    btn.style.color = "var(--grn)";
+    btn.style.borderColor = "var(--grn)";
+    btn.textContent = "Refreshed ✓";
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => {
+      btn.style.color = "";
+      btn.style.borderColor = "";
+      btn.textContent = "Refresh now";
+      resetTimer = null;
+    }, 1400);
   });
   return _row("Force refresh", btn,
     "Drops the in-memory ttl cache and refires every active polling task.");

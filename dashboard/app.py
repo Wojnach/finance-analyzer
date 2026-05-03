@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
@@ -1510,6 +1511,79 @@ def api_market_health():
     except Exception:
         logger.exception("mstr endpoint error")
         return jsonify({"error": "Internal server error"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Avanza account snapshot — live cash + positions + open orders + stop-losses.
+# Lets the user verify the local view is in sync with the actual broker
+# state. Each subsection is independently fetched so a single API hiccup
+# (e.g. flaky stop-loss endpoint) doesn't blank the whole view.
+# ---------------------------------------------------------------------------
+
+_AVANZA_CACHE_LOCK = threading.Lock()
+_AVANZA_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+_AVANZA_TTL_SECONDS = 30.0
+
+
+def _avanza_account_snapshot() -> dict:
+    """Build a fresh Avanza account snapshot. Uncached.
+
+    Each subcall is independently try/except'd. Errors land in `errors[]`
+    rather than raising, so the dashboard view can degrade gracefully.
+    """
+    from dataclasses import asdict
+    out: dict[str, Any] = {
+        "ts": datetime.now(UTC).isoformat(),
+        "cash": None,
+        "positions": [],
+        "orders": [],
+        "stop_losses": [],
+        "errors": [],
+    }
+    try:
+        from portfolio.avanza import get_buying_power
+        out["cash"] = asdict(get_buying_power())
+    except Exception as e:
+        out["errors"].append(f"cash: {type(e).__name__}: {e}")
+    try:
+        from portfolio.avanza import get_positions
+        out["positions"] = [asdict(p) for p in get_positions()]
+    except Exception as e:
+        out["errors"].append(f"positions: {type(e).__name__}: {e}")
+    try:
+        from portfolio.avanza import get_orders
+        out["orders"] = [asdict(o) for o in get_orders()]
+    except Exception as e:
+        out["errors"].append(f"orders: {type(e).__name__}: {e}")
+    try:
+        from portfolio.avanza import get_stop_losses
+        out["stop_losses"] = [asdict(s) for s in get_stop_losses()]
+    except Exception as e:
+        out["errors"].append(f"stop_losses: {type(e).__name__}: {e}")
+    return out
+
+
+@app.route("/api/avanza_account")
+@require_auth
+def api_avanza_account():
+    """Live snapshot of the Avanza brokerage account.
+
+    Cash + positions + open orders + active stop-losses. 30-second TTL
+    cache because the underlying calls hit the network and the dashboard
+    polls regularly. Each subsection has its own try/except so a partial
+    upstream outage degrades to "this section unavailable" instead of a
+    full 500.
+    """
+    now = time.monotonic()
+    with _AVANZA_CACHE_LOCK:
+        cached = _AVANZA_CACHE.get("value")
+        if cached and (now - _AVANZA_CACHE["at"]) < _AVANZA_TTL_SECONDS:
+            return jsonify(cached)
+    snapshot = _avanza_account_snapshot()
+    with _AVANZA_CACHE_LOCK:
+        _AVANZA_CACHE["value"] = snapshot
+        _AVANZA_CACHE["at"] = now
+    return jsonify(snapshot)
 
 
 # ---------------------------------------------------------------------------

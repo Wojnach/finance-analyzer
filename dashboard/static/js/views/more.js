@@ -7,6 +7,7 @@
 import * as router from "../router.js";
 
 const ITEMS = [
+  { route: "avanza",     label: "Avanza",      hint: "Live broker sync — cash, positions, orders, stops" },
   { route: "health",     label: "Health",      hint: "Loops, signals, errors" },
   { route: "messages",   label: "Messages",    hint: "Telegram log + saved-only" },
   { route: "metals",     label: "Metals",      hint: "XAG/XAU warrants" },
