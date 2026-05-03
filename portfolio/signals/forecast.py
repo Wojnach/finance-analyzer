@@ -831,6 +831,34 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     result["indicators"]["kronos_circuit_open"] = _kronos_circuit_open()
     result["indicators"]["chronos_circuit_open"] = _chronos_circuit_open()
 
+    # 2026-05-03 ordering: Chronos BEFORE Kronos. Chronos is in-process and
+    # fast (~50ms warm, ~1.7s cold model load). Kronos is a subprocess that
+    # holds the GPU file-lock for the duration of model load + inference,
+    # which on cold-start was ~210s — long enough that 4 concurrent ticker
+    # threads all timed out their Chronos gate (120s) waiting behind one
+    # Kronos. Running Chronos first lets all 4 tickers pipeline through the
+    # GPU in seconds; Kronos (shadow-only by current config) then runs and
+    # whichever threads can't grab the gate within 90s skip silently — fine
+    # because the live consensus uses Chronos, not Kronos.
+    #
+    # Run Chronos (skip entirely if circuit breaker is open)
+    t0 = time.time()
+    chronos_key = f"chronos_forecast_{ticker}"
+    chronos = _cached(chronos_key, _FORECAST_TTL, _run_chronos, close_prices, (1, 24), ticker)
+    chronos_ms = round((time.time() - t0) * 1000)
+    result["indicators"]["chronos_time_ms"] = chronos_ms
+
+    if chronos:
+        if "1h" in chronos:
+            result["sub_signals"]["chronos_1h"] = chronos["1h"].get("action", "HOLD")
+            result["indicators"]["chronos_1h_pct"] = chronos["1h"].get("pct_move", 0)
+            result["indicators"]["chronos_1h_conf"] = chronos["1h"].get("confidence", 0)
+
+        if "24h" in chronos:
+            result["sub_signals"]["chronos_24h"] = chronos["24h"].get("action", "HOLD")
+            result["indicators"]["chronos_24h_pct"] = chronos["24h"].get("pct_move", 0)
+            result["indicators"]["chronos_24h_conf"] = chronos["24h"].get("confidence", 0)
+
     # Run Kronos — use 5m candles if available, otherwise 1h
     t0 = time.time()
     kronos_key = f"kronos_forecast_{ticker}"
@@ -873,24 +901,6 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             result["indicators"]["kronos_24h_range_skew"] = kr["24h"].get("range_skew", 0)
             result["indicators"]["kronos_24h_predicted_high"] = kr["24h"].get("predicted_high", 0)
             result["indicators"]["kronos_24h_predicted_low"] = kr["24h"].get("predicted_low", 0)
-
-    # Run Chronos (skip entirely if circuit breaker is open)
-    t0 = time.time()
-    chronos_key = f"chronos_forecast_{ticker}"
-    chronos = _cached(chronos_key, _FORECAST_TTL, _run_chronos, close_prices, (1, 24), ticker)
-    chronos_ms = round((time.time() - t0) * 1000)
-    result["indicators"]["chronos_time_ms"] = chronos_ms
-
-    if chronos:
-        if "1h" in chronos:
-            result["sub_signals"]["chronos_1h"] = chronos["1h"].get("action", "HOLD")
-            result["indicators"]["chronos_1h_pct"] = chronos["1h"].get("pct_move", 0)
-            result["indicators"]["chronos_1h_conf"] = chronos["1h"].get("confidence", 0)
-
-        if "24h" in chronos:
-            result["sub_signals"]["chronos_24h"] = chronos["24h"].get("action", "HOLD")
-            result["indicators"]["chronos_24h_pct"] = chronos["24h"].get("pct_move", 0)
-            result["indicators"]["chronos_24h_conf"] = chronos["24h"].get("confidence", 0)
 
     raw_sub_signals = dict(result["sub_signals"])
     gated_sub_signals, subsignal_gating = _gate_subsignal_votes_by_accuracy(
