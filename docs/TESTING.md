@@ -194,6 +194,10 @@ def _isolate_state(tmp_path):
 | `tests/test_portfolio*.py` | Portfolio state, trading logic |
 | `tests/test_trigger*.py` | Trigger system |
 | `tests/test_dashboard.py` | Dashboard API endpoints (48 tests) |
+| `tests/test_dashboard_legacy_route.py` | /legacy fallback route during the 2026-05-03 mobile rollout (5 tests) |
+| `tests/test_dashboard_static_assets.py` | New mobile-dashboard CSS/JS/PWA asset paths (20 tests) |
+| `tests/test_dashboard_skeleton.py` | New `index.html` skeleton integrity — viewport-fit, manifest, Chart.js order, bottom-nav routes, bottom-sheet shell (15 tests) |
+| `tests/test_dashboard_frontend.py` | Frozen content-string asserts on the legacy file (`index_legacy.html`) — delete after the /legacy rollout window closes |
 | `tests/test_http_retry.py` | HTTP retry logic (60 tests) |
 | `tests/integration/` | End-to-end (mostly broken — Freqtrade deps) |
 
@@ -203,3 +207,41 @@ Monte Carlo module benchmarks (from test suite):
 - Single ticker, 10K paths: **< 1 second**
 - 5-ticker batch, 10K paths each: **< 5 seconds**
 - Portfolio VaR (3 positions, 10K paths): **< 2 seconds**
+
+## Manual phone smoke test (mobile dashboard, 2026-05-03)
+
+The redesigned dashboard at `/` is built mobile-first; existing automated
+tests verify routing + asset presence + skeleton integrity, but visual
+behaviour on a real phone needs eyeballs. Run this checklist before
+merging any mobile-affecting PR:
+
+1. Open the dashboard in Chrome devtools mobile-emulator (390×844 iPhone).
+2. **Bottom-nav** appears with 4 items: Home / Decisions / Signals / More.
+3. **Home** renders P&L card, positions strip (horizontal scroll snaps
+   per card), consensus chips, latest decision, system pulse dots.
+4. Tap a position card → navigates to /#signals/<ticker> (heatmap with
+   that ticker pre-selected).
+5. Tap the latest decision card → /#decisions list view.
+6. Tap a decision card → /#decisions/<ts> detail view; tap ← Decisions
+   to go back.
+7. **Signals** view: sub-tab bar (Heatmap / Accuracy / History). Heatmap
+   shows transposed grid with sticky leftmost column. Long-press a cell
+   → bottom-sheet drill opens. Tap the backdrop → sheet closes.
+8. **More** menu lists Health, Messages, Metals, GoldDigger, Equity,
+   Settings. Each navigates to its full view; bottom-nav still
+   highlights "More".
+9. **Settings**: theme toggle flips light↔dark. Pause toggles polling.
+   "Refresh now" forces re-fetch. Legacy view link opens /legacy
+   (existing single-file dashboard, fully functional).
+10. **PWA**: open Chrome → ⋮ → "Install Portfolio". App icon appears on
+    home screen. Open it standalone (no browser chrome). First launch
+    redirects to CF Access SSO (PWA cookie jar isolated from Safari).
+11. **Service worker**: in devtools Application tab, SW shows
+    `pi-shell-v1-2026-05-03` controlling the page. Disconnect network
+    → reload → cached shell renders with offline badge for /api/*.
+12. **Visibility-aware polling**: switch to another tab for 30s, switch
+    back. Network panel shows polling pauses while hidden and
+    re-fires once on return.
+
+Failures during this checklist are not test failures — log them as
+follow-up issues and assess whether to roll back or patch.

@@ -1,0 +1,99 @@
+/*
+ * base.css — reset, document defaults, scrollbars, accessibility primitives.
+ */
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--ty-stack);
+  font-size: var(--ty-md);
+  line-height: var(--ty-leading);
+  background: var(--bg);
+  color: var(--tx);
+  font-variant-numeric: tabular-nums;
+  /* Disable Chrome's native pull-to-reload (Track 6: PTR nukes in-memory state) */
+  overscroll-behavior-y: contain;
+  /* Prevent rubber-band horizontal overscroll */
+  overflow-x: hidden;
+  transition: background var(--dur-slow) var(--ease-out),
+              color    var(--dur-slow) var(--ease-out);
+}
+
+/* Numeric class for tables / chips that want extra-tight tabular alignment */
+.num,
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Code / mono blocks */
+code, pre, .mono {
+  font-family: var(--ty-mono);
+  font-size: 0.92em;
+}
+
+/* Buttons reset to look like text by default */
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Anchors */
+a {
+  color: var(--cyn);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* Form controls inherit font */
+input, select, textarea, button {
+  font: inherit;
+}
+
+/* Scrollbar polish (WebKit) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bdr2); border-radius: var(--rad-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--txm); }
+
+/* Visually-hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Focus ring — visible for keyboard users only */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--cyn);
+  outline-offset: 2px;
+  border-radius: var(--rad-sm);
+}
+
+/* Reduce motion respect */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

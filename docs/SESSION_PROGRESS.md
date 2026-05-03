@@ -1,4 +1,44 @@
-# Session Progress — After-Hours Research (2026-05-02 → 2026-05-03)
+# Session Progress
+
+## Mobile Dashboard Redesign (2026-05-03 evening)
+
+**Session start:** 2026-05-03 ~20:30 UTC
+**Status:** MERGED — branch `feat/mobile-dashboard-redesign-2026-05-03`
+removed after merge.
+**Goal:** replace desktop-first single-file dashboard with a mobile-first
+ES-module + PWA dashboard, preserving every endpoint and every
+functional surface.
+
+### Phases
+
+1. Research (Tracks 1-6, 4 parallel agents + me) → 7 deliverables under
+   `docs/research/2026-05-03-mobile-dashboard/`.
+2. Spec at `docs/superpowers/specs/2026-05-03-mobile-dashboard-redesign-design.md`.
+3. PLAN.md committed before any code changes (per `/fgl`).
+4. Nine implementation batches (each committed independently):
+   - Batch 1: skeleton + /legacy fallback + CSS tokens
+   - Batch 2: state/fetch/router/polling/format/theme/main JS modules
+   - Batch 3: 10 reusable UI components
+   - Batch 4: Home view + Chart.js wrapper + sparkline
+   - Batch 5: Decisions list + drill-down detail
+   - Batch 6: Signals heatmap + accuracy + history
+   - Batch 7: More + Health + Messages + Settings views
+   - Batch 8: Metals + GoldDigger + Equity views + chart configs
+   - Batch 9: PWA manifest + service worker + icons + skeleton tests + docs.
+5. Codex adversarial review (`codex review --base main`) — 5 findings
+   (3 P1, 2 P2, 1 P3): loop_health rollup unwrap, signal-heatmap shape,
+   equity field names, GoldDigger normalized fields, /logout server
+   endpoint for HttpOnly cookie, pulse navigation. All fixed in
+   commit `ed67c288`.
+6. Tests: 161 dashboard tests pass. Pre-existing full-suite failures
+   verified on main HEAD before merge.
+
+### Manual phone smoke test
+Documented in `docs/TESTING.md`; required before each mobile-affecting PR.
+
+---
+
+## After-Hours Research (2026-05-02 → 2026-05-03)
 
 **Session start:** 2026-05-02 ~23:00 CET (21:00 UTC)
 **Status:** COMPLETE

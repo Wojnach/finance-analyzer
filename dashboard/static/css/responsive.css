@@ -1,0 +1,50 @@
+/*
+ * responsive.css — width-up breakpoints. Mobile-first.
+ *
+ * Phone (default, no media query): single column, bottom nav.
+ * Tablet (>=768px): wider gutters, multi-column for some cards.
+ * Desktop (>=1024px): bottom nav becomes top tabs (handled in layout.css);
+ *                      multi-column grids for home cards.
+ */
+
+/* Tablet */
+@media (min-width: 768px) {
+  .home-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-4);
+    align-items: start;
+  }
+  .home-grid > .home-cell--full {
+    grid-column: 1 / -1;
+  }
+
+  .scroll-strip {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+
+  .heatmap td { height: 28px; min-width: 44px; }
+}
+
+/* Desktop */
+@media (min-width: 1024px) {
+  .app-main { padding: var(--sp-5) var(--sp-6); }
+
+  .home-grid { grid-template-columns: 2fr 1fr; }
+  .home-grid > .home-cell--full { grid-column: 1 / -1; }
+
+  /* LoRA panel re-appears on desktop; mobile-only-hidden by default */
+  .desktop-only { display: block; }
+}
+@media (max-width: 1023px) {
+  .desktop-only { display: none !important; }
+}
+
+/* Tap-target floor escapes — dense table rows are allowed to drop to
+   --tap-tight (36px) when row spacing is adequate. Apply this opt-in
+   only inside .dense-table. */
+.dense-table .tap--tight {
+  min-height: var(--tap-tight);
+  min-width: var(--tap-tight);
+}

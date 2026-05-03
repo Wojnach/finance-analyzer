@@ -1,0 +1,124 @@
+/*
+ * tokens.css — design tokens (CSS variables)
+ *
+ * Palette names preserved from the legacy dashboard so existing render code
+ * keeps working when ported. New tokens (--sp-*, --ty-*, --rad-*, --z-*)
+ * are added for layout consistency in the mobile-first redesign.
+ */
+
+:root {
+  /* ----- Color palette (dark, default) ----- */
+  --bg: #1a1a2e;
+  --bg2: #16213e;
+  --card: #1e2746;
+  --card2: #253255;
+  --hover: #2a3a5c;
+  --bdr: #2a3a5c;
+  --bdr2: #3a4f7a;
+  --tx: #e0e0e0;
+  --txd: #a0aec0;
+  --txm: #718096;
+  --grn: #00ff88;
+  --red: #ff4444;
+  --gry: #6b7280;
+  --yel: #eab308;
+  --org: #f97316;
+  --blu: #3b82f6;
+  --cyn: #06b6d4;
+
+  /* Heatmap 5-class cell scale (Track 5) */
+  --hm-strong-buy:  rgba(0, 255, 136, 0.45);
+  --hm-buy:         rgba(0, 255, 136, 0.20);
+  --hm-hold:        rgba(107, 114, 128, 0.15);
+  --hm-sell:        rgba(255, 68, 68, 0.20);
+  --hm-strong-sell: rgba(255, 68, 68, 0.45);
+
+  /* Color flash (price-tick momentum) */
+  --flash-up:   rgba(0, 255, 136, 0.35);
+  --flash-down: rgba(255, 68, 68, 0.35);
+
+  /* ----- Spacing (4-px grid) ----- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+
+  /* ----- Typography ----- */
+  --ty-stack: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
+              "Helvetica Neue", Arial, sans-serif;
+  --ty-mono:  "Cascadia Code", "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+  --ty-xs:    10px;
+  --ty-sm:    11px;
+  --ty-md:    13px;
+  --ty-lg:    15px;
+  --ty-xl:    18px;
+  --ty-2xl:   24px;
+  --ty-3xl:   32px;
+  --ty-leading: 1.5;
+
+  /* ----- Radii ----- */
+  --r:     8px;   /* legacy alias */
+  --rad-sm: 4px;
+  --rad-md: 8px;
+  --rad-lg: 12px;
+  --rad-pill: 9999px;
+
+  /* ----- Touch targets (Track 6: 48px floor) ----- */
+  --tap-min: 48px;
+  --tap-tight: 36px;
+
+  /* ----- Layout chrome ----- */
+  --header-h: 56px;
+  --bottomnav-h: 60px;
+  --content-max: 1600px;
+
+  /* ----- Z-index ----- */
+  --z-header:     50;
+  --z-bottomnav:  60;
+  --z-bottomsheet: 80;
+  --z-toast:      90;
+  --z-modal:      100;
+
+  /* ----- Motion ----- */
+  --ease-out: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
+}
+
+html.light {
+  --bg: #f0f2f5;
+  --bg2: #e2e8f0;
+  --card: #ffffff;
+  --card2: #f7fafc;
+  --hover: #edf2f7;
+  --bdr: #e2e8f0;
+  --bdr2: #cbd5e0;
+  --tx: #1a202c;
+  --txd: #4a5568;
+  --txm: #718096;
+  --grn: #059669;
+  --red: #dc2626;
+  --gry: #6b7280;
+  --yel: #d69e2e;
+  --org: #dd6b20;
+  --blu: #3b82f6;
+  --cyn: #0891b2;
+
+  --hm-strong-buy:  rgba(5, 150, 105, 0.40);
+  --hm-buy:         rgba(5, 150, 105, 0.18);
+  --hm-hold:        rgba(107, 114, 128, 0.15);
+  --hm-sell:        rgba(220, 38, 38, 0.18);
+  --hm-strong-sell: rgba(220, 38, 38, 0.40);
+
+  --flash-up:   rgba(5, 150, 105, 0.30);
+  --flash-down: rgba(220, 38, 38, 0.30);
+}
+
+@media (prefers-color-scheme: light) {
+  html:not(.dark):not(.light) { color-scheme: light; }
+}

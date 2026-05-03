@@ -1,0 +1,201 @@
+/*
+ * layout.css — page chrome (header, bottom nav, view container, safe areas).
+ *
+ * Mobile-first. Width-up media queries promote to tablet/desktop layouts.
+ */
+
+/* ================================================================
+   Page shell
+   ================================================================ */
+.app {
+  min-height: 100dvh;
+  min-height: 100vh; /* fallback for browsers without dvh */
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* Honor iOS home-indicator + notch via safe-area in nav/header rules below */
+  padding-bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom));
+}
+
+/* ================================================================
+   Header (sticky, compact on phone)
+   ================================================================ */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bdr);
+  padding: var(--sp-2) var(--sp-3);
+  padding-top: calc(var(--sp-2) + env(safe-area-inset-top));
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--header-h);
+}
+
+.app-header__brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.app-header__title {
+  font-size: var(--ty-md);
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--tx);
+}
+.app-header__sub {
+  font-size: var(--ty-xs);
+  color: var(--txm);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.app-header__pnl {
+  margin-left: auto;
+  font-size: var(--ty-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px var(--sp-2);
+  border-radius: var(--rad-pill);
+  background: var(--card);
+  border: 1px solid var(--bdr);
+}
+.app-header__pnl.pos { color: var(--grn); }
+.app-header__pnl.neg { color: var(--red); }
+
+.app-header__icons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Refresh dot */
+.refresh-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--grn);
+  animation: pulse 2s infinite;
+}
+.refresh-dot.paused { background: var(--yel); animation: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.icon-btn {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  background: transparent;
+  border: 0;
+  border-radius: var(--rad-md);
+  color: var(--txd);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: background var(--dur-fast) var(--ease-out),
+              color      var(--dur-fast) var(--ease-out);
+}
+.icon-btn:hover { background: var(--hover); color: var(--tx); }
+.icon-btn.active { color: var(--cyn); }
+
+/* ================================================================
+   Main view container
+   ================================================================ */
+.app-main {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--sp-3);
+}
+
+/* Each view is a section that mounts/unmounts */
+.view {
+  display: block;
+  animation: fade-in var(--dur-base) var(--ease-out);
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ================================================================
+   Bottom navigation (fixed, thumb-zone, safe-area aware)
+   ================================================================ */
+.bottom-nav {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: var(--z-bottomnav);
+  display: flex;
+  background: var(--bg2);
+  border-top: 1px solid var(--bdr);
+  padding-bottom: env(safe-area-inset-bottom);
+  height: calc(var(--bottomnav-h) + env(safe-area-inset-bottom));
+}
+
+.bottom-nav__item {
+  flex: 1 1 0;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--sp-1) 0;
+  min-height: var(--bottomnav-h);
+  background: transparent;
+  border: 0;
+  color: var(--txm);
+  cursor: pointer;
+  font-size: var(--ty-xs);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.bottom-nav__item:hover { color: var(--txd); }
+.bottom-nav__item.active {
+  color: var(--cyn);
+}
+.bottom-nav__item .glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ================================================================
+   Width-up enhancements (tablet/desktop)
+   ================================================================ */
+
+/* Tablet — ≥768 px: reflow header to two-row layout with more breathing room */
+@media (min-width: 768px) {
+  .app-header { padding-inline: var(--sp-5); }
+  .app-main   { padding: var(--sp-4) var(--sp-5); }
+}
+
+/* Desktop — ≥1024 px: bottom nav becomes a top tab strip; remove fixed bottom */
+@media (min-width: 1024px) {
+  .app { padding-bottom: 0; }
+
+  .bottom-nav {
+    position: static;
+    height: auto;
+    padding: 0 var(--sp-5);
+    border-top: 0;
+    border-bottom: 1px solid var(--bdr);
+    background: var(--bg2);
+  }
+  .bottom-nav__item {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-4);
+    min-height: 44px;
+    border-bottom: 2px solid transparent;
+  }
+  .bottom-nav__item.active {
+    border-bottom-color: var(--cyn);
+  }
+  .bottom-nav__item .glyph { font-size: 14px; }
+}

@@ -1,6 +1,17 @@
+"""Frontend integrity tests for the legacy dashboard.
+
+The mobile-first redesign (2026-05-03) replaced `dashboard/static/index.html`
+with an ES-module skeleton that delegates to JS modules under `static/js/*`.
+The single-file pre-redesign dashboard is preserved as `index_legacy.html`
+during the rollout window — these tests guard the legacy file's features so
+the /legacy fallback route keeps working until the new dashboard is verified.
+
+After the rollout window (and removal of the /legacy route per docs/PLAN.md),
+this test file should be deleted along with `index_legacy.html`.
+"""
 from pathlib import Path
 
-INDEX_HTML = Path("dashboard/static/index.html").read_text(encoding="utf-8")
+INDEX_HTML = Path("dashboard/static/index_legacy.html").read_text(encoding="utf-8")
 
 
 def test_frontend_propagates_query_token_to_api_requests():

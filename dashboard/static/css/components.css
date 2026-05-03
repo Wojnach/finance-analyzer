@@ -1,0 +1,387 @@
+/*
+ * components.css — reusable UI atoms/molecules.
+ *
+ * Cards, chips, badges, accordion, bottom sheet, signal heatmap cells,
+ * color-flash animation, error banner, empty state.
+ */
+
+/* ================================================================
+   Cards
+   ================================================================ */
+.card {
+  background: var(--card);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rad-md);
+  padding: var(--sp-3);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.card:hover { border-color: var(--bdr2); }
+
+.card--tap {
+  cursor: pointer;
+  -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.card--tap:active { transform: scale(0.99); transition: transform 80ms var(--ease-out); }
+
+.card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.card__title {
+  font-size: var(--ty-md);
+  font-weight: 700;
+  color: var(--tx);
+}
+.card__subtitle {
+  font-size: var(--ty-xs);
+  color: var(--txm);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.card__meta {
+  font-size: var(--ty-xs);
+  color: var(--txm);
+}
+
+.section-title {
+  font-size: var(--ty-sm);
+  font-weight: 600;
+  color: var(--txd);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: var(--sp-4) 0 var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.section-title::before {
+  content: "";
+  display: block;
+  width: 3px;
+  height: 13px;
+  background: var(--cyn);
+  border-radius: 2px;
+}
+
+/* ================================================================
+   Chips & badges
+   ================================================================ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px var(--sp-2);
+  border-radius: var(--rad-pill);
+  font-size: var(--ty-sm);
+  font-weight: 600;
+  background: var(--card2);
+  color: var(--txd);
+  border: 1px solid var(--bdr);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.chip:hover { background: var(--hover); color: var(--tx); }
+.chip.active { background: var(--cyn); color: #000; border-color: var(--cyn); }
+
+.chip--filter { min-height: 36px; }   /* dense rows OK per Track 6 spec */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--sp-2);
+  border-radius: var(--rad-sm);
+  font-size: var(--ty-xs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.badge--BUY  { background: rgba(0,255,136,0.15);  color: var(--grn); border: 1px solid rgba(0,255,136,0.3); }
+.badge--SELL { background: rgba(255,68,68,0.15);  color: var(--red); border: 1px solid rgba(255,68,68,0.3); }
+.badge--HOLD { background: rgba(107,114,128,0.15);color: var(--gry); border: 1px solid rgba(107,114,128,0.3); }
+
+/* Pulse dots for system health */
+.pulse-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gry);
+}
+.pulse-dot.ok    { background: var(--grn); box-shadow: 0 0 6px rgba(0,255,136,0.6); }
+.pulse-dot.warn  { background: var(--yel); }
+.pulse-dot.fail  { background: var(--red); animation: pulse 1.5s infinite; }
+.pulse-dot.idle  { background: var(--gry); opacity: 0.5; }
+
+/* ================================================================
+   Color-flash on value change (Track 5)
+   ================================================================ */
+.flash-up { animation: flash-up 250ms var(--ease-out); }
+.flash-dn { animation: flash-dn 250ms var(--ease-out); }
+@keyframes flash-up {
+  0%   { background-color: var(--flash-up); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-dn {
+  0%   { background-color: var(--flash-down); }
+  100% { background-color: transparent; }
+}
+
+/* ================================================================
+   Numbers
+   ================================================================ */
+.num--lg { font-size: var(--ty-2xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+.num--md { font-size: var(--ty-lg);  font-weight: 600; font-variant-numeric: tabular-nums; }
+.num--sm { font-size: var(--ty-md);  font-weight: 600; font-variant-numeric: tabular-nums; }
+.num.pos { color: var(--grn); }
+.num.neg { color: var(--red); }
+.num.flat { color: var(--tx); }
+
+/* ================================================================
+   Accordion
+   ================================================================ */
+.accordion {
+  margin-bottom: var(--sp-3);
+}
+.accordion__head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3);
+  background: var(--card);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rad-md);
+  font-size: var(--ty-md);
+  font-weight: 600;
+  color: var(--tx);
+  cursor: pointer;
+  min-height: var(--tap-min);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.accordion__head:hover { background: var(--hover); }
+.accordion__chevron {
+  font-size: 12px;
+  color: var(--txm);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.accordion.open .accordion__chevron { transform: rotate(180deg); }
+.accordion__body {
+  display: none;
+  padding: var(--sp-3);
+  background: var(--card);
+  border: 1px solid var(--bdr);
+  border-top: 0;
+  border-radius: 0 0 var(--rad-md) var(--rad-md);
+}
+.accordion.open .accordion__body { display: block; }
+
+/* ================================================================
+   Bottom sheet (long-press / drill-down detail)
+   ================================================================ */
+.bottom-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-bottomsheet);
+  display: none;
+}
+.bottom-sheet.open { display: block; }
+
+.bottom-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  animation: fade-in var(--dur-fast) var(--ease-out);
+}
+.bottom-sheet__panel {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  background: var(--bg2);
+  border-top-left-radius: var(--rad-lg);
+  border-top-right-radius: var(--rad-lg);
+  padding: var(--sp-3);
+  padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom));
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: sheet-up var(--dur-base) var(--ease-out);
+}
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0);    }
+}
+.bottom-sheet__handle {
+  width: 40px;
+  height: 4px;
+  background: var(--bdr2);
+  border-radius: var(--rad-pill);
+  margin: 0 auto var(--sp-3);
+}
+.bottom-sheet__title {
+  font-size: var(--ty-lg);
+  font-weight: 700;
+  margin-bottom: var(--sp-2);
+}
+
+/* ================================================================
+   Signal heatmap (Track 5: transposed, sticky cells)
+   ================================================================ */
+.heatmap-wrap {
+  background: var(--card);
+  border: 1px solid var(--bdr);
+  border-radius: var(--rad-md);
+  padding: var(--sp-2);
+  overflow: auto;
+  max-height: 70vh;
+}
+.heatmap {
+  border-collapse: separate;
+  border-spacing: 2px;
+  white-space: nowrap;
+}
+.heatmap th {
+  font-size: var(--ty-xs);
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--txm);
+  padding: var(--sp-1) var(--sp-2);
+  text-align: center;
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 2;
+}
+.heatmap th:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+.heatmap td {
+  text-align: center;
+  padding: 0;
+  min-width: 40px;
+  height: 24px;
+  border-radius: var(--rad-sm);
+  font-size: 0; /* color-only — Track 5 */
+  cursor: pointer;
+}
+.heatmap td:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--card) !important;
+  z-index: 1;
+  text-align: left;
+  padding: 0 var(--sp-2);
+  font-size: var(--ty-sm);
+  color: var(--tx);
+  font-weight: 500;
+  cursor: default;
+}
+.cell--strong-buy  { background: var(--hm-strong-buy); }
+.cell--buy         { background: var(--hm-buy); }
+.cell--hold        { background: var(--hm-hold); }
+.cell--sell        { background: var(--hm-sell); }
+.cell--strong-sell { background: var(--hm-strong-sell); }
+.cell--disabled {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--hm-hold),
+    var(--hm-hold) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+/* ================================================================
+   Banner / empty / error
+   ================================================================ */
+.banner {
+  border-radius: var(--rad-md);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  font-size: var(--ty-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.banner--error {
+  background: rgba(239,68,68,0.10);
+  border: 1px solid rgba(239,68,68,0.3);
+  color: var(--red);
+}
+.banner--info {
+  background: rgba(59,130,246,0.10);
+  border: 1px solid rgba(59,130,246,0.3);
+  color: var(--blu);
+}
+
+.empty {
+  color: var(--txm);
+  text-align: center;
+  font-size: var(--ty-md);
+  padding: var(--sp-6);
+}
+
+/* ================================================================
+   Horizontal scroll-snap strips (Home: positions, consensus)
+   ================================================================ */
+.scroll-strip {
+  display: flex;
+  gap: var(--sp-2);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 calc(-1 * var(--sp-3));
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+.scroll-strip > * {
+  scroll-snap-align: start;
+  flex: 0 0 auto;
+}
+.scroll-strip::-webkit-scrollbar { height: 4px; }
+
+/* ================================================================
+   Decision card body
+   ================================================================ */
+.decision-card__reason {
+  font-size: var(--ty-sm);
+  color: var(--txd);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ================================================================
+   Sparkline mini-chart container
+   ================================================================ */
+.sparkline {
+  position: relative;
+  width: 100%;
+  height: 40px;
+}
+.sparkline canvas {
+  width: 100% !important;
+  height: 40px !important;
+  display: block;
+}
+
+/* ================================================================
+   Filter / chip strip
+   ================================================================ */
+.chip-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  overflow-x: auto;
+  padding-bottom: var(--sp-2);
+  -webkit-overflow-scrolling: touch;
+}
+.chip-strip::-webkit-scrollbar { display: none; }
