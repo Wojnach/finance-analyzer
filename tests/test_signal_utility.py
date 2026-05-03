@@ -232,14 +232,17 @@ class TestNoneChangePct:
     populated yet. _vote_correct grew a None-guard on 2026-04-22 but
     _compute_signal_utility was missed — every cold compute crashed, the
     cache never populated, so cold cost paid every cycle.
+
+    NOTE: Pass entries= explicitly to bypass the in-memory _signal_utility_cache.
+    Without this, two tests with the same horizon would share a cached result
+    and the second test's `entries` would never be evaluated.
     """
 
     def test_none_change_pct_does_not_crash(self):
         entries = _make_entries([
             ("BTC-USD", "rsi", "BUY", None),
         ])
-        with patch("portfolio.accuracy_stats.load_entries", return_value=entries):
-            result = signal_utility("1d")
+        result = signal_utility("1d", entries=entries)
         assert result["rsi"]["samples"] == 0
 
     def test_none_change_pct_skipped_like_neutral(self):
@@ -248,8 +251,7 @@ class TestNoneChangePct:
             ("BTC-USD", "rsi", "BUY", 2.0),
             ("BTC-USD", "rsi", "BUY", None),
         ])
-        with patch("portfolio.accuracy_stats.load_entries", return_value=entries):
-            result = signal_utility("1d")
+        result = signal_utility("1d", entries=entries)
         rsi = result["rsi"]
         assert rsi["samples"] == 1
         assert abs(rsi["avg_return"] - 2.0) < 1e-9

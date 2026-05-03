@@ -3,14 +3,18 @@
 Mirrors signal_engine.py:3401-3491 exactly:
   1. load_cached_regime_accuracy(horizon)
   2. fall through to signal_accuracy_by_regime(horizon) on miss
+     (we do NOT write the recomputed value back — see harness note below)
   3. signal_utility(horizon)
   4. iterate accuracy_data applying boost
 
 Measures wall time per sub-step, then dumps cProfile cumtime top-30.
-Read-only against the live data files. Does not mutate state.
+
+Pure read-only. We deliberately skip write_regime_accuracy_cache so the
+harness can run against a live system without racing the loop's writer
+under _accuracy_write_lock or overwriting the disk cache mid-cycle.
 
 Usage:
-  .venv/Scripts/python.exe scripts/perf/profile_utility_overlay.py
+  .venv/Scripts/python.exe -m scripts.perf.profile_utility_overlay
 """
 from __future__ import annotations
 
@@ -37,9 +41,10 @@ def overlay_one(horizon: str) -> tuple[float, float, float, float]:
     t0 = time.monotonic()
     regime_acc = A.load_cached_regime_accuracy(horizon)
     if not regime_acc:
+        # Mirror the production path's fall-through compute, but DO NOT
+        # write back to disk — see module docstring. The live loop owns
+        # the disk cache; this harness is a pure observer.
         regime_acc = A.signal_accuracy_by_regime(horizon)
-        if regime_acc:
-            A.write_regime_accuracy_cache(horizon, regime_acc)
     t_load = (time.monotonic() - t0) * 1000
 
     accuracy_data: dict = {}
