@@ -1559,8 +1559,91 @@ _AVANZA_CACHE_LOCK = threading.Lock()
 _AVANZA_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
 _AVANZA_TTL_SECONDS = 30.0
 
+# ---------------------------------------------------------------------------
+# Avanza worker thread — Playwright's sync API is bound to its creator
+# thread, but Flask's ThreadedWSGIServer spawns a fresh worker per request.
+# A request that lands on a different thread than the one which initialised
+# Playwright fails with "cannot switch to a different thread (which happens
+# to have exited)".
+#
+# Solution: a single dedicated worker thread owns the Playwright session
+# for the dashboard process. HTTP handlers enqueue snapshot requests via
+# `_avanza_request_q`, the worker processes them in order, and replies via
+# a per-request Event. This is the same pattern the metals_loop dodges by
+# being single-threaded; Flask can't afford that, so we serialise here.
+# ---------------------------------------------------------------------------
+
+import queue  # noqa: E402  (kept near the worker for grouping)
+
+_AVANZA_REQ_Q: "queue.Queue[dict]" = queue.Queue()
+_AVANZA_WORKER_LOCK = threading.Lock()
+_AVANZA_WORKER_STARTED = False
+_AVANZA_REQ_TIMEOUT_SECONDS = 25.0  # snapshot upper bound
+
+
+def _avanza_worker_loop() -> None:
+    """Single-thread worker that owns Playwright. Blocks on the request
+    queue and serves snapshot requests sequentially."""
+    while True:
+        future = _AVANZA_REQ_Q.get()
+        try:
+            future["result"] = _avanza_snapshot_impl()
+        except Exception as e:
+            logger.exception("avanza-worker: snapshot failed")
+            future["result"] = {
+                "ts": datetime.now(UTC).isoformat(),
+                "account_id": None,
+                "cash": None,
+                "positions": [],
+                "orders": [],
+                "stop_losses": [],
+                "errors": [f"worker: {type(e).__name__}: {e}"],
+            }
+        finally:
+            future["done"].set()
+
+
+def _ensure_avanza_worker() -> None:
+    global _AVANZA_WORKER_STARTED
+    if _AVANZA_WORKER_STARTED:
+        return
+    with _AVANZA_WORKER_LOCK:
+        if _AVANZA_WORKER_STARTED:
+            return
+        t = threading.Thread(
+            target=_avanza_worker_loop, daemon=True, name="avanza-worker",
+        )
+        t.start()
+        _AVANZA_WORKER_STARTED = True
+
 
 def _avanza_account_snapshot() -> dict:
+    """Public entry. Marshals snapshot building onto the worker thread so
+    Playwright's thread affinity is honoured."""
+    _ensure_avanza_worker()
+    future: dict[str, Any] = {"result": None, "done": threading.Event()}
+    _AVANZA_REQ_Q.put(future)
+    if not future["done"].wait(timeout=_AVANZA_REQ_TIMEOUT_SECONDS):
+        return {
+            "ts": datetime.now(UTC).isoformat(),
+            "account_id": None,
+            "cash": None,
+            "positions": [],
+            "orders": [],
+            "stop_losses": [],
+            "errors": [
+                f"avanza-worker: timed out after {_AVANZA_REQ_TIMEOUT_SECONDS}s"
+            ],
+        }
+    return future["result"] or {
+        "ts": datetime.now(UTC).isoformat(),
+        "account_id": None, "cash": None, "positions": [],
+        "orders": [], "stop_losses": [],
+        "errors": ["avanza-worker: empty result"],
+    }
+
+
+def _avanza_snapshot_impl() -> dict:
     """Build a fresh Avanza account snapshot. Uncached.
 
     Uses `portfolio.avanza_session` (Playwright BankID auth at
