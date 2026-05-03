@@ -29,6 +29,10 @@ import { initTheme, toggleTheme } from "./theme.js";
 import "./views/home.js";
 import "./views/decisions.js"; // also imports decision-detail.js internally
 import "./views/signals.js";
+import "./views/more.js";
+import "./views/health.js";
+import "./views/messages.js";
+import "./views/settings.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -41,10 +45,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Update active state on bottom-nav as the route changes.
+  // Update active state on bottom-nav as the route changes. Sub-routes
+  // under "More" (health, messages, metals, golddigger, equity, settings)
+  // keep the More tab highlighted.
+  const MORE_SUB_ROUTES = new Set([
+    "health", "messages", "metals", "golddigger", "equity", "settings",
+  ]);
   state.subscribe(state.Slots.ROUTE, (parsed) => {
+    const route = parsed?.name || "home";
     document.querySelectorAll(".bottom-nav__item").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.route === (parsed?.name || "home"));
+      const r = btn.dataset.route;
+      let isActive = r === route;
+      if (!isActive && r === "more") isActive = MORE_SUB_ROUTES.has(route);
+      btn.classList.toggle("active", isActive);
     });
   });
 
