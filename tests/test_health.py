@@ -334,6 +334,11 @@ class TestUpdateModuleFailures:
         assert "ts" in mf
 
     def test_empty_list_is_noop(self, tmp_path):
+        """No prior failure + empty failures = no disk write.
+
+        Avoids writing health_state.json every 60s for the steady-state
+        all-clean case.
+        """
         hf = tmp_path / "health_state.json"
         hf.write_text(json.dumps({
             "start_time": time.time(), "cycle_count": 1,
@@ -343,6 +348,52 @@ class TestUpdateModuleFailures:
             update_module_failures([])
         state = json.loads(hf.read_text(encoding="utf-8"))
         assert "last_module_failures" not in state
+
+    def test_empty_list_clears_prior_failure(self, tmp_path):
+        """Recovery semantics: a clean cycle following a failure clears
+        the stale record so the dashboard reflects current state.
+
+        2026-05-03: this fixes a UX bug where cycle-0 transient failures
+        in monte_carlo / price_targets / equity_curve stayed pinned to
+        /api/health for hours after the modules had recovered.
+        """
+        hf = tmp_path / "health_state.json"
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 14,
+            "error_count": 0, "errors": [],
+            "last_module_failures": {
+                "ts": "2026-05-03T18:35:05+00:00",
+                "modules": ["monte_carlo", "price_targets", "equity_curve"],
+            },
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            update_module_failures([])
+        state = json.loads(hf.read_text(encoding="utf-8"))
+        assert "last_module_failures" not in state
+        # Other fields preserved.
+        assert state["cycle_count"] == 14
+
+    def test_recovery_then_failure_records_new(self, tmp_path):
+        """After clearing a stale record, a subsequent failure writes
+        cleanly with a fresh timestamp."""
+        hf = tmp_path / "health_state.json"
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 1,
+            "error_count": 0, "errors": [],
+            "last_module_failures": {
+                "ts": "2026-05-03T18:35:05+00:00",
+                "modules": ["monte_carlo"],
+            },
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            # First clean cycle clears the record.
+            update_module_failures([])
+            # Then a new failure records fresh.
+            update_module_failures(["alpha_vantage"])
+        state = json.loads(hf.read_text(encoding="utf-8"))
+        assert state["last_module_failures"]["modules"] == ["alpha_vantage"]
+        # Old timestamp is gone.
+        assert state["last_module_failures"]["ts"] != "2026-05-03T18:35:05+00:00"
 
     def test_overwrites_previous_failures(self, tmp_path):
         hf = tmp_path / "health_state.json"

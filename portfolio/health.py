@@ -134,16 +134,29 @@ def update_module_failures(failures: list):
     Called by reporting.py after generating the agent summary.
     Persists module names + timestamp in health_state.json so the dashboard
     and monitoring scripts can see per-module status without parsing logs.
+
+    Recovery semantics (2026-05-03): when called with an empty list AND a
+    prior failure record exists, this clears the record so the dashboard
+    reflects the *current* state, not a stale "last known failure" — the
+    bug surfaced after a 2026-05-03 cycle-0 transient that left dashboard
+    /api/health falsely flagging monte_carlo / price_targets / equity_curve
+    as failed for hours after the modules had recovered.
+
+    The clean-no-prior-failure case still skips the write to avoid
+    spamming the disk every 60s for the common case.
     """
-    if not failures:
-        return
     with _health_lock:
         state = load_health()
-        state["last_module_failures"] = {
-            "ts": datetime.now(UTC).isoformat(),
-            "modules": list(failures),
-        }
-        atomic_write_json(HEALTH_FILE, state)
+        if failures:
+            state["last_module_failures"] = {
+                "ts": datetime.now(UTC).isoformat(),
+                "modules": list(failures),
+            }
+            atomic_write_json(HEALTH_FILE, state)
+        elif state.get("last_module_failures") is not None:
+            # Recovery: prior failure cleared on a clean cycle. One-shot write.
+            state.pop("last_module_failures", None)
+            atomic_write_json(HEALTH_FILE, state)
 
 
 def update_signal_health(signal_name: str, success: bool):

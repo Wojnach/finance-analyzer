@@ -766,12 +766,17 @@ def write_agent_summary(
     # Surface module warnings to Layer 2 so it knows what context is missing
     if _module_warnings:
         summary["_module_warnings"] = _module_warnings
-        # BUG-89: Persist to health state, but don't let a failure here crash summary output
-        try:
-            from portfolio.health import update_module_failures
-            update_module_failures(_module_warnings)
-        except Exception:
-            logger.warning("[reporting] update_module_failures failed", exc_info=True)
+
+    # 2026-05-03: always notify health (passing [] on a clean cycle is
+    # what triggers recovery — clears a stale prior failure record).
+    # Previously we only called this when warnings existed, so the
+    # dashboard kept reporting hours-old transients indefinitely.
+    # BUG-89: don't let a failure here crash summary output.
+    try:
+        from portfolio.health import update_module_failures
+        update_module_failures(_module_warnings)
+    except Exception:
+        logger.warning("[reporting] persisting module failures failed", exc_info=True)
 
     # Aggregate signal health across all tickers (ARCH-12: signal failure surfacing)
     all_failures = []
