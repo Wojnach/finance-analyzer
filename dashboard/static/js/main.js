@@ -37,6 +37,8 @@ import "./views/equity.js";
 import "./views/metals.js";
 import "./views/golddigger.js";
 import "./views/avanza.js";
+import "./views/assets.js";
+import "./views/prices.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -53,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // under "More" (health, messages, metals, golddigger, equity, settings)
   // keep the More tab highlighted.
   const MORE_SUB_ROUTES = new Set([
-    "avanza", "health", "messages", "metals", "golddigger", "equity", "settings",
+    "avanza", "assets", "prices", "health", "messages", "metals", "golddigger", "equity", "settings",
   ]);
   state.subscribe(state.Slots.ROUTE, (parsed) => {
     const route = parsed?.name || "home";

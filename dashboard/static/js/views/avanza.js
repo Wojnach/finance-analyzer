@@ -29,8 +29,11 @@ export const view = {
 
     _unsubs.push(state.subscribe(SLOT_AVANZA, _renderBody));
 
-    polling.register(POLL_KEY, 60_000, async () => {
-      const d = await fj("/api/avanza_account", { ttl: 5_000 });
+    polling.register(POLL_KEY, 60_000, async (force = false) => {
+      // Manual refresh sends ?force=1 to bypass the server-side 30s TTL
+      // so a just-placed/cancelled order shows up immediately.
+      const url = force ? "/api/avanza_account?force=1" : "/api/avanza_account";
+      const d = await fj(url, { ttl: force ? 0 : 5_000 });
       if (d) state.set(SLOT_AVANZA, d);
     });
   },
@@ -67,8 +70,12 @@ function _renderShell() {
   refresh.style.minWidth = "auto";
   refresh.style.padding = "var(--sp-1) var(--sp-2)";
   let resetTimer = null;
-  refresh.addEventListener("click", () => {
-    polling.fireNow(POLL_KEY);
+  refresh.addEventListener("click", async () => {
+    // Bypass the 30s server cache so the manual click actually re-queries
+    // Avanza (codex P2 fix 2026-05-04).
+    const url = "/api/avanza_account?force=1";
+    const d = await fj(url, { ttl: 0 });
+    if (d) state.set(SLOT_AVANZA, d);
     // Visual confirmation — flash green + checkmark for 1.4s. Mirrors the
     // pattern in views/settings.js so refresh-style buttons behave the same
     // everywhere.

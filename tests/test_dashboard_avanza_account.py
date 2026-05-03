@@ -183,7 +183,9 @@ class TestAvanzaAccountEndpoint:
         """Two consecutive hits inside the 30s TTL must share the same payload."""
         call_count = {"n": 0}
 
-        def _count_cash():
+        def _count_cash(*_args, **_kwargs):
+            # Accepts account_id kwarg etc. — the endpoint passes it through
+            # since the codex P2 fix on 2026-05-04.
             call_count["n"] += 1
             return _Cash(buying_power=float(call_count["n"]), total_value=0.0, own_capital=0.0)
 
@@ -198,6 +200,28 @@ class TestAvanzaAccountEndpoint:
         assert call_count["n"] == 1
         assert r1["cash"]["buying_power"] == 1.0
         assert r2["cash"]["buying_power"] == 1.0
+
+    def test_force_query_bypasses_cache(self, client):
+        """`?force=1` must re-fetch from Avanza even within the TTL window
+        (codex P2 fix 2026-05-04). Without this the manual Refresh button
+        in the view would silently serve stale broker state."""
+        call_count = {"n": 0}
+
+        def _count_cash(*_args, **_kwargs):
+            call_count["n"] += 1
+            return _Cash(buying_power=float(call_count["n"]), total_value=0.0, own_capital=0.0)
+
+        with patch("portfolio.avanza.get_buying_power", side_effect=_count_cash), \
+             patch("portfolio.avanza.get_positions", return_value=[]), \
+             patch("portfolio.avanza.get_orders", return_value=[]), \
+             patch("portfolio.avanza.get_stop_losses", return_value=[]), \
+             _no_auth():
+            r1 = client.get("/api/avanza_account").get_json()
+            r2 = client.get("/api/avanza_account?force=1").get_json()
+        # Both requests fired upstream.
+        assert call_count["n"] == 2
+        assert r1["cash"]["buying_power"] == 1.0
+        assert r2["cash"]["buying_power"] == 2.0
 
     def test_requires_auth_when_token_configured(self, client):
         with patch("dashboard.auth._get_dashboard_token", return_value="secret"):

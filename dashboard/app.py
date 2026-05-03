@@ -1525,39 +1525,74 @@ _AVANZA_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
 _AVANZA_TTL_SECONDS = 30.0
 
 
+def _ensure_avanza_client() -> str | None:
+    """Make sure the AvanzaClient singleton is initialized. Returns the
+    configured account_id or None on init failure.
+
+    The dashboard process never seeds the singleton on startup; the first
+    call would otherwise raise `ValueError: AvanzaClient.get_instance()
+    requires config on first call` because portfolio.avanza.{account,trading}
+    helpers all call get_instance() with no args. Codex P1 finding 2026-05-04.
+    """
+    try:
+        from portfolio.avanza import AvanzaClient
+        client = AvanzaClient.get_instance(_get_config())
+        return client.account_id
+    except Exception:
+        logger.exception("avanza singleton init failed")
+        return None
+
+
 def _avanza_account_snapshot() -> dict:
     """Build a fresh Avanza account snapshot. Uncached.
 
     Each subcall is independently try/except'd. Errors land in `errors[]`
     rather than raising, so the dashboard view can degrade gracefully.
+
+    All sections are filtered to the configured `account_id` so a multi-
+    account install doesn't show a cash card for one account next to
+    positions/orders/stops aggregated across all accounts. Codex P2
+    finding 2026-05-04.
     """
     from dataclasses import asdict
     out: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
+        "account_id": None,
         "cash": None,
         "positions": [],
         "orders": [],
         "stop_losses": [],
         "errors": [],
     }
+    account_id = _ensure_avanza_client()
+    out["account_id"] = account_id
     try:
         from portfolio.avanza import get_buying_power
-        out["cash"] = asdict(get_buying_power())
+        out["cash"] = asdict(get_buying_power(account_id=account_id))
     except Exception as e:
         out["errors"].append(f"cash: {type(e).__name__}: {e}")
     try:
         from portfolio.avanza import get_positions
-        out["positions"] = [asdict(p) for p in get_positions()]
+        out["positions"] = [asdict(p) for p in get_positions(account_id=account_id)]
     except Exception as e:
         out["errors"].append(f"positions: {type(e).__name__}: {e}")
     try:
         from portfolio.avanza import get_orders
-        out["orders"] = [asdict(o) for o in get_orders()]
+        # get_orders() doesn't accept an account_id kwarg — filter client-side.
+        all_orders = get_orders()
+        out["orders"] = [
+            asdict(o) for o in all_orders
+            if account_id is None or str(o.account_id) == str(account_id)
+        ]
     except Exception as e:
         out["errors"].append(f"orders: {type(e).__name__}: {e}")
     try:
         from portfolio.avanza import get_stop_losses
-        out["stop_losses"] = [asdict(s) for s in get_stop_losses()]
+        all_stops = get_stop_losses()
+        out["stop_losses"] = [
+            asdict(s) for s in all_stops
+            if account_id is None or str(s.account_id) == str(account_id)
+        ]
     except Exception as e:
         out["errors"].append(f"stop_losses: {type(e).__name__}: {e}")
     return out
@@ -1568,22 +1603,74 @@ def _avanza_account_snapshot() -> dict:
 def api_avanza_account():
     """Live snapshot of the Avanza brokerage account.
 
-    Cash + positions + open orders + active stop-losses. 30-second TTL
-    cache because the underlying calls hit the network and the dashboard
-    polls regularly. Each subsection has its own try/except so a partial
-    upstream outage degrades to "this section unavailable" instead of a
-    full 500.
+    Cash + positions + open orders + active stop-losses, filtered to the
+    configured account_id. 30-second TTL cache because the underlying
+    calls hit the network. Each subsection has its own try/except so a
+    partial upstream outage degrades to "this section unavailable"
+    instead of a full 500.
+
+    `?force=1` bypasses the TTL cache so the user's manual Refresh
+    button can verify a just-placed or cancelled order without waiting
+    out the polling cadence (Codex P2 finding 2026-05-04).
     """
+    force = request.args.get("force", "").strip() in {"1", "true", "yes"}
     now = time.monotonic()
-    with _AVANZA_CACHE_LOCK:
-        cached = _AVANZA_CACHE.get("value")
-        if cached and (now - _AVANZA_CACHE["at"]) < _AVANZA_TTL_SECONDS:
-            return jsonify(cached)
+    if not force:
+        with _AVANZA_CACHE_LOCK:
+            cached = _AVANZA_CACHE.get("value")
+            if cached and (now - _AVANZA_CACHE["at"]) < _AVANZA_TTL_SECONDS:
+                return jsonify(cached)
     snapshot = _avanza_account_snapshot()
     with _AVANZA_CACHE_LOCK:
         _AVANZA_CACHE["value"] = snapshot
         _AVANZA_CACHE["at"] = now
     return jsonify(snapshot)
+
+
+# ---------------------------------------------------------------------------
+# Tradeable assets — what the loops will buy/sell. Aggregates the metals
+# warrant catalog (fin_fish), crypto + oil JSON catalogs, plus the small
+# equity universe in avanza_tracker. Lets the user verify the system
+# knows about each instrument, including its orderbook_id, leverage, and
+# direction. Read-only.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/tradeable_assets")
+@require_auth
+def api_tradeable_assets():
+    """Return everything the system might trade on Avanza.
+
+    Aggregates:
+      - Metals warrants (`portfolio.fin_fish.WARRANT_CATALOG`)
+      - Crypto warrants (`data/crypto_warrant_catalog.json`)
+      - Oil warrants (`data/oil_warrant_catalog.json`)
+
+    Each category is independently try/except'd so a missing import or
+    bad JSON file doesn't blank the whole view.
+    """
+    out: dict[str, Any] = {
+        "ts": datetime.now(UTC).isoformat(),
+        "metals_warrants": {},
+        "crypto_warrants": {},
+        "oil_warrants": {},
+        "errors": [],
+    }
+    try:
+        from portfolio.fin_fish import WARRANT_CATALOG as METALS_CATALOG
+        out["metals_warrants"] = dict(METALS_CATALOG)
+    except Exception as e:
+        out["errors"].append(f"metals: {type(e).__name__}: {e}")
+    try:
+        crypto = _read_json(DATA_DIR / "crypto_warrant_catalog.json") or {}
+        out["crypto_warrants"] = crypto.get("warrants", crypto) if isinstance(crypto, dict) else {}
+    except Exception as e:
+        out["errors"].append(f"crypto: {type(e).__name__}: {e}")
+    try:
+        oil = _read_json(DATA_DIR / "oil_warrant_catalog.json") or {}
+        out["oil_warrants"] = oil.get("warrants", oil) if isinstance(oil, dict) else {}
+    except Exception as e:
+        out["errors"].append(f"oil: {type(e).__name__}: {e}")
+    return jsonify(out)
 
 
 # ---------------------------------------------------------------------------

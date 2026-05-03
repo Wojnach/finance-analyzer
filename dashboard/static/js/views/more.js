@@ -8,6 +8,8 @@ import * as router from "../router.js";
 
 const ITEMS = [
   { route: "avanza",     label: "Avanza",      hint: "Live broker sync — cash, positions, orders, stops" },
+  { route: "prices",     label: "Live prices", hint: "What the system reads — verify against Avanza app" },
+  { route: "assets",     label: "Assets",      hint: "Tradeable warrant catalog — what the loops can buy/sell" },
   { route: "health",     label: "Health",      hint: "Loops, signals, errors" },
   { route: "messages",   label: "Messages",    hint: "Telegram log + saved-only" },
   { route: "metals",     label: "Metals",      hint: "XAG/XAU warrants" },
