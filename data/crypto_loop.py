@@ -253,19 +253,30 @@ def write_heartbeat(extra: dict | None = None) -> None:
     (canonical schema lives there). The `extra` dict — historically
     populated by call sites with `cycle` / `ok` / `n_positions` keys —
     is unpacked into named args; any leftover keys flow through as
-    operator-facing context. Failure path swallows like before.
+    operator-facing context.
+
+    2026-05-04 codex P3-2 follow-up: ALL coercion + dict-handling
+    happens inside the try/except. Pre-fix, a non-dict `extra` (e.g.
+    a future call site that passes a list) or a non-numeric `cycle`
+    would raise BEFORE the swallow path, regressing the
+    pre-migration behavior where every heartbeat-write failure was
+    silently absorbed.
     """
-    extra = dict(extra or {})
-    cycle = int(extra.pop("cycle", 0) or 0)
-    ok = bool(extra.pop("ok", True))
-    n_positions = int(extra.pop("n_positions", 0) or 0)
     try:
+        e = dict(extra or {})
+        try:
+            cycle = int(e.pop("cycle", 0) or 0)
+        except (TypeError, ValueError):
+            cycle = 0
+        ok = bool(e.pop("ok", True))
+        try:
+            n_positions = int(e.pop("n_positions", 0) or 0)
+        except (TypeError, ValueError):
+            n_positions = 0
         from portfolio.loop_health import write_heartbeat as _shared
         _shared(HEARTBEAT_FILE, cycle=cycle, ok=ok,
-                n_positions=n_positions, extra=extra or None)
+                n_positions=n_positions, extra=e or None)
     except Exception as exc:  # noqa: BLE001
-        # Defence in depth — _shared already swallows, but if the
-        # import itself fails we still must not crash the loop.
         logger.debug("heartbeat dispatch failed: %s", exc)
 
 

@@ -1106,6 +1106,7 @@ def get_or_compute_consensus_accuracy(horizon: str):
 _DASHBOARD_PREWARM_HORIZONS: tuple = ("1d", "3d", "5d", "10d")
 _DASHBOARD_PREWARM_INTERVAL_SEC = 3600.0  # 1 hour
 _DASHBOARD_PREWARM_STATE_FILE = DATA_DIR / "dashboard_prewarm_state.json"
+_DASHBOARD_PREWARM_LOCK_FILE = DATA_DIR / "dashboard_prewarm.lock"
 _dashboard_prewarm_lock = threading.Lock()
 _last_dashboard_prewarm_ts: float = 0.0
 _dashboard_prewarm_loaded: bool = False
@@ -1143,44 +1144,87 @@ def maybe_prewarm_dashboard_accuracy(now: float | None = None) -> bool:
     respects the BUG-178 thundering-herd lock and won't fight with
     in-loop callers that hit the same cache from ticker threads.
 
-    2026-05-04: persistence layer. The interval gate now seeds itself
-    from `data/dashboard_prewarm_state.json` on first call, and atomic-
-    writes the ts back when prewarm fires. This means a loop restart
-    no longer triggers an extra cold-cache prewarm — the persisted ts
-    survives. Stale-on-corruption-or-missing falls back to 0 (i.e.,
-    fires on next call), which is the safe direction.
+    Concurrency layers (2026-05-04 codex P2-2 follow-up):
+      1. Process-local `threading.Lock` — guards the in-memory ts and
+         lazy-load flag against concurrent threads in the same process.
+      2. Re-read the persisted ts from disk inside the file-lock window
+         — catches the case where another process wrote between our
+         lazy-load and our gate decision.
+      3. Cross-process file lock around the gate decision + fanout so
+         only one of N concurrent processes (main loop + a manual
+         trigger, two main loops during a botched restart) actually
+         performs the fanout. Lock is non-blocking — a second process
+         that races just returns False and treats the call as gated,
+         since whichever process wins is doing the same fanout.
+
+    Persistence: `data/dashboard_prewarm_state.json` survives loop
+    restarts. Stale-on-corruption-or-missing falls back to 0.0 (next
+    call fires) — safe direction.
 
     Args:
         now: Override clock for tests. Defaults to time.time().
 
     Returns:
-        True if prewarm fired this call, False if gated by the interval.
+        True if prewarm fired this call, False if gated by the interval
+        or another process holds the file lock.
     """
     global _last_dashboard_prewarm_ts, _dashboard_prewarm_loaded
     t = now if now is not None else time.time()
     with _dashboard_prewarm_lock:
-        # Lazy-load the persisted ts on first call per process. Subsequent
-        # calls use the in-memory value, which is faster and avoids
-        # reading the file every cycle.
+        # Layer 1: lazy-load the persisted ts on first call per process.
         if not _dashboard_prewarm_loaded:
             _last_dashboard_prewarm_ts = _load_prewarm_ts_from_disk()
             _dashboard_prewarm_loaded = True
+        # First gate check using in-memory (and possibly stale) ts.
         if t - _last_dashboard_prewarm_ts < _DASHBOARD_PREWARM_INTERVAL_SEC:
             return False
-        _last_dashboard_prewarm_ts = t
+
+    # Layer 3: cross-process exclusion. If another process is already
+    # in the fanout window, skip — the work is being done.
     try:
+        from portfolio.process_lock import acquire_lock_file, release_lock_file
+    except Exception:
+        # If process_lock is somehow unavailable, fall back to the
+        # process-local guarantee (better than crashing the loop).
+        acquire_lock_file = None
+        release_lock_file = None
+
+    fh = acquire_lock_file(_DASHBOARD_PREWARM_LOCK_FILE,
+                            owner="dashboard_prewarm") if acquire_lock_file else "noop"
+    if fh is None:
+        # Another process holds the lock — they're doing the fanout.
+        # Treat as gated; next caller will see the persisted ts they write.
+        return False
+
+    try:
+        # Layer 2: re-read disk under the file lock. A racer that won
+        # the lock just before us would have written; honor their work.
+        # Only honor a positive disk_ts — "file missing" returns 0 from
+        # _load_prewarm_ts_from_disk, and treating that as authoritative
+        # would clobber a deliberately-old in-memory seed (e.g., test
+        # fixtures that pre-seed -10000 to force a fire).
+        with _dashboard_prewarm_lock:
+            disk_ts = _load_prewarm_ts_from_disk()
+            if disk_ts > 0 and disk_ts > _last_dashboard_prewarm_ts:
+                _last_dashboard_prewarm_ts = disk_ts
+            if t - _last_dashboard_prewarm_ts < _DASHBOARD_PREWARM_INTERVAL_SEC:
+                return False
+            _last_dashboard_prewarm_ts = t
+
         for h in _DASHBOARD_PREWARM_HORIZONS:
             get_or_compute_accuracy(h)
             get_or_compute_consensus_accuracy(h)
             get_or_compute_per_ticker_accuracy(h)
-        # Persist after the actual fanout completes so a crash mid-fanout
-        # doesn't pin the gate (next process will retry).
+        # Persist AFTER the fanout completes so a crash mid-fanout doesn't
+        # pin the gate. The file lock means we're the only writer.
         _save_prewarm_ts_to_disk(t)
         return True
     except Exception:
-        # Best-effort: telemetry + cache pre-warm must never crash the loop.
         logger.debug("maybe_prewarm_dashboard_accuracy failed", exc_info=True)
         return False
+    finally:
+        if release_lock_file and fh != "noop":
+            release_lock_file(fh)
 
 
 def _count_entries_with_outcomes(entries, horizon):

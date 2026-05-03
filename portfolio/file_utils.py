@@ -158,13 +158,25 @@ def load_jsonl_tail(path, max_entries=500, tail_bytes=512_000):
         with open(path, "rb") as f:
             # Seek to near end of file
             offset = max(0, file_size - tail_bytes)
+            # 2026-05-04 codex P3-1 follow-up: peek the byte just before
+            # the seek point. If it's a newline, the seek lands exactly
+            # at a line boundary and the first decoded line is intact.
+            # Without this check, a happy-coincidence boundary would
+            # cost us one valid entry on every read.
+            seek_on_boundary = False
+            if offset > 0:
+                f.seek(offset - 1)
+                prior = f.read(1)
+                seek_on_boundary = prior == b"\n"
             f.seek(offset)
             data = f.read()
         # Decode and split into lines
         text = data.decode("utf-8", errors="replace")
         lines = text.split("\n")
-        # If we seeked mid-file, the first line is likely truncated — skip it
-        if offset > 0 and lines:
+        # Drop the first line only when we landed mid-line. When seek
+        # lands on a newline boundary, the first decoded line is
+        # complete and should be kept.
+        if offset > 0 and lines and not seek_on_boundary:
             lines = lines[1:]
         for line in lines:
             line = line.strip()

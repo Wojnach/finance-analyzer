@@ -100,6 +100,7 @@ data/analysis_log.jsonl
 data/watch_log.jsonl
 data/accuracy_cache.json
 data/dashboard_prewarm_state.json
+data/dashboard_prewarm.lock
 data/critical_errors.jsonl
 data/forecast_health.jsonl
 data/forecast_predictions.jsonl

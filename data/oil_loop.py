@@ -272,18 +272,24 @@ def write_heartbeat(extra: dict | None = None) -> None:
     """Write a JSON heartbeat file each successful cycle.
 
     2026-05-04: thin shim over `portfolio.loop_health.write_heartbeat`.
-    Mirrors crypto_loop's wrapper — `extra` is unpacked into the shared
-    helper's named args; leftover keys flow through as operator-facing
-    context. Failure path swallows like before.
+    2026-05-04 codex P3-2 follow-up: ALL coercion + dict-handling
+    happens inside try/except so a malformed `extra` cannot crash
+    the loop (matches the pre-migration swallow contract).
     """
-    extra = dict(extra or {})
-    cycle = int(extra.pop("cycle", 0) or 0)
-    ok = bool(extra.pop("ok", True))
-    n_positions = int(extra.pop("n_positions", 0) or 0)
     try:
+        e = dict(extra or {})
+        try:
+            cycle = int(e.pop("cycle", 0) or 0)
+        except (TypeError, ValueError):
+            cycle = 0
+        ok = bool(e.pop("ok", True))
+        try:
+            n_positions = int(e.pop("n_positions", 0) or 0)
+        except (TypeError, ValueError):
+            n_positions = 0
         from portfolio.loop_health import write_heartbeat as _shared
         _shared(HEARTBEAT_FILE, cycle=cycle, ok=ok,
-                n_positions=n_positions, extra=extra or None)
+                n_positions=n_positions, extra=e or None)
     except Exception as exc:  # noqa: BLE001
         logger.debug("heartbeat dispatch failed: %s", exc)
 

@@ -219,3 +219,105 @@ class TestWrapperShims:
         monkeypatch.setattr(builtins, "__import__", _failing_import)
         # Must not raise.
         crypto_loop.write_heartbeat({"cycle": 1})
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-04 codex P3-2: shim must coerce-then-call all inside the
+# try/except, so a malformed `extra` (non-dict, bad cycle, etc.) cannot
+# raise out to the live trading loop.
+# ---------------------------------------------------------------------------
+
+class TestWrapperCoercionSafety:
+    def test_crypto_wrapper_swallows_non_int_cycle(self, tmp_path, monkeypatch):
+        from data import crypto_loop
+        hb = tmp_path / "crypto_loop.heartbeat"
+        monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
+
+        # Must NOT raise even though cycle="N/A".
+        crypto_loop.write_heartbeat({"cycle": "N/A", "ok": True, "n_positions": 0})
+        # Heartbeat still written with cycle defaulted to 0.
+        payload = _read(hb)
+        assert payload["cycle"] == 0
+        assert payload["ok"] is True
+
+    def test_crypto_wrapper_swallows_non_int_n_positions(self, tmp_path, monkeypatch):
+        from data import crypto_loop
+        hb = tmp_path / "crypto_loop.heartbeat"
+        monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
+
+        crypto_loop.write_heartbeat({"cycle": 1, "ok": True,
+                                      "n_positions": {"weird": "shape"}})
+        payload = _read(hb)
+        assert payload["n_positions"] == 0
+
+    def test_crypto_wrapper_swallows_non_dict_extra(self, tmp_path, monkeypatch):
+        """If a future caller passes a list (or any non-dict), the dict()
+        coercion would raise — must be caught silently."""
+        from data import crypto_loop
+        hb = tmp_path / "crypto_loop.heartbeat"
+        monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
+
+        # Pass a list — dict(list) tries to make pairs, fails for non-pair items.
+        crypto_loop.write_heartbeat([1, 2, 3])
+        # No raise. May or may not write the file (failure may be at coerce
+        # time), but the loop didn't crash.
+
+    def test_oil_wrapper_swallows_non_int_cycle(self, tmp_path, monkeypatch):
+        from data import oil_loop
+        hb = tmp_path / "oil_loop.heartbeat"
+        monkeypatch.setattr(oil_loop, "HEARTBEAT_FILE", str(hb))
+        oil_loop.write_heartbeat({"cycle": None, "ok": True, "n_positions": 0})
+        payload = _read(hb)
+        assert payload["cycle"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-04 codex P3-1: load_jsonl_tail must keep the first decoded
+# line when the seek lands exactly on a newline boundary.
+# ---------------------------------------------------------------------------
+
+class TestLoadJsonlTailBoundary:
+    """Note: tests write files in BINARY mode so Windows' default
+    text-mode CRLF translation doesn't skew our byte-offset arithmetic.
+    pathlib's Path.write_text(...) on Windows still does \\n -> \\r\\n
+    expansion unless newline='' is passed explicitly."""
+
+    def test_keeps_first_line_when_seek_lands_on_newline(self, tmp_path):
+        """Construct a file where the requested tail_bytes EXACTLY contains
+        a complete trailing record (seek lands on '\\n' boundary)."""
+        from portfolio.file_utils import load_jsonl_tail
+
+        entries = [json.dumps({"i": i}) for i in range(10)]
+        full = ("\n".join(entries) + "\n").encode("utf-8")
+        f = tmp_path / "boundary.jsonl"
+        f.write_bytes(full)
+
+        # tail_bytes that lands exactly on a newline before entry index 7
+        # (i.e., reads entries 7,8,9 — three intact entries).
+        prefix = ("\n".join(entries[:7]) + "\n").encode("utf-8")
+        target_tail_bytes = len(full) - len(prefix)
+
+        rows = load_jsonl_tail(f, max_entries=10, tail_bytes=target_tail_bytes)
+        # Must return entries 7, 8, 9 (3 entries) — NOT 8, 9 (which would be
+        # the bug where the first intact line was dropped).
+        assert [e["i"] for e in rows] == [7, 8, 9], (
+            f"got {[e['i'] for e in rows]} — first intact line dropped on boundary"
+        )
+
+    def test_drops_first_line_when_seek_lands_mid_line(self, tmp_path):
+        """When seek lands inside a record (not on \\n), the first
+        decoded chunk is truncated and must be dropped."""
+        from portfolio.file_utils import load_jsonl_tail
+
+        entries = [json.dumps({"i": i, "pad": "x" * 200}) for i in range(10)]
+        full = ("\n".join(entries) + "\n").encode("utf-8")
+        f = tmp_path / "midline.jsonl"
+        f.write_bytes(full)
+
+        # tail_bytes that lands inside entry 5 (mid-line).
+        prefix_to_entry5 = ("\n".join(entries[:5]) + "\n").encode("utf-8")
+        target_tail_bytes = len(full) - len(prefix_to_entry5) - 50
+
+        rows = load_jsonl_tail(f, max_entries=10, tail_bytes=target_tail_bytes)
+        # First parsed line should be entry 6 (entry 5 was truncated).
+        assert rows[0]["i"] == 6
