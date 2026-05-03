@@ -1560,36 +1560,22 @@ _AVANZA_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
 _AVANZA_TTL_SECONDS = 30.0
 
 
-def _ensure_avanza_client() -> str | None:
-    """Make sure the AvanzaClient singleton is initialized. Returns the
-    configured account_id or None on init failure.
-
-    The dashboard process never seeds the singleton on startup; the first
-    call would otherwise raise `ValueError: AvanzaClient.get_instance()
-    requires config on first call` because portfolio.avanza.{account,trading}
-    helpers all call get_instance() with no args. Codex P1 finding 2026-05-04.
-    """
-    try:
-        from portfolio.avanza import AvanzaClient
-        client = AvanzaClient.get_instance(_get_config())
-        return client.account_id
-    except Exception:
-        logger.exception("avanza singleton init failed")
-        return None
-
-
 def _avanza_account_snapshot() -> dict:
     """Build a fresh Avanza account snapshot. Uncached.
 
-    Each subcall is independently try/except'd. Errors land in `errors[]`
-    rather than raising, so the dashboard view can degrade gracefully.
+    Uses `portfolio.avanza_session` (Playwright BankID auth at
+    `data/avanza_session.json`) — the same path the live metals_loop and
+    golddigger use. The newer `portfolio.avanza` TOTP package is *not*
+    used here because TOTP credentials aren't populated in the live
+    config; switching needs setup work outside this PR. Codex P1 fix
+    2026-05-04 originally seeded the TOTP singleton, but the empty
+    credentials made every call still fail — the live-system path is
+    the right answer.
 
-    All sections are filtered to the configured `account_id` so a multi-
-    account install doesn't show a cash card for one account next to
-    positions/orders/stops aggregated across all accounts. Codex P2
-    finding 2026-05-04.
+    Each subcall is independently try/except'd so a partial Avanza
+    outage degrades section-by-section. Sections are filtered to the
+    configured account_id (codex P2 finding 2026-05-04).
     """
-    from dataclasses import asdict
     out: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
         "account_id": None,
@@ -1599,38 +1585,90 @@ def _avanza_account_snapshot() -> dict:
         "stop_losses": [],
         "errors": [],
     }
-    account_id = _ensure_avanza_client()
-    out["account_id"] = account_id
     try:
-        from portfolio.avanza import get_buying_power
-        out["cash"] = asdict(get_buying_power(account_id=account_id))
+        from portfolio.avanza_session import DEFAULT_ACCOUNT_ID
+        account_id = str(DEFAULT_ACCOUNT_ID)
+    except Exception:
+        account_id = None
+    out["account_id"] = account_id
+
+    try:
+        from portfolio.avanza_session import get_buying_power
+        cash = get_buying_power(account_id=account_id)
+        if cash is None:
+            out["errors"].append(
+                "cash: get_buying_power returned None "
+                "(Avanza session likely expired — re-auth via BankID)"
+            )
+        else:
+            out["cash"] = cash
     except Exception as e:
         out["errors"].append(f"cash: {type(e).__name__}: {e}")
+
     try:
-        from portfolio.avanza import get_positions
-        out["positions"] = [asdict(p) for p in get_positions(account_id=account_id)]
-    except Exception as e:
-        out["errors"].append(f"positions: {type(e).__name__}: {e}")
-    try:
-        from portfolio.avanza import get_orders
-        # get_orders() doesn't accept an account_id kwarg — filter client-side.
-        all_orders = get_orders()
-        out["orders"] = [
-            asdict(o) for o in all_orders
-            if account_id is None or str(o.account_id) == str(account_id)
+        from portfolio.avanza_session import get_positions
+        all_positions = get_positions()
+        out["positions"] = [
+            p for p in all_positions
+            if account_id is None or str(p.get("account_id", "")) == account_id
         ]
     except Exception as e:
-        out["errors"].append(f"orders: {type(e).__name__}: {e}")
+        out["errors"].append(f"positions: {type(e).__name__}: {e}")
+
     try:
-        from portfolio.avanza import get_stop_losses
-        all_stops = get_stop_losses()
+        from portfolio.avanza_session import get_open_orders
+        out["orders"] = [_norm_order(o) for o in get_open_orders(account_id=account_id)]
+    except Exception as e:
+        out["errors"].append(f"orders: {type(e).__name__}: {e}")
+
+    try:
+        from portfolio.avanza_session import get_stop_losses
+        stops = get_stop_losses()
         out["stop_losses"] = [
-            asdict(s) for s in all_stops
-            if account_id is None or str(s.account_id) == str(account_id)
+            _norm_stop(s) for s in stops
+            if account_id is None or str(_stop_account(s)) == account_id
         ]
     except Exception as e:
         out["errors"].append(f"stop_losses: {type(e).__name__}: {e}")
     return out
+
+
+def _norm_order(raw: dict) -> dict:
+    """Normalize an Avanza orders-API dict to the snake_case shape the
+    dashboard view binds against."""
+    return {
+        "order_id":     str(raw.get("orderId", raw.get("id", ""))),
+        "orderbook_id": str(raw.get("orderBookId", raw.get("orderbookId", ""))),
+        "side":         str(raw.get("orderType", raw.get("side", ""))),
+        "price":        float(raw.get("price") or 0.0),
+        "volume":       int(raw.get("volume") or 0),
+        "status":       str(raw.get("status", raw.get("statusDescription", ""))),
+        "account_id":   str(raw.get("accountId", raw.get("account_id", ""))),
+    }
+
+
+def _stop_account(raw: dict) -> str:
+    return str(
+        raw.get("accountId") or raw.get("account_id") or
+        (raw.get("account") or {}).get("id", "")
+    )
+
+
+def _norm_stop(raw: dict) -> dict:
+    """Normalize an Avanza stop-loss dict (matches Order.from_api shape)."""
+    trigger = raw.get("trigger") or {}
+    order_event = raw.get("orderEvent") or raw.get("order") or {}
+    return {
+        "stop_id":       str(raw.get("id", raw.get("stopLossId", ""))),
+        "orderbook_id":  str((raw.get("orderbook") or {}).get("id",
+                              raw.get("orderBookId", raw.get("orderbookId", "")))),
+        "trigger_price": float(trigger.get("value") or raw.get("triggerPrice") or 0.0),
+        "trigger_type":  str(trigger.get("type") or raw.get("triggerType") or "LAST_PRICE"),
+        "sell_price":    float(order_event.get("price") or raw.get("sellPrice") or 0.0),
+        "volume":        int(order_event.get("volume") or raw.get("volume") or 0),
+        "status":        str(raw.get("status", "")),
+        "account_id":    _stop_account(raw),
+    }
 
 
 @app.route("/api/avanza_account")

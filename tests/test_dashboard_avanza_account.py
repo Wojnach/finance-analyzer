@@ -1,11 +1,14 @@
 """Tests for /api/avanza_account — live broker-state mirror endpoint.
 
-The route makes live calls into `portfolio.avanza.{account, trading}`. We
-mock those imports so the dashboard test suite never touches the network
-or expects valid Avanza credentials.
+The route makes live calls into `portfolio.avanza_session` (the
+Playwright BankID auth path used by the live metals_loop / golddigger).
+We mock those imports so the dashboard test suite never touches the
+network or expects a valid Avanza session.
+
+avanza_session returns plain dicts, so the success-path stubs below are
+dicts (not dataclasses).
 """
 
-from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
@@ -28,89 +31,65 @@ def _no_auth():
 
 
 # ---------------------------------------------------------------------------
-# Stub dataclasses so dataclasses.asdict succeeds without touching the
-# real avanza package types.
+# Stub dicts that match what `portfolio.avanza_session.*` actually returns.
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _Cash:
-    buying_power: float
-    total_value: float
-    own_capital: float
+def _stub_cash():
+    return {"buying_power": 12_345.6, "total_value": 98_765.4, "own_capital": 80_000.0}
 
 
-@dataclass(frozen=True)
-class _Position:
-    name: str
-    orderbook_id: str
-    instrument_type: str
-    volume: float
-    value: float
-    acquired_value: float
-    profit: float
-    profit_percent: float
-    last_price: float
-    change_percent: float
-    account_id: str
-    currency: str
+def _stub_position():
+    return {
+        "name": "MINI L SILVER",
+        "orderbook_id": "123456",
+        "instrument_id": "999",
+        "type": "WARRANT",
+        "volume": 10.0,
+        "value": 1500.0,
+        "acquired_value": 1400.0,
+        "profit": 100.0,
+        "profit_percent": 7.14,
+        "currency": "SEK",
+        "last_price": 150.0,
+        "change_percent": 1.25,
+        "account_id": "1625505",
+        "account_type": "ISK",
+    }
 
 
-@dataclass(frozen=True)
-class _Order:
-    order_id: str
-    orderbook_id: str
-    side: str
-    price: float
-    volume: int
-    status: str
-    account_id: str
+def _stub_raw_order():
+    """Avanza orders endpoint returns camelCase dicts which the dashboard
+    normalizes via _norm_order."""
+    return {
+        "orderId": "ord-1",
+        "orderBookId": "123456",
+        "orderType": "BUY",
+        "price": 149.5,
+        "volume": 5,
+        "status": "ACTIVE",
+        "accountId": "1625505",
+    }
 
 
-@dataclass(frozen=True)
-class _StopLoss:
-    stop_id: str
-    orderbook_id: str
-    trigger_price: float
-    trigger_type: str
-    sell_price: float
-    volume: int
-    status: str
-    account_id: str
+def _stub_raw_stop():
+    return {
+        "id": "sl-1",
+        "orderbook": {"id": "123456"},
+        "trigger": {"value": 140.0, "type": "LAST_PRICE"},
+        "orderEvent": {"price": 139.0, "volume": 10},
+        "status": "ACTIVE",
+        "accountId": "1625505",
+    }
 
 
 def _patch_avanza_success():
     """Patch all four import sites with successful stubs."""
-    cash = _Cash(buying_power=12_345.6, total_value=98_765.4, own_capital=80_000.0)
-    pos = _Position(
-        name="MINI L SILVER",
-        orderbook_id="123456",
-        instrument_type="WARRANT",
-        volume=10.0,
-        value=1500.0,
-        acquired_value=1400.0,
-        profit=100.0,
-        profit_percent=7.14,
-        last_price=150.0,
-        change_percent=1.25,
-        account_id="1625505",
-        currency="SEK",
-    )
-    order = _Order(
-        order_id="ord-1", orderbook_id="123456", side="BUY",
-        price=149.5, volume=5, status="ACTIVE", account_id="1625505",
-    )
-    stop = _StopLoss(
-        stop_id="sl-1", orderbook_id="123456", trigger_price=140.0,
-        trigger_type="LAST_PRICE", sell_price=139.0, volume=10,
-        status="ACTIVE", account_id="1625505",
-    )
-
     return [
-        patch("portfolio.avanza.get_buying_power", return_value=cash),
-        patch("portfolio.avanza.get_positions", return_value=[pos]),
-        patch("portfolio.avanza.get_orders", return_value=[order]),
-        patch("portfolio.avanza.get_stop_losses", return_value=[stop]),
+        patch("portfolio.avanza_session.get_buying_power", return_value=_stub_cash()),
+        patch("portfolio.avanza_session.get_positions", return_value=[_stub_position()]),
+        patch("portfolio.avanza_session.get_open_orders", return_value=[_stub_raw_order()]),
+        patch("portfolio.avanza_session.get_stop_losses", return_value=[_stub_raw_stop()]),
     ]
 
 
@@ -147,11 +126,11 @@ class TestAvanzaAccountEndpoint:
 
     def test_partial_failure_isolates_per_section(self, client):
         """One failing subsection (positions) should not blank the others."""
-        cash = _Cash(buying_power=1.0, total_value=2.0, own_capital=3.0)
-        with patch("portfolio.avanza.get_buying_power", return_value=cash), \
-             patch("portfolio.avanza.get_positions", side_effect=RuntimeError("avanza 503")), \
-             patch("portfolio.avanza.get_orders", return_value=[]), \
-             patch("portfolio.avanza.get_stop_losses", return_value=[]), \
+        cash = {"buying_power": 1.0, "total_value": 2.0, "own_capital": 3.0}
+        with patch("portfolio.avanza_session.get_buying_power", return_value=cash), \
+             patch("portfolio.avanza_session.get_positions", side_effect=RuntimeError("avanza 503")), \
+             patch("portfolio.avanza_session.get_open_orders", return_value=[]), \
+             patch("portfolio.avanza_session.get_stop_losses", return_value=[]), \
              _no_auth():
             resp = client.get("/api/avanza_account")
         assert resp.status_code == 200
@@ -163,12 +142,26 @@ class TestAvanzaAccountEndpoint:
         assert data["orders"] == []
         assert data["stop_losses"] == []
 
+    def test_cash_returning_none_records_error(self, client):
+        """avanza_session.get_buying_power returns None on read failure
+        (intentional sentinel — see the docstring there). The endpoint
+        should surface that as an error rather than misreading 'no cash'."""
+        with patch("portfolio.avanza_session.get_buying_power", return_value=None), \
+             patch("portfolio.avanza_session.get_positions", return_value=[]), \
+             patch("portfolio.avanza_session.get_open_orders", return_value=[]), \
+             patch("portfolio.avanza_session.get_stop_losses", return_value=[]), \
+             _no_auth():
+            resp = client.get("/api/avanza_account")
+        data = resp.get_json()
+        assert data["cash"] is None
+        assert any("cash:" in e for e in data["errors"])
+
     def test_all_failures_return_200_with_errors(self, client):
         """Even total auth failure should return 200 + errors[], not 500."""
-        with patch("portfolio.avanza.get_buying_power", side_effect=RuntimeError("no session")), \
-             patch("portfolio.avanza.get_positions", side_effect=RuntimeError("no session")), \
-             patch("portfolio.avanza.get_orders", side_effect=RuntimeError("no session")), \
-             patch("portfolio.avanza.get_stop_losses", side_effect=RuntimeError("no session")), \
+        with patch("portfolio.avanza_session.get_buying_power", side_effect=RuntimeError("no session")), \
+             patch("portfolio.avanza_session.get_positions", side_effect=RuntimeError("no session")), \
+             patch("portfolio.avanza_session.get_open_orders", side_effect=RuntimeError("no session")), \
+             patch("portfolio.avanza_session.get_stop_losses", side_effect=RuntimeError("no session")), \
              _no_auth():
             resp = client.get("/api/avanza_account")
         assert resp.status_code == 200
@@ -187,12 +180,12 @@ class TestAvanzaAccountEndpoint:
             # Accepts account_id kwarg etc. — the endpoint passes it through
             # since the codex P2 fix on 2026-05-04.
             call_count["n"] += 1
-            return _Cash(buying_power=float(call_count["n"]), total_value=0.0, own_capital=0.0)
+            return {"buying_power": float(call_count["n"]), "total_value": 0.0, "own_capital": 0.0}
 
-        with patch("portfolio.avanza.get_buying_power", side_effect=_count_cash), \
-             patch("portfolio.avanza.get_positions", return_value=[]), \
-             patch("portfolio.avanza.get_orders", return_value=[]), \
-             patch("portfolio.avanza.get_stop_losses", return_value=[]), \
+        with patch("portfolio.avanza_session.get_buying_power", side_effect=_count_cash), \
+             patch("portfolio.avanza_session.get_positions", return_value=[]), \
+             patch("portfolio.avanza_session.get_open_orders", return_value=[]), \
+             patch("portfolio.avanza_session.get_stop_losses", return_value=[]), \
              _no_auth():
             r1 = client.get("/api/avanza_account").get_json()
             r2 = client.get("/api/avanza_account").get_json()
@@ -209,12 +202,12 @@ class TestAvanzaAccountEndpoint:
 
         def _count_cash(*_args, **_kwargs):
             call_count["n"] += 1
-            return _Cash(buying_power=float(call_count["n"]), total_value=0.0, own_capital=0.0)
+            return {"buying_power": float(call_count["n"]), "total_value": 0.0, "own_capital": 0.0}
 
-        with patch("portfolio.avanza.get_buying_power", side_effect=_count_cash), \
-             patch("portfolio.avanza.get_positions", return_value=[]), \
-             patch("portfolio.avanza.get_orders", return_value=[]), \
-             patch("portfolio.avanza.get_stop_losses", return_value=[]), \
+        with patch("portfolio.avanza_session.get_buying_power", side_effect=_count_cash), \
+             patch("portfolio.avanza_session.get_positions", return_value=[]), \
+             patch("portfolio.avanza_session.get_open_orders", return_value=[]), \
+             patch("portfolio.avanza_session.get_stop_losses", return_value=[]), \
              _no_auth():
             r1 = client.get("/api/avanza_account").get_json()
             r2 = client.get("/api/avanza_account?force=1").get_json()
