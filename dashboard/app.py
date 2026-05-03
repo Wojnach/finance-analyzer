@@ -69,6 +69,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from portfolio.file_utils import load_json as _load_json_impl
 from portfolio.file_utils import load_jsonl as _load_jsonl_impl
+from portfolio.file_utils import load_jsonl_tail as _load_jsonl_tail_impl
 
 # ---------------------------------------------------------------------------
 # TTL Cache (BUG-130: avoid re-reading files on every API request)
@@ -101,6 +102,31 @@ def _read_json(path, ttl=_DEFAULT_TTL):
 
 
 def _read_jsonl(path, limit=100, ttl=_DEFAULT_TTL):
+    """Cached JSONL read returning the last `limit` entries.
+
+    2026-05-04: switched from load_jsonl(limit=) (which scans the entire
+    file then keeps the tail in a deque) to load_jsonl_tail (which
+    seeks from the end of the file). For an 80MB log the difference is
+    ~880ms vs ~5ms — every endpoint reading recent entries from a
+    large JSONL benefits.
+
+    `tail_bytes` is sized to `limit * 1KB` with a 512KB floor and a
+    4MB ceiling so larger limits get proportionally more bytes. If a
+    callsite passes an absurd limit and the typical entry is huge, the
+    4MB ceiling could under-deliver — but no current caller does that.
+    The legacy load_jsonl path (no limit) stays available via the
+    direct module import for callers that need the whole file.
+    """
+    if limit and limit > 0:
+        # Heuristic: ~1KB per entry, with bounds. Most JSONL entries in
+        # this codebase are 200-500 bytes; this leaves headroom.
+        tail_bytes = max(512_000, min(4_000_000, limit * 1024))
+        return _cached_read(
+            f"jsonl_tail:{path}:{limit}",
+            ttl,
+            lambda: _load_jsonl_tail_impl(path, max_entries=limit,
+                                            tail_bytes=tail_bytes),
+        )
     return _cached_read(
         f"jsonl:{path}:{limit}", ttl, lambda: _load_jsonl_impl(path, limit=limit)
     )

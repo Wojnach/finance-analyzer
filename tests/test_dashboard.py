@@ -83,6 +83,77 @@ class TestReadJsonl:
         result = _read_jsonl(f)
         assert len(result) == 2
 
+    def test_limit_uses_tail_seek_not_full_scan(self, tmp_path, monkeypatch):
+        """2026-05-04: _read_jsonl(limit=N) must call load_jsonl_tail
+        (seek-from-end), not load_jsonl (full scan + deque). Otherwise
+        an 80MB log re-scans on every dashboard poll.
+        """
+        f = tmp_path / "big.jsonl"
+        f.write_text("\n".join(json.dumps({"i": i}) for i in range(50)), encoding="utf-8")
+
+        from dashboard import app as app_mod
+
+        # Track invocations of both impl functions.
+        full_calls = {"n": 0}
+        tail_calls = {"n": 0}
+        original_full = app_mod._load_jsonl_impl
+        original_tail = app_mod._load_jsonl_tail_impl
+
+        def _track_full(*a, **kw):
+            full_calls["n"] += 1
+            return original_full(*a, **kw)
+
+        def _track_tail(*a, **kw):
+            tail_calls["n"] += 1
+            return original_tail(*a, **kw)
+
+        monkeypatch.setattr(app_mod, "_load_jsonl_impl", _track_full)
+        monkeypatch.setattr(app_mod, "_load_jsonl_tail_impl", _track_tail)
+        # Bust the cache so we actually hit the dispatch path.
+        app_mod._cache.clear()
+
+        result = _read_jsonl(f, limit=5)
+        assert len(result) == 5
+        # Tail path was used; full-scan path was NOT.
+        assert tail_calls["n"] == 1, f"expected tail path, got {tail_calls['n']} tail calls"
+        assert full_calls["n"] == 0, f"full-scan path was hit ({full_calls['n']}x)"
+
+    def test_no_limit_uses_full_scan(self, tmp_path, monkeypatch):
+        """When the caller wants the WHOLE file (no limit), keep using
+        the load_jsonl path — load_jsonl_tail can't deliver entries
+        outside its tail_bytes window."""
+        f = tmp_path / "all.jsonl"
+        f.write_text('{"a":1}\n{"a":2}\n', encoding="utf-8")
+
+        from dashboard import app as app_mod
+        full_calls = {"n": 0}
+        original_full = app_mod._load_jsonl_impl
+        def _track(*a, **kw):
+            full_calls["n"] += 1
+            return original_full(*a, **kw)
+        monkeypatch.setattr(app_mod, "_load_jsonl_impl", _track)
+        app_mod._cache.clear()
+
+        # Pass limit=None explicitly to opt out of tail-mode.
+        result = _read_jsonl(f, limit=None)
+        assert len(result) == 2
+        assert full_calls["n"] == 1
+
+    def test_returns_chronological_order(self, tmp_path):
+        """load_jsonl_tail returns entries in file order (oldest→newest).
+        Same as the old load_jsonl(limit=N) behavior — verify the switch
+        didn't reverse anything."""
+        f = tmp_path / "ordered.jsonl"
+        lines = [json.dumps({"i": i}) for i in range(20)]
+        f.write_text("\n".join(lines), encoding="utf-8")
+
+        # Bust cache for a clean read.
+        from dashboard import app as app_mod
+        app_mod._cache.clear()
+
+        result = _read_jsonl(f, limit=5)
+        assert [e["i"] for e in result] == [15, 16, 17, 18, 19]
+
 
 # ---------------------------------------------------------------------------
 # Authentication
