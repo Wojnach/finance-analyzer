@@ -1502,5 +1502,42 @@ from dashboard.house_blueprint import bp as _house_bp  # noqa: E402
 app.register_blueprint(_house_bp)
 
 
+def _serve_dual_stack(port: int = 5055) -> None:
+    """Run the Flask app on a dual-stack IPv4+IPv6 socket.
+
+    2026-05-04: previously used `app.run(host="0.0.0.0", ...)` which is
+    IPv4-only. Local Python tooling (urllib, requests) on Windows that
+    resolves "localhost" to ::1 first then waits ~2s for the IPv6
+    connection to fail before falling back to IPv4 — perceived as a
+    universal "2s auth floor" but actually a client-side Happy Eyeballs
+    timeout. Real users (Cloudflare tunnel, LAN browsers) never see it.
+
+    Switching to `host="::"` would fix localhost on Linux but on
+    Windows the default `IPV6_V6ONLY=True` socket option means IPv4
+    clients can no longer connect. So we bind manually with
+    `IPV6_V6ONLY=0`, which works on every modern Windows / Linux /
+    macOS host.
+    """
+    import socket
+    from werkzeug.serving import ThreadedWSGIServer
+
+    # Build the dual-stack listening socket explicitly. IPV6_V6ONLY=0
+    # enables IPv4 mapping (::ffff:127.0.0.1 etc.), so a single AF_INET6
+    # socket accepts both IPv4 and IPv6 clients.
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("::", port))
+    sock.listen(128)
+
+    # ThreadedWSGIServer accepts `fd=` so it skips its own bind/listen
+    # and reuses our pre-configured socket. ThreadingMixIn handles
+    # concurrent requests just like Werkzeug's default app.run().
+    server = ThreadedWSGIServer("::", port, app, fd=sock.fileno())
+    print(f"Dashboard listening on dual-stack [::]:{port} (IPv4 + IPv6)",
+          flush=True)
+    server.serve_forever()
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5055, debug=False)
+    _serve_dual_stack(port=5055)
