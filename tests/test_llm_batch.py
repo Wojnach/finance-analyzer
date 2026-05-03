@@ -670,3 +670,231 @@ class TestCachedOrEnqueueRotationGate:
         assert result is None
         assert enqueues == []
         self._clear_cache(key)
+
+
+# ---------------------------------------------------------------------------
+# fingpt batch observability (fix/fingpt-batch-observability, 2026-05-03)
+# ---------------------------------------------------------------------------
+#
+# Verifies the metrics dict returned by _flush_fingpt_phase on every code
+# path and the per-failure-mode warnings. Background: the previous summary
+# log "LLM batch: %d results in %.1fs (M:%d Q:%d F:%d)" counted only
+# Phase 1+2 results, so a fingpt-only cycle always logged "0 results"
+# whether fingpt succeeded or silently failed. New format includes the
+# parsed/queued count for each phase.
+
+
+class TestFingptPhaseMetrics:
+    """_flush_fingpt_phase returns a metrics dict on every code path so the
+    caller (flush_llm_batch) can include parsed counts in the summary log
+    and downstream consumers can detect silent failures.
+    """
+
+    def test_metrics_on_success(self, fake_fingpt_infer, fake_llama_server, stash_recorder):
+        """Happy path: 3 prompts in, 3 texts received, 3 parsed, 1 group stashed."""
+        fake_llama_server["response"] = ["positive", "negative", "neutral"]
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        metrics = _flush_fingpt_phase([
+            (
+                "BTC:metrics-success",
+                "headlines",
+                {"mode": "headlines", "ticker": "BTC", "texts": ["h1", "h2", "h3"]},
+            ),
+        ])
+
+        assert metrics == {
+            "queries": 3,
+            "received": 3,
+            "parsed": 3,
+            "stashed_groups": 1,
+            "exception": None,
+        }
+
+    def test_metrics_on_empty_queue(self, fake_fingpt_infer, fake_llama_server, stash_recorder):
+        """Empty queue: all-zero metrics, no exception, no warning."""
+        from portfolio.llm_batch import _flush_fingpt_phase
+        metrics = _flush_fingpt_phase([])
+        assert metrics == {
+            "queries": 0,
+            "received": 0,
+            "parsed": 0,
+            "stashed_groups": 0,
+            "exception": None,
+        }
+
+    def test_metrics_on_all_none_response_warns(
+        self, fake_fingpt_infer, fake_llama_server, stash_recorder, caplog,
+    ):
+        """When the server returns None for every prompt, metrics show
+        received=0 / parsed=0 and a specific warning fires so operators
+        can see "server unavailable" instead of generic silence.
+        """
+        fake_llama_server["response"] = [None, None, None]
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        with caplog.at_level("WARNING", logger="portfolio.llm_batch"):
+            metrics = _flush_fingpt_phase([
+                ("BTC:none", "headlines",
+                 {"mode": "headlines", "ticker": "BTC", "texts": ["h1", "h2", "h3"]}),
+            ])
+
+        assert metrics["queries"] == 3
+        assert metrics["received"] == 0
+        assert metrics["parsed"] == 0
+        assert metrics["exception"] is None
+        # Warning text identifies the failure mode and the count
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("server returned None for all 3 prompts" in m for m in warnings), warnings
+
+    def test_metrics_on_parser_majority_failure_warns(
+        self, fake_fingpt_infer, fake_llama_server, stash_recorder, caplog, monkeypatch,
+    ):
+        """Server returns text but the parser raises on most of them — that's
+        the 2026-04-09 parser-defaulting-neutral regression class. Metrics
+        show received=N parsed<<N and a parser-specific warning fires.
+        """
+        # Force _parse_sentiment to raise on every text — covers the case
+        # where the prompt template drifts and the model emits something
+        # the parser cannot handle. The parser wrapper catches the
+        # exception and returns None, which is what _flush_fingpt_phase
+        # counts.
+        def boom(text):
+            raise ValueError("template drift")
+        monkeypatch.setattr(fake_fingpt_infer, "_parse_sentiment", boom)
+
+        fake_llama_server["response"] = ["garbage1", "garbage2", "garbage3", "garbage4"]
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        with caplog.at_level("WARNING", logger="portfolio.llm_batch"):
+            metrics = _flush_fingpt_phase([
+                ("ETH:parser", "headlines",
+                 {"mode": "headlines", "ticker": "ETH",
+                  "texts": ["h1", "h2", "h3", "h4"]}),
+            ])
+
+        assert metrics["queries"] == 4
+        assert metrics["received"] == 4    # texts came back
+        assert metrics["parsed"] == 0      # but parser failed on every one
+        assert metrics["exception"] is None
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any(
+            "parser returned None for 4/4" in m for m in warnings
+        ), warnings
+
+    def test_metrics_on_top_level_exception(
+        self, fake_fingpt_infer, stash_recorder, caplog, monkeypatch,
+    ):
+        """When query_llama_server_batch raises, metrics record the
+        exception class name and the warning includes the repr so the
+        operator does not have to dig through exc_info to triage.
+        """
+        def boom(name, prompts_and_params):
+            raise RuntimeError("server exploded")
+
+        import portfolio.llama_server as llama_server_mod
+        monkeypatch.setattr(llama_server_mod, "query_llama_server_batch", boom)
+
+        from portfolio.llm_batch import _flush_fingpt_phase
+        with caplog.at_level("WARNING", logger="portfolio.llm_batch"):
+            metrics = _flush_fingpt_phase([
+                ("BTC:exc", "headlines",
+                 {"mode": "headlines", "ticker": "BTC", "texts": ["h1"]}),
+            ])
+
+        assert metrics["exception"] == "RuntimeError"
+        # Phase bailed before stashing
+        assert metrics["stashed_groups"] == 0
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("server exploded" in m for m in warnings), warnings
+
+
+class TestFlushLlmBatchSummaryLog:
+    """The summary log line format changed 2026-05-03 from
+    "LLM batch: %d results in %.1fs (M:%d Q:%d F:%d)" to
+    "LLM batch: M=%d/%d Q=%d/%d F=%d/%d in %.1fs"
+    so a fingpt-only cycle no longer falsely reports "0 results".
+    """
+
+    def test_summary_log_uses_parsed_over_queued_format(
+        self, fake_fingpt_infer, fake_llama_server, stash_recorder,
+        reset_rotation_counter, caplog,
+    ):
+        """Drive flush_llm_batch with a fingpt-only queue and assert the
+        summary line shows F=k/n (parsed/queued), not '%d results'.
+        """
+        from portfolio.llm_batch import (
+            _fingpt_queue,
+            _lock,
+            _ministral_queue,
+            _qwen3_queue,
+            enqueue_fingpt,
+            flush_llm_batch,
+        )
+        with _lock:
+            _ministral_queue.clear()
+            _qwen3_queue.clear()
+            _fingpt_queue.clear()
+
+        fake_llama_server["response"] = ["positive", "negative"]
+        enqueue_fingpt(
+            "BTC:summary", "headlines",
+            {"mode": "headlines", "ticker": "BTC", "texts": ["h1", "h2"]},
+        )
+        # counter=2 → next slot is fingpt (after warmup logic), but we pass
+        # the queued items directly so the rotation gate is irrelevant here.
+        reset_rotation_counter._full_llm_cycle_count = 2
+
+        with caplog.at_level("INFO", logger="portfolio.llm_batch"):
+            flush_llm_batch()
+
+        summary_lines = [
+            r.getMessage() for r in caplog.records
+            if r.levelname == "INFO" and r.getMessage().startswith("LLM batch: M=")
+        ]
+        assert len(summary_lines) == 1, [r.getMessage() for r in caplog.records]
+        line = summary_lines[0]
+        # F=2/2 means 2 parsed out of 2 queued — the whole point of the fix.
+        assert "F=2/2" in line, line
+        assert "M=0/0" in line and "Q=0/0" in line, line
+        # And the old misleading "%d results" wording is gone.
+        assert "results in" not in line, line
+
+    def test_summary_log_shows_fingpt_silent_failure(
+        self, fake_fingpt_infer, fake_llama_server, stash_recorder,
+        reset_rotation_counter, caplog,
+    ):
+        """When fingpt actually fails (server returns all None), the
+        summary line surfaces F=0/N — easy to spot in tail/grep.
+        """
+        from portfolio.llm_batch import (
+            _fingpt_queue,
+            _lock,
+            _ministral_queue,
+            _qwen3_queue,
+            enqueue_fingpt,
+            flush_llm_batch,
+        )
+        with _lock:
+            _ministral_queue.clear()
+            _qwen3_queue.clear()
+            _fingpt_queue.clear()
+
+        fake_llama_server["response"] = [None, None, None]
+        enqueue_fingpt(
+            "ETH:silent", "headlines",
+            {"mode": "headlines", "ticker": "ETH",
+             "texts": ["h1", "h2", "h3"]},
+        )
+        reset_rotation_counter._full_llm_cycle_count = 0
+
+        with caplog.at_level("INFO", logger="portfolio.llm_batch"):
+            flush_llm_batch()
+
+        summary_lines = [
+            r.getMessage() for r in caplog.records
+            if r.levelname == "INFO" and r.getMessage().startswith("LLM batch: M=")
+        ]
+        assert len(summary_lines) == 1
+        line = summary_lines[0]
+        assert "F=0/3" in line, line  # silent failure visible

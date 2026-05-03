@@ -199,6 +199,9 @@ def flush_llm_batch():
 
     results = {}
     t0 = time.monotonic()
+    m_parsed = 0  # 2026-05-03 (fix/fingpt-batch-observability): track per-phase
+    q_parsed = 0  # parsed counts so the summary log shows results-vs-queue
+    f_parsed = 0  # rather than the misleading "%d results" of the M+Q dict.
 
     # Phase 1: All Ministral queries (lock held for entire phase)
     if m_batch:
@@ -217,6 +220,7 @@ def flush_llm_batch():
                 return result
 
             phase = _flush_via_server("ministral3", m_batch, _build_prompt, _parse_ministral, ["[INST]"])
+            m_parsed = len(phase)
             results.update(phase)
         except Exception as e:
             logger.warning("LLM batch Ministral failed: %s", e)
@@ -239,6 +243,7 @@ def flush_llm_batch():
                 "qwen3", q_batch, _qwen_build, _parse_qwen3,
                 ["<|endoftext|>", "<|im_end|>"],
             )
+            q_parsed = len(phase)
             results.update(phase)
         except Exception as e:
             logger.warning("LLM batch Qwen3 failed: %s", e)
@@ -250,13 +255,38 @@ def flush_llm_batch():
     # inference time per cycle. Fingpt is a SHADOW sentiment signal (does
     # not vote) so its failures are log-only — primary sentiment (CryptoBERT
     # / Trading-Hero-LLM) is unaffected if this phase breaks.
+    f_queries = 0  # 2026-05-03: prompts sent (1 per cumulative entry, N per
+                   # headlines entry). Used as the F denominator so the unit
+                   # is "prompts" not "queue groups" — apples-to-apples with
+                   # the fingpt parser stage that produces one parsed dict
+                   # per prompt.
     if f_batch:
         logger.info("LLM batch: %d fingpt queries", len(f_batch))
-        _flush_fingpt_phase(f_batch)
+        # 2026-05-03 (fix/fingpt-batch-observability): _flush_fingpt_phase now
+        # returns a metrics dict on every code path. Used in the summary log
+        # below so a fingpt-only cycle no longer reports "0 results" when
+        # fingpt actually stashed its outputs to sentiment._pending_ab_entries.
+        f_metrics = _flush_fingpt_phase(f_batch)
+        f_parsed = f_metrics.get("parsed", 0)
+        f_queries = f_metrics.get("queries", 0)
 
     elapsed = time.monotonic() - t0
-    logger.info("LLM batch: %d results in %.1fs (M:%d Q:%d F:%d)",
-                len(results), elapsed, len(m_batch), len(q_batch), len(f_batch))
+    # 2026-05-03 (fix/fingpt-batch-observability): replaced the old line
+    # `"LLM batch: %d results in %.1fs (M:%d Q:%d F:%d)"` which counted
+    # only Phase 1+2 entries in the local `results` dict — fingpt-only
+    # cycles always logged "0 results" regardless of actual outcome.
+    # New format shows parsed/queued for each phase so silent fingpt
+    # failures (e.g. F=0/6) are visible at a glance. Note: M and Q use
+    # `len(_batch)` because those phases run 1 prompt per queue entry;
+    # fingpt uses the metrics-tracked query count because one queue entry
+    # can fan out to multiple per-headline prompts.
+    logger.info(
+        "LLM batch: M=%d/%d Q=%d/%d F=%d/%d in %.1fs",
+        m_parsed, len(m_batch),
+        q_parsed, len(q_batch),
+        f_parsed, f_queries,
+        elapsed,
+    )
 
     # Advance rotation counter — next flush will target the next LLM in rotation.
     # Only bumped when at least one phase had work (we already returned early
@@ -267,17 +297,43 @@ def flush_llm_batch():
     return results
 
 
-def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> None:
+def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> dict:
     """Execute Phase 3: load finance-llama-8b once, run all queued sentiment
     prompts, stash results in sentiment._pending_ab_entries.
 
-    Per-item failure (None text from the server) is logged as a tagged
-    fingpt:error result — the A/B logger sees it and writes a zero-confidence
-    entry instead of silently dropping the sample.
+    Returns a metrics dict on EVERY code path (success, partial, exception):
 
-    The whole phase is wrapped in try/except so fingpt errors never leak out
-    into the main loop. Shadow signals must not crash anything above them.
+        {
+          "queries": int,         # prompts sent to llama-server
+          "received": int,        # non-None text completions back
+          "parsed": int,          # parsed dicts (non-None) handed to _stash_fingpt_result
+          "stashed_groups": int,  # distinct (ab_key, sub_key) groups stashed
+          "exception": str|None,  # exception class name if the bare except fired
+        }
+
+    Per-item failure (None text from the server) bubbles up to the A/B
+    logger which writes a tagged fingpt:error entry instead of silently
+    dropping the sample.
+
+    The whole phase is wrapped in try/except so fingpt errors never leak
+    out into the main loop. Shadow signals must not crash anything above
+    them. The metrics dict is the observability hook so a silent failure
+    becomes loud — see callers in flush_llm_batch().
+
+    2026-05-03 (fix/fingpt-batch-observability): added metrics return +
+    specific failure-mode warnings (server-returned-all-None, parser-
+    failed-majority). Previously the phase returned None and a single
+    bare `except` swallowed every error class with one generic warning,
+    making silent regressions invisible until the A/B log was inspected
+    by hand.
     """
+    metrics = {
+        "queries": 0,
+        "received": 0,
+        "parsed": 0,
+        "stashed_groups": 0,
+        "exception": None,
+    }
     try:
         # fingpt_infer provides the prompt templates, stop tokens, and
         # response parsers that were originally used by the retired daemon.
@@ -344,19 +400,53 @@ def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> None:
                     })
                     meta.append((ab_key, sub_key, ctx, i))
 
+        metrics["queries"] = len(prompts_and_params)
         if not prompts_and_params:
-            return
+            return metrics
 
         # Single HTTP batch — llama_server holds its own file lock for the
         # duration so no other process can swap the model mid-phase.
         from portfolio.llama_server import query_llama_server_batch
         texts_out = query_llama_server_batch("finance-llama-8b", prompts_and_params)
+        metrics["received"] = sum(1 for t in texts_out if t is not None)
+
+        # 2026-05-03: explicit warning when the server returned None for
+        # every prompt — this is the "silent failure" mode (model swap
+        # broke, llama-server crashed mid-batch, file-lock starvation).
+        # Without this line operators see only the summary "F=0/N" and
+        # have to dig through agent.log to figure out which layer broke.
+        if metrics["queries"] > 0 and metrics["received"] == 0:
+            logger.warning(
+                "fingpt: server returned None for all %d prompts "
+                "(likely llama_server unavailable or swap failed)",
+                metrics["queries"],
+            )
 
         # Group results back by (ab_key, sub_key) → list of per-prompt parsed dicts.
         grouped: dict[tuple[str, str], list[tuple[int, dict | None, dict]]] = {}
         for (ab_key, sub_key, ctx, prompt_idx), text in zip(meta, texts_out):
             parsed = _parse_fingpt_completion(text, fingpt_infer)
+            if parsed is not None:
+                metrics["parsed"] += 1
             grouped.setdefault((ab_key, sub_key), []).append((prompt_idx, parsed, ctx))
+
+        # 2026-05-03: parser-regression warning. If the server gave us text
+        # but the parser produced None for >50% of completions, something
+        # broke upstream in fingpt_infer (template change, model swap to a
+        # chat-tuned variant, prompt format drift). The 50% threshold is
+        # generous — the parser always returns SOME label for non-empty
+        # text, so a high None rate means the completions themselves are
+        # garbage (empty / truncated / wrong-language).
+        if (
+            metrics["received"] > 0
+            and metrics["parsed"] * 2 < metrics["received"]
+        ):
+            logger.warning(
+                "fingpt: parser returned None for %d/%d completions "
+                "(>50%%; possible parser or prompt regression)",
+                metrics["received"] - metrics["parsed"],
+                metrics["received"],
+            )
 
         # Stash each (ab_key, sub_key) result into the sentiment buffer. The
         # buffer is consumed by sentiment.flush_ab_log() which runs right
@@ -384,8 +474,15 @@ def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> None:
             else:
                 per_headline = [p for (_idx, p, _c) in items]
                 _stash_fingpt_result(ab_key, sub_key, per_headline)
-    except Exception:
-        logger.warning("LLM batch fingpt phase failed", exc_info=True)
+            metrics["stashed_groups"] += 1
+    except Exception as e:
+        # 2026-05-03: log the exception class name + repr so a single grep
+        # tells you what blew up. The previous bare `except: warning(...,
+        # exc_info=True)` produced a multi-line traceback that was harder
+        # to scan in tail/grep contexts (loop_out tail, telegram digests).
+        metrics["exception"] = type(e).__name__
+        logger.warning("LLM batch fingpt phase failed: %s", repr(e), exc_info=True)
+    return metrics
 
 
 def _parse_fingpt_completion(text: str | None, fingpt_infer) -> dict | None:
