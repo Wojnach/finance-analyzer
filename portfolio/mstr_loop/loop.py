@@ -23,6 +23,28 @@ from portfolio.mstr_loop.strategies import load_enabled_strategies
 logger = logging.getLogger(__name__)
 
 
+def _write_heartbeat(bot_state: state.BotState, cycle_count: int) -> None:
+    """Write the loop_health watchdog heartbeat after a successful cycle.
+
+    Mirrors crypto_loop / oil_loop. The watchdog only requires `ts`; the
+    other fields are operator-facing context. Failure here must never
+    crash the loop — it's best-effort telemetry.
+    """
+    try:
+        from portfolio.file_utils import atomic_write_json
+        payload = {
+            "ts": datetime.datetime.now(datetime.UTC).isoformat(),
+            "status": "ok",
+            "cycle": cycle_count,
+            "ok": True,
+            "phase": config.PHASE,
+            "n_positions": len(bot_state.positions or {}),
+        }
+        atomic_write_json(config.HEARTBEAT_FILE, payload)
+    except Exception:
+        logger.debug("loop: heartbeat write failed", exc_info=True)
+
+
 def _log_poll(bundle_or_none, reason: str, cycle_count: int) -> None:
     """Append a per-cycle snapshot to POLL_LOG for post-hoc debugging."""
     record: dict[str, Any] = {
@@ -146,10 +168,17 @@ def run_forever() -> None:
     while True:
         cycle_started = time.monotonic()
         cycle_count += 1
+        cycle_ok = False
         try:
             run_cycle(bot_state, strategies, cycle_count)
+            cycle_ok = True
         except Exception:
             logger.exception("mstr_loop: run_cycle raised — continuing")
+
+        # Heartbeat for the loop_health watchdog. Skipped on exception so
+        # the watchdog sees staleness and pages. Mirrors crypto_loop.
+        if cycle_ok:
+            _write_heartbeat(bot_state, cycle_count)
 
         # Drift-free cadence
         elapsed = time.monotonic() - cycle_started

@@ -119,6 +119,7 @@ data/loop.log
 # as "modified" so they're a deliberate choice to commit, not an accident.
 data/crypto_loop.heartbeat
 data/oil_loop.heartbeat
+data/mstr_loop.heartbeat
 data/crypto_loop_out.txt
 data/oil_loop_out.txt
 data/crypto_loop.lock

@@ -163,8 +163,11 @@ class TestReadLoopHealthRollup:
         depending on whether loops have run."""
         assert "crypto" in loop_health.DEFAULT_HEARTBEAT_FILES
         assert "oil" in loop_health.DEFAULT_HEARTBEAT_FILES
+        assert "mstr" in loop_health.DEFAULT_HEARTBEAT_FILES
         assert loop_health.DEFAULT_HEARTBEAT_FILES["crypto"].endswith(
             "crypto_loop.heartbeat")
+        assert loop_health.DEFAULT_HEARTBEAT_FILES["mstr"].endswith(
+            "mstr_loop.heartbeat")
 
     def test_rollup_includes_checked_at_and_threshold(self, tmp_path, fixed_now):
         rollup = loop_health.read_loop_health(

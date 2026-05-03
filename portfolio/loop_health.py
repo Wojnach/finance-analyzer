@@ -42,6 +42,7 @@ STALE_THRESHOLD_SECONDS = 300
 DEFAULT_HEARTBEAT_FILES: dict[str, str] = {
     "crypto": "data/crypto_loop.heartbeat",
     "oil": "data/oil_loop.heartbeat",
+    "mstr": "data/mstr_loop.heartbeat",
 }
 
 
