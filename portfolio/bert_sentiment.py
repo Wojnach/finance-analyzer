@@ -131,6 +131,22 @@ def _resolve_finbert_snapshot(cache_dir: str, subdir: str) -> str | None:
     return snapshots[0] if snapshots else None
 
 
+def _has_meta_tensor(model: Any) -> bool:
+    """Walk both `parameters()` and `buffers()` for the meta-tensor check.
+
+    BERT models keep LayerNorm running mean/var (and a few other tensors)
+    as buffers, not parameters. The race-induced meta corruption we
+    observed at 2026-05-03 23:38 surfaces as "Tensor on device meta..."
+    during the forward pass — that error fires whether the offender is
+    a parameter OR a buffer. Checking parameters() alone would miss the
+    buffer case, so do both.
+    """
+    return (
+        any(p.is_meta for p in model.parameters())
+        or any(b.is_meta for b in model.buffers())
+    )
+
+
 def _accelerate_version() -> str | None:
     """Return the installed accelerate version string for diagnostic logging,
     or None if accelerate isn't importable. Used in the meta-tensor retry
@@ -219,7 +235,7 @@ def _load_model(name: str) -> tuple[Any, Any, str, threading.Lock]:
     # Triggered: only when accelerate's race actually leaves meta tensors,
     # which is rare and load-time-only — never during steady-state
     # inference.
-    if any(p.is_meta for p in model.parameters()):
+    if _has_meta_tensor(model):
         logger.warning(
             "BERT %s loaded with meta tensors (likely accelerate race with "
             "concurrent CUDA load); retrying with eager init",
@@ -233,7 +249,7 @@ def _load_model(name: str) -> tuple[Any, Any, str, threading.Lock]:
         model = AutoModelForSequenceClassification.from_pretrained(
             load_path, **eager_kwargs,
         )
-        if any(p.is_meta for p in model.parameters()):
+        if _has_meta_tensor(model):
             raise RuntimeError(
                 f"BERT {name} still has meta tensors after retry "
                 f"(accelerate version: {_accelerate_version() or 'not installed'}, "

@@ -146,6 +146,11 @@ def fake_torch_and_transformers(monkeypatch):
             # state via _make_fake_model_with_params.
             return iter([])
 
+        def buffers(self):
+            # _has_meta_tensor also walks buffers (LayerNorm running
+            # mean/var etc.); default fakes expose an empty list.
+            return iter([])
+
         def to(self, device):
             self._device = device
             return self
@@ -484,23 +489,32 @@ class _FakeParam:
         self.is_meta = is_meta
 
 
-def _make_fake_model_with_params(meta_count: int, total: int = 5):
+def _make_fake_model_with_params(
+    meta_count: int = 0, total: int = 5,
+    meta_buffer_count: int = 0, total_buffers: int = 3,
+):
     """Build a fake model whose `.parameters()` yields `total` _FakeParam
-    instances, the first `meta_count` of which have is_meta=True. Returns
-    a _FakeModel-like object with .parameters() and .train() defined.
+    instances (first `meta_count` with is_meta=True), and `.buffers()`
+    yields `total_buffers` instances (first `meta_buffer_count` with
+    is_meta=True). Lets tests exercise both paths of _has_meta_tensor.
     """
     class _FakeModelWithParams:
-        load_count_local = 0
-
         def __init__(self):
             self._params = [
                 _FakeParam(is_meta=(i < meta_count))
                 for i in range(total)
             ]
+            self._buffers = [
+                _FakeParam(is_meta=(i < meta_buffer_count))
+                for i in range(total_buffers)
+            ]
             self._device = "cpu"
 
         def parameters(self):
             return iter(self._params)
+
+        def buffers(self):
+            return iter(self._buffers)
 
         def train(self, _flag):
             return self
@@ -614,6 +628,42 @@ class TestMetaTensorRecovery:
         assert "CryptoBERT" in str(excinfo.value)
         # Bad model must NOT have been cached
         assert "CryptoBERT" not in bert_sentiment._models
+
+    def test_meta_buffer_also_triggers_retry(
+        self, fake_torch_and_transformers, caplog,
+    ):
+        """LayerNorm running mean/var etc. live as buffers, not parameters.
+        A meta tensor in a buffer would slip past a parameters()-only check
+        and cause the same predict-time forward-pass failure. _has_meta_tensor
+        walks both; this test verifies that path.
+        """
+        from portfolio import bert_sentiment
+        FakeAutoModel = fake_torch_and_transformers["FakeAutoModel"]
+
+        call_log: list = []
+
+        def fake_from_pretrained(*args, **kwargs):
+            call_log.append(dict(kwargs))
+            if len(call_log) == 1:
+                # All params clean, but ONE buffer is meta — buffer-only
+                # corruption should still trigger the retry.
+                return _make_fake_model_with_params(
+                    meta_count=0, meta_buffer_count=1,
+                )
+            return _make_fake_model_with_params(
+                meta_count=0, meta_buffer_count=0,
+            )
+
+        FakeAutoModel.from_pretrained = staticmethod(fake_from_pretrained)
+        bert_sentiment._reset_for_tests()
+
+        with caplog.at_level("WARNING", logger="portfolio.bert_sentiment"):
+            bert_sentiment.predict("CryptoBERT", ["warmup"])
+
+        assert len(call_log) == 2, (
+            f"buffer-only meta should still trigger retry, got {len(call_log)}"
+        )
+        assert call_log[1].get("low_cpu_mem_usage") is False
 
     def test_finbert_retry_uses_snapshot_path(
         self, fake_torch_and_transformers, monkeypatch, tmp_path,
