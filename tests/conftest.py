@@ -30,6 +30,36 @@ def _reset_module_state():
     reset_all_high_risk()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _redirect_signal_utility_disk_cache(tmp_path_factory):
+    """Redirect SIGNAL_UTILITY_CACHE_FILE to a session-scoped tmp path so the
+    pytest suite NEVER touches the production data/signal_utility_cache.json.
+
+    Added 2026-05-04 after the L2 disk cache landed: invalidate_signal_utility_cache()
+    now deletes the disk file, and the per-test in-memory clearing fixture below
+    was indiscriminately wiping the production L2 cache every test run. With
+    this session-level monkeypatch, the production file path is replaced once
+    at session start with a tmpdir that gets cleaned up automatically when
+    pytest exits.
+
+    Session-scoped because file path doesn't need per-test isolation (the
+    in-memory clear below handles that), and a per-test redirect would burn
+    a tmpdir per test for thousands of tests.
+    """
+    try:
+        import portfolio.accuracy_stats as acc_mod
+    except ImportError:
+        yield
+        return
+    tmp_dir = tmp_path_factory.mktemp("signal_utility_disk")
+    original = acc_mod.SIGNAL_UTILITY_CACHE_FILE
+    acc_mod.SIGNAL_UTILITY_CACHE_FILE = tmp_dir / "signal_utility_cache.json"
+    try:
+        yield
+    finally:
+        acc_mod.SIGNAL_UTILITY_CACHE_FILE = original
+
+
 @pytest.fixture(autouse=True)
 def _isolate_signal_utility_cache():
     """Clear the signal_utility in-memory cache around each test.
@@ -49,6 +79,11 @@ def _isolate_signal_utility_cache():
       - before: protects against state leaked from a prior test or
         module import
       - after: protects against this test's state leaking into others
+
+    2026-05-04: invalidate_signal_utility_cache() now also deletes the L2
+    disk file. The session-scoped fixture above redirects the file path to
+    a tmpdir, so per-test invalidate calls are safe (they delete the
+    tmpdir's file, not production's).
     """
     try:
         from portfolio.accuracy_stats import invalidate_signal_utility_cache
