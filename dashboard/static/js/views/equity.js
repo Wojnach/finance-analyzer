@@ -139,7 +139,11 @@ function _renderBody() {
       const sek = document.createElement("span");
       sek.style.textAlign = "right";
       sek.style.color = "var(--txd)";
-      sek.textContent = t.sek != null ? Number(t.sek).toFixed(0) + " kr" : "—";
+      // /api/trades emits total_sek (the field name on the underlying
+      // transaction record). Accept ``sek`` as a legacy fallback so a
+      // future API rename doesn't blank the column.
+      const sekVal = t.total_sek ?? t.sek;
+      sek.textContent = sekVal != null ? Number(sekVal).toFixed(0) + " kr" : "—";
 
       row.append(ts, strat, action, tk, sek);
       wrap.append(row);

@@ -43,6 +43,8 @@ def contract_env(tmp_path, monkeypatch):
         "HEALTH_STATE_FILE": tmp_path / "data" / "health_state.json",
         "LAYER2_JOURNAL_FILE": tmp_path / "data" / "layer2_journal.jsonl",
         "CLAUDE_INVOCATIONS_FILE": tmp_path / "data" / "claude_invocations.jsonl",
+        "LAYER2_INVOCATIONS_FILE": tmp_path / "data" / "invocations.jsonl",
+        "CONTRACT_STATE_FILE": tmp_path / "data" / "contract_state.json",
     }
     for name, p in paths.items():
         monkeypatch.setattr(loop_contract, name, p)
@@ -215,8 +217,16 @@ def test_violation_writes_to_critical_errors_journal(contract_env):
 
 
 def test_violation_includes_last_invocation_context(contract_env):
-    """If claude_invocations.jsonl has a recent entry, it's quoted in
-    the violation details — saves the user from doing the correlation."""
+    """If invocations.jsonl has a recent L2 entry, it's quoted in
+    the violation details — saves the user from doing the correlation.
+
+    2026-05-04: now reads LAYER2_INVOCATIONS_FILE (the L2-specific log)
+    instead of the global claude log. The global log has entries from
+    claude_fundamental, bigbet, iskbets, golddigger fix-agent — its tail
+    is essentially noise here, and produced misleading details on
+    2026-05-03/04 (last_invocation_caller="loop_contract_golddigger" on
+    a Layer 2 violation).
+    """
     tmp_path, p = contract_env
     now = datetime.now(UTC)
     trigger_ts = now - timedelta(hours=3)
@@ -228,17 +238,63 @@ def test_violation_includes_last_invocation_context(contract_env):
     })
     p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
     p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
-    _write_jsonl(p["CLAUDE_INVOCATIONS_FILE"], [
-        {"timestamp": _iso(trigger_ts + timedelta(seconds=30)),
-         "caller": "layer2_t3", "status": "auth_error",
-         "exit_code": 1, "duration_seconds": 0.5},
+    inv_ts = trigger_ts + timedelta(seconds=30)
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(inv_ts),
+         "reasons": ["test"], "status": "auth_error",
+         "tier": 3, "exit_code": 1, "duration_s": 0.5},
     ])
 
     violations = loop_contract.check_layer2_journal_activity()
     assert len(violations) == 1
     details = violations[0].details
     assert details["last_invocation_status"] == "auth_error"
-    assert details["last_invocation_caller"] == "layer2_t3"
+    assert details["last_invocation_ts"] == _iso(inv_ts)
+    assert details["last_invocation_tier"] == 3
+    assert details["last_invocation_exit_code"] == 1
+
+
+def test_violation_context_ignores_unrelated_global_caller(contract_env):
+    """Regression for 2026-05-03/04: the global claude_invocations.jsonl
+    had a stale ``loop_contract_golddigger`` timeout entry from yesterday
+    that bled into Layer 2 violation details, making it look like Layer 2
+    was broken when only the journal write timing missed the grace
+    window. Confirm the L2-specific log wins now."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(hours=3)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "test",
+    })
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    # Stale unrelated entry in the GLOBAL log — should NOT appear in details.
+    _write_jsonl(p["CLAUDE_INVOCATIONS_FILE"], [
+        {"timestamp": _iso(now - timedelta(hours=20)),
+         "caller": "loop_contract_golddigger", "status": "timeout",
+         "exit_code": 124},
+    ])
+    # Fresh L2 entry — should appear in details.
+    fresh_ts = trigger_ts - timedelta(seconds=10)
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(fresh_ts),
+         "reasons": ["test"], "status": "success",
+         "tier": 1, "exit_code": 0,
+         "duration_s": 480.0, "journal_written": True},
+    ])
+
+    violations = loop_contract.check_layer2_journal_activity()
+    assert len(violations) == 1
+    details = violations[0].details
+    # L2-specific status, NOT the stale "timeout" from the global log.
+    assert details["last_invocation_status"] == "success"
+    assert details["last_invocation_ts"] == _iso(fresh_ts)
+    # No "caller" leakage from the global log either.
+    assert "last_invocation_caller" not in details
 
 
 # ---------------------------------------------------------------------------

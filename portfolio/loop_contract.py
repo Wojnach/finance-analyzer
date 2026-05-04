@@ -187,6 +187,20 @@ LAYER2_JOURNAL_GRACE_S_BY_TIER = {
 LAYER2_JOURNAL_GRACE_S_DEFAULT = LAYER2_JOURNAL_GRACE_S_BY_TIER[3]
 
 
+# Invariants whose state is global to the trading system, not specific to a
+# single loop. The same regression looks identical from main, golddigger,
+# metals and elongir, so dispatching it from each one produces 2-3 duplicate
+# rows in contract_violations.jsonl + critical_errors.jsonl and 2-3 Telegram
+# alerts within a few ms (observed 2026-05-03/04 on accuracy_degradation —
+# three rows per cycle, 21ms apart, all identical bar tracker cycle_id).
+#
+# verify_and_act() drops these from the dispatch path on non-main loops:
+# the contract still RUNS on every loop (so the tracker's consecutive
+# counter stays in sync with that loop's own state), but only main owns
+# the side effects (log, alert, critical_errors row, self-heal).
+_GLOBAL_INVARIANTS_MAIN_ONLY = frozenset({"accuracy_degradation"})
+
+
 def _get_layer2_grace_s(health: dict | None) -> int:
     """Return the per-tier grace window in seconds.
 
@@ -350,10 +364,18 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
             return []
 
-    # For violation context only (non-blocking): read the global claude
-    # log to surface last_invocation_caller in the alert message. This is
-    # informational — it does NOT gate the alert.
-    latest_inv = last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
+    # For violation context only (non-blocking): surface
+    # last_invocation_caller / status / ts in the alert details.
+    #
+    # Use LAYER2_INVOCATIONS_FILE (the L2-specific log already read above
+    # for the in-flight gate). The global CLAUDE_INVOCATIONS_FILE has
+    # entries from claude_fundamental, bigbet, iskbets, golddigger
+    # fix-agent etc — its tail is essentially noise here, and it caused
+    # misleading violation rows on 2026-05-03/04 where details showed
+    # ``last_invocation_caller: "loop_contract_golddigger"`` and
+    # ``last_invocation_ts`` from the prior day even though L2 itself
+    # was running fine.
+    latest_inv = latest_l2_inv
 
     # Check: journal entry since the trigger?
     latest_journal_entry = last_jsonl_entry(LAYER2_JOURNAL_FILE)
@@ -389,13 +411,21 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # failure was logged — it's the most common root cause, and telling
     # the user "auth_error was already recorded" saves them investigation.
     # (latest_inv was already fetched for precondition 4.)
+    #
+    # 2026-05-04: latest_inv now points at LAYER2_INVOCATIONS_FILE which
+    # uses ``ts`` not ``timestamp`` and has no ``caller`` field — accept
+    # either key and surface tier/exit_code instead of caller for L2 rows.
     inv_context = {}
     if latest_inv:
         inv_context = {
             "last_invocation_status": latest_inv.get("status"),
-            "last_invocation_caller": latest_inv.get("caller"),
-            "last_invocation_ts": latest_inv.get("timestamp"),
+            "last_invocation_ts": (
+                latest_inv.get("timestamp") or latest_inv.get("ts")
+            ),
+            "last_invocation_tier": latest_inv.get("tier"),
         }
+        if latest_inv.get("exit_code") is not None:
+            inv_context["last_invocation_exit_code"] = latest_inv.get("exit_code")
 
     violation = Violation(
         invariant="layer2_journal_activity",
@@ -1832,6 +1862,18 @@ def verify_and_act(report, config: dict,
             cleared, state_file=tracker_state_file,
         )
 
+    # Dispatch-side dedup for globally-scoped invariants (added 2026-05-04).
+    # These look identical from every loop, so only main owns the noisy
+    # side effects. Tracker counters above are still updated per loop so
+    # each loop's own consecutive-fire state stays consistent.
+    if loop_name != "main":
+        dispatch_violations = [
+            v for v in violations
+            if v.invariant not in _GLOBAL_INVARIANTS_MAIN_ONLY
+        ]
+    else:
+        dispatch_violations = violations
+
     # 2026-04-28 (Codex P2): wire dispatcher-tracked invariants into
     # critical_errors.jsonl AFTER the tracker has had its chance to
     # promote consecutive WARNINGs to CRITICAL. Doing it pre-tracker
@@ -1839,22 +1881,22 @@ def verify_and_act(report, config: dict,
     # own row inline because the layer2 check needs the trigger ts in
     # the resolution context.
     _dispatch_critical_errors_for_degradation(
-        violations, state_file=tracker_state_file,
+        dispatch_violations, state_file=tracker_state_file,
     )
 
     # Log all violations
-    _log_violations(violations, report.cycle_id)
+    _log_violations(dispatch_violations, report.cycle_id)
 
     # Alert critical violations via Telegram
     _alert_violations(
-        violations, config, loop_name=loop_name,
+        dispatch_violations, config, loop_name=loop_name,
         state_file=tracker_state_file,
     )
 
     # Self-heal on critical violations
-    critical = [v for v in violations if v.severity == "CRITICAL"]
+    critical = [v for v in dispatch_violations if v.severity == "CRITICAL"]
     if critical:
-        _trigger_self_heal(violations, tracker, loop_name=loop_name)
+        _trigger_self_heal(dispatch_violations, tracker, loop_name=loop_name)
 
     logger.warning(
         "Contract violations [%s]: %d total (%d critical) — cycle %d",

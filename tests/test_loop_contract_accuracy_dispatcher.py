@@ -505,3 +505,144 @@ class TestVerifyAndActDispatchAfterTracker:
             f"Expected 2 rows when the alert set changes (new signal joins); "
             f"got {len(rows)}"
         )
+
+
+class TestGlobalInvariantsMainOnly:
+    """Cross-loop dedup for globally-scoped invariants (added 2026-05-04).
+
+    accuracy_degradation looks identical from main, golddigger, metals,
+    elongir — they all read the same accuracy snapshot. Without a gate,
+    each verify_and_act call appends a row (observed 2026-05-03/04 when
+    three identical rows landed within 21ms in contract_violations.jsonl).
+    Only main owns dispatch; non-main loops still run the check so their
+    own tracker counters stay coherent, but the side effects are
+    suppressed.
+    """
+
+    def test_non_main_loop_skips_accuracy_degradation_dispatch(
+        self, critical_errors_paths, tmp_path, monkeypatch,
+    ):
+        from unittest.mock import patch
+
+        from portfolio.loop_contract import (
+            CycleReport,
+            ViolationTracker,
+            verify_and_act,
+        )
+
+        crit_file, state_file = critical_errors_paths
+        log_file = tmp_path / "contract_violations.jsonl"
+        monkeypatch.setattr(
+            "portfolio.loop_contract.CONTRACT_LOG_FILE", log_file,
+        )
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+            details={"alert_count": 12, "alerts": []},
+        )
+
+        report = CycleReport(cycle_id=42, active_tickers={"BTC-USD"})
+
+        # Bypass the main verify_contract pipeline by injecting our
+        # violation through a custom verify_fn.
+        with patch("portfolio.loop_contract._alert_violations") as alert_mock, \
+             patch("portfolio.loop_contract._trigger_self_heal") as heal_mock:
+            verify_and_act(
+                report, {}, tracker=ViolationTracker(state_file),
+                verify_fn=lambda r: [v],
+                loop_name="golddigger",
+            )
+
+        # No row in either log — the global invariant was filtered before
+        # log/alert/critical_errors dispatch.
+        assert _read_jsonl(crit_file) == []
+        assert _read_jsonl(log_file) == []
+        # The dispatch_violations passed downstream must be empty.
+        # _alert_violations and _trigger_self_heal each got an empty list.
+        assert alert_mock.call_args.args[0] == [] or alert_mock.call_args is None
+        assert not heal_mock.called
+
+    def test_main_loop_dispatches_accuracy_degradation(
+        self, critical_errors_paths, tmp_path, monkeypatch,
+    ):
+        from unittest.mock import patch
+
+        from portfolio.loop_contract import (
+            CycleReport,
+            ViolationTracker,
+            verify_and_act,
+        )
+
+        crit_file, state_file = critical_errors_paths
+        log_file = tmp_path / "contract_violations.jsonl"
+        monkeypatch.setattr(
+            "portfolio.loop_contract.CONTRACT_LOG_FILE", log_file,
+        )
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+            details={"alert_count": 12, "alerts": []},
+        )
+        report = CycleReport(cycle_id=42, active_tickers={"BTC-USD"})
+
+        with patch("portfolio.loop_contract._alert_violations"), \
+             patch("portfolio.loop_contract._trigger_self_heal"):
+            verify_and_act(
+                report, {}, tracker=ViolationTracker(state_file),
+                verify_fn=lambda r: [v],
+                loop_name="main",
+            )
+
+        # Main loop: critical_errors.jsonl row is written.
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 1
+        assert rows[0]["category"] == "accuracy_degradation"
+        # And contract_violations.jsonl gets the row too.
+        log_rows = _read_jsonl(log_file)
+        assert len(log_rows) == 1
+        assert log_rows[0]["invariant"] == "accuracy_degradation"
+
+    def test_non_main_loop_still_dispatches_other_invariants(
+        self, critical_errors_paths, tmp_path, monkeypatch,
+    ):
+        """The gate is invariant-specific. Non-global invariants (e.g.
+        cycle_duration, holdings_reconciled) still dispatch from any
+        loop because they describe that loop's own state."""
+        from unittest.mock import patch
+
+        from portfolio.loop_contract import (
+            CycleReport,
+            ViolationTracker,
+            verify_and_act,
+        )
+
+        _crit_file, state_file = critical_errors_paths
+        log_file = tmp_path / "contract_violations.jsonl"
+        monkeypatch.setattr(
+            "portfolio.loop_contract.CONTRACT_LOG_FILE", log_file,
+        )
+
+        v = Violation(
+            invariant="cycle_duration",
+            severity="WARNING",
+            message="golddigger: cycle took 333.7s (limit: 120s)",
+            details={"duration_s": 333.7, "limit_s": 120},
+        )
+        report = CycleReport(cycle_id=42)
+
+        with patch("portfolio.loop_contract._alert_violations"), \
+             patch("portfolio.loop_contract._trigger_self_heal"):
+            verify_and_act(
+                report, {}, tracker=ViolationTracker(state_file),
+                verify_fn=lambda r: [v],
+                loop_name="golddigger",
+            )
+
+        # cycle_duration is per-loop — golddigger should still log its row.
+        log_rows = _read_jsonl(log_file)
+        assert len(log_rows) == 1
+        assert log_rows[0]["invariant"] == "cycle_duration"
