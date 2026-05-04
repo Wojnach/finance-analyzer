@@ -364,10 +364,18 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
             return []
 
-    # For violation context only (non-blocking): read the global claude
-    # log to surface last_invocation_caller in the alert message. This is
-    # informational — it does NOT gate the alert.
-    latest_inv = last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
+    # For violation context only (non-blocking): surface
+    # last_invocation_caller / status / ts in the alert details.
+    #
+    # Use LAYER2_INVOCATIONS_FILE (the L2-specific log already read above
+    # for the in-flight gate). The global CLAUDE_INVOCATIONS_FILE has
+    # entries from claude_fundamental, bigbet, iskbets, golddigger
+    # fix-agent etc — its tail is essentially noise here, and it caused
+    # misleading violation rows on 2026-05-03/04 where details showed
+    # ``last_invocation_caller: "loop_contract_golddigger"`` and
+    # ``last_invocation_ts`` from the prior day even though L2 itself
+    # was running fine.
+    latest_inv = latest_l2_inv
 
     # Check: journal entry since the trigger?
     latest_journal_entry = last_jsonl_entry(LAYER2_JOURNAL_FILE)
@@ -403,13 +411,21 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # failure was logged — it's the most common root cause, and telling
     # the user "auth_error was already recorded" saves them investigation.
     # (latest_inv was already fetched for precondition 4.)
+    #
+    # 2026-05-04: latest_inv now points at LAYER2_INVOCATIONS_FILE which
+    # uses ``ts`` not ``timestamp`` and has no ``caller`` field — accept
+    # either key and surface tier/exit_code instead of caller for L2 rows.
     inv_context = {}
     if latest_inv:
         inv_context = {
             "last_invocation_status": latest_inv.get("status"),
-            "last_invocation_caller": latest_inv.get("caller"),
-            "last_invocation_ts": latest_inv.get("timestamp"),
+            "last_invocation_ts": (
+                latest_inv.get("timestamp") or latest_inv.get("ts")
+            ),
+            "last_invocation_tier": latest_inv.get("tier"),
         }
+        if latest_inv.get("exit_code") is not None:
+            inv_context["last_invocation_exit_code"] = latest_inv.get("exit_code")
 
     violation = Violation(
         invariant="layer2_journal_activity",

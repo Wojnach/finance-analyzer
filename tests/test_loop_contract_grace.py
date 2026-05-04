@@ -251,9 +251,12 @@ def test_real_silent_failure_still_fires(contract_env):
         "last_invocation_tier": 3,
     })
     # Most recent invocation is terminal (timeout), no fresh in-flight.
-    _write_jsonl(p["CLAUDE_INVOCATIONS_FILE"], [
-        {"timestamp": _iso(now - timedelta(minutes=22)),
-         "caller": "layer2_t3", "status": "timeout", "tier": 3},
+    # 2026-05-04: violation context now reads LAYER2_INVOCATIONS_FILE,
+    # not the global claude log.
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=22)),
+         "reasons": ["BTC-USD consensus SELL (47%)"],
+         "status": "timeout", "tier": 3, "exit_code": 124},
     ])
     p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
     p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
