@@ -1418,52 +1418,80 @@ def _hash_violation_message(message: str) -> str:
     return hashlib.sha1(stripped.encode("utf-8")).hexdigest()
 
 
-def _hash_violation_identity(violation: "Violation") -> str:
-    """Stable per-incident identity used for both Telegram cooldown dedup
-    and critical_errors.jsonl dedup.
+def violation_identity_payload(
+    invariant: str | None,
+    message: str | None,
+    details: dict | None,
+) -> str:
+    """Stable per-incident identity *payload* (unhashed) shared between the
+    source-side dedup (``_hash_violation_identity``) and the dashboard's
+    cross-stream resolution check
+    (``dashboard.system_status._identity_key_for_dict``).
 
-    Strips the ``ESCALATED (Nx consecutive):`` prefix added by
-    ViolationTracker, so a tracker-promoted alert dedups against the
-    pre-promotion form.
+    Centralising this here means future per-invariant overrides land in
+    exactly one place — the dashboard mirror used to drift silently
+    (Claude review of a85a646f, P1-1/P1-2: dashboard read ``details``
+    while ``record_critical_error`` writes ``context``, AND the dashboard
+    didn't strip the ``ESCALATED`` prefix the source has stripped since
+    Codex P1 round-3 2026-04-28). Both bugs are now structurally
+    impossible because the dashboard side normalises ``context``→
+    ``details`` and applies the prefix strip before calling this helper.
 
-    Per-invariant identity overrides:
-    - ``layer2_journal_activity`` folds ``details['trigger_time']`` because
-      the message embeds only rounded age + reason (Codex P2 round-4
-      2026-04-28).
-    - ``accuracy_degradation`` (added 2026-04-28 round 2) hashes ONLY the
-      sorted set of ``(scope::key)`` pairs from ``details['alerts']``.
-      The rendered message contains percentages like "33.7%→33.2%" that
-      drift each cycle as samples shift; without this override every
-      cycle generates a fresh hash, and the multi-hash dedup can't trap
-      the duplicates. Falls back to the message-only hash if details are
-      missing or malformed.
+    Per-invariant overrides:
+    - ``accuracy_degradation`` keys on the sorted ``(scope::key)`` set
+      from ``details['alerts']`` because rendered messages embed
+      drifting percentages (e.g. "33.7%→33.2%") that change cycle-to-
+      cycle even when the alert set is identical.
+    - ``layer2_journal_activity`` folds ``details['trigger_time']`` so
+      two distinct triggers that round to the same minute count don't
+      collide on rendered text.
+    - Other invariants use ``invariant + message[:200]``.
 
-    Other invariants fall back to the message-only hash.
-
-    SHA-1 is a content fingerprint here, not a security primitive.
+    The caller is responsible for stripping ``ESCALATED (Nx consecutive):
+    `` from ``message`` first — kept out of this helper so callers that
+    work with already-stripped messages don't pay the regex twice.
     """
-    msg = _ESCALATED_PREFIX_RE.sub("", violation.message or "", count=1)
+    # Preserve the byte-exact payload format used by the source-side hasher
+    # since 2026-04-28 — cooldown state files persist these SHA-1 hashes,
+    # and changing the format would invalidate every recent_hashes entry.
+    inv = invariant or ""
+    msg = message or ""
+    d = details if isinstance(details, dict) else {}
 
-    if violation.invariant == "accuracy_degradation":
-        details = violation.details or {}
-        alerts = details.get("alerts") or []
+    if inv == "accuracy_degradation":
+        alerts = d.get("alerts") or []
         keys = sorted(
             f"{a.get('scope', '?')}::{a.get('key', '?')}"
             for a in alerts
             if isinstance(a, dict)
         )
         if keys:
-            payload = "accuracy_degradation:" + ",".join(keys)
-            return hashlib.sha1(payload.encode("utf-8")).hexdigest()
-        # else fall through to message-only hash for legacy/empty-details
+            return "accuracy_degradation:" + ",".join(keys)
+        # else fall through to message-only payload for legacy/empty-details
 
     parts = [msg]
-    if violation.invariant == "layer2_journal_activity":
-        details = violation.details or {}
-        trigger = details.get("trigger_time")
+    if inv == "layer2_journal_activity":
+        trigger = d.get("trigger_time")
         if trigger:
             parts.append(f"trigger_time={trigger}")
-    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+    return "\n".join(parts)
+
+
+def _hash_violation_identity(violation: "Violation") -> str:
+    """Stable per-incident identity used for both Telegram cooldown dedup
+    and critical_errors.jsonl dedup.
+
+    Strips the ``ESCALATED (Nx consecutive):`` prefix added by
+    ViolationTracker (so a tracker-promoted alert dedups against the
+    pre-promotion form), then delegates to ``violation_identity_payload``.
+
+    SHA-1 is a content fingerprint here, not a security primitive.
+    """
+    msg = _ESCALATED_PREFIX_RE.sub("", violation.message or "", count=1)
+    payload = violation_identity_payload(
+        violation.invariant, msg, violation.details
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
 def _normalize_recent_hashes(prior: dict) -> list[dict]:
