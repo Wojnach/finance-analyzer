@@ -176,7 +176,17 @@ LAYER2_JOURNAL_GRACE_S = 18 * 60       # grace period post-trigger for agent to 
 # 15:30 CET, so a 20m grace from an overnight trigger at 02:00 is well
 # inside the 7+ hour buffer).
 LAYER2_JOURNAL_GRACE_S_BY_TIER = {
-    1: 3 * 60,    # T1 timeout 120s + 3m slack
+    # 2026-05-05 (item 3 of dashboard-noise-followups): T1's nominal
+    # timeout is 120s but real T1 invocations across 2026-05-04 routinely
+    # ran 397-538s (see data/invocations.jsonl). The flat 180s grace was
+    # firing layer2_journal_activity violations on every successful T1
+    # call — the dashboard cross-stream filter hid the rows from the home
+    # page once the journal landed, but Telegram still received the alert
+    # in the gap. Widen to 12 min to cover observed wall-time (matches
+    # T2's prior grace) until the deeper bug is traced — see
+    # docs/plans/2026-05-05-dashboard-noise-followups.md (3a/3b/3c) for
+    # the open investigation of why T1 enforcement is loose.
+    1: 12 * 60,   # was 3min; widen to match observed T1 wall-time
     2: 12 * 60,   # T2 timeout 600s + 2m slack
     3: 20 * 60,   # T3 timeout 900s + 5m slack
 }
