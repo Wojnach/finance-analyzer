@@ -290,18 +290,23 @@ class TestContractViolations:
         # (assuming neither is resolved by a later journal entry).
         assert out["contract_violations"]["unresolved"] == 2
 
-    def test_violation_resolved_via_critical_errors_chain(
+    def test_violation_resolved_via_critical_errors_chain_production_shape(
         self, tmp_path: Path
     ):
-        """Production resolution: dispatcher writes a critical_errors row
-        for the invariant; a later resolution row's ``resolves_ts`` points
-        at the critical_errors row's ts (not the contract_violations row's
-        ts). Cross-stream identity match resolves the violation."""
+        """Production resolution with the *real* CE row shape.
+
+        ``record_critical_error`` writes the payload under ``context``,
+        not ``details``. The cross-stream identity match must accept
+        either key — without that, the resolution path silently misses
+        for every accuracy_degradation incident in production.
+        (Claude review of a85a646f, P1-1.)
+        """
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         crit_err_ts = _ts(-3000)
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
+                # CV row: ``details`` (matches loop_contract._log_violations)
                 {"ts": _ts(-3500), "severity": "CRITICAL",
                  "invariant": "accuracy_degradation",
                  "message": "12 signal(s) dropped >15pp...",
@@ -313,11 +318,12 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
+                # CE row: ``context`` (matches claude_gate.record_critical_error)
                 {"ts": crit_err_ts, "level": "critical",
                  "caller": "accuracy_degradation",
                  "category": "accuracy_degradation",
                  "message": "12 signal(s) dropped >15pp...",
-                 "details": {"alerts": [
+                 "context": {"alerts": [
                      {"scope": "signal", "key": "sentiment"},
                  ]},
                  "resolution": None},
@@ -326,6 +332,76 @@ class TestContractViolations:
             ],
         )
         out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 0
+
+    def test_layer2_cross_stream_match_uses_context_trigger_time(
+        self, tmp_path: Path
+    ):
+        """layer2_journal_activity CE rows carry ``trigger_time`` under
+        ``context``, not ``details``. (Claude review P1-1.)"""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        trigger_ts = _ts(-2700)
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-2400), "severity": "CRITICAL",
+                 "invariant": "layer2_journal_activity",
+                 "message": "Layer 2 trigger fired 5m ago (X)",
+                 "details": {"trigger_time": trigger_ts}},
+            ],
+        )
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {"ts": _ts(-2300), "level": "critical",
+                 "caller": "layer2_journal_activity",
+                 "category": "contract_violation",  # inline path's actual shape
+                 "message": "Layer 2 trigger fired 5m ago (X)",
+                 "context": {"trigger_time": trigger_ts},
+                 "resolution": None},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["errors"]["unresolved"] == 1
+        assert out["contract_violations"]["unresolved"] == 0
+
+    def test_escalated_prefix_does_not_break_cross_stream_dedup(
+        self, tmp_path: Path
+    ):
+        """ViolationTracker promotes a warning by prepending
+        ``ESCALATED (Nx consecutive): `` to the message. The source
+        strips this before hashing; the dashboard must too, otherwise
+        escalated CV rows never match their pre-escalation CE row.
+        (Claude review of a85a646f, P1-2.)"""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-1800), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "ESCALATED (3x consecutive): 12 signal(s) "
+                            "dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                 ]}},
+            ],
+        )
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {"ts": _ts(-3000), "level": "critical",
+                 "caller": "accuracy_degradation",
+                 "category": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp...",  # un-prefixed
+                 "context": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                 ]},
+                 "resolution": None},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["errors"]["unresolved"] == 1
+        # Without the prefix strip, the CV row would surface as a duplicate.
         assert out["contract_violations"]["unresolved"] == 0
 
     def test_violation_dedupes_against_unresolved_critical_error(
@@ -353,7 +429,7 @@ class TestContractViolations:
                  "caller": "accuracy_degradation",
                  "category": "accuracy_degradation",
                  "message": "12 signal(s) dropped >15pp...",
-                 "details": {"alerts": [
+                 "context": {"alerts": [
                      {"scope": "signal", "key": "sentiment"},
                  ]},
                  "resolution": None},
@@ -675,4 +751,135 @@ class TestCodex20260504Regressions:
         keys = [m["key"] for m in out["llm_inference"]["models"]]
         assert "chronos" not in keys  # skipped
         assert "kronos" in keys       # still works
+
+
+class TestDashboardSourceIdentityEquivalence:
+    """Pin the equivalence between the dashboard's identity-key path and
+    the source's ``_hash_violation_identity``. Without this, future
+    per-invariant overrides added to the source can silently desync the
+    dashboard the same way the missing ``context``/``ESCALATED`` strip
+    bugs did. (Claude review of a85a646f, P2-1.)"""
+
+    @staticmethod
+    def _entry_from_violation(v):
+        # Mirror what loop_contract._log_violations writes.
+        return {
+            "ts": "2026-05-05T00:00:00+00:00",
+            "severity": v.severity,
+            "invariant": v.invariant,
+            "message": v.message,
+            "details": v.details,
+        }
+
+    @pytest.mark.parametrize(
+        "invariant,message,details",
+        [
+            ("min_success_rate", "0% rate", {}),
+            ("session_alive", "dead session", {"alive": False}),
+            (
+                "accuracy_degradation",
+                "12 signal(s) dropped >15pp 33.7%->33.2%",
+                {"alerts": [
+                    {"scope": "signal", "key": "sentiment"},
+                    {"scope": "signal", "key": "structure"},
+                ]},
+            ),
+            (
+                "accuracy_degradation",
+                "different drift text 99.9%->10%",
+                {"alerts": [
+                    {"scope": "signal", "key": "sentiment"},
+                    {"scope": "signal", "key": "structure"},
+                ]},
+            ),
+            (
+                "layer2_journal_activity",
+                "Layer 2 trigger fired 5m ago (BTC)",
+                {"trigger_time": "2026-05-05T00:00:00+00:00"},
+            ),
+        ],
+    )
+    def test_identity_payload_matches_source(
+        self, invariant, message, details
+    ):
+        from portfolio.loop_contract import (
+            Violation,
+            _hash_violation_identity,
+            violation_identity_payload,
+        )
+        import hashlib
+
+        v = Violation(
+            invariant=invariant, severity="CRITICAL",
+            message=message, details=details,
+        )
+        # Source side: tracker may have prepended the prefix; use
+        # the raw constructor message here (no prefix).
+        source_hash = _hash_violation_identity(v)
+        # Dashboard side: build the entry shape, run through the
+        # mirror, then hash by the same SHA-1 algorithm.
+        entry = self._entry_from_violation(v)
+        dash_payload = ss._identity_key_for_dict(entry)
+        dash_hash = hashlib.sha1(dash_payload.encode("utf-8")).hexdigest()
+        assert dash_hash == source_hash, (
+            f"Dashboard identity drifted from source for {invariant!r}: "
+            f"dashboard payload={dash_payload!r} → {dash_hash}, "
+            f"source → {source_hash}. Both must call "
+            f"violation_identity_payload."
+        )
+        # Sanity: the shared helper directly returns the same payload
+        # for the source-side input.
+        assert dash_payload == violation_identity_payload(
+            invariant, message, details,
+        )
+
+    def test_escalated_message_strips_to_pre_promotion_payload(self):
+        """Two dicts representing the same incident — one before
+        ViolationTracker promotion, one after — must produce the same
+        identity payload."""
+        pre = {
+            "ts": "2026-05-05T00:00:00+00:00",
+            "severity": "WARNING",
+            "invariant": "accuracy_degradation",
+            "message": "2 signal(s) dropped >15pp...",
+            "details": {"alerts": [
+                {"scope": "signal", "key": "sentiment"},
+            ]},
+        }
+        post = {**pre, "severity": "CRITICAL",
+                "message": "ESCALATED (3x consecutive): "
+                           + pre["message"]}
+        assert ss._identity_key_for_dict(pre) == ss._identity_key_for_dict(post)
+
+    def test_critical_errors_context_payload_matches_source(self):
+        """A critical_errors row written by record_critical_error uses
+        ``context`` instead of ``details``. Identity must still match
+        the matching contract_violations row's identity."""
+        from portfolio.loop_contract import (
+            Violation,
+            _hash_violation_identity,
+        )
+        import hashlib
+
+        details = {"alerts": [
+            {"scope": "signal", "key": "sentiment"},
+        ]}
+        message = "12 signal(s) dropped >15pp..."
+        v = Violation(
+            invariant="accuracy_degradation", severity="CRITICAL",
+            message=message, details=details,
+        )
+        source_hash = _hash_violation_identity(v)
+        ce_entry = {
+            "ts": "2026-05-05T00:00:00+00:00",
+            "level": "critical",
+            "caller": "accuracy_degradation",
+            "category": "accuracy_degradation",
+            "message": message,
+            "context": details,  # NOT details
+            "resolution": None,
+        }
+        ce_payload = ss._identity_key_for_dict(ce_entry)
+        ce_hash = hashlib.sha1(ce_payload.encode("utf-8")).hexdigest()
+        assert ce_hash == source_hash
 

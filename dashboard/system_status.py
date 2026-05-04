@@ -20,7 +20,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import re
+
 from portfolio.file_utils import load_json, load_jsonl, load_jsonl_tail
+from portfolio.loop_contract import violation_identity_payload
+
+# Mirror loop_contract._ESCALATED_PREFIX_RE so the dashboard strips the
+# tracker's "ESCALATED (Nx consecutive): " prefix before computing the
+# identity payload — without this, a tracker-promoted CV row hashes
+# differently from its critical_errors counterpart and the cross-stream
+# resolution check fails to match. (Claude review of a85a646f, P1-2.)
+_ESCALATED_PREFIX_RE = re.compile(r"^ESCALATED \(\d+x consecutive\): ")
 
 # Repo data dir. Resolved relative to this file so the module works in
 # both the main checkout and a worktree without further config.
@@ -320,45 +330,44 @@ def _latest_layer2_journal_ts(dd: Path) -> str | None:
 
 
 def _violation_identity_key(entry: dict) -> str:
-    """Per-invariant identity hash mirroring
-    ``loop_contract._hash_violation_identity``.
+    """Per-invariant identity payload for cross-stream resolution checks.
 
-    For contract_violations.jsonl rows we don't have access to the
-    Violation object, only the serialized dict. Reproduce the same
-    overrides:
-
-    - ``layer2_journal_activity`` includes ``details['trigger_time']``
-      so two distinct triggers that round to the same minute count
-      don't collide.
-    - ``accuracy_degradation`` keys on the sorted ``(scope::key)`` set
-      from ``details['alerts']`` so percentage drift between cycles
-      doesn't generate fresh keys for the same alert set.
-    - Other invariants fall back to ``(invariant, message[:200])``.
+    Delegates to ``portfolio.loop_contract.violation_identity_payload`` —
+    the *same* function the source uses for Telegram cooldown / dedup
+    state — so the two sides cannot drift.
     """
     return _identity_key_for_dict(entry)
 
 
 def _identity_key_for_dict(entry: dict) -> str:
-    invariant = entry.get("invariant") or entry.get("category") or ""
-    message = (entry.get("message") or "")[:200]
-    details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+    # contract_violations.jsonl uses ``invariant``, critical_errors.jsonl
+    # uses ``caller`` (or ``category`` as fallback). The dispatcher writes
+    # the invariant name into both fields for the periodic-violation path
+    # (loop_contract:992-997), but the inline layer2 path writes
+    # category="contract_violation" + caller=invariant_name
+    # (loop_contract:471-476) — prefer caller, fall back to category.
+    invariant = (
+        entry.get("invariant")
+        or entry.get("caller")
+        or entry.get("category")
+        or ""
+    )
+    raw_msg = entry.get("message") or ""
+    # ViolationTracker promotes warnings by prepending
+    # "ESCALATED (Nx consecutive): " — the source strips this before
+    # hashing; mirror that here so escalated CV rows match their
+    # pre-escalation form and their critical_errors counterpart.
+    msg = _ESCALATED_PREFIX_RE.sub("", raw_msg, count=1)[:200]
 
-    if invariant == "accuracy_degradation":
-        alerts = details.get("alerts") or []
-        keys = sorted(
-            f"{a.get('scope', '?')}::{a.get('key', '?')}"
-            for a in alerts
-            if isinstance(a, dict)
-        )
-        if keys:
-            return "accuracy_degradation:" + ",".join(keys)
-        return f"accuracy_degradation:{message}"
+    # ``record_critical_error`` writes the payload under ``context``;
+    # ``_log_violations`` writes it under ``details``. Accept either so
+    # the cross-stream identity match works on both sides without a
+    # wire-format change. (Claude review of a85a646f, P1-1.)
+    payload_dict = entry.get("details") or entry.get("context") or {}
+    if not isinstance(payload_dict, dict):
+        payload_dict = {}
 
-    if invariant == "layer2_journal_activity":
-        trig = details.get("trigger_time")
-        return f"layer2_journal_activity:{trig}|{message}"
-
-    return f"{invariant}:{message}"
+    return violation_identity_payload(invariant, msg, payload_dict)
 
 
 def _violation_resolved(
