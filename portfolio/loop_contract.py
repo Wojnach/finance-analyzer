@@ -422,30 +422,35 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         },
     )
 
-    # Also record to critical_errors.jsonl so the CLAUDE.md STARTUP CHECK
-    # surfaces this to every future Claude session. The contract's own
-    # Telegram alerting is per-cycle; critical_errors is persistent until
-    # explicitly resolved.
-    try:
-        from portfolio.claude_gate import record_critical_error
-        record_critical_error(
-            category="contract_violation",
-            caller="layer2_journal_activity",
-            message=violation.message,
-            context=violation.details,
-        )
-    except Exception as e:
-        # Never let record_critical_error failures break the contract check.
-        logger.warning("record_critical_error failed in contract check: %s", e)
-
-    # Persist the dedup marker so we don't re-fire on this same trigger.
-    # Wrapped in best-effort: a failed state write reverts to today's
-    # per-cycle firing (harmless noise), but won't break the contract.
+    # Persist the dedup marker BEFORE writing to critical_errors.jsonl.
+    # If the marker write fails, skip the critical error append — otherwise
+    # a persistent marker-write failure causes duplicate entries every cycle
+    # (observed 2026-05-03: 7 identical entries in 0.2s when marker write
+    # failed). The violation still surfaces via Telegram alerting.
+    dedup_written = False
     try:
         contract_state["layer2_last_violation_trigger_ts"] = current_trigger_iso
         atomic_write_json(CONTRACT_STATE_FILE, contract_state)
+        dedup_written = True
     except Exception as e:
         logger.warning("contract dedup state write failed: %s", e)
+
+    if dedup_written:
+        try:
+            from portfolio.claude_gate import record_critical_error
+            record_critical_error(
+                category="contract_violation",
+                caller="layer2_journal_activity",
+                message=violation.message,
+                context=violation.details,
+            )
+        except Exception as e:
+            logger.warning("record_critical_error failed in contract check: %s", e)
+    else:
+        logger.warning(
+            "Skipping critical_errors.jsonl write — dedup marker not persisted; "
+            "violation still fires via Telegram"
+        )
 
     return [violation]
 
