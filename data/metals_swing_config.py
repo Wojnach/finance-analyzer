@@ -64,7 +64,22 @@ MIN_TRADE_SEK = 1000          # minimum trade size (Avanza min courtage threshol
 # Entry rules
 # ---------------------------------------------------------------------------
 MIN_BUY_VOTERS = 3            # minimum agreeing BUY signals
-MIN_BUY_CONFIDENCE = 0.60     # minimum calibrated signal confidence (user rule: no sub-60% trades)
+# 2026-05-04: lowered from 0.60 -> 0.56 because Stage 7 calibration compression
+# (signal_engine.py:2553-2567, added 2026-04-18) caps post-everything confidence
+# at 0.685 even on a perfect 7/7 raw consensus, so 0.60 was mathematically
+# unclearable for any ticker carrying a Stage 6 PTC accuracy penalty. The
+# SwingTrader had placed 0 trades over its lifetime despite 397 first-BUY
+# signals in the previous 28 days as a result. Backtest in
+# scripts/perf/backtest_conf_threshold.py shows the 0.56-0.60 band has
+# *better* short-horizon selection than the 0.60+ band (3h winrate 58.3% vs
+# 44.1% on the added 12 trades). Full reasoning + math:
+# docs/plans/2026-05-04-conf-threshold-fix.md
+# 0.56 post-compression maps to ~0.583 raw consensus entering Stage 7, which
+# after the typical ranging-regime 0.75x penalty implies ~0.78 raw vote
+# ratio -- i.e. ~6 of 7 voters or 5 of 6 voters agreeing. Same intuitive bar
+# the original "no sub-60% trades" rule was meant to enforce; just reanchored
+# to the post-calibration scale.
+MIN_BUY_CONFIDENCE = 0.56     # post-calibration; raw consensus ~78% (see comment above)
 MIN_BUY_TF_RATIO = 0.43       # 3/7 timeframes must agree
 RSI_ENTRY_LOW = 35            # RSI buy zone lower bound
 RSI_ENTRY_HIGH = 68           # RSI buy zone upper bound (avoid overbought)
