@@ -552,3 +552,221 @@ class TestPerTickerAccuracy:
         from portfolio.accuracy_stats import per_ticker_accuracy
         result = per_ticker_accuracy(horizon="1d", entries=[])
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-05: enabled flag + samples alias + disable-reason helper
+#
+# These tests guard the dashboard accuracy view's "DISABLED" labelling
+# pipeline. signal_accuracy() and friends must emit `enabled=False` and
+# `samples == total` for every entry; tickers.get_disabled_reason() must
+# return a short reason for each disabled signal and None for active ones.
+# ---------------------------------------------------------------------------
+
+class TestEnabledFlagAndSamplesAlias:
+
+    def test_signal_accuracy_includes_enabled_and_samples(self):
+        from portfolio.accuracy_stats import signal_accuracy
+        from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
+
+        entries = [
+            _make_entry("BTC-USD", "rsi", "BUY", 1.5),
+            _make_entry("BTC-USD", "rsi", "BUY", 1.0),
+        ]
+        result = signal_accuracy("1d", entries=entries)
+        for sig_name in SIGNAL_NAMES:
+            entry = result[sig_name]
+            assert "enabled" in entry, f"missing enabled flag for {sig_name}"
+            assert "samples" in entry, f"missing samples alias for {sig_name}"
+            assert entry["samples"] == entry["total"]
+            assert entry["enabled"] is (sig_name not in DISABLED_SIGNALS)
+
+    def test_signal_accuracy_ewma_includes_enabled_and_samples(self):
+        from portfolio.accuracy_stats import signal_accuracy_ewma
+        from portfolio.tickers import DISABLED_SIGNALS
+
+        entries = [_make_entry("BTC-USD", "rsi", "BUY", 1.5)]
+        result = signal_accuracy_ewma("1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["enabled"] is True
+        assert rsi["samples"] == rsi["total"]
+        # A disabled signal should be labelled even with zero samples.
+        any_disabled = next(iter(DISABLED_SIGNALS))
+        assert result[any_disabled]["enabled"] is False
+
+    def test_signal_accuracy_cost_adjusted_includes_enabled_and_samples(self):
+        from portfolio.accuracy_stats import signal_accuracy_cost_adjusted
+        entries = [_make_entry("BTC-USD", "rsi", "BUY", 1.5)]
+        result = signal_accuracy_cost_adjusted("1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["enabled"] is True
+        assert rsi["samples"] == rsi["total"]
+
+    def test_blend_accuracy_data_includes_enabled_and_samples(self):
+        from portfolio.accuracy_stats import blend_accuracy_data
+        from portfolio.tickers import DISABLED_SIGNALS
+
+        any_disabled = next(iter(DISABLED_SIGNALS))
+        alltime = {
+            "rsi": {"accuracy": 0.6, "total": 50, "correct": 30},
+            any_disabled: {"accuracy": 0.4, "total": 20, "correct": 8},
+        }
+        recent = {
+            "rsi": {"accuracy": 0.7, "total": 30, "correct": 21},
+        }
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=20)
+        assert result["rsi"]["enabled"] is True
+        assert result["rsi"]["samples"] == result["rsi"]["total"]
+        assert result[any_disabled]["enabled"] is False
+
+    def test_signal_accuracy_by_regime_includes_enabled_and_samples(self):
+        from portfolio.accuracy_stats import signal_accuracy_by_regime
+        from portfolio.tickers import DISABLED_SIGNALS
+
+        # Build entries with regime metadata.
+        entries = [{
+            "ts": "2026-03-15T12:00:00+00:00",
+            "tickers": {
+                "BTC-USD": {
+                    "signals": {"rsi": "BUY"},
+                    "consensus": "BUY",
+                    "regime": "trending",
+                },
+            },
+            "outcomes": {"BTC-USD": {"1d": {"change_pct": 1.5}}},
+        }]
+        result = signal_accuracy_by_regime("1d", entries=entries)
+        assert "trending" in result
+        rsi = result["trending"]["rsi"]
+        assert rsi["enabled"] is True
+        assert rsi["samples"] == rsi["total"]
+        # Disabled signals only appear in the regime map if they had samples,
+        # which they don't here — so we only assert the active-signal shape.
+        assert "rsi" not in DISABLED_SIGNALS
+
+
+class TestGetDisabledReason:
+
+    def test_returns_none_for_active_signal(self):
+        from portfolio.tickers import get_disabled_reason
+        # rsi, macd, ema are core actives — never disabled.
+        assert get_disabled_reason("rsi") is None
+        assert get_disabled_reason("macd") is None
+
+    def test_returns_none_for_unknown_signal(self):
+        from portfolio.tickers import get_disabled_reason
+        assert get_disabled_reason("not_a_real_signal_xyz") is None
+
+    def test_returns_reason_for_every_disabled_signal(self):
+        from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
+        # Every entry in DISABLED_SIGNALS is annotated with a comment in
+        # tickers.py — the parser must extract a non-empty reason for each.
+        # If this fails, an entry was added without an inline comment.
+        empty = sorted(
+            name for name in DISABLED_SIGNALS
+            if not (get_disabled_reason(name) or "").strip()
+        )
+        assert empty == [], f"missing/empty disable reason for: {empty}"
+
+    def test_reason_is_short_and_single_line(self):
+        from portfolio.tickers import get_disabled_reason
+        r = get_disabled_reason("hash_ribbons")
+        assert r is not None
+        assert len(r) <= 160
+        assert "\n" not in r
+
+    def test_separator_comments_do_not_bleed_into_adjacent_entries(self):
+        """Regression guard for the parser's column-aware continuation rule.
+
+        The DISABLED_SIGNALS literal contains flush-left separator comments
+        about *re-enabled* signals (cot_positioning, statistical_jump_regime,
+        forecast, econ_calendar) sitting between disabled entries. A naive
+        line-by-line continuation parser would absorb that text into the
+        previous entry's reason. We require the helper to ignore comments
+        whose `#` indent is not strictly greater than the entry-name indent.
+        """
+        from portfolio.tickers import get_disabled_reason
+
+        # Each pair: entry whose reason might absorb the following separator.
+        # If any of these substrings appears in the reason, the parser is
+        # leaking separator text into the entry above.
+        leak_pairs = [
+            ("fibonacci", "cot_positioning"),
+            ("copper_gold_ratio", "statistical_jump_regime"),
+            ("complexity_gap_regime", "econ_calendar"),
+            ("orderbook_flow", "forecast"),
+        ]
+        for entry, leaked in leak_pairs:
+            reason = get_disabled_reason(entry) or ""
+            assert leaked not in reason, (
+                f"reason for {entry!r} leaked separator text about {leaked!r}: {reason!r}"
+            )
+
+
+class TestApiAccuracyEnrichment:
+    """Verify the dashboard's response-layer enrichment overwrites stale flags.
+
+    The endpoint must re-derive `enabled` and `disabled_reason` from the
+    live DISABLED_SIGNALS on every request, not preserve whatever was
+    cached. Otherwise a re-enabled signal stays labelled as disabled
+    until the 1h accuracy cache rebuilds.
+    """
+
+    def test_enrich_signals_overwrites_stale_enabled_flag(self, monkeypatch):
+        from dashboard import app as dash
+
+        # Build a fake stale cache where everything claims to be disabled.
+        stale_signals = {
+            "rsi": {"total": 100, "correct": 50, "pct": 50.0, "enabled": False,
+                    "disabled_reason": "stale leftover from a previous run"},
+            # And a genuinely disabled one with no enabled flag at all.
+            "hash_ribbons": {"total": 0, "correct": 0, "pct": 0.0},
+        }
+        stale_consensus = {"correct": 5, "total": 10, "accuracy": 0.5, "pct": 50.0}
+
+        def fake_acc(_horizon):
+            # Return a fresh copy each call so tests don't see prior mutations.
+            import copy
+            return copy.deepcopy(stale_signals)
+
+        def fake_consensus(_horizon):
+            return dict(stale_consensus)
+
+        def fake_per_ticker(_horizon):
+            return {}
+
+        monkeypatch.setattr(
+            "portfolio.accuracy_stats.get_or_compute_accuracy", fake_acc,
+        )
+        monkeypatch.setattr(
+            "portfolio.accuracy_stats.get_or_compute_consensus_accuracy",
+            fake_consensus,
+        )
+        monkeypatch.setattr(
+            "portfolio.accuracy_stats.get_or_compute_per_ticker_accuracy",
+            fake_per_ticker,
+        )
+        # Bust the 60s in-process TTL so our monkeypatched compute is hit.
+        dash._API_ACCURACY_CACHE["data"] = None
+        dash._API_ACCURACY_CACHE["ts"] = 0
+
+        client = dash.app.test_client()
+        # Fall back to bearer auth via the dashboard token.
+        token = dash.app.config.get("DASHBOARD_TOKEN") or ""
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        resp = client.get("/api/accuracy", headers=headers)
+        assert resp.status_code == 200, resp.data
+        body = resp.get_json()
+        assert "1d" in body
+        sigs = body["1d"]["signals"]
+
+        # rsi was stale-tagged disabled; enrichment must overwrite to True
+        # and clear the bogus disabled_reason.
+        assert sigs["rsi"]["enabled"] is True
+        assert "disabled_reason" not in sigs["rsi"]
+        assert sigs["rsi"]["samples"] == sigs["rsi"]["total"]
+
+        # hash_ribbons is genuinely disabled — flag must be set False
+        # and reason populated from the inline comment.
+        assert sigs["hash_ribbons"]["enabled"] is False
+        assert sigs["hash_ribbons"].get("disabled_reason")

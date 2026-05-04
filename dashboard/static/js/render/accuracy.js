@@ -24,15 +24,27 @@ export function renderAccuracyPanel({ horizon = "1d", data, threshold = 47 } = {
     return root;
   }
 
-  // Convert to array, sort by accuracy desc
+  // Convert to array. The backend response shape uses `total` for the
+  // sample count (see portfolio/accuracy_stats.py:signal_accuracy); older
+  // mappings to `samples`/`n`/`sample_size` are kept for forward-compat.
+  // Without the `total` fallback every row used to render n=0 because
+  // Number(null) coerces to 0 — fixed 2026-05-05.
   const rows = Object.entries(signals)
     .map(([name, info]) => ({
       name,
       pct: Number(info?.pct ?? info?.accuracy ?? info?.accuracy_pct ?? null),
-      samples: Number(info?.samples ?? info?.n ?? info?.sample_size ?? null),
+      samples: Number(info?.samples ?? info?.n ?? info?.sample_size ?? info?.total ?? null),
+      enabled: info?.enabled !== false,
+      disabledReason: info?.disabled_reason ?? null,
     }))
     .filter((r) => r.pct != null && Number.isFinite(r.pct))
-    .sort((a, b) => (b.pct - a.pct));
+    // Disabled rows sink to the bottom regardless of pct — a force-HOLD'd
+    // signal with 0 samples isn't "0% accurate", it's off, and lumping it
+    // beneath active signals avoids visually competing with real data.
+    .sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+      return b.pct - a.pct;
+    });
 
   if (!rows.length) {
     root.append(emptyState(`No accuracy data for ${horizon}.`));
@@ -51,6 +63,8 @@ export function renderAccuracyPanel({ horizon = "1d", data, threshold = 47 } = {
       accuracyPct: r.pct,
       sampleSize: Number.isFinite(r.samples) ? r.samples : null,
       threshold,
+      disabled: !r.enabled,
+      disabledReason: r.disabledReason,
     }));
   });
   root.append(list);

@@ -959,6 +959,40 @@ def api_accuracy():
             get_or_compute_consensus_accuracy,
             get_or_compute_per_ticker_accuracy,
         )
+        from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
+
+        def _enrich_signals(signals_dict):
+            # 2026-05-05: enrich at response time so older cached entries
+            # (written before signal_accuracy() learned to emit `samples`/
+            # `enabled`) still render correctly on the dashboard. The
+            # accuracy cache has a 1h TTL; without this fallback the
+            # disabled-signal labels would not appear until the cache
+            # rebuilds.
+            #
+            # Important: `enabled` and `disabled_reason` are *overwritten*
+            # from the live DISABLED_SIGNALS, not setdefault'd. A signal
+            # re-enabled (e.g. statistical_jump_regime, 2026-04-29) or
+            # newly disabled would otherwise keep the stale flag from the
+            # cache file until the next 1h rebuild. `samples` is just an
+            # alias for `total` so setdefault is fine there.
+            if not isinstance(signals_dict, dict):
+                return signals_dict
+            for sig_name, info in signals_dict.items():
+                if not isinstance(info, dict):
+                    continue
+                if "samples" not in info and "total" in info:
+                    info["samples"] = info["total"]
+                enabled = sig_name not in DISABLED_SIGNALS
+                info["enabled"] = enabled
+                if enabled:
+                    info.pop("disabled_reason", None)
+                else:
+                    reason = get_disabled_reason(sig_name)
+                    if reason:
+                        info["disabled_reason"] = reason
+                    else:
+                        info.pop("disabled_reason", None)
+            return signals_dict
 
         result = {}
         for horizon in ["1d", "3d", "5d", "10d"]:
@@ -970,7 +1004,7 @@ def api_accuracy():
             # horizons entirely so the response stays well-formed.
             if ca and ca.get("total", 0) > 0:
                 result[horizon] = {
-                    "signals": sa or {},
+                    "signals": _enrich_signals(sa or {}),
                     "consensus": ca,
                     "per_ticker": ta or {},
                 }
@@ -1121,6 +1155,14 @@ def api_signal_heatmap():
             if row_since:
                 since[ticker] = row_since
 
+    # 2026-05-05: ship the disabled set so the heatmap can render
+    # disabled cells with the muted style + tap-to-show reason. The
+    # frontend already reads `data.disabled_signals` (signals.js:137).
+    try:
+        from portfolio.tickers import DISABLED_SIGNALS
+        disabled = sorted(DISABLED_SIGNALS)
+    except Exception:
+        disabled = []
     return jsonify({
         "tickers": tickers,
         "signals": all_signals,
@@ -1128,6 +1170,7 @@ def api_signal_heatmap():
         "enhanced_signals": enhanced_signals,
         "heatmap": heatmap,
         "since": since,
+        "disabled_signals": disabled,
     })
 
 
@@ -1146,8 +1189,26 @@ def api_triggers():
 @app.route("/api/accuracy-history")
 @require_auth
 def api_accuracy_history():
-    """Return accuracy snapshots over time for charting trend lines."""
+    """Return accuracy snapshots over time for charting trend lines.
+
+    2026-05-05: tag each per-signal slice with `enabled` so the chart
+    can dim/exclude force-HOLD'd signals. Tag is derived at response
+    time from DISABLED_SIGNALS so historical snapshots written before
+    the flag existed are also tagged correctly.
+    """
     entries = _read_jsonl(DATA_DIR / "accuracy_snapshots.jsonl", limit=500)
+    try:
+        from portfolio.tickers import DISABLED_SIGNALS
+        for snap in entries:
+            sigs = snap.get("signals") if isinstance(snap, dict) else None
+            if not isinstance(sigs, dict):
+                continue
+            for sig_name, info in sigs.items():
+                if isinstance(info, dict):
+                    # Overwrite (not setdefault) — see /api/accuracy comment.
+                    info["enabled"] = sig_name not in DISABLED_SIGNALS
+    except Exception:
+        logger.exception("accuracy-history enrichment failed; serving raw")
     return jsonify(entries)
 
 

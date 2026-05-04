@@ -21,10 +21,11 @@ import { fDurationShort } from "../format.js";
  *   tickers?: string[],                 // override column order
  *   accuracy?: Record<string, number>,  // signal -> accuracy %
  *   disabled?: Set<string>,             // disabled signal names (force-HOLD)
+ *   disabledReasons?: Record<string, string>, // signal -> short reason text
  * }} props
  * @returns {HTMLElement}
  */
-export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = new Set() }) {
+export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = new Set(), disabledReasons = {} }) {
   const wrap = document.createElement("div");
   wrap.className = "heatmap-wrap";
 
@@ -99,12 +100,12 @@ export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = 
 
       bindLongPress(cell, () => ({
         title: `${sigName} — ${ticker}`,
-        content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs),
+        content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs, isDisabled, disabledReasons[sigName]),
       }));
       cell.addEventListener("click", () => {
         openSheet({
           title: `${sigName} — ${ticker}`,
-          content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs),
+          content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs, isDisabled, disabledReasons[sigName]),
         });
       });
       tr.append(cell);
@@ -152,7 +153,7 @@ function _truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function _detailNode(signal, ticker, value, accPct, sinceTs) {
+function _detailNode(signal, ticker, value, accPct, sinceTs, isDisabled = false, disabledReason = null) {
   const wrap = document.createElement("div");
   const meta = document.createElement("div");
   meta.style.fontSize = "var(--ty-sm)";
@@ -160,23 +161,46 @@ function _detailNode(signal, ticker, value, accPct, sinceTs) {
   meta.textContent = `${ticker} · vote: ${value || "—"}`;
   wrap.append(meta);
 
-  const durLabel = fDurationShort(sinceTs);
-  if (durLabel) {
-    const dur = document.createElement("div");
-    dur.style.fontSize = "var(--ty-sm)";
-    dur.style.marginTop = "var(--sp-1)";
-    dur.style.color = "var(--txm)";
-    dur.textContent = `In this state for: ${durLabel}`;
-    wrap.append(dur);
-  }
+  // For disabled signals, suppress the time-in-state and accuracy lines
+  // and instead show the disable reason. Time-in-state is meaningless on
+  // a force-HOLD'd signal, and the 0% accuracy is a counter-init artifact
+  // (see /api/accuracy enabled flag, dashboard/app.py:_enrich_signals).
+  if (isDisabled) {
+    const tag = document.createElement("div");
+    tag.style.fontSize = "var(--ty-sm)";
+    tag.style.fontWeight = "600";
+    tag.style.color = "var(--txm)";
+    tag.style.marginTop = "var(--sp-2)";
+    tag.textContent = "Disabled (force-HOLD)";
+    wrap.append(tag);
+    if (disabledReason) {
+      const why = document.createElement("div");
+      why.style.fontSize = "var(--ty-xs)";
+      why.style.color = "var(--txm)";
+      why.style.marginTop = "var(--sp-1)";
+      why.style.lineHeight = "1.5";
+      why.textContent = disabledReason;
+      wrap.append(why);
+    }
+  } else {
+    const durLabel = fDurationShort(sinceTs);
+    if (durLabel) {
+      const dur = document.createElement("div");
+      dur.style.fontSize = "var(--ty-sm)";
+      dur.style.marginTop = "var(--sp-1)";
+      dur.style.color = "var(--txm)";
+      dur.textContent = `In this state for: ${durLabel}`;
+      wrap.append(dur);
+    }
 
-  if (accPct != null && Number.isFinite(Number(accPct))) {
-    const acc = document.createElement("div");
-    acc.style.fontSize = "var(--ty-sm)";
-    acc.style.marginTop = "var(--sp-2)";
-    acc.style.color = accPct >= 47 ? "var(--grn)" : "var(--red)";
-    acc.textContent = `Recent accuracy: ${Number(accPct).toFixed(0)}%`;
-    wrap.append(acc);
+    if (accPct != null && Number.isFinite(Number(accPct))) {
+      const acc = document.createElement("div");
+      acc.style.fontSize = "var(--ty-sm)";
+      acc.style.marginTop = "var(--sp-2)";
+      acc.style.color = accPct >= 47 ? "var(--grn)" : "var(--red)";
+      acc.textContent = `Recent accuracy: ${Number(accPct).toFixed(0)}%`;
+      wrap.append(acc);
+    }
   }
 
   const note = document.createElement("p");

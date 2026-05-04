@@ -263,6 +263,8 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
         result[sig_name] = {
             "correct": s["correct"],
             "total": s["total"],
+            "samples": s["total"],
+            "enabled": sig_name not in DISABLED_SIGNALS,
             "accuracy": acc,
             "pct": round(acc * 100, 1),
             "correct_buy": s["correct_buy"],
@@ -375,6 +377,8 @@ def signal_accuracy_ewma(horizon="1d", halflife_days=5, entries=None):
             "total_weight": w_total,
             "effective_samples": effective_samples,
             "total": int(round(w_total)),
+            "samples": int(round(w_total)),
+            "enabled": sig_name not in DISABLED_SIGNALS,
             "correct": int(round(w_correct)),
             "pct": round(accuracy * 100, 1),
         }
@@ -441,6 +445,8 @@ def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=10.0, entries=None):
         result[sig_name] = {
             "correct": s["correct"],
             "total": s["total"],
+            "samples": s["total"],
+            "enabled": sig_name not in DISABLED_SIGNALS,
             "accuracy": acc,
             "pct": round(acc * 100, 1),
             "cost_bps": cost_bps,
@@ -923,6 +929,8 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
         result = {
             "accuracy": blended,
             "total": total,
+            "samples": total,
+            "enabled": sig_name not in DISABLED_SIGNALS,
             "correct": int(round(blended * total)),  # BUG-186
             "pct": round(blended * 100, 1),
         }
@@ -1356,6 +1364,8 @@ def signal_accuracy_by_regime(horizon="1d", since=None, entries=None):
             regime_result[sig_name] = {
                 "correct": s["correct"],
                 "total": s["total"],
+                "samples": s["total"],
+                "enabled": sig_name not in DISABLED_SIGNALS,
                 "accuracy": acc,
                 "pct": round(acc * 100, 1),
             }
@@ -1775,6 +1785,8 @@ def signal_best_horizon_accuracy(min_samples=50, entries=None):
             result[sig_name] = {
                 "accuracy": best_acc,
                 "total": best_total,
+                "samples": best_total,
+                "enabled": sig_name not in DISABLED_SIGNALS,
                 "correct": best_correct,
                 "pct": round(best_acc * 100, 1),
                 "best_horizon": best_hz,
