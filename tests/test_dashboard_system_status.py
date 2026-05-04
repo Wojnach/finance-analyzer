@@ -437,6 +437,32 @@ class TestCodex20260504Regressions:
         assert sa["tickers"] == []
         assert "error" in sa  # surfaced, not raised
 
+    def test_heartbeat_payload_includes_expected_interval(self, tmp_path: Path):
+        """Hero footer comparator: expected_heartbeat_seconds is sourced
+        from portfolio.health._HEARTBEAT_KEEPALIVE_INTERVAL_S so the
+        dashboard never drifts from the loop's truth.
+        """
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        out = ss.compute(data_dir=tmp_path)
+        exp = out["heartbeat"]["expected_heartbeat_seconds"]
+        assert isinstance(exp, int)
+        assert exp > 0
+
+    def test_errors_recent_includes_message_and_category(self, tmp_path: Path):
+        """Health-view rows need ts/category/message keys to render."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [{"ts": _ts(-300), "level": "critical", "category": "auth_outage",
+              "caller": "layer2", "message": "claude -p exited 0 with Not logged in"}],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        recent = out["errors"]["recent"]
+        assert len(recent) >= 1
+        first = recent[0]
+        for key in ("ts", "category", "message"):
+            assert key in first, f"missing key: {key}"
+
     def test_llm_report_garbage_value_skipped(self, tmp_path: Path):
         """P2: a string instead of an int in the local_llm_report no
         longer raises; the bad model is skipped.

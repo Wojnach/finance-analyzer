@@ -12,9 +12,11 @@ import { fj } from "../fetch.js";
 import { decisionCard } from "../components/decision-card.js";
 import { emptyState } from "../components/empty-state.js";
 import { filterChip } from "../components/filter-chip.js";
+import { fAgo } from "../format.js";
 import { view as detailView } from "./decision-detail.js";
 
 const POLL_KEY = "decisions.list";
+const POLL_KEY_SYS = "decisions.system_status";
 
 const ACTIONS  = ["ALL", "BUY", "SELL", "HOLD"];
 const TICKERS  = ["ALL", "BTC-USD", "ETH-USD", "MSTR", "XAG-USD", "XAU-USD"];
@@ -41,7 +43,9 @@ export const view = {
     _root.append(_renderShell());
 
     _unsubs.push(state.subscribe(state.Slots.DECISIONS, _renderList));
+    _unsubs.push(state.subscribe(state.Slots.SYSTEM_STATUS, _renderList));
     polling.register(POLL_KEY, 60_000, _refresh);
+    polling.register(POLL_KEY_SYS, 60_000, _refreshSystemStatus);
   },
   unmount() {
     if (_activeChild) {
@@ -51,6 +55,7 @@ export const view = {
       for (const off of _unsubs) try { off(); } catch (_) {}
       _unsubs = [];
       polling.unregister(POLL_KEY);
+      polling.unregister(POLL_KEY_SYS);
     }
     _root = null;
   },
@@ -68,6 +73,10 @@ function _renderShell() {
   title.className = "section-title";
   title.textContent = "Decisions";
   view.append(title);
+
+  const bannerSlot = document.createElement("div");
+  bannerSlot.dataset.slot = "banner";
+  view.append(bannerSlot);
 
   // Action filter strip
   view.append(_renderChipStrip("Action", ACTIONS, _filter.action, (v) => {
@@ -138,6 +147,11 @@ async function _refresh() {
   if (data) state.set(state.Slots.DECISIONS, data);
 }
 
+async function _refreshSystemStatus() {
+  const d = await fj("/api/system_status", { ttl: 5_000 });
+  if (d) state.set(state.Slots.SYSTEM_STATUS, d);
+}
+
 function _buildUrl() {
   const qs = new URLSearchParams({ limit: "100" });
   if (_filter.action !== "ALL")   qs.set("action", _filter.action);
@@ -149,11 +163,19 @@ function _buildUrl() {
 function _renderList() {
   if (!_root) return;
   const slot = _root.querySelector('[data-slot="list"]');
+  const bannerSlot = _root.querySelector('[data-slot="banner"]');
   if (!slot) return;
   while (slot.firstChild) slot.removeChild(slot.firstChild);
 
   const data = state.get(state.Slots.DECISIONS);
   const arr = Array.isArray(data) ? data : (data?.decisions || []);
+
+  if (bannerSlot) {
+    while (bannerSlot.firstChild) bannerSlot.removeChild(bannerSlot.firstChild);
+    const banner = _buildContextBanner(arr);
+    if (banner) bannerSlot.append(banner);
+  }
+
   if (!arr.length) {
     slot.append(emptyState("No decisions match the current filters."));
     return;
@@ -171,4 +193,44 @@ function _renderList() {
     card.style.marginBottom = "var(--sp-2)";
     slot.append(card);
   });
+}
+
+function _decisionAction(d, side) {
+  const slot = d?.decisions?.[side] || d?.[side];
+  return (slot?.action || "").toUpperCase();
+}
+
+function _buildContextBanner(arr) {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  const head = arr[0];
+  const headHold = _decisionAction(head, "patient") === "HOLD" && _decisionAction(head, "bold") === "HOLD";
+  if (!headHold) return null;
+
+  const sys = state.get(state.Slots.SYSTEM_STATUS);
+  const tickers = sys?.signal_aggregate?.tickers;
+  if (!Array.isArray(tickers) || !tickers.length) return null;
+  // Match RANGING / RANGING_LOW_VOL / etc. — engine emits prefixed regime tags.
+  const ranging = tickers.some((t) => /^RANGING/i.test(String(t?.regime || "")));
+  if (!ranging) return null;
+
+  let lastNonHold = null;
+  for (const d of arr) {
+    if (_decisionAction(d, "patient") !== "HOLD" || _decisionAction(d, "bold") !== "HOLD") {
+      lastNonHold = d.ts || d.timestamp;
+      break;
+    }
+  }
+
+  const banner = document.createElement("div");
+  banner.style.background = "var(--card)";
+  banner.style.borderLeft = "3px solid var(--cyn)";
+  banner.style.padding = "var(--sp-2) var(--sp-3)";
+  banner.style.marginBottom = "var(--sp-2)";
+  banner.style.borderRadius = "4px";
+  banner.style.fontSize = "var(--ty-sm)";
+  banner.style.color = "var(--txm)";
+  banner.textContent = lastNonHold
+    ? `Range-bound regime · last non-HOLD ${fAgo(lastNonHold)}`
+    : "Range-bound regime · no non-HOLD decisions in this window";
+  return banner;
 }

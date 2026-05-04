@@ -460,6 +460,11 @@ def _normalize_metals_risk(risk):
         tg_item["status"] = "warnings" if tg_item else "unknown"
         item["trade_guards"] = tg_item
 
+    if "drawdown_pct" not in item and isinstance(item.get("drawdown"), dict):
+        item["drawdown_pct"] = item["drawdown"].get("current_drawdown_pct")
+    if "trade_guard_status" not in item and isinstance(item.get("trade_guards"), dict):
+        item["trade_guard_status"] = item["trade_guards"].get("status")
+
     return item
 
 
@@ -468,6 +473,32 @@ def _normalize_metals_context(context):
         return context
     item = dict(context)
     item["risk"] = _normalize_metals_risk(item.get("risk"))
+
+    underlying = item.get("underlying")
+    if isinstance(underlying, dict):
+        remapped = dict(underlying)
+        if "silver" in remapped and "XAG" not in remapped:
+            remapped["XAG"] = remapped["silver"]
+        if "gold" in remapped and "XAU" not in remapped:
+            remapped["XAU"] = remapped["gold"]
+        item["underlying"] = remapped
+
+    totals = item.get("totals")
+    if isinstance(totals, dict):
+        t = dict(totals)
+        if "value_sek" not in t and "current" in t:
+            t["value_sek"] = t["current"]
+        if "invested_sek" not in t and "invested" in t:
+            t["invested_sek"] = t["invested"]
+        item["totals"] = t
+
+    positions = item.get("positions")
+    if isinstance(positions, dict):
+        item["positions"] = [
+            {**(p if isinstance(p, dict) else {}), "ticker": k}
+            for k, p in positions.items()
+        ]
+
     return item
 
 
@@ -579,6 +610,7 @@ def _build_metals_context_fallback(decisions):
     drawdown_pct = None
     if isinstance(latest_decision, dict):
         drawdown_pct = (latest_decision.get("risk") or {}).get("drawdown_pct")
+    trade_guard_status = "warnings" if latest_signal.get("triggered") else "all_clear"
 
     price_history_recent = []
     gold_fallback = ((technicals.get("context") or {}).get("gold_price"))
@@ -615,14 +647,16 @@ def _build_metals_context_fallback(decisions):
         "tier": latest_decision.get("tier"),
         "market_close_cet": "21:55",
         "hours_remaining": _hours_until_stockholm_close(now_sthlm),
-        "positions": positions,
+        "positions": [
+            {"ticker": ticker, **payload} for ticker, payload in positions.items()
+        ],
         "underlying": {
-            "gold": {"price": gold_price} if gold_price is not None else {},
-            "silver": {"price": silver_price} if silver_price is not None else {},
+            "XAU": {"price": gold_price} if gold_price is not None else {},
+            "XAG": {"price": silver_price} if silver_price is not None else {},
         },
         "totals": {
-            "invested": _round_or_none(total_invested, 0),
-            "current": _round_or_none(total_value, 0),
+            "invested_sek": _round_or_none(total_invested, 0),
+            "value_sek": _round_or_none(total_value, 0),
             "pnl_pct": _round_or_none(total_pnl_pct, 2),
             "profit_sek": _round_or_none(
                 (total_value - total_invested)
@@ -650,9 +684,14 @@ def _build_metals_context_fallback(decisions):
                 "level": _drawdown_level_from_pct(drawdown_pct),
             },
             "trade_guards": {
-                "status": "warnings" if latest_signal.get("triggered") else "all_clear",
+                "status": trade_guard_status,
                 "reason": "; ".join((latest_signal.get("trigger_reasons") or [])[:2]) or None,
             },
+            # Top-level duplicates of nested values — metals.js view reads these
+            # flat keys directly (drawdown_pct, trade_guard_status). Don't drop
+            # the nested dicts; other consumers (legacy decision logs) read them.
+            "drawdown_pct": _round_or_none(drawdown_pct, 2),
+            "trade_guard_status": trade_guard_status,
         },
         "trades_today_file": "data/metals_trades.jsonl",
     }
@@ -1228,10 +1267,27 @@ def api_decisions():
 @app.route("/api/health")
 @require_auth
 def api_health():
-    """Return system health summary (loop heartbeat, errors, agent silence)."""
+    """Return system health summary (loop heartbeat, errors, agent silence).
+
+    Augmented 2026-05-04: also surfaces unresolved-critical-error count and
+    24h CRITICAL contract-violation count so the legacy /health view backs
+    the same numbers the home hero shows. Sourced from
+    dashboard.system_status to avoid duplicating the journal-walking logic.
+    """
     try:
         from portfolio.health import get_health_summary
-        return jsonify(get_health_summary())
+        payload = get_health_summary() or {}
+        try:
+            from dashboard import system_status
+            errs = system_status._errors_unresolved(system_status.DATA_DIR)
+            viols = system_status._violations_recent(system_status.DATA_DIR)
+            payload["unresolved_critical_errors"] = int(errs.get("unresolved", 0))
+            payload["contract_violations_24h"] = int(viols.get("unresolved", 0))
+        except Exception as enrich_exc:
+            payload["unresolved_critical_errors"] = 0
+            payload["contract_violations_24h"] = 0
+            payload["enrichment_error"] = f"{type(enrich_exc).__name__}: {enrich_exc}"
+        return jsonify(payload)
     except Exception:
         logger.exception("health endpoint error")
         return jsonify({"error": "Internal server error"}), 500
@@ -1506,6 +1562,54 @@ def api_golddigger():
         "log": log,
         "trades": trades,
     })
+
+
+# ---------------------------------------------------------------------------
+# Fish engine (metals straddle bot)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/fish_engine")
+@require_auth
+def api_fish_engine():
+    """Return Fish-engine state + recent log tail.
+
+    Mirrors the /api/golddigger shape: { state, log }. Reads via the
+    atomic file_utils helpers per CLAUDE.md "Atomic I/O only" rule.
+    """
+    try:
+        state = _load_json_impl(DATA_DIR / "fish_engine_state.json", default={}) or {}
+        log_path = DATA_DIR / "fish_engine_log.jsonl"
+        log_tail = []
+        if log_path.exists():
+            log_tail = _load_jsonl_tail_impl(log_path, max_entries=30) or []
+        return jsonify({"state": state, "log": log_tail})
+    except Exception:
+        logger.exception("fish_engine endpoint error")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Elongir (equity bot)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/elongir")
+@require_auth
+def api_elongir():
+    """Return Elongir state + recent decisions tail.
+
+    Mirrors the /api/golddigger shape: { state, log }. Tail of
+    `elongir_decisions.jsonl` is treated as the log stream.
+    """
+    try:
+        state = _load_json_impl(DATA_DIR / "elongir_state.json", default={}) or {}
+        log_path = DATA_DIR / "elongir_decisions.jsonl"
+        log_tail = []
+        if log_path.exists():
+            log_tail = _load_jsonl_tail_impl(log_path, max_entries=30) or []
+        return jsonify({"state": state, "log": log_tail})
+    except Exception:
+        logger.exception("elongir endpoint error")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ---------------------------------------------------------------------------

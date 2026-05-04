@@ -1360,7 +1360,10 @@ class TestApiMetals:
         assert "history" in data
         assert "technicals" in data
         assert data["context"]["totals"]["pnl_pct"] == -2.22
-        assert data["context"]["positions"]["gold"]["bid"] == 979.9
+        positions = data["context"]["positions"]
+        assert isinstance(positions, list)
+        gold_pos = next(p for p in positions if p["ticker"] == "gold")
+        assert gold_pos["bid"] == 979.9
 
     def test_returns_nulls_when_no_files(self, client, tmp_data):
         with _no_auth():
@@ -1408,7 +1411,10 @@ class TestApiMetals:
             resp = client.get("/api/metals")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["context"]["positions"]["gold"]["bid"] == 950
+        positions = data["context"]["positions"]
+        assert isinstance(positions, list)
+        gold_pos = next(p for p in positions if p["ticker"] == "gold")
+        assert gold_pos["bid"] == 950
         assert data["decisions"] == []
         assert data["history"] is None
         assert data["technicals"] is None
@@ -1494,12 +1500,17 @@ class TestApiMetals:
         assert resp.status_code == 200
         data = resp.get_json()
         context = data["context"]
-        assert context["positions"]["silver301"]["bid"] == 12.03
-        assert context["totals"]["current"] == 13293.0
-        assert context["underlying"]["gold"]["price"] == 5179.79
+        positions = context["positions"]
+        assert isinstance(positions, list)
+        silver301_pos = next(p for p in positions if p.get("ticker") == "silver301")
+        assert silver301_pos["bid"] == 12.03
+        assert context["totals"]["value_sek"] == 13293.0
+        assert context["underlying"]["XAU"]["price"] == 5179.79
         assert context["signals"]["forecast_signals"]["XAG-USD"]["action"] == "BUY"
         assert context["llm_predictions"]["predictions"]["XAG-USD"]["chronos_1h"]["pct_move"] == 0.288
         assert context["risk"]["trade_guards"]["status"] == "warnings"
+        assert context["risk"]["trade_guard_status"] == "warnings"
+        assert context["risk"]["drawdown_pct"] == -41.32
 
     def test_merges_fallback_into_partial_context(self, client, tmp_data):
         partial_context = {
@@ -1556,10 +1567,133 @@ class TestApiMetals:
         data = resp.get_json()
         context = data["context"]
         assert context["totals"]["pnl_pct"] == -1.0
-        assert context["totals"]["current"] == 13293.0
-        assert context["positions"]["silver301"]["entry"] == 13.921176
+        assert context["totals"]["value_sek"] == 13293.0
+        positions = context["positions"]
+        assert isinstance(positions, list)
+        silver301_pos = next(p for p in positions if p.get("ticker") == "silver301")
+        assert silver301_pos["entry"] == 13.921176
         assert context["risk"]["drawdown"]["level"] == "WARNING"
         assert context["risk"]["drawdown"]["current_drawdown_pct"] == -41.32
+
+    def test_api_metals_fallback_keys_match_frontend(self, client, tmp_data):
+        """Lock down the SHAPE the JS view (dashboard/static/js/views/metals.js)
+        reads from /api/metals when metals_context.json is missing entirely.
+        """
+        decision = {
+            "ts": "2026-03-11T12:01:56+00:00",
+            "check_count": 60,
+            "tier": 3,
+            "trigger": "drawdown",
+            "positions": {
+                "silver301": {
+                    "name": "MINI L SILVER AVA 301",
+                    "units": 1105,
+                    "entry": 13.92,
+                    "bid": 12.03,
+                    "stop": 13.23,
+                    "pnl_pct": -13.58,
+                }
+            },
+            "risk": {"drawdown_pct": -41.32},
+        }
+        signal = {
+            "ts": "2026-03-11T12:01:56+00:00",
+            "check": 60,
+            "prices": {
+                "silver301": 12.03,
+                "XAG-USD": 86.21,
+                "XAU-USD": 5179.79,
+            },
+            "triggered": True,
+            "trigger_reasons": ["drawdown"],
+        }
+        history_point = {
+            "ts": "2026-03-11T12:01:54+00:00",
+            "total_value": 13293.1,
+            "total_invested": 15382.9,
+            "pnl_pct": -13.58,
+            "positions": {"silver301": {"bid": 12.03, "value": 13293.1, "pnl_pct": -13.58}},
+        }
+        positions_state = {
+            "silver301": {"active": True, "units": 1105, "entry": 13.92, "stop": 13.23}
+        }
+
+        # NOTE: deliberately omit metals_context.json so the fallback path runs.
+        (tmp_data / "metals_decisions.jsonl").write_text(json.dumps(decision) + "\n", encoding="utf-8")
+        (tmp_data / "metals_signal_log.jsonl").write_text(json.dumps(signal) + "\n", encoding="utf-8")
+        (tmp_data / "metals_value_history.jsonl").write_text(json.dumps(history_point) + "\n", encoding="utf-8")
+        (tmp_data / "metals_positions_state.json").write_text(json.dumps(positions_state), encoding="utf-8")
+
+        with _no_auth():
+            resp = client.get("/api/metals")
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        ctx = payload["context"]
+        # underlying.XAU.price / underlying.XAG.price (metals.js lines ~108-109)
+        assert "XAU" in ctx["underlying"] and ctx["underlying"]["XAU"]["price"] == 5179.79
+        assert "XAG" in ctx["underlying"] and ctx["underlying"]["XAG"]["price"] == 86.21
+        # totals.value_sek / totals.invested_sek (metals.js lines ~106-107)
+        assert "value_sek" in ctx["totals"]
+        assert "invested_sek" in ctx["totals"]
+        # risk.drawdown_pct / risk.trade_guard_status (metals.js lines ~180/182)
+        assert ctx["risk"]["drawdown_pct"] == -41.32
+        assert ctx["risk"]["trade_guard_status"] == "warnings"
+        # positions is an array (metals.js line ~138-139, iterates with for..of)
+        assert isinstance(ctx["positions"], list)
+        assert ctx["positions"], "fallback positions list should not be empty"
+        assert ctx["positions"][0].get("ticker") == "silver301"
+
+    def test_api_metals_normalize_remaps_canonical_writer_shape(self, client, tmp_data):
+        """When data/metals_context.json IS present (canonical path), the
+        normalizer must remap data/metals_loop.py's writer shape (silver/gold,
+        invested/current, positions-as-dict, risk.drawdown.current_drawdown_pct)
+        to the frontend-expected shape (XAG/XAU, value_sek/invested_sek,
+        positions-as-list, risk.drawdown_pct).
+        """
+        canonical_ctx = {
+            "timestamp": "2026-05-04T17:30:00+00:00",
+            "positions": {
+                "silver301": {
+                    "name": "MINI L SILVER AVA 301",
+                    "value_sek": 13293.1,
+                    "invested_sek": 15382.9,
+                    "pnl_pct": -13.58,
+                }
+            },
+            "underlying": {
+                "silver": {"price": 86.21, "bid": 86.10, "ask": 86.32},
+                "gold":   {"price": 5179.79, "bid": 5179.50, "ask": 5180.10},
+            },
+            "totals": {
+                "invested": 15382,
+                "current": 13293,
+                "pnl_pct": -13.58,
+                "profit_sek": -2089,
+            },
+            "risk": {
+                "drawdown": {"current_drawdown_pct": -41.32},
+                "trade_guards": {"recent_losses": 2},
+            },
+        }
+        (tmp_data / "metals_context.json").write_text(
+            json.dumps(canonical_ctx), encoding="utf-8"
+        )
+
+        with _no_auth():
+            resp = client.get("/api/metals")
+
+        assert resp.status_code == 200
+        ctx = resp.get_json()["context"]
+        assert ctx["underlying"]["XAG"]["price"] == 86.21
+        assert ctx["underlying"]["XAU"]["price"] == 5179.79
+        assert ctx["totals"]["value_sek"] == 13293
+        assert ctx["totals"]["invested_sek"] == 15382
+        assert ctx["risk"]["drawdown_pct"] == -41.32
+        assert ctx["risk"]["trade_guard_status"] == "warnings"
+        assert isinstance(ctx["positions"], list)
+        assert ctx["positions"][0]["ticker"] == "silver301"
+        assert ctx["positions"][0]["value_sek"] == 13293.1
 
 
 class TestApiGoldDigger:
@@ -1664,6 +1798,146 @@ class TestApiGoldDigger:
         assert data["state"] is None
         assert data["log"] == []
         assert data["trades"] == []
+
+
+class TestApiFishEngine:
+    def test_api_fish_engine_returns_state(self, client, tmp_data):
+        fixture_state = {
+            "mode": "straddle",
+            "position": None,
+            "session_pnl": -123.45,
+            "trade_count": 4,
+            "win_count": 1,
+            "loss_count": 3,
+            "consecutive_losses": 2,
+            "cooldown_seconds": 300,
+            "last_trade_ts": 1776279449.31,
+            "orb_range_low": 72.3,
+            "orb_range_high": 73.22,
+            "orb_range_formed": True,
+        }
+        (tmp_data / "fish_engine_state.json").write_text(
+            json.dumps(fixture_state), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/fish_engine")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["state"]["mode"] == "straddle"
+        assert data["state"]["trade_count"] == 4
+        assert data["state"]["orb_range_formed"] is True
+        assert data["log"] == []
+
+    def test_returns_empty_state_when_files_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/fish_engine")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["state"] == {}
+        assert data["log"] == []
+
+
+class TestApiElongir:
+    def test_api_elongir_returns_state(self, client, tmp_data):
+        fixture_state = {
+            "cash_sek": 124867.02,
+            "position": None,
+            "daily_pnl": 4494.92,
+            "daily_trades": 1,
+            "total_pnl": 24867.02,
+            "wins": 5,
+            "losses": 2,
+            "max_drawdown_pct": 4.05,
+            "halted": False,
+            "halted_reason": "",
+            "signal_state": "SCANNING",
+            "last_trade_date": "2026-04-24",
+        }
+        (tmp_data / "elongir_state.json").write_text(
+            json.dumps(fixture_state), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/elongir")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["state"]["cash_sek"] == 124867.02
+        assert data["state"]["signal_state"] == "SCANNING"
+        assert data["state"]["wins"] == 5
+        assert data["log"] == []
+
+    def test_returns_empty_state_when_files_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/elongir")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["state"] == {}
+        assert data["log"] == []
+
+
+class TestApiHealthIncludesUnresolvedCounts:
+    """The legacy /api/health endpoint is augmented with the same counters
+    the home hero shows so the tap-target backs the same numbers."""
+
+    def test_api_health_includes_unresolved_counts(self, client, tmp_data, monkeypatch):
+        critical = [
+            {
+                "ts": "2026-05-04T10:00:00+00:00",
+                "level": "critical",
+                "category": "loop_silent",
+                "caller": "main",
+                "message": "loop did not heartbeat for 600s",
+            },
+            {
+                "ts": "2026-05-04T11:00:00+00:00",
+                "level": "critical",
+                "category": "auth_outage",
+                "caller": "layer2",
+                "message": "claude -p exited with not-logged-in",
+            },
+        ]
+        (tmp_data / "critical_errors.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in critical) + "\n",
+            encoding="utf-8",
+        )
+        # Same UTC-now epoch so the violation lands inside the 24h window.
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        violations = [
+            {
+                "ts": now_iso,
+                "severity": "CRITICAL",
+                "invariant": "trigger_acked_within_60s",
+                "message": "trigger never reached layer2",
+            },
+            {
+                "ts": now_iso,
+                "severity": "WARNING",
+                "invariant": "noise_only",
+                "message": "ignore me",
+            },
+        ]
+        (tmp_data / "contract_violations.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in violations) + "\n",
+            encoding="utf-8",
+        )
+
+        # health_state.json keeps get_health_summary() happy.
+        (tmp_data / "health_state.json").write_text(
+            json.dumps({"loop_alive": True, "cycles": 100, "agent_silent": False}),
+            encoding="utf-8",
+        )
+
+        # /api/health enriches via dashboard.system_status.DATA_DIR — patch it.
+        from dashboard import system_status as ss
+        monkeypatch.setattr(ss, "DATA_DIR", tmp_data)
+        with _no_auth():
+            resp = client.get("/api/health")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data.get("unresolved_critical_errors"), int)
+        assert isinstance(data.get("contract_violations_24h"), int)
+        assert data["unresolved_critical_errors"] == 2
+        assert data["contract_violations_24h"] == 1
 
 
 class TestSignalHeatmapUpdated:

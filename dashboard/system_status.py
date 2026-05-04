@@ -94,6 +94,16 @@ def _heartbeat(dd: Path) -> dict[str, Any]:
             "cycle_count": health.get("cycle_count", 0),
             "error_count": health.get("error_count", 0),
         }
+        # Source of truth: portfolio.health._HEARTBEAT_KEEPALIVE_INTERVAL_S
+        # is the cadence the loop touches last_heartbeat at (incl. during
+        # Layer 2 work). Hero footer uses this as the observed-vs-expected
+        # comparator instead of the 600s loop cycle, which is wrong because
+        # the keepalive shortens the expected age.
+        try:
+            from portfolio.health import _HEARTBEAT_KEEPALIVE_INTERVAL_S
+            out["expected_heartbeat_seconds"] = int(_HEARTBEAT_KEEPALIVE_INTERVAL_S)
+        except Exception:
+            pass
         if err:
             out["error"] = err
         return out
@@ -108,6 +118,11 @@ def _hb_default(error: str | None = None) -> dict[str, Any]:
         "cycle_count": 0,
         "error_count": 0,
     }
+    try:
+        from portfolio.health import _HEARTBEAT_KEEPALIVE_INTERVAL_S
+        out["expected_heartbeat_seconds"] = int(_HEARTBEAT_KEEPALIVE_INTERVAL_S)
+    except Exception:
+        pass
     if error:
         out["error"] = error
     return out

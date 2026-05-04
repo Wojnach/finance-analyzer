@@ -15,6 +15,8 @@ const ITEMS = [
   { route: "messages",   label: "Messages",    hint: "Telegram log + saved-only" },
   { route: "metals",     label: "Metals",      hint: "XAG/XAU warrants" },
   { route: "golddigger", label: "GoldDigger",  hint: "Gold-cert bot" },
+  { route: "fish",       label: "Fish engine", hint: "Metals straddle / ORB bot" },
+  { route: "elongir",    label: "Elongir",     hint: "Equity bot" },
   { route: "equity",     label: "Equity",      hint: "P&L curve + trade marks" },
   { route: "settings",   label: "Settings",    hint: "Theme, polling, /legacy" },
 ];

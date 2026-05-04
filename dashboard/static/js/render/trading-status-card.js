@@ -24,9 +24,8 @@ const STATE_COLORS = {
 const BOT_ROUTES = {
   golddigger: "golddigger",
   metals:     "metals",
-  // No dedicated routes for elongir/fishing yet — fall through to /health
-  elongir:    "health",
-  fishing:    "health",
+  elongir:    "elongir",
+  fishing:    "fish",
 };
 
 /** @returns {HTMLElement} */

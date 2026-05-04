@@ -78,7 +78,17 @@ export function systemStatusHero(payload) {
   foot.style.marginTop = "var(--sp-2)";
   foot.style.color = "var(--txm)";
   foot.style.fontSize = "var(--ty-sm)";
-  foot.textContent = `loop ${ageStr} ago · cycle #${hb.cycle_count ?? "?"} · ${hb.error_count ?? 0} errors recorded`;
+  const exp = payload?.heartbeat?.expected_heartbeat_seconds;
+  foot.append(document.createTextNode(`loop ${ageStr} ago`));
+  if (Number.isFinite(exp)) {
+    const sep = document.createElement("span");
+    sep.style.color = "var(--txm)";
+    sep.style.opacity = "0.6";
+    sep.textContent = " / ";
+    foot.append(sep);
+    foot.append(document.createTextNode(`expected ~${exp}s`));
+  }
+  foot.append(document.createTextNode(` · cycle #${hb.cycle_count ?? "?"} · ${hb.error_count ?? 0} errors recorded`));
   card.append(foot);
 
   return card;

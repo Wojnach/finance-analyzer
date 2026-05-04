@@ -14,6 +14,7 @@ import { emptyState } from "../components/empty-state.js";
 import { pulseDot } from "../components/pulse-dot.js";
 
 const POLL_KEY = "health";
+const POLL_KEY_SYS = "health.system_status";
 
 let _root = null;
 let _unsubs = [];
@@ -26,6 +27,7 @@ export const view = {
 
     _unsubs.push(state.subscribe(state.Slots.HEALTH, _renderBody));
     _unsubs.push(state.subscribe(state.Slots.LOOP_HEALTH, _renderBody));
+    _unsubs.push(state.subscribe(state.Slots.SYSTEM_STATUS, _renderBody));
 
     polling.register(POLL_KEY, 60_000, async () => {
       const h = await fj("/api/health");
@@ -33,11 +35,16 @@ export const view = {
       const lh = await fj("/api/loop_health");
       if (lh) state.set(state.Slots.LOOP_HEALTH, lh);
     });
+    polling.register(POLL_KEY_SYS, 60_000, async () => {
+      const d = await fj("/api/system_status");
+      if (d) state.set(state.Slots.SYSTEM_STATUS, d);
+    });
   },
   unmount() {
     for (const off of _unsubs) try { off(); } catch (_) {}
     _unsubs = [];
     polling.unregister(POLL_KEY);
+    polling.unregister(POLL_KEY_SYS);
     _root = null;
   },
 };
@@ -65,6 +72,20 @@ function _renderBody() {
   const slot = _root.querySelector('[data-slot="body"]');
   if (!slot) return;
   while (slot.firstChild) slot.removeChild(slot.firstChild);
+
+  // System-status sections from /api/system_status. Surfaces unresolved
+  // criticals + 24h contract violations so the hero/errors-panel taps
+  // land on a page that backs the claim (legacy /api/health is blind to
+  // both jsonl journals).
+  const sys = state.get(state.Slots.SYSTEM_STATUS);
+  const sysErrs = Array.isArray(sys?.errors?.recent) ? sys.errors.recent : [];
+  if (sysErrs.length) {
+    slot.append(_section("Unresolved critical errors", _criticalErrorList(sysErrs)));
+  }
+  const sysCV = Array.isArray(sys?.contract_violations?.recent) ? sys.contract_violations.recent : [];
+  if (sysCV.length) {
+    slot.append(_section("Contract violations (24h)", _contractViolationList(sysCV)));
+  }
 
   const h = state.get(state.Slots.HEALTH);
   if (!h) {
@@ -171,6 +192,68 @@ function _errorList(items) {
     msg.style.marginTop = "2px";
     msg.style.color = "var(--tx)";
     msg.textContent = item?.message || item?.msg || JSON.stringify(item);
+    row.append(top, msg);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function _criticalErrorList(items) {
+  const wrap = document.createElement("div");
+  wrap.style.background = "var(--card)";
+  wrap.style.border = "1px solid var(--bdr)";
+  wrap.style.borderRadius = "var(--rad-md)";
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.style.padding = "var(--sp-2) var(--sp-3)";
+    row.style.borderBottom = "1px solid var(--bdr)";
+    const top = document.createElement("div");
+    top.style.display = "flex";
+    top.style.justifyContent = "space-between";
+    top.style.fontSize = "var(--ty-xs)";
+    const left = document.createElement("span");
+    left.style.color = "var(--txm)";
+    left.textContent = ftFull(item?.ts || "");
+    const right = document.createElement("span");
+    right.style.color = "var(--red)";
+    right.textContent = [item?.category, item?.caller].filter(Boolean).join(" · ") || "critical";
+    top.append(left, right);
+    const msg = document.createElement("div");
+    msg.style.fontSize = "var(--ty-sm)";
+    msg.style.marginTop = "2px";
+    msg.style.color = "var(--tx)";
+    msg.textContent = item?.message || "";
+    row.append(top, msg);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function _contractViolationList(items) {
+  const wrap = document.createElement("div");
+  wrap.style.background = "var(--card)";
+  wrap.style.border = "1px solid var(--bdr)";
+  wrap.style.borderRadius = "var(--rad-md)";
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.style.padding = "var(--sp-2) var(--sp-3)";
+    row.style.borderBottom = "1px solid var(--bdr)";
+    const top = document.createElement("div");
+    top.style.display = "flex";
+    top.style.justifyContent = "space-between";
+    top.style.fontSize = "var(--ty-xs)";
+    const left = document.createElement("span");
+    left.style.color = "var(--txm)";
+    left.textContent = ftFull(item?.ts || "");
+    const right = document.createElement("span");
+    right.style.color = "var(--red)";
+    right.textContent = [item?.invariant, item?.severity].filter(Boolean).join(" · ") || "violation";
+    top.append(left, right);
+    const msg = document.createElement("div");
+    msg.style.fontSize = "var(--ty-sm)";
+    msg.style.marginTop = "2px";
+    msg.style.color = "var(--tx)";
+    msg.textContent = item?.message || "";
     row.append(top, msg);
     wrap.append(row);
   }

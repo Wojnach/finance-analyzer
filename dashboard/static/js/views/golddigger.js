@@ -127,6 +127,8 @@ function _renderSignal(data) {
   t.textContent = "Signal breakdown";
   card.append(t);
 
+  const sessionClosed = String(s.session ?? "").toUpperCase() === "CLOSED";
+
   for (const [k, v] of present) {
     const n = Number(v);
     const row = document.createElement("div");
@@ -139,12 +141,27 @@ function _renderSignal(data) {
     a.style.color = "var(--txd)";
     const b = document.createElement("span");
     b.className = "num num--sm";
-    b.textContent = n.toFixed(3);
-    b.style.color = n > 0 ? "var(--grn)" : n < 0 ? "var(--red)" : "var(--txm)";
+    // z_fx/z_yield collapse to a hard 0.0 when the gold session is closed (no
+    // contribution this session). Render as em-dash so users don't misread it
+    // as a stale/missing feed. z_gold stays raw — it's the primary signal.
+    const muted = (k === "z_fx" || k === "z_yield") ? _fmtZ(n, sessionClosed) : null;
+    if (muted === "—") {
+      b.textContent = "—";
+      b.style.color = "var(--txm)";
+    } else {
+      b.textContent = n.toFixed(3);
+      b.style.color = n > 0 ? "var(--grn)" : n < 0 ? "var(--red)" : "var(--txm)";
+    }
     row.append(a, b);
     card.append(row);
   }
   slot.append(card);
+}
+
+function _fmtZ(value, sessionClosed) {
+  if (sessionClosed && (value === 0 || value === 0.0)) return "—";
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toFixed(3);
 }
 
 function _renderPosition(data) {
