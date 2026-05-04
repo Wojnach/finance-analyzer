@@ -160,12 +160,30 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
 
 
 def _violations_recent(dd: Path) -> dict[str, Any]:
-    """Last-24h CRITICAL contract violations. WARNINGs are noise.
+    """Last-24h CRITICAL contract violations, filtered to *unresolved* rows.
 
     Uses adaptive tail growth so we don't undercount on high-volume
     days. ``contract_violations.jsonl`` can grow unbounded; we read
     the tail and re-pull more if the oldest entry is still inside the
     24h window.
+
+    Resolution-aware (added 2026-05-04). A row is treated as resolved when:
+
+    1. Generic — ``critical_errors.jsonl`` has a row with
+       ``resolves_ts == violation.ts`` (the standard resolution mechanism
+       used by ``_errors_unresolved`` and ``check_critical_errors.py``).
+    2. ``layer2_journal_activity`` — ``layer2_journal.jsonl`` has at least
+       one entry with ``ts >= violation.details.trigger_time``. The
+       journal entry IS the resolution; the contract check itself returns
+       early on this condition the next cycle.
+    3. ``accuracy_degradation`` — multiple loops dispatch the same alert
+       independently into the shared file (one row per loop). Dedup by
+       ``(invariant, message)`` keeping only the newest row.
+
+    Without these filters the panel surfaced cleared-but-stale events for
+    up to 24h after the underlying issue was fixed (observed 2026-05-04
+    when 6 CV rows were shown despite Layer 2 working and accuracy
+    regression already disposition'd by the 2026-05-03 research session).
     """
     try:
         entries = _load_last_n_hours(
@@ -174,25 +192,99 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
     except Exception as e:
         return {"unresolved": 0, "recent": [], "error": f"violations load: {type(e).__name__}: {e}"}
     try:
-        recent: list[dict[str, Any]] = []
+        resolved_ts = _resolved_ts_set(dd)
+        latest_l2_journal_ts = _latest_layer2_journal_ts(dd)
+
+        # Pass 1: severity filter + per-row resolution check.
+        kept: list[dict[str, Any]] = []
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
             if entry.get("severity") != "CRITICAL":
                 continue
-            ts = entry.get("ts")
-            recent.append(
-                {
-                    "ts": ts,
-                    "invariant": entry.get("invariant"),
-                    "severity": entry.get("severity"),
-                    "message": (entry.get("message") or "")[:200],
-                }
+            if _violation_resolved(entry, resolved_ts, latest_l2_journal_ts):
+                continue
+            kept.append(entry)
+
+        # Pass 2: cross-row dedup. accuracy_degradation fires from every
+        # loop (main, golddigger, metals, elongir) within milliseconds and
+        # produces identical-message rows; collapse to the newest.
+        seen: set[tuple[str, str]] = set()
+        deduped: list[dict[str, Any]] = []
+        for entry in sorted(kept, key=lambda e: e.get("ts", ""), reverse=True):
+            key = (
+                str(entry.get("invariant") or ""),
+                (entry.get("message") or "")[:200],
             )
-        recent.sort(key=lambda x: x.get("ts", ""), reverse=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(entry)
+
+        recent = [
+            {
+                "ts": e.get("ts"),
+                "invariant": e.get("invariant"),
+                "severity": e.get("severity"),
+                "message": (e.get("message") or "")[:200],
+            }
+            for e in deduped
+        ]
         return {"unresolved": len(recent), "recent": recent[:5]}
     except Exception as e:
         return {"unresolved": 0, "recent": [], "error": f"violations aggregate: {type(e).__name__}: {e}"}
+
+
+def _resolved_ts_set(dd: Path) -> set[str]:
+    """Build the set of ts values that have been resolved via
+    ``critical_errors.jsonl`` resolution rows."""
+    try:
+        entries = load_jsonl(dd / "critical_errors.jsonl")
+    except Exception:
+        return set()
+    out: set[str] = set()
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        rts = e.get("resolves_ts")
+        if rts:
+            out.add(str(rts))
+    return out
+
+
+def _latest_layer2_journal_ts(dd: Path) -> str | None:
+    """Newest ts from ``layer2_journal.jsonl``, or None if empty.
+
+    Used to short-circuit ``layer2_journal_activity`` violations whose
+    trigger has since been journaled. Reads only the tail because the
+    file is append-only and we just need the maximum timestamp.
+    """
+    try:
+        tail = load_jsonl_tail(dd / "layer2_journal.jsonl", max_entries=20)
+    except Exception:
+        return None
+    best: str | None = None
+    for e in tail:
+        if not isinstance(e, dict):
+            continue
+        ts = e.get("ts") or e.get("timestamp")
+        if ts and (best is None or str(ts) > best):
+            best = str(ts)
+    return best
+
+
+def _violation_resolved(
+    entry: dict, resolved_ts: set[str], latest_l2_journal_ts: str | None
+) -> bool:
+    ts = entry.get("ts")
+    if ts and str(ts) in resolved_ts:
+        return True
+    if entry.get("invariant") == "layer2_journal_activity":
+        details = entry.get("details") or {}
+        trig = details.get("trigger_time")
+        if trig and latest_l2_journal_ts and str(latest_l2_journal_ts) >= str(trig):
+            return True
+    return False
 
 
 def _llm_inference(dd: Path) -> dict[str, Any]:

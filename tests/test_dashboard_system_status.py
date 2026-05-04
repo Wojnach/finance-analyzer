@@ -159,6 +159,118 @@ class TestContractViolations:
         assert out["contract_violations"]["unresolved"] == 1
         assert out["contract_violations"]["recent"][0]["message"] == "recent"
 
+    def test_layer2_journal_activity_resolved_by_journal_entry(
+        self, tmp_path: Path
+    ):
+        """If a layer2_journal.jsonl entry exists with ts >= the violation's
+        details.trigger_time, the violation has been implicitly resolved."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        trigger_ts = _ts(-3000)
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {
+                    "ts": _ts(-2700),
+                    "severity": "CRITICAL",
+                    "invariant": "layer2_journal_activity",
+                    "message": "Layer 2 trigger fired but no journal entry",
+                    "details": {"trigger_time": trigger_ts},
+                },
+            ],
+        )
+        # Journal entry written AFTER the trigger -> resolves.
+        _write_jsonl(
+            tmp_path / "layer2_journal.jsonl",
+            [{"ts": _ts(-2400), "trigger": "x", "decisions": {}}],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 0
+
+    def test_layer2_violation_not_resolved_when_journal_predates_trigger(
+        self, tmp_path: Path
+    ):
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        trigger_ts = _ts(-1000)
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {
+                    "ts": _ts(-500),
+                    "severity": "CRITICAL",
+                    "invariant": "layer2_journal_activity",
+                    "message": "no journal",
+                    "details": {"trigger_time": trigger_ts},
+                },
+            ],
+        )
+        _write_jsonl(
+            tmp_path / "layer2_journal.jsonl",
+            [{"ts": _ts(-2000), "trigger": "x", "decisions": {}}],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 1
+
+    def test_accuracy_degradation_dedup_keeps_newest(self, tmp_path: Path):
+        """Three independent loops dispatch the same alert within ms.
+        After dedup, only the newest row should surface."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-3600), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp..."},
+                {"ts": _ts(-3599.9), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp..."},
+                {"ts": _ts(-3599.8), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp..."},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 1
+
+    def test_violation_resolved_by_critical_errors_resolution_row(
+        self, tmp_path: Path
+    ):
+        """A row in critical_errors.jsonl with resolves_ts == violation.ts
+        retroactively resolves the contract violation."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        violation_ts = _ts(-1800)
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": violation_ts, "severity": "CRITICAL",
+                 "invariant": "min_success_rate", "message": "0%"},
+            ],
+        )
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {"ts": _ts(-300), "level": "info", "category": "resolution",
+                 "resolves_ts": violation_ts, "message": "fixed"},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 0
+
+    def test_two_distinct_unresolved_violations_both_surface(
+        self, tmp_path: Path
+    ):
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-3600), "severity": "CRITICAL",
+                 "invariant": "min_success_rate", "message": "0% rate"},
+                {"ts": _ts(-1800), "severity": "CRITICAL",
+                 "invariant": "session_alive", "message": "dead session"},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 2
+
 
 # ---------------------------------------------------------------------------
 # LLM inference
