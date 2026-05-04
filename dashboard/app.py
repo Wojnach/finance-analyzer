@@ -1087,12 +1087,33 @@ def api_signal_heatmap():
             row[s] = (votes.get(s, "HOLD") or "HOLD").upper()
         heatmap[ticker] = row
 
+    # Per-(ticker, signal) state-change timestamps for the "time-in-state" badge.
+    # Written by portfolio.reporting._update_signal_state_since each loop cycle.
+    # Missing or malformed payload degrades to an empty map: frontend renders
+    # cells without the badge — never 500.
+    state_since_payload = _read_json(DATA_DIR / "signal_state_since.json") or {}
+    state_since_votes = state_since_payload.get("votes") if isinstance(state_since_payload, dict) else None
+    since: dict[str, dict[str, str]] = {}
+    if isinstance(state_since_votes, dict):
+        for ticker in tickers:
+            tk_state = state_since_votes.get(ticker)
+            if not isinstance(tk_state, dict):
+                continue
+            row_since: dict[str, str] = {}
+            for s in all_signals:
+                entry = tk_state.get(s)
+                if isinstance(entry, dict) and isinstance(entry.get("since"), str):
+                    row_since[s] = entry["since"]
+            if row_since:
+                since[ticker] = row_since
+
     return jsonify({
         "tickers": tickers,
         "signals": all_signals,
         "core_signals": core_signals,
         "enhanced_signals": enhanced_signals,
         "heatmap": heatmap,
+        "since": since,
     })
 
 
