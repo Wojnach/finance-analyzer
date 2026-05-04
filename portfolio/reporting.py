@@ -21,6 +21,7 @@ AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
 TIER1_FILE = DATA_DIR / "agent_context_t1.json"
 TIER2_FILE = DATA_DIR / "agent_context_t2.json"
+SIGNAL_STATE_SINCE_FILE = DATA_DIR / "signal_state_since.json"
 
 # 2026-04-22: escalate persistent silent failures to critical_errors.jsonl.
 # The MC seed=None bug survived weeks undetected because reporting.py's bare
@@ -796,9 +797,42 @@ def write_agent_summary(
             },
         }
 
+    _update_signal_state_since(summary)
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     _write_compact_summary(summary)
     return summary
+
+
+def _update_signal_state_since(summary: dict) -> None:
+    """Update data/signal_state_since.json with per-(ticker, signal) flip times.
+
+    Drives the dashboard heatmap "time-in-state" badge — see
+    docs/SESSION_PROGRESS.md (2026-05-05 heatmap-time-in-state). The endpoint
+    /api/signal-heatmap reads this file; on absence the dashboard degrades
+    gracefully to color-only cells.
+
+    Failures are logged and swallowed. This is a UX-only side-effect; if the
+    file can't be written we never want to break agent_summary.json itself.
+    """
+    try:
+        from portfolio.signal_state_since import update_state_since
+        current_votes: dict[str, dict[str, str]] = {}
+        for ticker, sig_data in (summary.get("signals") or {}).items():
+            if not isinstance(sig_data, dict):
+                continue
+            votes = (sig_data.get("extra") or {}).get("_votes")
+            if isinstance(votes, dict):
+                current_votes[ticker] = {
+                    str(k): str(v or "HOLD").upper() for k, v in votes.items()
+                }
+        if not current_votes:
+            return
+        prev = load_json(SIGNAL_STATE_SINCE_FILE, default={})
+        now_iso = datetime.now(UTC).isoformat()
+        payload = update_state_since(prev, current_votes, now_iso)
+        _atomic_write_json(SIGNAL_STATE_SINCE_FILE, payload)
+    except Exception as e:
+        logger.warning("Failed to update signal_state_since.json: %s", e)
 
 
 _held_tickers_cache = {"cycle_id": -1, "tickers": set()}
