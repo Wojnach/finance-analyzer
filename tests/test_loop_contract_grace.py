@@ -77,8 +77,16 @@ def contract_env(tmp_path, monkeypatch):
 def test_grace_table_pins_tier_values():
     """Pin the per-tier grace table. If someone widens or shrinks these,
     this test forces them to justify it in review and update the CLAUDE.md
-    critical-rules doc."""
-    assert loop_contract.LAYER2_JOURNAL_GRACE_S_BY_TIER[1] == 3 * 60
+    critical-rules doc.
+
+    T1 widened from 3 min → 12 min on 2026-05-05: real T1 invocations
+    routinely run 397-538 s (see ``data/invocations.jsonl`` for
+    2026-05-04). The narrower 180 s grace was firing false-positive
+    layer2_journal_activity violations on every successful T1 call. The
+    deeper "why does T1 enforcement allow 8-minute runs" investigation
+    is tracked in ``docs/plans/2026-05-05-dashboard-noise-followups.md``.
+    """
+    assert loop_contract.LAYER2_JOURNAL_GRACE_S_BY_TIER[1] == 12 * 60
     assert loop_contract.LAYER2_JOURNAL_GRACE_S_BY_TIER[2] == 12 * 60
     assert loop_contract.LAYER2_JOURNAL_GRACE_S_BY_TIER[3] == 20 * 60
 
@@ -109,9 +117,11 @@ def test_get_layer2_grace_returns_default_for_non_int_tier():
     assert loop_contract._get_layer2_grace_s({"last_invocation_tier": None}) == 20 * 60
 
 
-@pytest.mark.parametrize("tier,expected", [(1, 180), (2, 720), (3, 1200)])
+@pytest.mark.parametrize("tier,expected", [(1, 720), (2, 720), (3, 1200)])
 def test_get_layer2_grace_maps_each_tier(tier, expected):
-    """_get_layer2_grace_s returns the correct per-tier value for 1/2/3."""
+    """_get_layer2_grace_s returns the correct per-tier value for 1/2/3.
+
+    T1 widened to 720 s on 2026-05-05 — see test_grace_table_pins_tier_values."""
     assert loop_contract._get_layer2_grace_s({"last_invocation_tier": tier}) == expected
 
 
@@ -125,9 +135,14 @@ def test_get_layer2_grace_unknown_tier_uses_default():
 # ---------------------------------------------------------------------------
 
 def test_t1_grace_suppresses_alert_at_4m(contract_env):
-    """Trigger 4m old with T1 last_tier → no alert (T1 grace is 3m, but
-    this also tests that we don't false-positive before the grace has
-    elapsed when the most recent invocation is T1)."""
+    """Trigger 4m old with T1 last_tier → no alert.
+
+    Originally exercised the 3-min T1 grace boundary; after the
+    2026-05-05 widening to 12 min (real T1 invocations run 397-538 s)
+    the 4-min mark is well inside grace AND there's an in-flight
+    "invoked" entry, so two independent suppression paths agree.
+    Kept as a regression that "no false positive at 4 m with a T1 tier
+    in flight"."""
     tmp_path, p = contract_env
     now = datetime.now(UTC)
     trigger_ts = now - timedelta(minutes=4)
