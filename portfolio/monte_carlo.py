@@ -31,6 +31,14 @@ DEFAULT_N_PATHS = 10_000   # 5K pairs with antithetic variates
 DEFAULT_HORIZONS = [1, 3]  # days
 MIN_VOLATILITY = 0.05      # 5% annualized floor (prevents degenerate sims)
 
+# Per-asset-class ATR fallbacks when actual ATR is missing from signals.
+# The generic 2.0% underestimates tail risk for crypto/metals.
+_ATR_DEFAULT_BY_CLASS = {
+    "crypto": 3.5,  # BTC 3-4% typical daily ATR
+    "metals": 4.0,  # XAG 4-6%, XAU 2-3% — biased toward silver
+    "stocks": 2.0,  # MSTR ~3% but broader equities lower
+}
+
 
 # ---------------------------------------------------------------------------
 # Volatility & drift estimation from existing system data
@@ -87,6 +95,16 @@ def drift_from_probability(p_up: float, volatility: float) -> float:
     mu = volatility * z * math.sqrt(252.0) + 0.5 * volatility**2
 
     return mu
+
+
+def _atr_default_for_ticker(ticker: str) -> float:
+    """Return the per-asset-class ATR fallback for a ticker."""
+    from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
+    if ticker in CRYPTO_SYMBOLS:
+        return _ATR_DEFAULT_BY_CLASS["crypto"]
+    if ticker in METALS_SYMBOLS:
+        return _ATR_DEFAULT_BY_CLASS["metals"]
+    return _ATR_DEFAULT_BY_CLASS["stocks"]
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +296,7 @@ def simulate_ticker(ticker: str, agent_summary: dict,
         return None
 
     extra = ticker_data.get("extra", {})
-    atr_pct = extra.get("atr_pct") or ticker_data.get("atr_pct", 2.0)
+    atr_pct = extra.get("atr_pct") or ticker_data.get("atr_pct") or _atr_default_for_ticker(ticker)
 
     # Get volatility from ATR
     vol = volatility_from_atr(atr_pct)
