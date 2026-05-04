@@ -1,5 +1,68 @@
 # Session Progress
 
+## System-Health-First Home (2026-05-04 evening, /fgl)
+
+**Session start:** 2026-05-04 ~16:30 CEST
+**Status:** MERGED + PUSHED — branch `feat/dashboard-system-health-home-2026-05-04` merged into main as 6 commits, pushed via `cmd.exe /c git push`. PF-Dashboard restarted and live at `:5055`.
+**Commits:** 6 (5 batches + 1 codex fix-pass)
+
+### What changed
+
+The dashboard home page no longer leads with simulated-portfolio P&L. The user said:
+
+> "Honestly I don't care much about the patient and bold traders current money. They pretty much never trade anyway. […] When I open the dashboard I want to instantly see the system is working. If there are any errors. Contracts being violated. If most of the signals are abstaining and holding. If the LLM success rate is less than 100%. How long ago we had a loop running. Why the loops aren't trading on Avanza."
+
+New home = 7-card stack driven by two new endpoints:
+
+1. **System status hero** — GREEN/YELLOW/RED + reasons. Live data flips to RED on this loop with: "loop heartbeat 385s ago, 10 unresolved errors, 22 contract violations 24h, Layer 2 success 0.0%". The hero is the punchline.
+2. **Trading status** — per-Avanza-bot row (GoldDigger / Elongir / Metals / Fishing) with state badge + reason. Currently all 4 SCANNING in-session with no signal — answers the user's "why aren't they trading right now?" without clicking through.
+3. **LLM inference health** — per-model success bar. Currently Chronos-2 97.5%, Kronos 91.8% (yellow), Claude Fundamental 100%, Forecast voter 100%.
+4. **Layer 2 activity (24h)** — sparkline + headline. Currently surfaces "5 triggers, 0% success — last loop_contract_main TIMEOUT 180s" → exactly the operational signal the user wanted to surface.
+5. **Signal pulse** — per-ticker BUY/SELL/HOLD counts with abstain %. Live: ETH-USD SELL 68% abstaining, MSTR HOLD 65% abstaining, etc.
+6. **Errors & violations** — last 5 unresolved entries with timestamps.
+7. **P&L footer** — single tap-link to `/portfolio` (the old home, preserved verbatim under More).
+
+### Backend
+
+- New `dashboard/system_status.py` — pure aggregator (~370 LOC). Reads `health_state.json`, `critical_errors.jsonl`, `contract_violations.jsonl`, `claude_invocations.jsonl`, `signal_log.jsonl`, `local_llm_report_latest.json`, `portfolio_state*.json`. 24 unit tests including 4 codex-finding regressions.
+- New `dashboard/trading_status.py` — per-bot reader (~190 LOC). Reads `golddigger_state.json` / `elongir_state.json` / `metals_swing_state.json` / `metals_guard_state.json` / `fish_engine_state.json`. DST-aware Europe/Stockholm session check. 19 unit tests including 3 weekend-gating regressions.
+- Routes `/api/system_status` + `/api/trading_status` in `dashboard/app.py`. 30s TTL cache mirroring the `_AVANZA_CACHE` pattern. Lock covers both read and write so concurrent misses serialize and `?force=1` can't lose to an in-flight fill (codex P2 finding fix).
+
+### Frontend
+
+- 6 new render modules under `dashboard/static/js/render/`: system-status-hero, trading-status-card, llm-inference-card, layer2-activity-card, signal-pulse-card, errors-panel. Each is a plain function returning a DOM element — no factory pattern.
+- `dashboard/static/js/views/home.js` — full rewrite (490 -> 207 lines). Polls 30s on both new endpoints.
+- `dashboard/static/js/views/portfolio.js` — old home content preserved; reachable via More -> Portfolio.
+- `dashboard/static/js/state.js` — added `Slots.SYSTEM_STATUS` + `Slots.TRADING_STATUS`.
+- `dashboard/static/js/main.js` — registers portfolio view; `MORE_SUB_ROUTES` set updated.
+
+### Codex review (P1+P2 fixes, single fix-pass)
+
+5 findings, all locked in with regression tests:
+
+- **P1 weekday gate** — `_in_session()` ignored Sat/Sun → idle bots wrongly read SCANNING on weekends. Fixed: `local.weekday() < 5` plus `_next_open_hint()` rolls forward across the weekend, suffix uses `target.tzname()` so it auto-flips CET ↔ CEST across DST.
+- **P1 errors tail-cap blind spot** — `_errors_unresolved()` scanned only the last 500 rows. With 500+ newer info/resolution rows after older unresolved criticals, the older ones disappeared from the count and the home page would silently flip to GREEN. Fixed: full-scan `critical_errors.jsonl` (file is ~120 KB; 30s cache makes the IO negligible).
+- **P2 cache race** — slow earlier request could overwrite fresher payload from a later request. Fixed: lock covers compute + write; concurrent misses serialize.
+- **P2 incomplete error envelope** — non-dict rows or string-instead-of-int values in jsonl could escape the per-section try/except. Fixed: outer try/except per helper, `isinstance(entry, dict)` guards, `_safe_int()` wrapper.
+- **P2 layer2 24h undercount** — fixed 2000-line tail silently dropped 24h triggers on high-volume days. Fixed: `_load_last_n_hours()` adaptive tail growth (500 → 50K → full scan).
+
+### Verification
+
+- 50/50 dashboard-touching tests green (`tests/test_dashboard_system_status.py` + `test_dashboard_trading_status.py` + `test_dashboard_system_health_routes.py`)
+- Live smoke test on 390x844 phone viewport via Playwright MCP: hero, all 6 cards render. No horizontal scroll. RED status visible above the fold with concrete reasons.
+- `/portfolio` route smoke-tested: legacy P&L hero / open positions strip / consensus chips / latest decision / system pulse — all render verbatim, More tab stays highlighted.
+
+### Surfaced operational issues (worth following up — not in scope here)
+
+The dashboard now exposes things that were silently broken:
+- Layer 2 has 0% success rate over the last 24h (5 triggers, all timing out at 180s — `loop_contract_main`/`loop_contract_golddigger` callers).
+- Loop heartbeat is 385s and growing — probably stuck on a long signal compute or stuck behind a GPU lock. The PR doesn't fix it, but you can now *see* it.
+- 22 CRITICAL contract violations in 24h, 10 unresolved errors — most are repeats of the layer2_journal_activity invariant from the timeouts above.
+
+These are now front-of-fold rather than buried in `data/agent.log`.
+
+---
+
 ## Conf-Threshold Fix (2026-05-04 PM, /fgl)
 
 **Session start:** 2026-05-04 ~14:00 CEST
@@ -2344,3 +2407,54 @@ data/metals_swing_config.py
 docs/plans/2026-05-04-conf-threshold-fix.md
 tests/test_metals_swing_entry_gates.py
 tests/test_metals_swing_momentum.py
+
+### 2026-05-04 13:28 UTC | main
+6ed4b4d7 docs(session): record conf-threshold fix + codex review reconciliation
+docs/SESSION_PROGRESS.md
+
+### 2026-05-04 14:36 UTC | feat/dashboard-system-health-home-2026-05-04
+20f1b2f0 feat(dashboard): add system_status aggregator for system-health home
+dashboard/system_status.py
+tests/test_dashboard_system_status.py
+
+### 2026-05-04 14:38 UTC | feat/dashboard-system-health-home-2026-05-04
+d84e1ea4 feat(dashboard): add trading_status reader for per-bot Avanza state
+dashboard/trading_status.py
+tests/test_dashboard_trading_status.py
+
+### 2026-05-04 14:40 UTC | feat/dashboard-system-health-home-2026-05-04
+3fb53547 feat(dashboard): wire /api/system_status + /api/trading_status routes
+dashboard/app.py
+tests/test_dashboard_system_health_routes.py
+
+### 2026-05-04 14:45 UTC | feat/dashboard-system-health-home-2026-05-04
+e4a92c21 feat(dashboard): rewrite home as system-health-first view
+dashboard/static/js/render/errors-panel.js
+dashboard/static/js/render/layer2-activity-card.js
+dashboard/static/js/render/llm-inference-card.js
+dashboard/static/js/render/signal-pulse-card.js
+dashboard/static/js/render/system-status-hero.js
+dashboard/static/js/render/trading-status-card.js
+dashboard/static/js/state.js
+dashboard/static/js/views/home.js
+
+### 2026-05-04 14:47 UTC | feat/dashboard-system-health-home-2026-05-04
+58dc8fce feat(dashboard): preserve old P&L home as /portfolio view under More
+dashboard/static/js/main.js
+dashboard/static/js/views/more.js
+dashboard/static/js/views/portfolio.js
+
+### 2026-05-04 15:05 UTC | feat/dashboard-system-health-home-2026-05-04
+a4aa88ed fix(dashboard): codex P1+P2 findings on system-health home
+dashboard/app.py
+dashboard/system_status.py
+dashboard/trading_status.py
+tests/test_dashboard_system_status.py
+tests/test_dashboard_trading_status.py
+
+### 2026-05-04 15:09 UTC | feat/heartbeat-before-l2-2026-05-04
+72374301 feat(health): heartbeat keepalive across Layer 2 + bigbet/iskbets
+docs/plans/2026-05-04-heartbeat-before-l2.md
+portfolio/health.py
+portfolio/main.py
+tests/test_heartbeat_function.py

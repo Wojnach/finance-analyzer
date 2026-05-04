@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-04 (system-health-first home)
+
+Dashboard home replaced — was a Patient/Bold simulated-portfolio P&L
+hero, now leads with operational signals: GREEN/YELLOW/RED status
+hero, per-Avanza-bot trading status with reason, LLM inference
+success bars, Layer 2 24h activity, signal abstain rate, unresolved
+errors + contract violations. Old P&L preserved verbatim under
+**More → Portfolio**.
+
+**Backend:**
+- New `dashboard/system_status.py` aggregator + `/api/system_status`
+  route (30s cache, `?force=1` bypass).
+- New `dashboard/trading_status.py` per-bot reader + `/api/trading_status`
+  route. DST-aware Europe/Stockholm session check.
+- Lock discipline mirrors `_AVANZA_CACHE` and survives concurrent
+  misses (codex P2 fix).
+
+**Frontend:** 6 new render modules under
+`dashboard/static/js/render/`. `views/home.js` rewritten from 490 →
+207 lines. New `views/portfolio.js` preserves the previous home
+content.
+
+**Tests:** 50 new tests, 4 of which lock in the fixes from the codex
+adversarial review (weekday gating, full-scan errors, adaptive 24h
+tail, defensive numeric parsing).
+
+The first thing the dashboard did after deployment was correctly
+flag the system as RED with concrete reasons — Layer 2 has been at
+0% success rate for the last 24h (5 triggers, all 180s timeouts) and
+the loop heartbeat had drifted past 6 minutes. Both were operational
+issues that were previously buried in `data/agent.log`.
+
 ## 2026-05-03 (mobile-first dashboard redesign)
 
 The desktop-first 3,211-line `dashboard/static/index.html` is replaced
