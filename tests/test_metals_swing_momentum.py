@@ -101,7 +101,7 @@ def _write_candidate(
 def test_evaluate_entry_uses_relaxed_gates_with_momentum(monkeypatch):
     """Fresh LONG candidate + conf=0.55 + 2 voters → entry PASSES.
 
-    Regular gates would reject: 0.55 < MIN_BUY_CONFIDENCE=0.60 AND
+    Regular gates would reject: 0.55 < MIN_BUY_CONFIDENCE (currently 0.56) AND
     2 < MIN_BUY_VOTERS=3. Momentum-relaxed gates accept both.
     """
     _write_candidate(mst.MOMENTUM_STATE_FILE, age_sec=30)

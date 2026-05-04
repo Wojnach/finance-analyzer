@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 
 import metals_swing_config as cfg
@@ -403,9 +405,14 @@ def test_confidence_just_below_threshold_fails(monkeypatch):
 
 def test_realistic_ranging_regime_consensus_now_clears(monkeypatch):
     """The prototypical case the 0.56 threshold is meant to unblock:
-    6/7 BUY voters in ranging regime, post-Stage-6 PTC penalty still
-    leaves conf above 0.56 but below 0.60. This is what was previously
-    SKIP_BUY-ing every cycle and producing total_trades=0."""
+    6/7 BUY voters in ranging regime with mild Stage-6 PTC penalty leaves
+    final conf at 0.58 — above 0.56 but below 0.60. This is what was
+    previously SKIP_BUY-ing every cycle and producing total_trades=0.
+
+    Codex 2026-05-04 P3: explicitly set buy_count=6, sell_count=1 so the
+    docstring "6/7" matches the actual signal under test (the _signal()
+    default is 5/1).
+    """
     monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
     trader = _make_trader()
     trader.regime_history = {"XAG-USD": [("BUY", "ranging")] * 3}  # confirmed
@@ -416,9 +423,54 @@ def test_realistic_ranging_regime_consensus_now_clears(monkeypatch):
         {"action": "BUY", "confidence": 0.58},
     ]
     ok, reason = trader._evaluate_entry(
-        _signal(confidence=0.58, regime="ranging"), "XAG-USD",
+        _signal(confidence=0.58, buy_count=6, sell_count=1, regime="ranging"),
+        "XAG-USD",
     )
     assert ok, (
         f"6/7 ranging consensus with conf 0.58 must pass at the 0.56 "
         f"threshold (this is the case the threshold change unblocks); got: {reason}"
     )
+
+
+@pytest.mark.parametrize("conf,should_pass", [
+    (0.559, False),   # one tick below
+    (0.560, True),    # exactly at floor (>= comparison)
+    (0.561, True),    # one tick above
+])
+def test_min_buy_confidence_boundary(monkeypatch, conf, should_pass):
+    """Codex 2026-05-04 P3: boundary parametrize at 0.559/0.560/0.561 to
+    catch off-by-one drift at the exact live threshold."""
+    monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
+    trader = _make_trader()
+    trader._check_momentum_candidate = lambda t: None
+    # Pre-populate confidence_history at the same level so Gate A persistence
+    # passes (otherwise 0.559 lacks a precedent and Gate A blocks for a
+    # different reason than the confidence floor).
+    trader.state["confidence_history"]["XAG-USD"] = [
+        {"action": "BUY", "confidence": conf},
+        {"action": "BUY", "confidence": conf},
+    ]
+    ok, reason = trader._evaluate_entry(_signal(confidence=conf), "XAG-USD")
+    if should_pass:
+        assert ok, f"conf {conf} should pass {cfg.MIN_BUY_CONFIDENCE} floor; got: {reason}"
+    else:
+        assert not ok
+        # Reason format is "confidence X.XX < <floor>" (2 decimal rounding,
+        # so 0.559 displays as 0.56). Just confirm the reason cites the
+        # confidence gate, not some other gate.
+        assert "confidence" in reason and str(cfg.MIN_BUY_CONFIDENCE) in reason
+
+
+def test_confidence_just_above_threshold_passes(monkeypatch):
+    """Codex 2026-05-04 P3: explicit just_above_threshold test as promised
+    in plan section 'What changes'. conf one tick above the floor passes."""
+    monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
+    trader = _make_trader()
+    trader._check_momentum_candidate = lambda t: None
+    just_above = round(cfg.MIN_BUY_CONFIDENCE + 0.01, 4)
+    trader.state["confidence_history"]["XAG-USD"] = [
+        {"action": "BUY", "confidence": just_above},
+        {"action": "BUY", "confidence": just_above},
+    ]
+    ok, reason = trader._evaluate_entry(_signal(confidence=just_above), "XAG-USD")
+    assert ok, f"conf just above threshold should pass; got: {reason}"

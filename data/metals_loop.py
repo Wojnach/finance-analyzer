@@ -501,9 +501,9 @@ SILVER_VELOCITY_TELEGRAM = True  # send Telegram on velocity alerts
 #
 # Motivation: the 2026-04-17 silver rip moved +1.3% in 20 min on volume ratio
 # 2.2x while the swing trader's snapshot-based gates required
-# MIN_BUY_CONFIDENCE=0.60 AND 2-consecutive regime-confirm checks. Those
-# thresholds are correct for range entries but silently reject breakout
-# entries that move faster than the confirmation cadence.
+# MIN_BUY_CONFIDENCE (was 0.60, since 2026-05-04 0.56) AND 2-consecutive
+# regime-confirm checks. Those thresholds are correct for range entries but
+# silently reject breakout entries that move faster than the confirmation cadence.
 SILVER_ENTRY_FAST_TICK_ENABLED = True
 SILVER_ENTRY_VELOCITY_WINDOW = 18          # 18 × 10s = 3 min (matches exit window)
 SILVER_ENTRY_VELOCITY_ALERT_PCT = 0.8      # +% rise required over the window

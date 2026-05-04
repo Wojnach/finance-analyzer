@@ -7,16 +7,44 @@
 ## TL;DR
 
 Drop `MIN_BUY_CONFIDENCE` from 0.60 to 0.56 in `data/metals_swing_config.py`.
-The existing 0.60 gate has been **mathematically unclearable** since the
-calibration compression added 2026-04-18 (`signal_engine.py:2553-2567`). Result:
-the SwingTrader has placed **0 trades over its lifetime** despite 397 first-BUY
-signals in the last 28 days.
+The existing 0.60 gate is **empirically rarely clearable** since the multi-stage
+confidence pipeline (Stage 5 unanimity penalty + Stage 6 PTC accuracy penalty +
+Stage 7 calibration compression added 2026-04-18, with downstream linear-factor
+and market-health adjustments) routinely produces final conf 0.30-0.55 in the
+observed metals signals. Result: the SwingTrader has placed **0 trades over its
+lifetime** despite 397 first-BUY signals in the last 28 days.
+
+> **Codex adversarial review note (2026-05-04):** the original framing of this
+> plan claimed a hard "0.685 absolute ceiling on perfect 7/7 consensus", which
+> oversimplified the pipeline by ignoring Stage 5 unanimity (0.6x at 90%+
+> agreement; signal_engine.py:2515-2526) and post-Stage-7 boosts (linear-factor
+> 1.10x at signal_engine.py:3645-3653; market_health 1.10x at score>=70 in
+> market_health.py:500-512). The corrected math is: Stage 7 alone reanchors
+> 0.60 -> 0.565; full-pipeline ceilings depend on regime, ticker accuracy,
+> market health, and time of day. The 0.60 gate is *empirically* rarely-
+> clearable (consistent with 0 trades over lifetime), not *theoretically*
+> unclearable. The 0.56 floor is therefore justified by the **backtest
+> selection-quality evidence** (table below), not by a clean math inversion.
 
 ## Why
 
 ### The structural problem
 
-Stage 7 of the consensus pipeline (`portfolio/signal_engine.py:2560-2564`):
+The multi-stage confidence pipeline (in order, signal_engine.py):
+
+| Stage | Lines | Effect |
+|---|---|---|
+| 1: weighted consensus | 2216-2225 | starting point: weighted vote ratio |
+| 2: regime mult | (varies) | ranging 0.75x, high-vol 0.80x |
+| 3-4: ADX / volume / persistence | (varies) | gates that may zero conf |
+| 5: unanimity penalty | 2515-2526 | **0.6x if >=90% agreement, 0.75x if 80-90%** |
+| 6: per-ticker consensus | 2530-2547 | **0.2x-0.6x mult for tickers <52% historical accuracy** |
+| 7: calibration compression | 2553-2567 | **conf = 0.55 + (conf-0.55) * 0.3, only if conf > 0.55** |
+| 8 (post): linear-factor | 3645-3653 | **1.10x boost / 0.90x dampen on lf agreement** |
+| 9 (post): market_health | market_health.py:500-512 | **0.6x to 1.10x based on score** |
+| 10 (post): tod_factor | 3556-3562 | **0.8x at 2-6 UTC, else 1.0x** |
+
+Stage 7 alone:
 
 ```python
 _CALIBRATION_THRESHOLD = 0.55
@@ -25,22 +53,31 @@ if action != "HOLD" and conf > 0.55:
     conf = 0.55 + (conf - 0.55) * 0.3
 ```
 
-This compresses ALL confidence values >0.55 toward 0.55 with a factor of 0.3:
-
-| raw conf entering Stage 7 | post-compression |
+| pre-Stage-7 conf | post-Stage-7 |
 |---|---|
 | 0.60 | 0.565 |
 | 0.70 | 0.595 |
 | 0.80 | 0.625 |
 | 0.90 | 0.655 |
-| 1.00 (perfect 7/7 vote) | 0.685 (absolute ceiling) |
+| 1.00 | 0.685 |
 
-So even a perfect raw consensus tops out at 0.685 — only **0.085 above** the
-current `MIN_BUY_CONFIDENCE = 0.60` gate. Any per-ticker accuracy penalty
-(Stage 6, `_PTC_PENALTY_THRESHOLD = 0.52` triggers a 0.2x-0.6x multiplier on
-sub-52% accuracy tickers) can crash the raw conf below 0.55 *before* Stage 7,
-at which point the compression doesn't even fire and the gate also fails on
-the depressed raw value.
+So pre-compression 0.60 maps to post 0.565 (the "clean" Stage-7 reanchor of
+the original 0.60 rule). But Stage 7 is one stage among many — the true
+final-conf range depends on the full chain.
+
+**Empirical observation from the metals signal log:** with a perfect 6/7
+ranging-regime BUY consensus on XAG, observed final conf was 0.31. Working
+the math backward:
+- raw weighted conf ~0.857 → ranging mult 0.75x → 0.643
+- agreement ratio 6/7 = 86% → Stage 5 unanimity 0.75x → 0.482
+- 0.482 < 0.55, so Stage 7 doesn't fire (compression skipped)
+- PTC penalty (XAU at ~50% accuracy): ~0.48x → 0.231
+- (No tod_factor since 14 UTC) → ~0.31 final (matches the 0.31 logged)
+
+Without the PTC penalty (e.g., a stronger-accuracy ticker), the same setup
+would land around 0.482 — still below the 0.60 gate. So the 0.60 floor was
+clearable *only* on rare combinations (very strong agreement + healthy market
++ favorable TOD + linear-factor agreement). Hence the 0-trade lifetime.
 
 ### Live evidence
 
