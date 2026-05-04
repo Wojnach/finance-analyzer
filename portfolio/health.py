@@ -61,6 +61,94 @@ def reset_session_start():
         atomic_write_json(HEALTH_FILE, state)
 
 
+def heartbeat() -> None:
+    """Touch only the last_heartbeat timestamp.
+
+    Called as a one-shot or periodically from a keepalive thread while
+    long-blocking work is in flight. Layer 2 invocation can block up to
+    600s (T2) or 900s (T3), but update_health() only runs at end-of-cycle
+    (AFTER Layer 2 returns). Without periodic touches the dashboard
+    /api/health endpoint flips fresh→stale every triggering cycle, which
+    is misleading: the loop is alive, just waiting on the subprocess.
+
+    Other state (cycle_count, signals_ok/failed, errors) is left untouched
+    — those reflect the previously-completed cycle, still the most recent
+    ground truth. update_health() at end-of-cycle overwrites them with
+    this cycle's results.
+
+    Failure-tolerant: callers wrap in try/except since this is a "nice to
+    have" hint and must never crash the loop. The atomic write means a
+    partial run leaves the prior file intact.
+    """
+    with _health_lock:
+        state = load_health()
+        state["last_heartbeat"] = datetime.now(UTC).isoformat()
+        atomic_write_json(HEALTH_FILE, state)
+
+
+# Keepalive default interval. The dashboard's stale gate fires at 300s
+# (check_staleness max_age_seconds=300), so 60s gives 5x headroom while
+# leaving plenty of margin for missed ticks (e.g. GIL contention, slow
+# atomic_write_json on a heavily-loaded disk).
+_HEARTBEAT_KEEPALIVE_INTERVAL_S = 60.0
+
+
+class heartbeat_keepalive:  # noqa: N801 — context-manager naming convention
+    """Context manager that ticks heartbeat() every interval seconds.
+
+    Wraps long-blocking work (Layer 2 T2/T3 subprocess, autonomous decision
+    paths, anything that can block longer than the 300s stale threshold)
+    so /api/health stays fresh for the duration. Background daemon thread
+    is auto-stopped on context exit; a 2s join timeout prevents shutdown
+    deadlocks (the thread only sleeps + writes, both bounded).
+
+    Usage:
+        with heartbeat_keepalive():
+            result = invoke_agent(reasons_list, tier=tier)
+
+    The first beat is synchronous (so a fast-returning subprocess gets at
+    least one heartbeat even if it finishes before the first interval).
+    Subsequent beats run on the daemon thread until __exit__.
+
+    Failure-tolerant by design: tick exceptions are swallowed at WARNING
+    level — a Disk-full or permission-denied during keepalive must never
+    abort an in-flight Layer 2 trade decision.
+    """
+
+    def __init__(self, interval: float = _HEARTBEAT_KEEPALIVE_INTERVAL_S) -> None:
+        self._interval = interval
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "heartbeat_keepalive":
+        # Synchronous first beat — covers the case where the wrapped call
+        # returns before the keepalive thread's first tick.
+        try:
+            heartbeat()
+        except Exception:
+            logger.warning("heartbeat_keepalive initial beat failed", exc_info=True)
+
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="heartbeat-keepalive",
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+
+    def _run(self) -> None:
+        # Event.wait returns True when set (stop signaled), False on timeout.
+        # So we tick on each timeout and exit on the first True.
+        while not self._stop.wait(self._interval):
+            try:
+                heartbeat()
+            except Exception:
+                logger.warning("heartbeat_keepalive tick failed", exc_info=True)
+
+
 def check_staleness(max_age_seconds: int = 300) -> tuple:
     """Check if the loop heartbeat is stale.
     Returns (is_stale: bool, age_seconds: float, state: dict)
