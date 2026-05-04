@@ -43,8 +43,6 @@ Mirror the `signal_utility` L1+L2 pattern exactly:
 1. New module-level state in `portfolio/accuracy_stats.py`:
    - `_regime_accuracy_cache: dict[str, tuple[float, dict]]` — L1 keyed by horizon
    - `_regime_accuracy_cache_lock: threading.Lock` — guards L1 swap only
-   - `_regime_accuracy_disk_lock: threading.Lock` — serializes disk read-modify-write
-   - `_REGIME_ACCURACY_DISK_TTL = 3600` — same as ACCURACY_CACHE_TTL
    - `_REGIME_ACCURACY_CACHE_TTL = 300` — same as `_SIGNAL_UTILITY_CACHE_TTL`
 
 2. New wrapper `get_or_compute_regime_accuracy(horizon)`:
@@ -59,25 +57,26 @@ Mirror the `signal_utility` L1+L2 pattern exactly:
 4. Existing `load_cached_regime_accuracy` + `write_regime_accuracy_cache` stay
    unchanged so `signal_postmortem.py` and external callers keep working.
 
-5. Follow the existing disk-lock convention: cross-horizon merge inside the
-   disk lock to avoid losing 3-of-4 horizons on a 4-thread race
-   (the same fix that landed for signal_utility at 2026-05-03).
+5. The L2 file already merges horizons (existing `write_regime_accuracy_cache`
+   uses load-modify-write under `_accuracy_write_lock`), so no new disk lock
+   needed — it's reused as-is.
 
 ## Tests
 
 `tests/test_regime_accuracy_cache.py` — new file:
 
-- `test_l1_hit_returns_cached_dict_without_disk_read` — patch `_load_*_disk`
-  to raise; second call must not raise (L1 served).
+- `test_l1_hit_returns_cached_dict_without_disk_read` — patch the disk loader
+  to raise after first call; second call must not raise (L1 served).
 - `test_l2_hit_populates_l1` — preload disk with fresh payload, first call
   reads disk + populates L1, second call hits L1.
 - `test_l1_l2_miss_computes_writes_both` — clear caches, compute happens,
   both L1 and L2 are populated.
-- `test_cross_horizon_writes_merge` — write 1d, then 3d, both readable.
+- `test_cross_horizon_writes_merge` — write 1d, then 3d, both readable from disk.
 - `test_ttl_expiry_l1` — frozen time, expire L1, falls back to L2.
-- `test_ttl_expiry_l2` — frozen time, expire both, recomputes.
-- `test_concurrent_threads_dont_serialize` — 4 threads, only one
-  cold-compute call.
+- `test_invalidate_clears_l1` — `invalidate_regime_accuracy_cache` removes L1
+  entries so post-backfill cycles don't serve stale data.
+- `test_compute_failure_returns_empty_dict` — wraps the compute in try/except
+  so cache miss never crashes the pipeline.
 
 ## Risk + rollback
 

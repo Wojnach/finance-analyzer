@@ -3405,18 +3405,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # real accuracy values for cached signals, negating the fail-closed gate.
     if not _accuracy_failed:
         try:
-            from portfolio.accuracy_stats import (
-                load_cached_regime_accuracy,
-                signal_accuracy_by_regime,
-                write_regime_accuracy_cache,
-            )
+            from portfolio.accuracy_stats import get_or_compute_regime_accuracy
             # BUG-134: Use acc_horizon (not hardcoded "1d") so regime accuracy
             # matches the prediction horizon (3h/4h/12h/1d).
-            regime_acc = load_cached_regime_accuracy(acc_horizon)
-            if not regime_acc:
-                regime_acc = signal_accuracy_by_regime(acc_horizon)
-                if regime_acc:
-                    write_regime_accuracy_cache(acc_horizon, regime_acc)
+            # 2026-05-04: switched from manual L2-only dance to L1+L2 wrapper.
+            # The previous code re-read disk on every ticker call (~10-50ms
+            # JSON parse) and on TTL miss all 5 ticker threads cold-computed
+            # in parallel (~30s × 5). The wrapper adds an in-memory L1 with
+            # the same dogpile-resistant pattern as signal_utility, dropping
+            # 2nd-through-Nth ticker calls per cycle to <1ms. Empty dict on
+            # failure preserves the pre-existing fall-through behavior.
+            regime_acc = get_or_compute_regime_accuracy(acc_horizon)
             current_regime_data = regime_acc.get(regime, {})
             for sig_name, rdata in current_regime_data.items():
                 if rdata.get("total", 0) >= 30:

@@ -1396,6 +1396,122 @@ def write_regime_accuracy_cache(horizon, data):
         _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
 
 
+# L1 in-memory cache for regime accuracy (added 2026-05-04).
+# Mirrors the signal_utility L1+L2 pattern at line 69-95. The existing
+# load_cached_regime_accuracy/write_regime_accuracy_cache pair only had L2
+# (disk) — every ticker call paid a JSON parse, and on TTL miss all 5 ticker
+# threads cold-computed signal_accuracy_by_regime() in parallel (50K-entry
+# walks @ ~30s each). That's the [SLOW-PHASE] *_utility_overlay timings
+# observed 2026-05-04 that pushed cycles to ~595s and tripped the dashboard
+# stale flag. This L1 cache makes the second-through-Nth ticker thread per
+# cycle return in <1ms.
+#
+# 300s TTL matches _SIGNAL_UTILITY_CACHE_TTL. Dogpile behavior is identical:
+# lock guards ONLY the dict swap, never the compute. Two threads that both
+# miss on a TTL-boundary race will each recompute once (acceptable — outcome
+# backfill is daily so the cache is normally cold once per cycle window).
+_REGIME_ACCURACY_CACHE_TTL = 300.0
+_regime_accuracy_cache: dict[str, tuple[float, dict]] = {}
+_regime_accuracy_cache_lock = threading.Lock()
+
+
+def get_or_compute_regime_accuracy(horizon: str = "1d") -> dict:
+    """L1+L2 cached wrapper around signal_accuracy_by_regime.
+
+    Hot path on every ticker × horizon. Three-tier resolution:
+
+    1. L1 (in-memory dict) — sub-µs, returns the same dict ref each call.
+    2. L2 (regime_accuracy_cache.json on disk) — survives process restart.
+       ~10-50ms JSON parse; populates L1 on hit.
+    3. Cold compute via signal_accuracy_by_regime — ~30s walking 50K signal
+       log entries. Runs OUTSIDE any lock so concurrent ticker threads aren't
+       serialized through it. On success, populates BOTH caches.
+
+    Returns an empty dict on compute failure rather than raising — matches the
+    pre-existing `if not regime_acc:` guard at signal_engine.py:3416 so the
+    accuracy gate falls through to global per-signal accuracy. A cache miss
+    must never crash the live signal pipeline (BUG-178 silent-failure pattern).
+    """
+    now = time.time()
+    with _regime_accuracy_cache_lock:
+        cached = _regime_accuracy_cache.get(horizon)
+        if cached and now - cached[0] < _REGIME_ACCURACY_CACHE_TTL:
+            return cached[1]
+
+    # L1 miss — try L2 disk before paying the cold compute. After a process
+    # restart this is what saves us: thread-1 reads disk (~ms), populates L1,
+    # threads 2-5 hit L1.
+    disk_cached = load_cached_regime_accuracy(horizon)
+    if disk_cached is not None:
+        with _regime_accuracy_cache_lock:
+            _regime_accuracy_cache[horizon] = (time.time(), disk_cached)
+        return disk_cached
+
+    # L1 + L2 miss — compute outside the lock so concurrent ticker threads
+    # don't serialize. Same benign-race trade-off as signal_utility: one
+    # wasted walk on a cycle-boundary race is cheaper than serializing 4
+    # threads through a 30s compute.
+    #
+    # On compute exception → return {} WITHOUT caching, so a transient
+    # failure (e.g. SQLite locked) doesn't poison the cache for 5 minutes.
+    # Empty success ({} from sparse data) IS cached: outcomes update daily,
+    # so 5-min staleness on a legitimately-empty result is harmless and
+    # avoids the 30s/ticker re-walk that this whole change is meant to kill.
+    try:
+        result = signal_accuracy_by_regime(horizon)
+    except Exception:
+        logger.debug("regime accuracy compute failed", exc_info=True)
+        return {}
+    with _regime_accuracy_cache_lock:
+        _regime_accuracy_cache[horizon] = (time.time(), result)
+    try:
+        write_regime_accuracy_cache(horizon, result)
+    except Exception:
+        logger.debug("regime accuracy disk write failed", exc_info=True)
+    return result
+
+
+def invalidate_regime_accuracy_cache(horizon: str | None = None) -> None:
+    """Clear both layers of the regime accuracy cache.
+
+    Pass a specific horizon to evict just that entry, or None to clear all.
+    Clears the in-memory L1 AND expires the on-disk L2 by zeroing the
+    cache file's "time" field — without that, the L2 would keep serving
+    stale data for up to 1h (its TTL) even after L1 is dropped, defeating
+    the point of an explicit invalidation.
+
+    Intended for callers that just changed the underlying outcome data
+    (e.g. outcome_tracker after a backfill) and want the next signal cycle
+    to recompute. The function is best-effort on the disk side: a write
+    failure is logged but doesn't raise — a stale L2 self-corrects on its
+    natural TTL boundary.
+    """
+    with _regime_accuracy_cache_lock:
+        if horizon is None:
+            _regime_accuracy_cache.clear()
+        else:
+            _regime_accuracy_cache.pop(horizon, None)
+
+    try:
+        with _accuracy_write_lock:
+            cache = load_json(REGIME_ACCURACY_CACHE_FILE, default={})
+            if not isinstance(cache, dict):
+                return
+            if horizon is None:
+                # Drop everything: write empty so stale entries can't reappear
+                # if a partial write left the time field intact.
+                _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, {})
+            else:
+                cache.pop(horizon, None)
+                # Zero the global time so the surviving horizons fall through
+                # to recompute too — matches the L1 semantics (per-horizon
+                # eviction). The disk file uses a single shared "time" gate.
+                cache["time"] = 0
+                _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+    except Exception:
+        logger.debug("regime accuracy L2 invalidation failed", exc_info=True)
+
+
 ACCURACY_SNAPSHOTS_FILE = DATA_DIR / "accuracy_snapshots.jsonl"
 
 
