@@ -959,6 +959,28 @@ def api_accuracy():
             get_or_compute_consensus_accuracy,
             get_or_compute_per_ticker_accuracy,
         )
+        from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
+
+        def _enrich_signals(signals_dict):
+            # 2026-05-05: enrich at response time so older cached entries
+            # (written before signal_accuracy() learned to emit `samples`/
+            # `enabled`) still render correctly on the dashboard. The
+            # accuracy cache has a 1h TTL; without this fallback the
+            # disabled-signal labels would not appear until the cache
+            # rebuilds. Source of truth for `enabled` is DISABLED_SIGNALS.
+            if not isinstance(signals_dict, dict):
+                return signals_dict
+            for sig_name, info in signals_dict.items():
+                if not isinstance(info, dict):
+                    continue
+                if "samples" not in info and "total" in info:
+                    info["samples"] = info["total"]
+                info.setdefault("enabled", sig_name not in DISABLED_SIGNALS)
+                if not info["enabled"] and not info.get("disabled_reason"):
+                    reason = get_disabled_reason(sig_name)
+                    if reason:
+                        info["disabled_reason"] = reason
+            return signals_dict
 
         result = {}
         for horizon in ["1d", "3d", "5d", "10d"]:
@@ -970,7 +992,7 @@ def api_accuracy():
             # horizons entirely so the response stays well-formed.
             if ca and ca.get("total", 0) > 0:
                 result[horizon] = {
-                    "signals": sa or {},
+                    "signals": _enrich_signals(sa or {}),
                     "consensus": ca,
                     "per_ticker": ta or {},
                 }
@@ -1146,8 +1168,25 @@ def api_triggers():
 @app.route("/api/accuracy-history")
 @require_auth
 def api_accuracy_history():
-    """Return accuracy snapshots over time for charting trend lines."""
+    """Return accuracy snapshots over time for charting trend lines.
+
+    2026-05-05: tag each per-signal slice with `enabled` so the chart
+    can dim/exclude force-HOLD'd signals. Tag is derived at response
+    time from DISABLED_SIGNALS so historical snapshots written before
+    the flag existed are also tagged correctly.
+    """
     entries = _read_jsonl(DATA_DIR / "accuracy_snapshots.jsonl", limit=500)
+    try:
+        from portfolio.tickers import DISABLED_SIGNALS
+        for snap in entries:
+            sigs = snap.get("signals") if isinstance(snap, dict) else None
+            if not isinstance(sigs, dict):
+                continue
+            for sig_name, info in sigs.items():
+                if isinstance(info, dict):
+                    info.setdefault("enabled", sig_name not in DISABLED_SIGNALS)
+    except Exception:
+        logger.exception("accuracy-history enrichment failed; serving raw")
     return jsonify(entries)
 
 
