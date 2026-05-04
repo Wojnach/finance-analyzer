@@ -113,17 +113,24 @@ def _ensure_completion_watchdog() -> None:
     pointing at a dead thread), spawn a fresh one. Resets the stop
     event so a successor process that imports this module after a
     SIGTERM can still arm a new watchdog.
+
+    Uses ``_completion_lock`` to make the is-alive-check + spawn atomic
+    so concurrent callers cannot both pass the check and both spawn (a
+    race exposed by tests that drive start/stop concurrently — in
+    production the lazy-start happens once at the end of try_invoke_agent,
+    which is itself serialised by the main loop).
     """
     global _watchdog_thread
-    if _watchdog_thread is not None and _watchdog_thread.is_alive():
-        return
-    _watchdog_stop.clear()
-    _watchdog_thread = threading.Thread(
-        target=_completion_watchdog,
-        name="L2CompletionWatchdog",
-        daemon=True,
-    )
-    _watchdog_thread.start()
+    with _completion_lock:
+        if _watchdog_thread is not None and _watchdog_thread.is_alive():
+            return
+        _watchdog_stop.clear()
+        _watchdog_thread = threading.Thread(
+            target=_completion_watchdog,
+            name="L2CompletionWatchdog",
+            daemon=True,
+        )
+        _watchdog_thread.start()
 
 
 def _stop_completion_watchdog(timeout_s: float = 1.0) -> None:
@@ -555,30 +562,40 @@ def invoke_agent(reasons, tier=3):
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
     timeout = tier_cfg["timeout"]
 
-    if _agent_proc and _agent_proc.poll() is None:
-        # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
-        # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
-        # can't cause a negative elapsed that silently skips the timeout.
-        elapsed = _safe_elapsed_s()
-        if elapsed > _agent_timeout:
-            # P1B (2026-04-17): helper so check_agent_completion can share
-            # the kill path — see _kill_overrun_agent docstring.
-            kill_ok = _kill_overrun_agent(
-                fallback_reasons=reasons, fallback_tier=tier,
-            )
-            # BUG-92: If kill failed, don't spawn new agent (old one may
-            # still be running)
-            if not kill_ok:
-                logger.error(
-                    "Not spawning new agent — old process may still be running"
+    # 2026-05-05: this reentrancy block reads/mutates the same _agent_proc /
+    # _agent_log / _agent_start state that the watchdog tick observes via
+    # _check_agent_completion_locked. Without the lock, the watchdog could
+    # observe a freshly-killed _agent_proc.poll() exit code and write a
+    # "failed"/"incomplete" row at the same time _kill_overrun_agent is
+    # writing its "timeout" row — exactly the double-log the lock was added
+    # to prevent. Hold _completion_lock for the entire read-decide-kill
+    # path; _kill_overrun_agent itself does NOT take the lock so this is
+    # safe (no reentrant acquire).
+    with _completion_lock:
+        if _agent_proc and _agent_proc.poll() is None:
+            # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
+            # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
+            # can't cause a negative elapsed that silently skips the timeout.
+            elapsed = _safe_elapsed_s()
+            if elapsed > _agent_timeout:
+                # P1B (2026-04-17): helper so check_agent_completion can share
+                # the kill path — see _kill_overrun_agent docstring.
+                kill_ok = _kill_overrun_agent(
+                    fallback_reasons=reasons, fallback_tier=tier,
+                )
+                # BUG-92: If kill failed, don't spawn new agent (old one may
+                # still be running)
+                if not kill_ok:
+                    logger.error(
+                        "Not spawning new agent — old process may still be running"
+                    )
+                    return False
+            else:
+                logger.info(
+                    "Agent still running (pid %s, %.0fs), skipping",
+                    _agent_proc.pid, elapsed,
                 )
                 return False
-        else:
-            logger.info(
-                "Agent still running (pid %s, %.0fs), skipping",
-                _agent_proc.pid, elapsed,
-            )
-            return False
 
     if _agent_log:
         _agent_log.close()

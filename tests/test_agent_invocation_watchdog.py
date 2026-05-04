@@ -170,8 +170,24 @@ def test_concurrent_check_does_not_double_log(tmp_path, monkeypatch):
     completion row. The lock must serialise them so the second call
     sees ``_agent_proc = None`` (cleared at the end of the handler) and
     returns ``None`` without logging.
+
+    To make the lock contention real (rather than relying on GIL
+    serialisation, which would also pass even WITHOUT the lock — see
+    review feedback P2-4), we monkeypatch the auth-failure scan to
+    sleep 100 ms while the lock is held. That guarantees the second
+    thread reaches `with _completion_lock` while the first is still
+    inside the locked body. Without the lock the first would clear
+    ``_agent_proc`` only after the sleep, so the second would either
+    re-poll a stale proc and double-log, or — more likely — both
+    callers would write before either reaches the cleanup. With the
+    lock the second thread blocks until the first finishes cleanup
+    and clears ``_agent_proc``, and then returns ``None``.
     """
     inv_path = _seed_running_agent(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        ai, "_scan_agent_log_for_auth_failure",
+        lambda *a, **kw: (time.sleep(0.1), False)[1],
+    )
 
     barrier = threading.Barrier(2)
     results = {}
@@ -194,6 +210,53 @@ def test_concurrent_check_does_not_double_log(tmp_path, monkeypatch):
     assert len(rows) == 1, f"expected 1 row, got {rows}"
     assert rows[0]["status"] in ("success", "incomplete")
     assert rows[0]["tier"] == 1
+
+
+def test_concurrent_check_without_lock_would_double_log(tmp_path, monkeypatch):
+    """Negative regression guard: with the lock bypassed, the same setup
+    DOES double-log. If this test starts passing without changes, the
+    lock wrap on ``check_agent_completion`` was silently removed and
+    the previous test became reassurance theatre. See review P2-4.
+
+    We swap ``_completion_lock`` for a no-op context manager so the
+    test exercises the unprotected path. A 100 ms scan delay forces
+    real overlap. Both callers therefore proceed to the file-write
+    section, producing two rows.
+    """
+    inv_path = _seed_running_agent(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        ai, "_scan_agent_log_for_auth_failure",
+        lambda *a, **kw: (time.sleep(0.1), False)[1],
+    )
+
+    # Replace the real lock with a no-op so the locked path becomes
+    # equivalent to the pre-fix unprotected path.
+    class _NoopLock:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(ai, "_completion_lock", _NoopLock())
+
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def caller(name):
+        barrier.wait()
+        results[name] = ai.check_agent_completion()
+
+    t1 = threading.Thread(target=caller, args=("main",))
+    t2 = threading.Thread(target=caller, args=("watchdog",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rows = [json.loads(ln) for ln in inv_path.read_text().splitlines() if ln]
+    # Without the lock both callers reach the file-write section; the
+    # exact count is timing-dependent but must be > 1 for the lock to
+    # be load-bearing.
+    assert len(rows) > 1, (
+        f"expected >1 rows when lock bypassed, got {len(rows)}; lock no "
+        f"longer protects double-log. results={results}"
+    )
 
 
 # ---------------------------------------------------------------------------
