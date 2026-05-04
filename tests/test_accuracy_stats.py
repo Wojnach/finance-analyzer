@@ -674,3 +674,99 @@ class TestGetDisabledReason:
         assert r is not None
         assert len(r) <= 160
         assert "\n" not in r
+
+    def test_separator_comments_do_not_bleed_into_adjacent_entries(self):
+        """Regression guard for the parser's column-aware continuation rule.
+
+        The DISABLED_SIGNALS literal contains flush-left separator comments
+        about *re-enabled* signals (cot_positioning, statistical_jump_regime,
+        forecast, econ_calendar) sitting between disabled entries. A naive
+        line-by-line continuation parser would absorb that text into the
+        previous entry's reason. We require the helper to ignore comments
+        whose `#` indent is not strictly greater than the entry-name indent.
+        """
+        from portfolio.tickers import get_disabled_reason
+
+        # Each pair: entry whose reason might absorb the following separator.
+        # If any of these substrings appears in the reason, the parser is
+        # leaking separator text into the entry above.
+        leak_pairs = [
+            ("fibonacci", "cot_positioning"),
+            ("copper_gold_ratio", "statistical_jump_regime"),
+            ("complexity_gap_regime", "econ_calendar"),
+            ("orderbook_flow", "forecast"),
+        ]
+        for entry, leaked in leak_pairs:
+            reason = get_disabled_reason(entry) or ""
+            assert leaked not in reason, (
+                f"reason for {entry!r} leaked separator text about {leaked!r}: {reason!r}"
+            )
+
+
+class TestApiAccuracyEnrichment:
+    """Verify the dashboard's response-layer enrichment overwrites stale flags.
+
+    The endpoint must re-derive `enabled` and `disabled_reason` from the
+    live DISABLED_SIGNALS on every request, not preserve whatever was
+    cached. Otherwise a re-enabled signal stays labelled as disabled
+    until the 1h accuracy cache rebuilds.
+    """
+
+    def test_enrich_signals_overwrites_stale_enabled_flag(self, monkeypatch):
+        from dashboard import app as dash
+
+        # Build a fake stale cache where everything claims to be disabled.
+        stale_signals = {
+            "rsi": {"total": 100, "correct": 50, "pct": 50.0, "enabled": False,
+                    "disabled_reason": "stale leftover from a previous run"},
+            # And a genuinely disabled one with no enabled flag at all.
+            "hash_ribbons": {"total": 0, "correct": 0, "pct": 0.0},
+        }
+        stale_consensus = {"correct": 5, "total": 10, "accuracy": 0.5, "pct": 50.0}
+
+        def fake_acc(_horizon):
+            # Return a fresh copy each call so tests don't see prior mutations.
+            import copy
+            return copy.deepcopy(stale_signals)
+
+        def fake_consensus(_horizon):
+            return dict(stale_consensus)
+
+        def fake_per_ticker(_horizon):
+            return {}
+
+        monkeypatch.setattr(
+            "portfolio.accuracy_stats.get_or_compute_accuracy", fake_acc,
+        )
+        monkeypatch.setattr(
+            "portfolio.accuracy_stats.get_or_compute_consensus_accuracy",
+            fake_consensus,
+        )
+        monkeypatch.setattr(
+            "portfolio.accuracy_stats.get_or_compute_per_ticker_accuracy",
+            fake_per_ticker,
+        )
+        # Bust the 60s in-process TTL so our monkeypatched compute is hit.
+        dash._API_ACCURACY_CACHE["data"] = None
+        dash._API_ACCURACY_CACHE["ts"] = 0
+
+        client = dash.app.test_client()
+        # Fall back to bearer auth via the dashboard token.
+        token = dash.app.config.get("DASHBOARD_TOKEN") or ""
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        resp = client.get("/api/accuracy", headers=headers)
+        assert resp.status_code == 200, resp.data
+        body = resp.get_json()
+        assert "1d" in body
+        sigs = body["1d"]["signals"]
+
+        # rsi was stale-tagged disabled; enrichment must overwrite to True
+        # and clear the bogus disabled_reason.
+        assert sigs["rsi"]["enabled"] is True
+        assert "disabled_reason" not in sigs["rsi"]
+        assert sigs["rsi"]["samples"] == sigs["rsi"]["total"]
+
+        # hash_ribbons is genuinely disabled — flag must be set False
+        # and reason populated from the inline comment.
+        assert sigs["hash_ribbons"]["enabled"] is False
+        assert sigs["hash_ribbons"].get("disabled_reason")
