@@ -2763,3 +2763,78 @@ files: dashboard/system_status.py, dashboard/static/js/views/equity.js, dashboar
 - layer2 violation details surface L2 invocation context (not stale unrelated golddigger fix-agent timeouts)
 - shared violation_identity_payload helper between source + dashboard so future per-invariant overrides cannot drift
 - 7 commits, 8 files, ~1200 LOC including tests; 123/123 focused tests pass
+
+### 2026-05-04 22:29 UTC | main
+797ddd21 docs(session): dashboard noise + trades SEK column fixes
+docs/SESSION_PROGRESS.md
+
+### 2026-05-04 22:30 UTC | feat/heatmap-time-in-state-2026-05-05
+fa5926ed feat(dashboard): time-in-state badge on signal heatmap cells
+dashboard/static/css/components.css
+dashboard/static/js/format.js
+dashboard/static/js/render/signals-heatmap.js
+
+### 2026-05-04 22:32 UTC | feat/heatmap-time-in-state-2026-05-05
+8c600132 fix(dashboard): theme-aware cell-since color (self-review fix)
+dashboard/static/css/components.css
+
+### 2026-05-04 22:34 UTC | feat/live-prices-charts-2026-05-05
+3df36934 docs(plan): live-prices tap-to-chart drill-down
+docs/PLAN.md
+
+### 2026-05-04 22:35 UTC | fix/dashboard-accuracy-disabled-signals-2026-05-05
+297210e1 feat(accuracy): emit enabled flag + samples alias + disable reason
+portfolio/accuracy_stats.py
+portfolio/tickers.py
+tests/test_accuracy_stats.py
+
+### 2026-05-04 22:36 UTC | fix/dashboard-accuracy-disabled-signals-2026-05-05
+2a40f87e feat(dashboard): enrich /api/accuracy with enabled + disabled_reason
+dashboard/app.py
+
+### 2026-05-04 22:36 UTC | fix/dashboard-accuracy-disabled-signals-2026-05-05
+011997d7 feat(dashboard): label disabled signals + fix n=0 across all rows
+dashboard/static/js/components/signal-row.js
+dashboard/static/js/render/accuracy.js
+dashboard/static/js/render/signals-heatmap.js
+dashboard/static/js/views/signals.js
+
+### 2026-05-04 22:36 UTC | feat/live-prices-charts-2026-05-05
+646172e5 feat(dashboard): /api/price-history for tap-to-chart drill-down
+dashboard/app.py
+tests/test_dashboard_price_history.py
+
+### 2026-05-04 22:38 UTC | docs/dashboard-noise-followups-20260505
+63ab6519 docs(plan): record open follow-ups from dashboard noise PR
+docs/plans/2026-05-05-dashboard-noise-followups.md
+
+### 2026-05-04 22:40 UTC | feat/live-prices-charts-2026-05-05
+5c6bf77d feat(dashboard): tap-to-chart on Live Prices rows
+dashboard/static/js/views/prices.js
+
+### 2026-05-04 22:41 UTC | fix/t1-grace-hotfix-20260505
+0834bb71 fix(loop_contract): widen T1 grace 3min->12min to match real T1 wall-time
+portfolio/loop_contract.py
+tests/test_loop_contract_grace.py
+
+### 2026-05-04 22:47 UTC | feat/heatmap-time-in-state-2026-05-05
+755f3373 fix(dashboard): suppress stale time-in-state badge on vote mismatch (codex P2)
+dashboard/app.py
+tests/test_dashboard.py
+
+### 2026-05-04 22:52 UTC | fix/dashboard-accuracy-disabled-signals-2026-05-05
+733d9a57 fix(dashboard): codex P2 + P3 — heatmap disabled set + overwrite stale flag
+dashboard/app.py
+tests/test_accuracy_stats.py
+
+### 2026-05-04 22:56 UTC | fix/t1-timeout-drift-2026-05-05
+8e4a59ea fix(layer2): completion-detection watchdog so T1 timeout fires within 30s of budget
+docs/plans/2026-05-05-l2-completion-watchdog.md
+portfolio/agent_invocation.py
+portfolio/main.py
+tests/test_agent_invocation_watchdog.py
+
+### 2026-05-04 23:02 UTC | fix/t1-timeout-drift-2026-05-05
+d7d622fa fix(layer2): address review findings — extend lock, harden contention test
+portfolio/agent_invocation.py
+tests/test_agent_invocation_watchdog.py
