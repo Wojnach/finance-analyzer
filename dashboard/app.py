@@ -1559,6 +1559,17 @@ _AVANZA_CACHE_LOCK = threading.Lock()
 _AVANZA_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
 _AVANZA_TTL_SECONDS = 30.0
 
+# Same TTL pattern for the system-health rollup endpoints. Both caches
+# are independent so trading_status can refresh on its own cadence
+# while system_status keeps serving cached, and vice versa.
+_SYSTEM_STATUS_LOCK = threading.Lock()
+_SYSTEM_STATUS_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+_SYSTEM_STATUS_TTL_SECONDS = 30.0
+
+_TRADING_STATUS_LOCK = threading.Lock()
+_TRADING_STATUS_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+_TRADING_STATUS_TTL_SECONDS = 30.0
+
 # ---------------------------------------------------------------------------
 # Avanza worker thread — Playwright's sync API is bound to its creator
 # thread, but Flask's ThreadedWSGIServer spawns a fresh worker per request.
@@ -1827,6 +1838,69 @@ def api_tradeable_assets():
     except Exception as e:
         out["errors"].append(f"oil: {type(e).__name__}: {e}")
     return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
+# System-health home rollup endpoints.
+#
+# /api/system_status   - overall GREEN/YELLOW/RED, heartbeat, errors,
+#                        contract violations, LLM inference success,
+#                        Layer 2 24h activity, signal aggregate.
+# /api/trading_status  - per-bot Avanza state with reason
+#                        (golddigger, elongir, metals, fishing).
+#
+# Both are pure aggregations over data/*.json[l]. No network. 30s TTL
+# cache mirrors the _AVANZA_CACHE pattern; ?force=1 bypasses for the
+# manual Refresh button.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/system_status")
+@require_auth
+def api_system_status():
+    """System-health rollup for the home view's GREEN/YELLOW/RED hero.
+
+    See dashboard/system_status.py for the full payload shape and
+    severity thresholds. Per-section errors[] envelope so a corrupt
+    jsonl line never blanks the hero.
+    """
+    from dashboard import system_status as _sys_status
+
+    force = request.args.get("force", "").strip() in {"1", "true", "yes"}
+    now = time.monotonic()
+    if not force:
+        with _SYSTEM_STATUS_LOCK:
+            cached = _SYSTEM_STATUS_CACHE.get("value")
+            if cached and (now - _SYSTEM_STATUS_CACHE["at"]) < _SYSTEM_STATUS_TTL_SECONDS:
+                return jsonify(cached)
+    payload = _sys_status.compute()
+    with _SYSTEM_STATUS_LOCK:
+        _SYSTEM_STATUS_CACHE["value"] = payload
+        _SYSTEM_STATUS_CACHE["at"] = now
+    return jsonify(payload)
+
+
+@app.route("/api/trading_status")
+@require_auth
+def api_trading_status():
+    """Per-bot Avanza trading state with reason.
+
+    See dashboard/trading_status.py. Each bot resolves to one of
+    SCANNING / TRADING / HALTED / COOLDOWN / OUTSIDE_HOURS / UNKNOWN.
+    """
+    from dashboard import trading_status as _trading_status
+
+    force = request.args.get("force", "").strip() in {"1", "true", "yes"}
+    now = time.monotonic()
+    if not force:
+        with _TRADING_STATUS_LOCK:
+            cached = _TRADING_STATUS_CACHE.get("value")
+            if cached and (now - _TRADING_STATUS_CACHE["at"]) < _TRADING_STATUS_TTL_SECONDS:
+                return jsonify(cached)
+    payload = _trading_status.compute()
+    with _TRADING_STATUS_LOCK:
+        _TRADING_STATUS_CACHE["value"] = payload
+        _TRADING_STATUS_CACHE["at"] = now
+    return jsonify(payload)
 
 
 # ---------------------------------------------------------------------------
