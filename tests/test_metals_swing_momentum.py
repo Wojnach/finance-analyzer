@@ -17,6 +17,7 @@ import pytest
 # data/ contains script-style modules, not a package.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 
+import metals_swing_config as cfg
 import metals_swing_trader as mst
 
 
@@ -100,7 +101,7 @@ def _write_candidate(
 def test_evaluate_entry_uses_relaxed_gates_with_momentum(monkeypatch):
     """Fresh LONG candidate + conf=0.55 + 2 voters → entry PASSES.
 
-    Regular gates would reject: 0.55 < MIN_BUY_CONFIDENCE=0.60 AND
+    Regular gates would reject: 0.55 < MIN_BUY_CONFIDENCE (currently 0.56) AND
     2 < MIN_BUY_VOTERS=3. Momentum-relaxed gates accept both.
     """
     _write_candidate(mst.MOMENTUM_STATE_FILE, age_sec=30)
@@ -141,7 +142,7 @@ def test_evaluate_entry_voter_gate_also_relaxed_with_momentum(monkeypatch):
 
 
 def test_evaluate_entry_unchanged_without_momentum(monkeypatch):
-    """No candidate file → full MIN_BUY_CONFIDENCE=0.60 gate applied.
+    """No candidate file -> full MIN_BUY_CONFIDENCE gate applied (post-2026-05-04: 0.56).
 
     Regression guard: momentum override must not leak into regular ranging
     entries when no breakout has happened.
@@ -149,27 +150,34 @@ def test_evaluate_entry_unchanged_without_momentum(monkeypatch):
     # No candidate written.
     assert not os.path.exists(mst.MOMENTUM_STATE_FILE)
     trader = _make_trader()
-    sig = _signal(confidence=0.55, buy_count=3, sell_count=1, rsi=50.0)
+    # Use a confidence below the regular threshold but above the momentum-relaxed one.
+    test_conf = cfg.MIN_BUY_CONFIDENCE - 0.05
+    assert test_conf > cfg.MOMENTUM_MIN_BUY_CONFIDENCE, (
+        "test setup: regular threshold must be above momentum threshold by > 0.05"
+    )
+    sig = _signal(confidence=test_conf, buy_count=3, sell_count=1, rsi=50.0)
 
     ok, reason = trader._evaluate_entry(sig, "XAG-USD")
 
     assert not ok
-    # Regular threshold 0.60 should appear in the reason (not relaxed 0.50).
-    assert "0.6" in reason
-    assert "confidence 0.55" in reason
+    # Regular (not relaxed) threshold should appear in the reason.
+    assert f"{cfg.MIN_BUY_CONFIDENCE}" in reason
+    assert f"confidence {test_conf:.2f}" in reason
 
 
 def test_momentum_candidate_expires_after_ttl(monkeypatch):
     """A candidate older than MOMENTUM_CANDIDATE_TTL_SEC is ignored."""
     _write_candidate(mst.MOMENTUM_STATE_FILE, age_sec=600)  # 10 min — stale
     trader = _make_trader()
-    sig = _signal(confidence=0.55, buy_count=2, sell_count=1, rsi=50.0)
+    # Confidence below regular threshold so a non-relaxed gate is the rejection.
+    test_conf = cfg.MIN_BUY_CONFIDENCE - 0.05
+    sig = _signal(confidence=test_conf, buy_count=2, sell_count=1, rsi=50.0)
 
     ok, reason = trader._evaluate_entry(sig, "XAG-USD")
 
     assert not ok, (
-        "Stale candidate must not relax gates — regular 0.60 threshold "
-        "should reject 0.55"
+        f"Stale candidate must not relax gates -- regular {cfg.MIN_BUY_CONFIDENCE} "
+        f"threshold should reject {test_conf}"
     )
 
 
@@ -196,8 +204,11 @@ def test_momentum_candidate_ignored_for_short(monkeypatch):
     ]
     # SHORT MACD needs to be DECLINING
     trader.state["macd_history"]["XAG-USD"] = [-0.04000, -0.05000]
+    # Confidence between momentum-relaxed and regular thresholds, so the
+    # rejection has to come from the regular (LONG-candidate-blind) gate.
+    test_conf = cfg.MIN_BUY_CONFIDENCE - 0.05
     sig = _signal(
-        confidence=0.55, buy_count=1, sell_count=2,
+        confidence=test_conf, buy_count=1, sell_count=2,
         action="SELL", rsi=55.0, regime="trending-down",
     )
     sig["timeframes"] = {
@@ -207,10 +218,10 @@ def test_momentum_candidate_ignored_for_short(monkeypatch):
 
     ok, reason = trader._evaluate_entry(sig, "XAG-USD")
 
-    # SHORT should see regular 0.60 threshold, not relaxed 0.50 from the
-    # LONG candidate. 0.55 < 0.60 → reject.
+    # SHORT should see regular threshold, not relaxed momentum threshold from
+    # the LONG candidate.
     assert not ok
-    assert "0.6" in reason, (
+    assert f"{cfg.MIN_BUY_CONFIDENCE}" in reason, (
         f"SHORT entry must NOT use LONG candidate's relaxed threshold: {reason!r}"
     )
 
@@ -279,8 +290,9 @@ def test_momentum_override_disabled_flag(monkeypatch):
     assert trader._check_momentum_candidate("XAG-USD") is None
 
     # And _evaluate_entry falls back to regular gates.
-    sig = _signal(confidence=0.55, buy_count=2, sell_count=1, rsi=50.0)
+    test_conf = cfg.MIN_BUY_CONFIDENCE - 0.05
+    sig = _signal(confidence=test_conf, buy_count=2, sell_count=1, rsi=50.0)
     ok, reason = trader._evaluate_entry(sig, "XAG-USD")
     assert not ok
-    # Regular 0.60 threshold applies.
-    assert "0.6" in reason
+    # Regular (not relaxed) threshold applies.
+    assert f"{cfg.MIN_BUY_CONFIDENCE}" in reason
