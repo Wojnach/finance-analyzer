@@ -72,6 +72,19 @@ export function fAgo(ts) {
   return Math.floor(seconds / 86400) + "d ago";
 }
 
+/** Compact duration since timestamp — "12s", "3m", "2h", "5d" (no suffix).
+ * Used by the signal heatmap "time-in-state" badge, where space is tight. */
+export function fDurationShort(ts) {
+  if (!ts) return "";
+  const d = ts instanceof Date ? ts : new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (seconds < 60)    return seconds + "s";
+  if (seconds < 3600)  return Math.floor(seconds / 60) + "m";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + "h";
+  return Math.floor(seconds / 86400) + "d";
+}
+
 /** HTML-escape — match legacy `eh` semantics (XSS guard for innerHTML). */
 export function eh(s) {
   if (s == null) return "";

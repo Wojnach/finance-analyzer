@@ -614,6 +614,90 @@ class TestApiSignalHeatmap:
             resp = client.get("/api/signal-heatmap")
         assert resp.status_code == 404
 
+    def test_includes_state_since_when_file_present(self, client, tmp_data):
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "action": "BUY",
+                    "extra": {"_votes": {"rsi": "BUY", "macd": "SELL"}},
+                }
+            }
+        }
+        (tmp_data / "agent_summary.json").write_text(
+            json.dumps(summary), encoding="utf-8"
+        )
+        state_since = {
+            "updated_at": "2026-05-05T18:02:00+00:00",
+            "votes": {
+                "BTC-USD": {
+                    "rsi":  {"vote": "BUY",  "since": "2026-05-05T17:30:00+00:00"},
+                    "macd": {"vote": "SELL", "since": "2026-05-05T17:55:00+00:00"},
+                }
+            },
+        }
+        (tmp_data / "signal_state_since.json").write_text(
+            json.dumps(state_since), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        data = resp.get_json()
+        assert data["since"]["BTC-USD"]["rsi"] == "2026-05-05T17:30:00+00:00"
+        assert data["since"]["BTC-USD"]["macd"] == "2026-05-05T17:55:00+00:00"
+
+    def test_since_empty_when_file_missing(self, client, tmp_data):
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "action": "HOLD",
+                    "extra": {"_votes": {"rsi": "HOLD"}},
+                }
+            }
+        }
+        (tmp_data / "agent_summary.json").write_text(
+            json.dumps(summary), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        data = resp.get_json()
+        assert data["heatmap"]["BTC-USD"]["rsi"] == "HOLD"
+        assert data["since"] == {}
+
+    def test_since_drops_stale_entries_when_vote_mismatches(self, client, tmp_data):
+        """Codex P2 guard: if the since-file's recorded vote disagrees with the
+        current heatmap (inter-write window or swallowed write failure), the
+        badge must be suppressed for that cell — never report a stale duration
+        against a freshly-flipped vote."""
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "action": "BUY",
+                    "extra": {"_votes": {"rsi": "BUY", "macd": "SELL"}},
+                }
+            }
+        }
+        (tmp_data / "agent_summary.json").write_text(
+            json.dumps(summary), encoding="utf-8"
+        )
+        # since-file holds an old SELL for rsi (stale) but matching SELL for macd.
+        state_since = {
+            "updated_at": "2026-05-05T18:00:00+00:00",
+            "votes": {
+                "BTC-USD": {
+                    "rsi":  {"vote": "SELL", "since": "2026-05-05T17:00:00+00:00"},
+                    "macd": {"vote": "SELL", "since": "2026-05-05T17:30:00+00:00"},
+                }
+            },
+        }
+        (tmp_data / "signal_state_since.json").write_text(
+            json.dumps(state_since), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        data = resp.get_json()
+        # Stale rsi: dropped. macd: still in sync, kept.
+        assert "rsi" not in data["since"].get("BTC-USD", {})
+        assert data["since"]["BTC-USD"]["macd"] == "2026-05-05T17:30:00+00:00"
+
 
 class TestApiAccuracyHistory:
     def test_returns_history_entries(self, client, tmp_data):
