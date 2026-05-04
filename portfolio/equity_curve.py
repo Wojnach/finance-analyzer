@@ -17,6 +17,11 @@ DEFAULT_HISTORY_PATH = DATA_DIR / "portfolio_value_history.jsonl"
 INITIAL_VALUE = 500_000  # SEK
 RISK_FREE_RATE_ANNUAL = 0.035  # 3.5% Swedish risk-free rate (approximate)
 
+# The portfolio loop runs 24/7 (crypto always active), so
+# portfolio_value_history.jsonl has entries every calendar day.
+# Annualization must use 365, not 252 (stock-only convention).
+ANNUALIZATION_DAYS = 365
+
 
 def load_equity_curve(path: str | None = None) -> list[dict]:
     """Load portfolio value history for charting.
@@ -222,16 +227,16 @@ def compute_metrics(curve: list[dict], strategy: str) -> dict:
             mean_ret = sum(daily_rets) / len(daily_rets)
             variance = sum((r - mean_ret) ** 2 for r in daily_rets) / (len(daily_rets) - 1)
             daily_vol = math.sqrt(variance)
-            annual_vol = daily_vol * math.sqrt(252)  # Trading days
+            annual_vol = daily_vol * math.sqrt(ANNUALIZATION_DAYS)
             result["volatility_annual_pct"] = round(annual_vol, 4)
 
             # Sharpe ratio (annualized)
-            daily_rf = RISK_FREE_RATE_ANNUAL / 252  # Daily risk-free rate as decimal
+            daily_rf = RISK_FREE_RATE_ANNUAL / ANNUALIZATION_DAYS
             # Convert daily returns to decimal for Sharpe
             daily_rets_dec = [r / 100 for r in daily_rets]
             mean_excess = sum(r - daily_rf for r in daily_rets_dec) / len(daily_rets_dec)
             if daily_vol > 0:
-                # Annualize Sharpe: mean_excess / daily_std * sqrt(252)
+                # Annualize Sharpe: mean_excess / daily_std * sqrt(ANNUALIZATION_DAYS)
                 # BUG-225: extract mean to avoid O(n^2) recomputation inside generator
                 mean_dec = sum(daily_rets_dec) / len(daily_rets_dec)
                 daily_std_dec = math.sqrt(
@@ -239,14 +244,14 @@ def compute_metrics(curve: list[dict], strategy: str) -> dict:
                         for r in daily_rets_dec) / (len(daily_rets_dec) - 1)
                 )
                 if daily_std_dec > 0:
-                    sharpe = (mean_excess / daily_std_dec) * math.sqrt(252)
+                    sharpe = (mean_excess / daily_std_dec) * math.sqrt(ANNUALIZATION_DAYS)
                     result["sharpe_ratio"] = round(sharpe, 4)
 
             # H19: Sortino — divide by TOTAL observations, not just downside count (standard formula)
             squared_devs = [min(r - daily_rf, 0) ** 2 for r in daily_rets_dec]
             downside_dev = math.sqrt(sum(squared_devs) / len(daily_rets_dec))
             if downside_dev > 0:
-                sortino = (mean_excess / downside_dev) * math.sqrt(252)
+                sortino = (mean_excess / downside_dev) * math.sqrt(ANNUALIZATION_DAYS)
                 result["sortino_ratio"] = round(sortino, 4)
 
     return result
