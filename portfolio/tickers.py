@@ -4,6 +4,10 @@ Every module that needs ticker definitions should import from here instead
 of maintaining its own copy.
 """
 
+import re
+from functools import lru_cache
+from pathlib import Path
+
 # ── Tier 1: Full signals (30 signals, 7 timeframes) ──────────────────────
 
 SYMBOLS = {
@@ -139,6 +143,86 @@ DISABLED_SIGNALS = {
 #   penalty (0.5x) applies. Provides crypto-specific on-chain edge.
 # funding: removed from DISABLED — 74.2% at 3h (535 samples) but 29.9% at 1d.
 # Horizon-gated via REGIME_GATED_SIGNALS to only vote at 3h/4h.
+
+# 2026-05-05: Surface the disable reason to the dashboard tooltip by parsing the
+# inline comments next to each DISABLED_SIGNALS entry. Done via source-file
+# parsing (rather than a parallel dict) so the comments stay the single source
+# of truth. Falls back to None if the file shape changes.
+_DISABLED_REASON_ENTRY_RE = re.compile(
+    r'^(\s*)"([a-z_][a-z0-9_]*)"\s*,\s*(?:#\s*(.*))?$'
+)
+_DISABLED_REASON_CONT_RE = re.compile(r'^(\s+)#\s*(.*)$')
+
+
+def _clean_disabled_reason(lines: list[str]) -> str:
+    """Join continuation comments and trim to a single short summary."""
+    if not lines:
+        return ""
+    text = " ".join(lines).strip()
+    for sep in (". ", " — "):
+        if sep in text:
+            text = text.split(sep, 1)[0].rstrip(".")
+            break
+    return text[:160].rstrip()
+
+
+@lru_cache(maxsize=1)
+def _parse_disabled_reasons() -> dict[str, str]:
+    """Parse the DISABLED_SIGNALS literal in this file into {name: reason}.
+
+    A continuation comment is recognised when its `#` is indented strictly
+    further than the entry name's column, which excludes flush-left
+    separator comments (e.g. the commented-out re-enable notes) from
+    bleeding into the previous entry's reason.
+    """
+    try:
+        src = Path(__file__).resolve().read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    block_match = re.search(
+        r'^DISABLED_SIGNALS\s*=\s*\{(.*?)^\}',
+        src, re.MULTILINE | re.DOTALL,
+    )
+    if not block_match:
+        return {}
+    out: dict[str, str] = {}
+    current: str | None = None
+    current_lines: list[str] = []
+    entry_indent = 0
+    for raw in block_match.group(1).splitlines():
+        m_entry = _DISABLED_REASON_ENTRY_RE.match(raw)
+        if m_entry:
+            if current is not None:
+                out[current] = _clean_disabled_reason(current_lines)
+            current = m_entry.group(2)
+            entry_indent = len(m_entry.group(1))
+            first = (m_entry.group(3) or "").strip()
+            current_lines = [first] if first else []
+            continue
+        m_cont = _DISABLED_REASON_CONT_RE.match(raw)
+        if m_cont and current is not None:
+            indent = len(m_cont.group(1))
+            if indent > entry_indent:
+                txt = m_cont.group(2).strip()
+                if txt:
+                    current_lines.append(txt)
+    if current is not None:
+        out[current] = _clean_disabled_reason(current_lines)
+    return out
+
+
+def get_disabled_reason(signal_name: str) -> str | None:
+    """Return a short reason for why `signal_name` is disabled, or None.
+
+    Returns None for signals not in DISABLED_SIGNALS, and for disabled
+    signals whose comment was empty or unparseable.
+    """
+    if signal_name not in DISABLED_SIGNALS:
+        return None
+    reasons = _parse_disabled_reasons()
+    reason = reasons.get(signal_name)
+    return reason if reason else None
+
 
 # Signals that require local GPU inference.
 # Skipped for US stocks outside market hours to save GPU resources.
