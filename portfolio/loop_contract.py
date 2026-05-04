@@ -187,6 +187,20 @@ LAYER2_JOURNAL_GRACE_S_BY_TIER = {
 LAYER2_JOURNAL_GRACE_S_DEFAULT = LAYER2_JOURNAL_GRACE_S_BY_TIER[3]
 
 
+# Invariants whose state is global to the trading system, not specific to a
+# single loop. The same regression looks identical from main, golddigger,
+# metals and elongir, so dispatching it from each one produces 2-3 duplicate
+# rows in contract_violations.jsonl + critical_errors.jsonl and 2-3 Telegram
+# alerts within a few ms (observed 2026-05-03/04 on accuracy_degradation —
+# three rows per cycle, 21ms apart, all identical bar tracker cycle_id).
+#
+# verify_and_act() drops these from the dispatch path on non-main loops:
+# the contract still RUNS on every loop (so the tracker's consecutive
+# counter stays in sync with that loop's own state), but only main owns
+# the side effects (log, alert, critical_errors row, self-heal).
+_GLOBAL_INVARIANTS_MAIN_ONLY = frozenset({"accuracy_degradation"})
+
+
 def _get_layer2_grace_s(health: dict | None) -> int:
     """Return the per-tier grace window in seconds.
 
@@ -1832,6 +1846,18 @@ def verify_and_act(report, config: dict,
             cleared, state_file=tracker_state_file,
         )
 
+    # Dispatch-side dedup for globally-scoped invariants (added 2026-05-04).
+    # These look identical from every loop, so only main owns the noisy
+    # side effects. Tracker counters above are still updated per loop so
+    # each loop's own consecutive-fire state stays consistent.
+    if loop_name != "main":
+        dispatch_violations = [
+            v for v in violations
+            if v.invariant not in _GLOBAL_INVARIANTS_MAIN_ONLY
+        ]
+    else:
+        dispatch_violations = violations
+
     # 2026-04-28 (Codex P2): wire dispatcher-tracked invariants into
     # critical_errors.jsonl AFTER the tracker has had its chance to
     # promote consecutive WARNINGs to CRITICAL. Doing it pre-tracker
@@ -1839,22 +1865,22 @@ def verify_and_act(report, config: dict,
     # own row inline because the layer2 check needs the trigger ts in
     # the resolution context.
     _dispatch_critical_errors_for_degradation(
-        violations, state_file=tracker_state_file,
+        dispatch_violations, state_file=tracker_state_file,
     )
 
     # Log all violations
-    _log_violations(violations, report.cycle_id)
+    _log_violations(dispatch_violations, report.cycle_id)
 
     # Alert critical violations via Telegram
     _alert_violations(
-        violations, config, loop_name=loop_name,
+        dispatch_violations, config, loop_name=loop_name,
         state_file=tracker_state_file,
     )
 
     # Self-heal on critical violations
-    critical = [v for v in violations if v.severity == "CRITICAL"]
+    critical = [v for v in dispatch_violations if v.severity == "CRITICAL"]
     if critical:
-        _trigger_self_heal(violations, tracker, loop_name=loop_name)
+        _trigger_self_heal(dispatch_violations, tracker, loop_name=loop_name)
 
     logger.warning(
         "Contract violations [%s]: %d total (%d critical) — cycle %d",
