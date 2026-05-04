@@ -169,16 +169,26 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
 
     Resolution-aware (added 2026-05-04). A row is treated as resolved when:
 
-    1. Generic — ``critical_errors.jsonl`` has a row with
-       ``resolves_ts == violation.ts`` (the standard resolution mechanism
-       used by ``_errors_unresolved`` and ``check_critical_errors.py``).
-    2. ``layer2_journal_activity`` — ``layer2_journal.jsonl`` has at least
+    1. ``layer2_journal_activity`` — ``layer2_journal.jsonl`` has at least
        one entry with ``ts >= violation.details.trigger_time``. The
        journal entry IS the resolution; the contract check itself returns
        early on this condition the next cycle.
-    3. ``accuracy_degradation`` — multiple loops dispatch the same alert
-       independently into the shared file (one row per loop). Dedup by
-       ``(invariant, message)`` keeping only the newest row.
+    2. The same incident is already represented by an *unresolved* row in
+       ``critical_errors.jsonl`` (same ``invariant`` + per-invariant
+       identity hash). The errors panel will surface that row; showing
+       it again under "violations" would be cosmetic noise.
+       *Resolved* critical_errors rows do NOT hide the violation — that
+       hand-off must come through path 1 or path 3.
+    3. ``critical_errors.jsonl`` has a resolution row whose
+       ``resolves_ts`` matches the timestamp of a critical_errors row that
+       in turn matches our violation's identity. (Production ``resolves_ts``
+       points at the critical_errors row, not the contract_violations row,
+       so the match must go via the critical_errors row's ``ts``.)
+
+    Cross-row dedup uses per-invariant identity hashing — the same
+    ``_hash_violation_identity`` keys that ``loop_contract`` uses for
+    Telegram cooldown — so distinct incidents with similar message text
+    don't collapse into one row.
 
     Without these filters the panel surfaced cleared-but-stale events for
     up to 24h after the underlying issue was fixed (observed 2026-05-04
@@ -192,7 +202,7 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
     except Exception as e:
         return {"unresolved": 0, "recent": [], "error": f"violations load: {type(e).__name__}: {e}"}
     try:
-        resolved_ts = _resolved_ts_set(dd)
+        crit_idx = _critical_errors_index(dd)
         latest_l2_journal_ts = _latest_layer2_journal_ts(dd)
 
         # Pass 1: severity filter + per-row resolution check.
@@ -202,20 +212,20 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
                 continue
             if entry.get("severity") != "CRITICAL":
                 continue
-            if _violation_resolved(entry, resolved_ts, latest_l2_journal_ts):
+            if _violation_resolved(entry, crit_idx, latest_l2_journal_ts):
                 continue
             kept.append(entry)
 
-        # Pass 2: cross-row dedup. accuracy_degradation fires from every
-        # loop (main, golddigger, metals, elongir) within milliseconds and
-        # produces identical-message rows; collapse to the newest.
-        seen: set[tuple[str, str]] = set()
+        # Pass 2: cross-row dedup using per-invariant identity (mirrors
+        # loop_contract._hash_violation_identity so two distinct incidents
+        # that happen to share the same first 200 chars don't collapse
+        # into one row, and two layer2_journal_activity violations on
+        # different triggers stay separate even when the rendered text
+        # rounds to the same minute count).
+        seen: set[str] = set()
         deduped: list[dict[str, Any]] = []
         for entry in sorted(kept, key=lambda e: e.get("ts", ""), reverse=True):
-            key = (
-                str(entry.get("invariant") or ""),
-                (entry.get("message") or "")[:200],
-            )
+            key = _violation_identity_key(entry)
             if key in seen:
                 continue
             seen.add(key)
@@ -235,30 +245,66 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
         return {"unresolved": 0, "recent": [], "error": f"violations aggregate: {type(e).__name__}: {e}"}
 
 
-def _resolved_ts_set(dd: Path) -> set[str]:
-    """Build the set of ts values that have been resolved via
-    ``critical_errors.jsonl`` resolution rows."""
+def _critical_errors_index(dd: Path) -> dict[str, Any]:
+    """Index of critical_errors.jsonl for cross-stream resolution checks.
+
+    Returns a dict with:
+
+    - ``unresolved_keys``: set of ``(invariant, identity_key)`` tuples for
+      *unresolved* critical-level entries. A contract_violations row whose
+      identity matches one of these is already represented in the errors
+      panel, so we hide it under violations to avoid double-counting.
+    - ``resolved_keys``: set of ``(invariant, identity_key)`` tuples for
+      critical-level entries that have been retroactively resolved (a
+      later row pointed at them via ``resolves_ts``). Matching contract
+      violations are treated as resolved.
+
+    Resolution rows themselves carry ``level == 'info'`` and a
+    ``resolves_ts`` pointing at the original critical row's ``ts`` —
+    same protocol as ``check_critical_errors.py``.
+    """
     try:
         entries = load_jsonl(dd / "critical_errors.jsonl")
     except Exception:
-        return set()
-    out: set[str] = set()
-    for e in entries:
-        if not isinstance(e, dict):
+        return {"unresolved_keys": set(), "resolved_keys": set()}
+
+    by_ts: dict[str, dict] = {}
+    resolved_ts: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
             continue
-        rts = e.get("resolves_ts")
-        if rts:
-            out.add(str(rts))
-    return out
+        if entry.get("category") == "resolution" and entry.get("resolves_ts"):
+            resolved_ts.add(str(entry["resolves_ts"]))
+            continue
+        if entry.get("level") and entry.get("level") != "critical":
+            continue
+        ts = entry.get("ts")
+        if ts:
+            by_ts[str(ts)] = entry
+
+    unresolved_keys: set[tuple[str, str]] = set()
+    resolved_keys: set[tuple[str, str]] = set()
+    for ts, entry in by_ts.items():
+        # critical_errors rows record the invariant in either ``caller``
+        # or ``category`` (the dispatcher uses the invariant name for
+        # both). Prefer caller; fall back to category.
+        invariant = (
+            entry.get("caller") or entry.get("category") or ""
+        )
+        key = (str(invariant), _identity_key_for_dict(entry))
+        if ts in resolved_ts:
+            resolved_keys.add(key)
+        else:
+            unresolved_keys.add(key)
+
+    return {
+        "unresolved_keys": unresolved_keys,
+        "resolved_keys": resolved_keys,
+    }
 
 
 def _latest_layer2_journal_ts(dd: Path) -> str | None:
-    """Newest ts from ``layer2_journal.jsonl``, or None if empty.
-
-    Used to short-circuit ``layer2_journal_activity`` violations whose
-    trigger has since been journaled. Reads only the tail because the
-    file is append-only and we just need the maximum timestamp.
-    """
+    """Newest ts from ``layer2_journal.jsonl``, or None if empty."""
     try:
         tail = load_jsonl_tail(dd / "layer2_journal.jsonl", max_entries=20)
     except Exception:
@@ -273,17 +319,74 @@ def _latest_layer2_journal_ts(dd: Path) -> str | None:
     return best
 
 
+def _violation_identity_key(entry: dict) -> str:
+    """Per-invariant identity hash mirroring
+    ``loop_contract._hash_violation_identity``.
+
+    For contract_violations.jsonl rows we don't have access to the
+    Violation object, only the serialized dict. Reproduce the same
+    overrides:
+
+    - ``layer2_journal_activity`` includes ``details['trigger_time']``
+      so two distinct triggers that round to the same minute count
+      don't collide.
+    - ``accuracy_degradation`` keys on the sorted ``(scope::key)`` set
+      from ``details['alerts']`` so percentage drift between cycles
+      doesn't generate fresh keys for the same alert set.
+    - Other invariants fall back to ``(invariant, message[:200])``.
+    """
+    return _identity_key_for_dict(entry)
+
+
+def _identity_key_for_dict(entry: dict) -> str:
+    invariant = entry.get("invariant") or entry.get("category") or ""
+    message = (entry.get("message") or "")[:200]
+    details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+
+    if invariant == "accuracy_degradation":
+        alerts = details.get("alerts") or []
+        keys = sorted(
+            f"{a.get('scope', '?')}::{a.get('key', '?')}"
+            for a in alerts
+            if isinstance(a, dict)
+        )
+        if keys:
+            return "accuracy_degradation:" + ",".join(keys)
+        return f"accuracy_degradation:{message}"
+
+    if invariant == "layer2_journal_activity":
+        trig = details.get("trigger_time")
+        return f"layer2_journal_activity:{trig}|{message}"
+
+    return f"{invariant}:{message}"
+
+
 def _violation_resolved(
-    entry: dict, resolved_ts: set[str], latest_l2_journal_ts: str | None
+    entry: dict,
+    crit_idx: dict[str, Any],
+    latest_l2_journal_ts: str | None,
 ) -> bool:
-    ts = entry.get("ts")
-    if ts and str(ts) in resolved_ts:
-        return True
+    # Path 1: layer2_journal_activity is implicitly resolved by a later
+    # journal entry — same condition the contract check itself uses next
+    # cycle.
     if entry.get("invariant") == "layer2_journal_activity":
         details = entry.get("details") or {}
         trig = details.get("trigger_time")
         if trig and latest_l2_journal_ts and str(latest_l2_journal_ts) >= str(trig):
             return True
+
+    # Paths 2 + 3: cross-stream dedup via critical_errors.jsonl. A
+    # contract violation that matches any unresolved or resolved
+    # critical_errors entry is already accounted for: unresolved -> the
+    # errors panel will surface it; resolved -> it's been cleared.
+    key = (
+        str(entry.get("invariant") or ""),
+        _identity_key_for_dict(entry),
+    )
+    if key in crit_idx.get("resolved_keys", set()):
+        return True
+    if key in crit_idx.get("unresolved_keys", set()):
+        return True
     return False
 
 

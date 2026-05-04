@@ -210,49 +210,159 @@ class TestContractViolations:
         out = ss.compute(data_dir=tmp_path)
         assert out["contract_violations"]["unresolved"] == 1
 
-    def test_accuracy_degradation_dedup_keeps_newest(self, tmp_path: Path):
-        """Three independent loops dispatch the same alert within ms.
-        After dedup, only the newest row should surface."""
+    def test_accuracy_degradation_dedup_by_alert_set(self, tmp_path: Path):
+        """Identity is the sorted (scope, key) set from details.alerts —
+        not the rendered message text whose drifting percentages would
+        otherwise generate fresh hashes each cycle."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        alerts = [
+            {"scope": "signal", "key": "sentiment"},
+            {"scope": "signal", "key": "claude_fundamental"},
+        ]
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-3600), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "2 signal(s) dropped >15pp (33.7% -> 33.2%)",
+                 "details": {"alerts": alerts}},
+                {"ts": _ts(-1800), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "2 signal(s) dropped >15pp (33.5% -> 32.9%)",
+                 "details": {"alerts": alerts}},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 1
+
+    def test_accuracy_degradation_distinct_alert_sets_both_surface(
+        self, tmp_path: Path
+    ):
+        """When a new signal joins the degradation set, the identity key
+        changes and the row should NOT collapse against the previous one."""
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
                 {"ts": _ts(-3600), "severity": "CRITICAL",
                  "invariant": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp..."},
-                {"ts": _ts(-3599.9), "severity": "CRITICAL",
+                 "message": "2 signal(s) dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                     {"scope": "signal", "key": "momentum_factors"},
+                 ]}},
+                {"ts": _ts(-1800), "severity": "CRITICAL",
                  "invariant": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp..."},
-                {"ts": _ts(-3599.8), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp..."},
+                 "message": "3 signal(s) dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                     {"scope": "signal", "key": "momentum_factors"},
+                     {"scope": "signal", "key": "structure"},
+                 ]}},
             ],
         )
         out = ss.compute(data_dir=tmp_path)
-        assert out["contract_violations"]["unresolved"] == 1
+        assert out["contract_violations"]["unresolved"] == 2
 
-    def test_violation_resolved_by_critical_errors_resolution_row(
+    def test_layer2_distinct_trigger_times_both_surface(
         self, tmp_path: Path
     ):
-        """A row in critical_errors.jsonl with resolves_ts == violation.ts
-        retroactively resolves the contract violation."""
+        """Two layer2_journal_activity violations on different triggers
+        whose messages happen to round to the same minute count must
+        stay separate. Earlier dedup-by-message[:200] would have merged
+        them."""
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
-        violation_ts = _ts(-1800)
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": violation_ts, "severity": "CRITICAL",
-                 "invariant": "min_success_rate", "message": "0%"},
+                {"ts": _ts(-3600), "severity": "CRITICAL",
+                 "invariant": "layer2_journal_activity",
+                 "message": "Layer 2 trigger fired 5m ago (X)",
+                 "details": {"trigger_time": _ts(-3900)}},
+                {"ts": _ts(-1800), "severity": "CRITICAL",
+                 "invariant": "layer2_journal_activity",
+                 "message": "Layer 2 trigger fired 5m ago (X)",
+                 "details": {"trigger_time": _ts(-2100)}},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        # Different trigger_time => distinct identity, both surface
+        # (assuming neither is resolved by a later journal entry).
+        assert out["contract_violations"]["unresolved"] == 2
+
+    def test_violation_resolved_via_critical_errors_chain(
+        self, tmp_path: Path
+    ):
+        """Production resolution: dispatcher writes a critical_errors row
+        for the invariant; a later resolution row's ``resolves_ts`` points
+        at the critical_errors row's ts (not the contract_violations row's
+        ts). Cross-stream identity match resolves the violation."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        crit_err_ts = _ts(-3000)
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-3500), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                 ]}},
             ],
         )
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
+                {"ts": crit_err_ts, "level": "critical",
+                 "caller": "accuracy_degradation",
+                 "category": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                 ]},
+                 "resolution": None},
                 {"ts": _ts(-300), "level": "info", "category": "resolution",
-                 "resolves_ts": violation_ts, "message": "fixed"},
+                 "resolves_ts": crit_err_ts, "message": "fixed"},
             ],
         )
         out = ss.compute(data_dir=tmp_path)
+        assert out["contract_violations"]["unresolved"] == 0
+
+    def test_violation_dedupes_against_unresolved_critical_error(
+        self, tmp_path: Path
+    ):
+        """Cross-stream noise reduction: when both streams represent the
+        same incident, surface it only once (under ERR, since that side
+        is already resolution-aware). The CV side stays quiet."""
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        _write_jsonl(
+            tmp_path / "contract_violations.jsonl",
+            [
+                {"ts": _ts(-3500), "severity": "CRITICAL",
+                 "invariant": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                 ]}},
+            ],
+        )
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {"ts": _ts(-3000), "level": "critical",
+                 "caller": "accuracy_degradation",
+                 "category": "accuracy_degradation",
+                 "message": "12 signal(s) dropped >15pp...",
+                 "details": {"alerts": [
+                     {"scope": "signal", "key": "sentiment"},
+                 ]},
+                 "resolution": None},
+            ],
+        )
+        out = ss.compute(data_dir=tmp_path)
+        # Errors panel: 1 unresolved.
+        assert out["errors"]["unresolved"] == 1
+        # Violations panel: 0 (already counted under errors).
         assert out["contract_violations"]["unresolved"] == 0
 
     def test_two_distinct_unresolved_violations_both_surface(
