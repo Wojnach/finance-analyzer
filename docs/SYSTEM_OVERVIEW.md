@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-01
-Branch: improve/auto-session-2026-05-01
+Updated: 2026-05-04
+Branch: improve/auto-session-2026-05-04
 
 ## 1) Architecture Summary
 
@@ -116,7 +116,7 @@ main.loop()
 - MIN_VOTERS = 3 (all asset classes)
 - Core gate: at least 1 core signal must be active for non-HOLD
 - Confidence = active_voters_in_direction / total_active_voters
-- Accuracy gate: signals below 45% accuracy (30+ samples) are force-HOLD (not inverted)
+- Accuracy gate: signals below 47% accuracy (30+ samples) are force-HOLD (not inverted). 50% for 10K+ samples.
 - Recency-weighted: 70% recent (7d) + 30% all-time; fast blend (90/10) on 15%+ divergence
 - Global confidence cap: 0.80 (70-80% bracket has best actual accuracy at 57-59%)
 
@@ -142,7 +142,7 @@ main.loop()
 - **Core active BTC-only (1)**: On-Chain BTC (MVRV, SOPR, NUPL, Netflow)
 - **Core disabled (1)**: ML Classifier (41.7%)
 - **Enhanced active (22)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Metals Cross-Asset, DXY Cross-Asset, COT Positioning, Credit Spread Risk
-- **Enhanced disabled (16)**: ML, Oscillators (below 45%), Orderbook Flow (51.1%), Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio, Statistical Jump Regime, Network Momentum, OVX Metals Spillover, XTrend Equity Spillover, Complexity Gap Regime, Realized Skewness (all pending live validation, added Apr 2026)
+- **Enhanced disabled (19)**: ML, Oscillators (below 45%), Orderbook Flow (51.1%), Smart Money (2026-04-24), Mahalanobis Turbulence, Crypto EVRP, Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio, Statistical Jump Regime, Network Momentum, OVX Metals Spillover, XTrend Equity Spillover, Complexity Gap Regime, Realized Skewness (all pending live validation, added Apr 2026)
 
 ## 6) Configuration
 
@@ -198,219 +198,26 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-04-08)
+## 9) Known Issues (as of 2026-05-04)
 
-- BUG-15 through BUG-22: Fixed in 2026-03-08 session
-- BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
-- BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing (addressed by ARCH-12)
-- BUG-29: `_vote_correct()` treats 0% change as incorrect — fixed with `_MIN_CHANGE_PCT` threshold
-- BUG-30: `load_json()` TOCTOU race — fixed in 2026-03-10 session
-- BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)` — fixed as BUG-84 (2026-03-19)
-- BUG-32: main.py re-exports ~50 private symbols (documentation only)
-- BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
-- BUG-34 through BUG-38: Fixed in 2026-03-11 session (portfolio_mgr TOCTOU, health TOCTOU, inversion weight cap)
-- BUG-39 through BUG-46: Fixed in 2026-03-12 session (agent completion wiring, digest/daily_digest state isolation, TOCTOU-safe I/O in reporting+trigger, JSONL tail-read optimization, digest load limits, config dedup)
-- BUG-47 through BUG-50: Fixed in 2026-03-14 session (IO safety sweep: raw json.loads, non-atomic writes, manual JSONL loops)
-- BUG-51 (P1): Signal failure tracking ephemeral — no persistent record of degradation (2026-03-16)
-- BUG-52 (P2): `total_applicable` hardcoded at 27/25, doesn't account for disabled/failing signals (2026-03-16)
-- BUG-53 (P2): 7 modules use non-atomic JSONL appends instead of `atomic_append_jsonl()` (2026-03-16)
-- BUG-54 (P3): `_compute_adx()` not cached — fixed as BUG-84 (2026-03-19)
-- BUG-55 (P3): `fin_evolve.py` has dead ImportError fallback wrappers for file_utils (2026-03-16)
-- BUG-80: Duplicate `"could"` in sentiment.py stopwords set — fixed 2026-03-19 (auto-fix)
-- BUG-81: Missing `raise ... from None` in avanza_client.py — fixed 2026-03-19
-- BUG-82: Unused imports in claude_gate.py — fixed 2026-03-19 (auto-fix)
-- BUG-83: 5 remaining silent `except Exception: pass` handlers — fixed 2026-03-19
-- BUG-84: `_compute_adx()` not cached per ticker — fixed 2026-03-19 (id(df) cache)
-- ARCH-10: Signal result validation centralized in `_validate_signal_result()`
-- ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
-- ARCH-12: Signal failure tracking and health surfacing (in progress, 2026-03-16)
-- ARCH-13: Accuracy tolerance for flat markets (planned)
-- ARCH-14: Dynamic `total_applicable` computation (in progress, 2026-03-16)
-- ARCH-15: Centralized JSONL tail-read utility `last_jsonl_entry()` in `file_utils.py` (done 2026-03-12)
-- REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
-- REF-7: Removed legacy `trigger_state.json` migration in `signal_engine.py` (done 2026-03-12)
-- REF-9: Consolidate 7 raw JSONL appends to `atomic_append_jsonl()` (in progress, 2026-03-16)
-- REF-10: Remove dead `fin_evolve.py` fallback wrappers (in progress, 2026-03-16)
-- REF-16: 1,910 ruff auto-fix violations (datetime.UTC, PEP 604, PEP 585, import sorting) — fixed 2026-03-19
-- REF-17: 28 manual ruff fixes (B007 unused loop vars, B904 raise-from, SIM103 needless bool) — fixed 2026-03-19
-- FEAT-2: Signal failure rate in accuracy reports (in progress, 2026-03-16)
-- TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
-- BUG-71/73: Golddigger/elongir config loading used raw `json.load()` — fixed 2026-03-18
-- BUG-72: Golddigger sent Telegram directly bypassing message_store — fixed 2026-03-18
-- BUG-74: Golddigger data_provider used raw `json.load()` for cached data — fixed 2026-03-18
-- BUG-75/76/77: Dead variables in signal_engine, trigger, telegram_poller — fixed 2026-03-18
-- BUG-79: avanza_tracker silent exception — fixed 2026-03-18
-- REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
-- REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
-- ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~5,994 tests across 242 test files
-- BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
-- BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
-- BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
-- BUG-88 (P1): Tier 1 votes string always shows 0 HOLD in reporting.py — fixed 2026-03-20
-- BUG-89 (P1): `update_module_failures` crash prevents all summary output — fixed 2026-03-20
-- BUG-90 (P2): Confidence penalty cascade amplifies above 1.0 before gates — fixed 2026-03-20
-- BUG-91 (P1): Timed-out agent completion never logged — fixed 2026-03-20
-- BUG-92 (P1): taskkill failure not checked; potential concurrent agents — fixed 2026-03-20
-- BUG-93 (P2): Circuit breaker HALF_OPEN allows unlimited concurrent requests — fixed 2026-03-20
-- BUG-95 (P2): Stack overflow counter not reset on non-overflow failures — fixed 2026-03-20
-- BUG-97 (P2): Exception in check_agent_completion leaves agent state dirty — fixed 2026-03-20
-- BUG-99 (P3): ZeroDivisionError if initial_value_sek is 0 — fixed 2026-03-20
-- BUG-100 (P2): Empty Binance response recorded as circuit breaker success — fixed 2026-03-20
-- BUG-101 through BUG-106: Crash safety, thread safety, zero-division, silent failures, alert routing, memory leak — fixed 2026-03-21
-- BUG-107 (P2): Zero-division in digest P&L calculations — fixed 2026-03-22
-- BUG-108 (P3): Alpha Vantage budget counter not thread-safe — fixed 2026-03-22
-- BUG-109 (P3): Digest reads entire 68MB signal_log.jsonl — fixed 2026-03-22
-- BUG-110 (P3): Stale import path in digest.py — fixed 2026-03-22
-- BUG-111 (P1): outcome_tracker RSI vote derivation uses fixed 30/70, not adaptive thresholds — fixed 2026-03-23
-- BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory — fixed 2026-03-23 (streaming optimization: 75MB → 2MB)
-- BUG-113 (P3): majority_vote HOLD confidence inconsistency — fixed 2026-03-23
-- BUG-114 (P3): forecast JSON extraction fallbacks lack observability — fixed 2026-03-23
-- BUG-115 (P1): `structure.py` signal module had no logging — failures silently returned HOLD — **fixed 2026-03-24** (added logger + exception logging)
-- BUG-116 (P2): Trigger state pruning silently dropped tickers — **fixed 2026-03-24** (added logger.info on prune)
-- BUG-117 (P2): `fx_rates.py` hardcoded fallback 10.85 SEK/USD — **fixed 2026-03-24** (bounds check 7-15, ERROR level logging)
-- BUG-118 (P3): FOMC/econ dates hardcoded for 2026-2027 — **mitigated 2026-03-24** (staleness warnings in econ_calendar.py, calendar_seasonal.py)
-- BUG-119 (P2): CLAUDE.md T2=25 turns but code=40 — **fixed 2026-03-24** (docs updated to 600s/40 turns)
-- BUG-120 (P3): `_safe_series()` forward-fills silently — **fixed 2026-03-24** (warning when >5% values filled)
-- BUG-121 (P3): Sector representative mapping in news_event.py is hardcoded dict — not extensible (deferred)
-- Also added logging to `macro_regime.py` exception handlers (had no `import logging` at all) — **fixed 2026-03-24**
-- BUG-122 (P1): health.py reads entire 68MB signal_log.jsonl (x2) — **fixed 2026-03-25** (load_jsonl_tail)
-- BUG-123 (P1): Untracked files break worktrees (metals_ladder, process_lock, subprocess_utils, notification_text) — **fixed 2026-03-25** (tracked in git)
-- BUG-124 (P2): fin_snipe_manager raw config.json read — **fixed 2026-03-25** (load_json)
-- BUG-125 (P2): onchain_data non-atomic cache write — **fixed 2026-03-25** (atomic_write_json)
-- BUG-126 (P3): main.py silent Telegram exception handlers — **fixed 2026-03-25** (logger.debug)
-- BUG-127 (P3): crypto_scheduler silent exception handler — **fixed 2026-03-25** (logger.debug)
-- REF-9: Raw JSONL append consolidation (5 files) — **fixed 2026-03-25** (atomic_append_jsonl)
-- REF-10: fin_evolve.py aliased imports — **fixed 2026-03-25** (direct imports)
-- Also synced 5 modified portfolio files + 5 test files from main working tree — **fixed 2026-03-25**
-- ARCH-17: main.py re-exports 100+ symbols from submodules — obscures true module boundaries (deferred)
-- ARCH-18: metals_loop.py is 1000+ lines monolith — should be split into modules (deferred)
-- ARCH-19: No CI/CD pipeline — all testing is manual (deferred)
-- ARCH-20: No type checking (mypy) configured (deferred)
-- TEST-1: GPU gate module (`gpu_gate.py`) has zero test coverage
-- TEST-2: Health module (`health.py`) had only 3 tests — **extended 2026-03-24** (24 new tests covering staleness, signal health, dead signals)
-- TEST-3: 26 pre-existing test failures still unaddressed (integration, config, state isolation)
-- BUG-128 (P2): `avanza_orders.py` non-atomic offset file — **fixed 2026-03-26** (atomic_write_json + legacy read compat)
-- BUG-129 (P3): `avanza_session.py` Playwright globals not thread-safe — **fixed 2026-03-26** (threading.Lock)
-- BUG-130 (P3): Dashboard no caching — **fixed 2026-03-26** (TTL cache, 5s default / 60s config)
-- BUG-131 (P3): Telegram truncation breaks Markdown — **fixed 2026-03-26** (newline-boundary truncation)
-- BUG-132 (P3): `orb_predictor.py` fetches 5000+ candles from Binance on every call with no caching (deferred)
-- ARCH-21: `autonomous.py` has 500+ line functions (e.g., `_build_telegram_mode_a`) — should decompose for maintainability (deferred)
-- ARCH-22: `agent_invocation.py` uses module-level globals for process lifecycle — could be a class for clarity (deferred)
-- BUG-133 (P1): Accuracy cache shared timestamp causes cross-horizon staleness — **fixed 2026-03-27** (per-horizon timestamps)
-- BUG-134 (P1): Regime accuracy hardcoded to "1d" regardless of prediction horizon — **fixed 2026-03-27** (uses acc_horizon)
-- BUG-135 (P1): Signal utility always evaluated at "1d" horizon — **fixed 2026-03-27** (uses acc_horizon)
-- BUG-136 (P2): Utility boost mutates accuracy_data dict in-place — **fixed 2026-03-27** (dict copy)
-- BUG-137 (P2): SQLite DB resource leak in load_entries() — **fixed 2026-03-27** (try/finally)
-- BUG-138 (P2): Backtester duplicates accuracy blending logic — **fixed 2026-03-27** (shared blend_accuracy_data)
-- BUG-139 (P2): load_json() crashes on PermissionError — **fixed 2026-03-27** (OSError catch)
-- ARCH-23: Extract accuracy blending into reusable function — **done 2026-03-27**
-- ARCH-24: Parameterize accuracy functions with pre-loaded entries — **done 2026-03-27**
-- BUG-143 (P1): Unanimity penalty uses pre-gated vote counts (regime-gated signals counted) — **fixed 2026-03-29** (gating applied before counts)
-- BUG-144 (P1): Forecast regime discount is dead code (regime never passed in context_data) — **fixed 2026-03-29** (regime added to context)
-- ARCH-25: Pass regime through context_data to enhanced signals — **done 2026-03-29**
-- ARCH-26: Post-gated vote counts for penalty stages — **done 2026-03-29**
-- BUG-145 (P2): meta_learner SQLite connection leak on exception — **fixed 2026-03-29** (try/finally)
-- BUG-146 (P2): meta_learner old datetime import style — **fixed 2026-03-29** (UTC modernization)
-- BUG-147 (P2): meta_learner duplicates SIGNAL_NAMES list — **fixed 2026-03-29** (import from tickers)
-- BUG-148 (P2): meta_learner.predict() loads model from disk on every call — **fixed 2026-03-29** (module-level cache with mtime)
-- ARCH-27: Meta-learner model caching for predict() — **done 2026-03-29**
-- BUG-149 (P3): meta_learner orphaned — predict() never called from production (deferred — document or integrate as signal #31)
-- BUG-157 (P1): `analyze.py:434` loop variable capture in closure (B023) — **fixed 2026-03-31** (default param binding)
-- BUG-158 (P1): `test_signal_improvements.py:402,411` undefined `datetime` in lambda (F821) — **fixed 2026-03-31** (removed dead code)
-- BUG-159 (P2): `avanza_session.py:255` raise without exception chaining (B904) — **fixed 2026-03-31** (`from None`)
-- REF-21: 4 unused imports in portfolio/ (F401) — **fixed 2026-03-31** (auto-fix)
-- REF-22: 3 unused variables in portfolio/ (F841) — **fixed 2026-03-31** (removed)
-- REF-23: 2 f-strings without placeholders (F541) — **fixed 2026-03-31** (auto-fix)
-- REF-24..28: Import sorting, PEP604 annotations, deprecated imports, redundant open modes — **fixed 2026-03-31** (auto-fix)
-- REF-29: Unregistered `slow` pytest mark — **fixed 2026-03-31** (added to pyproject.toml)
-- REF-30: pyproject.toml description "29-signal" → "30-signal" — **fixed 2026-03-31**
-- REF-31: 78 unused imports + 65 unsorted imports in test files — **fixed 2026-03-31** (auto-fix)
-- ARCH-30: 14 `try/except/pass` → `contextlib.suppress` conversions — **done 2026-03-31**
-- BUG-160 (P1): 3 signals missing from SIGNAL_NAMES — **fixed 2026-04-01** (added crypto_macro, orderbook_flow, metals_cross_asset)
-- BUG-161 (P2): metals_loop.py raw JSONL appends — **fixed 2026-04-01** (atomic_append_jsonl)
-- BUG-162 (P3): `metals_loop.py` is 4,553-line monolith — hardest module to maintain, highest bug density (deferred)
-- BUG-163 (P3): `exit_optimizer.py` antithetic variate breaks on odd n_paths (deferred)
-- BUG-164 (P3): `orb_predictor.py` hardcodes UTC hours 8-10 for morning range (deferred)
-- BUG-165 (P1): llama_server.py model swap race condition — **fixed 2026-04-02** (locks held during entire query operation)
-- BUG-166 (P2): `shared_state._cached()` thundering herd on TTL expiry — **fixed 2026-04-02** (dogpile prevention via per-key loading flag)
-- BUG-167 (P2): Dead `_CORE_SIGNAL_SET` in signal_engine.py — **fixed 2026-04-02** (removed)
-- REF-33..37: 18 unused imports, 5 SIM105, 3 F541, 1 F841 in portfolio/ — **fixed 2026-04-02** (ruff auto-fix)
-- BUG-168 (P3): `llama_server.py` `_ensure_model()` missing `global _local_model` — **fixed 2026-04-04** (removed dead assignment)
-- BUG-169 (P3): `indicators.py` `_regime_cache` accessed without lock from 8 concurrent threads — **fixed 2026-04-04** (added `_regime_lock`)
-- BUG-170 (P3): `fear_greed.py` streak file non-atomic write — **fixed 2026-04-04** (atomic_write_json + load_json)
-- REF-39: I001/UP015/UP017 auto-fixes — **fixed 2026-04-04** (ruff auto-fix)
-- REF-40: Unused loop variables in `llm_batch.py` — **fixed 2026-04-04** (prefixed with `_`)
-- REF-41: Ambiguous variable `l` in 3 modules — **fixed 2026-04-04** (renamed to `line`/`lo`)
-- REF-42: Duplicate isinstance in `calendar_seasonal.py` — **fixed 2026-04-04** (merged)
-- REF-43: Lambda assignments in `avanza_control.py`, `avanza_session.py` — **fixed 2026-04-04** (converted to def)
-- REF-44: `except Exception: pass` in `main.py` — **fixed 2026-04-04** (contextlib.suppress)
-- ~6,036 tests across 212+ test files (as of 2026-04-04), 79 pre-existing failures
-- BUG-171 (P2): ~14 remaining `except Exception: pass` silent swallowers — **fixed 2026-04-07** (contextlib.suppress + logger.debug)
-- BUG-172 (P3): `fin_fish.py` datetime.timezone.utc → datetime.UTC — **fixed 2026-04-07** (UP017)
-- BUG-173 (P3): `orchestrator.py` typing.Callable → collections.abc.Callable — **fixed 2026-04-07** (UP035)
-- BUG-174 (P3): Unused Path import in golddigger_strategy.py — **fixed 2026-04-07** (F401)
-- REF-45: 9 collapsible nested `if` statements (SIM102) — **fixed 2026-04-07**
-- REF-46: 3 if-with-same-arms (SIM114) — **fixed 2026-04-07** (combined with `or`)
-- REF-47: 2 suppressible-exception (SIM105) in bot runners — **fixed 2026-04-07** (contextlib.suppress)
-- REF-48: 91 ruff auto-fixes in test files (F401, I001, UP017, SIM300) — **fixed 2026-04-07**
-- REF-49: SIM103 needless bool in daily_digest.py — **fixed 2026-04-07**
-- Portfolio ruff violations: 74 → 56 (remaining: 51 E402 intentional + 5 SIM115 intentional)
-- BUG-176 (P1): Concentration check used cash-only allocation — **fixed 2026-04-08** (uses total_value, capped at cash)
-- BUG-177 (P3): Sortino used inline r/100 instead of daily_rets_dec — **fixed 2026-04-08** (consistency)
-- BUG-178 (P1): Main loop ThreadPoolExecutor no timeout — **fixed 2026-04-08** (120s timeout + graceful degradation)
-- BUG-179 (P1): Data collector ThreadPoolExecutor no timeout — **fixed 2026-04-08** (60s timeout + partial results)
-- BUG-180 (P2): ADX cache eviction cleared all entries — **fixed 2026-04-08** (LRU eviction, keep newest 50%)
-- BUG-181 (P2): Fishing context stale on failure — **fixed 2026-04-08** (writes neutral context on exception)
-- BUG-182 (P2): GPU lock stale-break without PID check — **fixed 2026-04-08** (psutil.pid_exists validation)
-- ARCH-29: should_block_trade() helper in trade_guards.py — **added 2026-04-08**
-- Test ruff violations: 253 → 170 (remaining: F841 test vars, SIM117 style, E741 test naming)
-- ~6,138 tests, 85 pre-existing failures (as of 2026-04-07)
-- BUG-183 (P2): Dead code after return in metals_swing_trader.py `_regime_confirmed()` — **fixed 2026-04-09** (removed unreachable lines referencing undefined `signal_data`)
-- BUG-184 (P2): Duplicate test `test_btc_leads_eth` shadowed BUY test case (F811) — **fixed 2026-04-09** (renamed to `test_btc_leads_eth_sell`)
-- REF-50: 64 ruff auto-fix violations across 24 files (I001, F401, F541, SIM114, UP017) — **fixed 2026-04-09**
-- REF-51: 9 unused vars/imports in metals_loop.py (F841×6, F401×3) — **fixed 2026-04-09**
-- Total ruff violations: 382 → 309 (remaining: 69 E402 intentional, 73 F841 test vars, 55 SIM117 cosmetic, 40 E741 test naming, 29 SIM105 metals_loop monolith, rest cosmetic)
-- ~6,449 tests (as of 2026-04-09)
-- BUG-196 (P2): Relative `Path("data/...")` in 6 modules — **fixed 2026-04-15** (BASE_DIR absolute resolution)
-- BUG-197 (P3): Dead `ts_str_clean` in `agent_invocation.py` — **fixed 2026-04-15** (Python 3.12 `fromisoformat` native)
-- BUG-198 (P2): Signal registry retried failed imports every cycle (~35 warnings/cycle) — **fixed 2026-04-15** (sentinel-based cache, 5-min TTL cooldown)
-- BUG-199 (P3): Trigger sustained gate logic duplicated in 2 places — **fixed 2026-04-15** (extracted `_update_sustained` helper)
-- BUG-178 (P1 follow-on): `_TICKER_POOL_TIMEOUT` too tight after fingpt retirement — **fixed 2026-04-15** (180 → 360s with phase-log instrumentation + accuracy_stats utility cache)
-- BUG-200 (P1): `bigbet.py` bypasses `detect_auth_failure` — **fixed 2026-04-16**
-- BUG-201 (P1): `iskbets.py` bypasses `detect_auth_failure` + default-approve safety gap — **fixed 2026-04-16**
-- BUG-202 (P1): `LAYER2_JOURNAL_GRACE_S` 3600s too long (overnight silent outages 2026-04-14→16) — **fixed 2026-04-16** (900s = T3 timeout)
-- BUG-203 (P3): `agent_invocation.py` elapsed timing uses `time.time()` — **fixed 2026-04-16** (`time.monotonic()` for elapsed)
-- BUG-204 (P3): `qwen3_signal.py` silent GPU-reaper exception — **fixed 2026-04-16** (logger.debug)
-- BUG-205 (P3): `dashboard/app.py` silent market_health exception — **fixed 2026-04-16** (logger.debug)
-- BUG-206 (P2): `risk_management.py` `check_regime_mismatch()` treats missing volume_ratio as confirmed low volume — **fixed 2026-04-20** (skip flag when None)
-- BUG-207 (P3): `signal_engine.py` 5 bare `except Exception: pass` in enhancement stages — **fixed 2026-04-20** (logger.debug)
-- BUG-208 (P2): `loop_contract.py` local `_read_json()`/`_last_jsonl_entry()` bypass file_utils — **fixed 2026-04-20** (replaced with file_utils.load_json/last_jsonl_entry, O(1) JSONL tail read)
-- BUG-209 (P1): `indicators.py` zero/negative close prices poison signals (RSI=50, MACD=0, ATR=0) — **fixed 2026-04-21** (early None return)
-- BUG-210 (P1): `telegram_poller.py` config write with empty cfg destroys API keys — **fixed 2026-04-21** (len(cfg)<5 guard)
-- BUG-211 (P1): `avanza_session.py` no max order size limit — **fixed 2026-04-21** (MAX_ORDER_TOTAL_SEK=50K guard)
-- BUG-212 (P2): `shared_state._RateLimiter.wait()` sleeps inside lock, blocks 8 threads — **fixed 2026-04-21** (sleep-outside-lock)
-- BUG-213 (P3): `shared_state._cached()` leaks `_loading_timestamps` on success path — **fixed 2026-04-21** (.pop on success)
-- BUG-214 (P1): `check_drawdown()` never called from production — **fixed 2026-04-21** (wired into invoke_agent, advisory 20%, block 50%)
-- BUG-215 (P2): `fx_rates._fx_cache` no thread lock, 8-worker pool access — **fixed 2026-04-21** (threading.Lock)
-- BUG-216 (P2): Monte Carlo seed=42 in production — risk metrics are theater — **fixed 2026-04-21** (seed=None)
-- BUG-217 (P1): `metals_swing_trader._execute_sell()` exception aborts entire exit loop — **fixed 2026-04-21** (per-position try/except)
-- BUG-218 (P1): `econ_calendar` SELL-only (never BUY), permanent consensus bias — **fixed 2026-04-21** (force-HOLD via DISABLED_SIGNALS)
-- BUG-219 (P0): `_record_new_trades()` missing `pnl_pct` arg → consecutive-loss escalation dead — **fixed 2026-04-23**
-- BUG-220 (P2): `outcome_tracker` stores 0% change_pct when `base_price` is None — **fixed 2026-04-24** (skip ticker when base_price missing)
-- BUG-221 (P2): `daily_digest` crashes on invalid timezone config string — **fixed 2026-04-24** (fallback to UTC)
-- BUG-230 (P1): Dashboard CORS wildcard allows cross-origin data theft — **fixed 2026-04-28** (localhost whitelist)
-- BUG-231 (P2): `main.py` heartbeat uses non-atomic `.write_text()` — **fixed 2026-04-28** (atomic_write_text)
-- BUG-232 (P2): `portfolio_mgr.portfolio_value()` NaN fx_rate passes guard — **fixed 2026-04-28** (math.isfinite check)
-- BUG-233 (P3): `fish_monitor_live.py` CANCEL_HOUR/CANCEL_MIN undefined — **fixed 2026-04-28** (defined constants)
-- BUG-234 (P3): `signal_engine.py` unused variable `recent_horizon` — **fixed 2026-04-28** (removed)
-- BUG-235 (P3): Dashboard 500 errors expose internal exception messages — **fixed 2026-04-28** (generic error, server-side logging)
-- BUG-236 (P1): `crypto_swing_trader.py:675` TypeError on naive datetime subtraction — **fixed 2026-04-30** (Z-suffix normalization + TypeError catch)
-- BUG-237 (P2): `accuracy_stats.py` unused `import json` (F401) — **fixed 2026-04-30** (removed)
-- BUG-238 (P2): `crypto_swing_trader.py:454,471` fragile timezone in exit/cooldown — **fixed 2026-04-30** (Z-suffix normalization)
-- BUG-239 (P2): `crypto_loop.py` singleton lock TOCTOU race — **fixed 2026-04-30** (O_CREAT|O_EXCL atomic create)
-- BUG-240 (P3): `crypto_swing_trader.py` ruff I001+UP035 — **fixed 2026-04-30** (sorted imports, collections.abc.Callable)
-- BUG-241 (P3): `crypto_cross_asset.py` unsorted import block — **fixed 2026-04-30** (ruff fix)
-- BUG-242 (P3): `crypto_loop.py` 4x try-except-pass → contextlib.suppress — **fixed 2026-04-30**
-- REF-54 (P2): `trade_guards.py` loss escalation has no time-based decay — **fixed 2026-04-30** (geometric halving every 24h)
-- REF-55 (P3): 179 auto-fixable ruff violations in tests/ — **fixed 2026-04-30** (F401, I001, SIM117, UP017, SIM300)
+**244 bugs fixed** across 70+ sessions (BUG-15 through BUG-244).
+Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
+
+### Open Issues
+
+- ARCH-17: main.py re-exports 100+ symbols (obscures module boundaries)
+- ARCH-18/BUG-162: metals_loop.py is 7,699-line monolith — highest bug density, hardest to maintain
+- ARCH-19: No CI/CD pipeline — all testing is manual
+- ARCH-20: No type checking (mypy)
+- BUG-132: orb_predictor.py fetches 5000+ candles uncached
+- BUG-149: meta_learner orphaned (predict() never called from production)
+- TEST-1: GPU gate (`gpu_gate.py`) has zero test coverage
+- TEST-3: 26+ pre-existing test failures (integration, config, state isolation)
+
+### Findings from 2026-05-04 Auto Session
+
+- **B1 (fixed)**: Equity curve annualized with 252 days (stock convention) but portfolio runs 24/7 → crypto volatility understated 17%. Changed to 365.
+- **B2 (fixed)**: Contract violation dedup wrote critical_errors.jsonl BEFORE dedup marker → duplicate entries on marker write failure. Swapped order.
+- **B3 (fixed)**: Monte Carlo ATR fallback was generic 2.0% for all assets. Now per-asset-class: crypto=3.5%, metals=4.0%, stocks=2.0%.
+- **B4 (fixed)**: Stuck loading key eviction in shared_state.py logged at DEBUG. Elevated to WARNING.
+- ~6,000+ tests across 242 test files

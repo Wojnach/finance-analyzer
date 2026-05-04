@@ -71,8 +71,8 @@ def _cached(key, ttl, func, *args):
                  if _now_evict - ts > _LOADING_TIMEOUT]
         for k in stuck:
             _loading_keys.discard(k)
-            _loading_timestamps.pop(k, None)
-            logger.debug("[%s] evicted stuck loading key (timeout %ds)", k, _LOADING_TIMEOUT)
+            stuck_duration = _now_evict - _loading_timestamps.pop(k, _now_evict)
+            logger.warning("[%s] evicted stuck loading key after %.0fs (timeout %ds)", k, stuck_duration, _LOADING_TIMEOUT)
 
         # BUG-166: Dogpile prevention — if another thread is already loading
         # this key, return stale data instead of calling func redundantly.
