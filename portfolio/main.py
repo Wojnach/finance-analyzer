@@ -821,13 +821,25 @@ def run(force_report=False, active_symbols=None):
         except Exception as e:
             logger.warning("signal logging failed: %s", e)
 
+        # 2026-05-04: Wrap long-blocking work (Layer 2 T2/T3 = 600-900s
+        # subprocess; autonomous fallback = bounded but not instant) in a
+        # heartbeat keepalive. update_health() (the normal heartbeat write)
+        # only runs at end-of-cycle, so without periodic ticks the
+        # dashboard /api/health flips stale 300s into any triggering cycle
+        # even though the loop is alive and waiting on Claude CLI.
+        # The context manager's __exit__ runs on exceptions too, so the
+        # daemon thread is always cleaned up. Skip-paths (NO_TELEGRAM,
+        # outside agent window) are NOT wrapped — they don't block.
+        from portfolio.health import heartbeat_keepalive
+
         layer2_cfg = config.get("layer2", {})
         if os.environ.get("NO_TELEGRAM"):
             logger.info("[NO_TELEGRAM] Skipping agent invocation")
             _log_trigger(reasons_list, "skipped_test", tier=tier)
         elif layer2_cfg.get("enabled", True):
             if _is_agent_window():
-                result = invoke_agent(reasons_list, tier=tier)
+                with heartbeat_keepalive():
+                    result = invoke_agent(reasons_list, tier=tier)
                 _log_trigger(reasons_list, "invoked" if result else "skipped_busy", tier=tier)
             else:
                 logger.info("Layer 2: outside market window, skipping")
@@ -835,29 +847,40 @@ def run(force_report=False, active_symbols=None):
         else:
             logger.info("Layer 2 disabled — autonomous mode")
             from portfolio.autonomous import autonomous_decision
-            autonomous_decision(
-                config, signals, prices_usd, fx_rate, state,
-                reasons_list, tf_data, tier, triggered_tickers,
-            )
+            with heartbeat_keepalive():
+                autonomous_decision(
+                    config, signals, prices_usd, fx_rate, state,
+                    reasons_list, tf_data, tier, triggered_tickers,
+                )
             _log_trigger(reasons_list, "autonomous", tier=tier)
     else:
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         report.summary_written = True
         logger.info("No trigger.")
 
-    # Big Bet detection
+    # Big Bet detection — can invoke a 30s Claude subprocess per qualifying
+    # candidate (portfolio/bigbet.py:invoke_layer2_eval), with no per-cycle
+    # cap. Wrapped in keepalive so heartbeat stays fresh across multi-minute
+    # bigbet sweeps that would otherwise re-trip the dashboard stale gate.
     bigbet_cfg = config.get("bigbet", {})
     if bigbet_cfg.get("enabled", False):
         try:
             from portfolio.bigbet import check_bigbet
-            check_bigbet(signals, prices_usd, fx_rate, tf_data, config)
+            from portfolio.health import heartbeat_keepalive
+            with heartbeat_keepalive():
+                check_bigbet(signals, prices_usd, fx_rate, tf_data, config)
         except Exception as e:
             logger.warning("Big Bet check failed: %s", e)
 
-    # ISKBETS monitoring
+    # ISKBETS monitoring — same shape: each qualifying ticker can fire a 30s
+    # Claude gate subprocess (portfolio/iskbets.py:invoke_layer2_gate). With
+    # 5 Tier-1 tickers configured the worst case is ~150s of subprocess work,
+    # well past the 300s heartbeat threshold when stacked with bigbet+L2.
     try:
+        from portfolio.health import heartbeat_keepalive
         from portfolio.iskbets import check_iskbets
-        check_iskbets(signals, prices_usd, fx_rate, tf_data, config)
+        with heartbeat_keepalive():
+            check_iskbets(signals, prices_usd, fx_rate, tf_data, config)
     except Exception as e:
         logger.warning("ISKBETS check failed: %s", e)
 
