@@ -1,0 +1,8 @@
+6-signals-modules 52519cebf42fab5b75e535c44e5c96898b8b4733
+2-orchestration 7f098322aeea36fda5d8bff30fb378de87e041cf
+3-portfolio-risk 8280fa355609e62c92fce0a13554945107e24416
+5-avanza-api e736d78f911318f915ede7cc9a96982d616174e2
+8-infrastructure 7bdffcb7d93672939c5ff3941df1dfe18fdf8600
+7-data-external cf7115ede12045b5a3bdcecc1db59013cb2f32f9
+4-metals-core f3b47891df745cc5b6cf598ff5a3bb59ab6f5b4f
+1-signals-core ac8480ee2950bb07076498892f20a88fd9cbba96
