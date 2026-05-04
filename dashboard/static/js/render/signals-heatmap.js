@@ -13,6 +13,7 @@
  */
 
 import { open as openSheet, bindLongPress } from "../components/bottom-sheet.js";
+import { fDurationShort } from "../format.js";
 
 /**
  * @param {{
@@ -83,16 +84,27 @@ export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = 
       cell.className = _classForValue(value, isDisabled);
       cell.dataset.signal = sigName;
       cell.dataset.ticker = ticker;
-      cell.title = `${sigName} · ${ticker}: ${value || "—"}`;
+
+      const sinceTs = data.since?.[ticker]?.[sigName];
+      const durLabel = !isDisabled ? fDurationShort(sinceTs) : "";
+      cell.title = durLabel
+        ? `${sigName} · ${ticker}: ${value || "—"} · ${durLabel} in state`
+        : `${sigName} · ${ticker}: ${value || "—"}`;
+      if (durLabel) {
+        const since = document.createElement("span");
+        since.className = "cell-since";
+        since.textContent = durLabel;
+        cell.append(since);
+      }
 
       bindLongPress(cell, () => ({
         title: `${sigName} — ${ticker}`,
-        content: _detailNode(sigName, ticker, value, accuracy[sigName]),
+        content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs),
       }));
       cell.addEventListener("click", () => {
         openSheet({
           title: `${sigName} — ${ticker}`,
-          content: _detailNode(sigName, ticker, value, accuracy[sigName]),
+          content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs),
         });
       });
       tr.append(cell);
@@ -140,13 +152,23 @@ function _truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function _detailNode(signal, ticker, value, accPct) {
+function _detailNode(signal, ticker, value, accPct, sinceTs) {
   const wrap = document.createElement("div");
   const meta = document.createElement("div");
   meta.style.fontSize = "var(--ty-sm)";
   meta.style.color = "var(--txd)";
   meta.textContent = `${ticker} · vote: ${value || "—"}`;
   wrap.append(meta);
+
+  const durLabel = fDurationShort(sinceTs);
+  if (durLabel) {
+    const dur = document.createElement("div");
+    dur.style.fontSize = "var(--ty-sm)";
+    dur.style.marginTop = "var(--sp-1)";
+    dur.style.color = "var(--txm)";
+    dur.textContent = `In this state for: ${durLabel}`;
+    wrap.append(dur);
+  }
 
   if (accPct != null && Number.isFinite(Number(accPct))) {
     const acc = document.createElement("div");

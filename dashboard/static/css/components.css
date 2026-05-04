@@ -297,6 +297,19 @@
     transparent 8px
   );
 }
+/* Time-in-state badge inside heatmap cells.
+ * Parent td has font-size:0 (color-only design from Track 5) — the inner
+ * span re-establishes its own font-size so the badge renders while empty
+ * cells remain invisible. */
+.heatmap td .cell-since {
+  display: block;
+  font-size: 10px;
+  line-height: 24px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
 
 /* ================================================================
    Banner / empty / error
