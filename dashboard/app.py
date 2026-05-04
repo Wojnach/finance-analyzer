@@ -1091,6 +1091,13 @@ def api_signal_heatmap():
     # Written by portfolio.reporting._update_signal_state_since each loop cycle.
     # Missing or malformed payload degrades to an empty map: frontend renders
     # cells without the badge — never 500.
+    #
+    # Codex P2 (2026-05-05): the since-file is written *before* agent_summary
+    # in the same cycle, and a swallowed write-failure can also leave the two
+    # out of sync. Guard against showing a stale duration on a freshly-flipped
+    # vote by only emitting `since` when the recorded vote matches the current
+    # heatmap value. Mismatched cells fall back to colour-only until the next
+    # cycle re-syncs both files.
     state_since_payload = _read_json(DATA_DIR / "signal_state_since.json") or {}
     state_since_votes = state_since_payload.get("votes") if isinstance(state_since_payload, dict) else None
     since: dict[str, dict[str, str]] = {}
@@ -1100,10 +1107,17 @@ def api_signal_heatmap():
             if not isinstance(tk_state, dict):
                 continue
             row_since: dict[str, str] = {}
+            current_row = heatmap.get(ticker, {})
             for s in all_signals:
                 entry = tk_state.get(s)
-                if isinstance(entry, dict) and isinstance(entry.get("since"), str):
-                    row_since[s] = entry["since"]
+                if not isinstance(entry, dict):
+                    continue
+                since_ts = entry.get("since")
+                if not isinstance(since_ts, str):
+                    continue
+                if entry.get("vote") != current_row.get(s):
+                    continue  # stale: vote in since-file disagrees with heatmap
+                row_since[s] = since_ts
             if row_since:
                 since[ticker] = row_since
 
