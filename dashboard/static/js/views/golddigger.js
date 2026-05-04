@@ -253,7 +253,11 @@ function _renderTrades(data) {
     reason.textContent = t.reason || "";
     const sek = document.createElement("span");
     sek.style.textAlign = "right";
-    sek.textContent = t.sek != null ? Number(t.sek).toFixed(0) + " kr" : "—";
+    // /api/golddigger normalises trades with total_sek; accept ``sek`` as
+    // a legacy fallback so historical entries that still carry the older
+    // field still render.
+    const sekVal = t.total_sek ?? t.sek;
+    sek.textContent = sekVal != null ? Number(sekVal).toFixed(0) + " kr" : "—";
     row.append(ts, action, reason, sek);
     wrap.append(row);
   }
