@@ -5,6 +5,7 @@ import os
 import platform
 import shutil
 import subprocess
+import threading
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -59,6 +60,94 @@ _bold_txn_count_before = 0
 _STACK_OVERFLOW_EXIT_CODE = 3221225794
 _MAX_STACK_OVERFLOWS = 5  # auto-disable after this many consecutive stack overflow crashes
 _STACK_OVERFLOW_FILE = DATA_DIR / "stack_overflow_counter.json"
+
+# 2026-05-05 (item 3a of dashboard-noise-followups, see
+# docs/plans/2026-05-05-l2-completion-watchdog.md): completion-detection
+# watchdog. ``check_agent_completion`` is the only path that observes
+# subprocess.poll() and enforces the per-tier wall-clock timeout, but it
+# was called only once per ``main.run()`` cycle. When the cycle bloats
+# (333-918s violations 2026-05-01..04), a T1 subprocess that finishes
+# at its real 120s budget is not noticed for up to 6 more minutes —
+# inflating ``duration_s`` in invocations.jsonl and delaying the kill
+# of a hung agent past its real budget. The daemon thread below runs
+# the same check every 30s independent of ``run()``'s cadence; the
+# lock serialises with the main-thread call site so the two cannot
+# race on ``_agent_proc`` / ``_agent_start`` state.
+_COMPLETION_WATCHDOG_INTERVAL_S = 30
+_completion_lock = threading.Lock()
+_watchdog_thread: threading.Thread | None = None
+_watchdog_stop = threading.Event()
+
+
+def _completion_watchdog() -> None:
+    """Daemon thread body: poll completion every 30 s while not stopped.
+
+    Each tick takes ``_completion_lock`` and calls
+    ``_check_agent_completion_locked`` directly so the main-thread call
+    via ``check_agent_completion`` and this watchdog tick share one
+    critical section. Failures inside the tick are logged and swallowed
+    — the watchdog must never die from a transient I/O error or it
+    silently regresses to the pre-fix state where the main loop is the
+    only completion observer.
+    """
+    while not _watchdog_stop.is_set():
+        # Event.wait(timeout) returns True if the event was set during
+        # the wait — ie shutdown. Returning False means the timeout
+        # elapsed normally, so we tick.
+        if _watchdog_stop.wait(_COMPLETION_WATCHDOG_INTERVAL_S):
+            return
+        try:
+            with _completion_lock:
+                _check_agent_completion_locked()
+        except Exception as e:  # noqa: BLE001 — never let the watchdog die
+            logger.warning("completion watchdog tick failed: %s", e)
+
+
+def _ensure_completion_watchdog() -> None:
+    """Start the daemon watchdog if it is not already running.
+
+    Idempotent: the spawn happens at most once per process under normal
+    operation. If the previous thread died (uncaught exception escaping
+    the ``except Exception`` above is impossible, but a thread.start
+    failure or interpreter restart between calls could leave the global
+    pointing at a dead thread), spawn a fresh one. Resets the stop
+    event so a successor process that imports this module after a
+    SIGTERM can still arm a new watchdog.
+
+    Uses ``_completion_lock`` to make the is-alive-check + spawn atomic
+    so concurrent callers cannot both pass the check and both spawn (a
+    race exposed by tests that drive start/stop concurrently — in
+    production the lazy-start happens once at the end of try_invoke_agent,
+    which is itself serialised by the main loop).
+    """
+    global _watchdog_thread
+    with _completion_lock:
+        if _watchdog_thread is not None and _watchdog_thread.is_alive():
+            return
+        _watchdog_stop.clear()
+        _watchdog_thread = threading.Thread(
+            target=_completion_watchdog,
+            name="L2CompletionWatchdog",
+            daemon=True,
+        )
+        _watchdog_thread.start()
+
+
+def _stop_completion_watchdog(timeout_s: float = 1.0) -> None:
+    """Signal the watchdog to exit and wait briefly for it.
+
+    Used by tests to keep xdist parallel runs hermetic; production code
+    relies on ``daemon=True`` to terminate the thread at interpreter
+    exit. ``timeout_s`` is intentionally short — the worst case is a
+    sleeping thread that wakes within ``_COMPLETION_WATCHDOG_INTERVAL_S``
+    ticks, but ``_watchdog_stop.set()`` interrupts that wait
+    immediately.
+    """
+    global _watchdog_thread
+    _watchdog_stop.set()
+    if _watchdog_thread is not None:
+        _watchdog_thread.join(timeout=timeout_s)
+    _watchdog_thread = None
 
 
 def _load_stack_overflow_counter() -> int:
@@ -473,30 +562,40 @@ def invoke_agent(reasons, tier=3):
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
     timeout = tier_cfg["timeout"]
 
-    if _agent_proc and _agent_proc.poll() is None:
-        # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
-        # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
-        # can't cause a negative elapsed that silently skips the timeout.
-        elapsed = _safe_elapsed_s()
-        if elapsed > _agent_timeout:
-            # P1B (2026-04-17): helper so check_agent_completion can share
-            # the kill path — see _kill_overrun_agent docstring.
-            kill_ok = _kill_overrun_agent(
-                fallback_reasons=reasons, fallback_tier=tier,
-            )
-            # BUG-92: If kill failed, don't spawn new agent (old one may
-            # still be running)
-            if not kill_ok:
-                logger.error(
-                    "Not spawning new agent — old process may still be running"
+    # 2026-05-05: this reentrancy block reads/mutates the same _agent_proc /
+    # _agent_log / _agent_start state that the watchdog tick observes via
+    # _check_agent_completion_locked. Without the lock, the watchdog could
+    # observe a freshly-killed _agent_proc.poll() exit code and write a
+    # "failed"/"incomplete" row at the same time _kill_overrun_agent is
+    # writing its "timeout" row — exactly the double-log the lock was added
+    # to prevent. Hold _completion_lock for the entire read-decide-kill
+    # path; _kill_overrun_agent itself does NOT take the lock so this is
+    # safe (no reentrant acquire).
+    with _completion_lock:
+        if _agent_proc and _agent_proc.poll() is None:
+            # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
+            # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
+            # can't cause a negative elapsed that silently skips the timeout.
+            elapsed = _safe_elapsed_s()
+            if elapsed > _agent_timeout:
+                # P1B (2026-04-17): helper so check_agent_completion can share
+                # the kill path — see _kill_overrun_agent docstring.
+                kill_ok = _kill_overrun_agent(
+                    fallback_reasons=reasons, fallback_tier=tier,
+                )
+                # BUG-92: If kill failed, don't spawn new agent (old one may
+                # still be running)
+                if not kill_ok:
+                    logger.error(
+                        "Not spawning new agent — old process may still be running"
+                    )
+                    return False
+            else:
+                logger.info(
+                    "Agent still running (pid %s, %.0fs), skipping",
+                    _agent_proc.pid, elapsed,
                 )
                 return False
-        else:
-            logger.info(
-                "Agent still running (pid %s, %.0fs), skipping",
-                _agent_proc.pid, elapsed,
-            )
-            return False
 
     if _agent_log:
         _agent_log.close()
@@ -813,6 +912,11 @@ def invoke_agent(reasons, tier=3):
             tier, _agent_proc.pid, max_turns, timeout,
             ", ".join(reasons[:3]),
         )
+        # 2026-05-05: arm the completion watchdog so the wall-clock
+        # timeout fires within ~30 s of the real budget even when the
+        # main loop's run() cycle bloats. See module-level note at
+        # _COMPLETION_WATCHDOG_INTERVAL_S.
+        _ensure_completion_watchdog()
         # Save Layer 2 invocation notification (save-only, not sent to Telegram)
         try:
             config = _load_config()
@@ -989,6 +1093,14 @@ def _record_new_trades():
 def check_agent_completion():
     """Check if a running agent has completed and log completion info.
 
+    Thread-safe: serialised by ``_completion_lock`` so the main-loop call
+    site (``portfolio.main.run``) and the 30 s daemon watchdog
+    (``_completion_watchdog``) cannot race on ``_agent_proc`` /
+    ``_agent_start`` state. Both call paths share the same lock; whichever
+    reaches the lock first observes the completion and writes the
+    invocations.jsonl row, the other returns ``None`` because
+    ``_agent_proc`` is cleared at the end of the handler.
+
     Returns:
         dict with the following keys (None if no agent is running or the
         agent is still in progress and under its timeout):
@@ -1002,6 +1114,15 @@ def check_agent_completion():
         * ``journal_written`` — bool
         * ``telegram_sent`` — bool
         * ``completed_at`` — ISO-8601 UTC timestamp
+    """
+    with _completion_lock:
+        return _check_agent_completion_locked()
+
+
+def _check_agent_completion_locked():
+    """Body of ``check_agent_completion``. The caller MUST hold
+    ``_completion_lock``. Split out so the watchdog tick can call into
+    the same code path without re-acquiring the lock recursively.
     """
     global _agent_proc, _agent_log, _agent_start, _agent_start_wall
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before

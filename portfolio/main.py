@@ -426,7 +426,13 @@ def _run_post_cycle(config, report=None):
 def run(force_report=False, active_symbols=None):
     _ss._run_cycle_id += 1
 
-    # Check if a previously-spawned agent has completed (BUG-39)
+    # Check if a previously-spawned agent has completed (BUG-39).
+    # 2026-05-05: this call is now lock-protected and shares the
+    # _completion_lock with portfolio.agent_invocation._completion_watchdog,
+    # which polls every 30s independent of run()'s cadence. So when this
+    # cycle bloats (cycle_duration violations 2026-05-01..04), the watchdog
+    # still observes subprocess completion and enforces the per-tier
+    # wall-clock timeout — see docs/plans/2026-05-05-l2-completion-watchdog.md.
     try:
         completion = check_agent_completion()
         if completion:
