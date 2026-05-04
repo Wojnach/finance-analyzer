@@ -356,10 +356,13 @@ class TestSignalEngineRegimeOverlay:
         """If regime overlay raises, signal_engine should not crash (caught by try/except)."""
         # The generate_signal function catches all exceptions in the regime overlay block.
         # We just verify it can be imported and the try/except structure exists.
+        # 2026-05-04: helper-name set updated when call site switched from the
+        # manual L2-only dance (load_cached_regime_accuracy / signal_accuracy_by_regime
+        # / write_regime_accuracy_cache) to the L1+L2 wrapper.
         import inspect
 
         from portfolio.signal_engine import generate_signal
         source = inspect.getsource(generate_signal)
-        assert "load_cached_regime_accuracy" in source
-        assert "signal_accuracy_by_regime" in source
-        assert "write_regime_accuracy_cache" in source
+        assert "get_or_compute_regime_accuracy" in source
+        # Confirm the try/except wrapping is still in place.
+        assert "Regime-conditional accuracy unavailable" in source
