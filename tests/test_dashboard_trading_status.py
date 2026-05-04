@@ -50,6 +50,36 @@ class TestSessionWindow:
     def test_closed_morning(self):
         assert ts._in_session(_at(9, 0)) is False
 
+    def test_weekend_closed(self):
+        """Codex P1 finding 2026-05-04: Saturday/Sunday at 16:00 must
+        report as session_closed even though the wall-clock time is
+        inside the weekday window."""
+        # 2026-05-02 is a Saturday; 2026-05-03 is a Sunday.
+        sat_local = datetime(2026, 5, 2, 16, 0, tzinfo=STO).astimezone(UTC)
+        sun_local = datetime(2026, 5, 3, 16, 0, tzinfo=STO).astimezone(UTC)
+        assert ts._in_session(sat_local) is False
+        assert ts._in_session(sun_local) is False
+
+    def test_friday_open(self):
+        """And Friday is still open."""
+        fri_local = datetime(2026, 5, 1, 16, 0, tzinfo=STO).astimezone(UTC)
+        assert ts._in_session(fri_local) is True
+
+    def test_weekend_hint_rolls_to_monday(self):
+        """`_next_open_hint` on Saturday afternoon must point at the
+        next *weekday* open (Monday), not Sunday."""
+        sat_local = datetime(2026, 5, 2, 16, 0, tzinfo=STO).astimezone(UTC)
+        hint = ts._next_open_hint(sat_local)
+        # Saturday 16:00 -> Monday 15:30 = ~47h 30m away.
+        assert "h" in hint
+        # Must NOT be near 24h (which would mean it pointed at Sunday).
+        # Acceptable range: 40h to 50h.
+        import re
+        m = re.search(r"(\d+)h", hint)
+        assert m, hint
+        hours = int(m.group(1))
+        assert 40 <= hours <= 50, f"hint pointed at wrong day: {hint}"
+
 
 # ---------------------------------------------------------------------------
 # GoldDigger
@@ -83,7 +113,11 @@ class TestGoldDigger:
         out = ts.compute(data_dir=tmp_path, now_utc=_at(9, 0))
         gd = next(b for b in out["bots"] if b["bot"] == "golddigger")
         assert gd["state"] == "OUTSIDE_HOURS"
-        assert "next 15:30 CET" in gd["reason"]
+        # DST-aware: CEST in summer (the test's 2026-05-04 fixture date)
+        # and CET in winter. The code now uses target.tzname() so both
+        # are valid suffixes.
+        assert "next 15:30" in gd["reason"]
+        assert ("CEST" in gd["reason"]) or ("CET" in gd["reason"])
 
     def test_scanning_in_session(self, tmp_path: Path):
         _w(tmp_path / "golddigger_state.json", {

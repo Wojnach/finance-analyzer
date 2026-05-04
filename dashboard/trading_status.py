@@ -271,24 +271,39 @@ def _extract_stats(state: dict) -> dict[str, Any]:
 
 def _in_session(now_utc: datetime) -> bool:
     """True iff Europe/Stockholm wall-clock time is within the warrant
-    session (15:30–21:55 inclusive of open, exclusive of close)."""
-    local = now_utc.astimezone(SESSION_TZ).timetz().replace(tzinfo=None)
-    return SESSION_OPEN <= local < SESSION_CLOSE
+    session (Mon–Fri, 15:30–21:55 inclusive of open, exclusive of close).
+
+    Codex P1 finding 2026-05-04: weekday check matters — Saturday and
+    Sunday at 16:00 local time would otherwise read as session_open and
+    bots would render as SCANNING when they're correctly idle.
+    """
+    local = now_utc.astimezone(SESSION_TZ)
+    if local.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    t = local.timetz().replace(tzinfo=None)
+    return SESSION_OPEN <= t < SESSION_CLOSE
 
 
 def _next_open_hint(now_utc: datetime) -> str:
-    """Human-readable 'next 15:30 CET in 2h 14m'."""
+    """Human-readable 'next 15:30 CEST in 2h 14m'.
+
+    Rolls forward to the next weekday open and uses the *target* date's
+    tzname() so the suffix flips between CET and CEST automatically
+    across the DST boundary.
+    """
     from datetime import timedelta
 
     local_now = now_utc.astimezone(SESSION_TZ)
-    local_today_open = local_now.replace(
+    target = local_now.replace(
         hour=SESSION_OPEN.hour, minute=SESSION_OPEN.minute,
         second=0, microsecond=0,
     )
-    target = local_today_open
-    if local_now >= local_today_open:
-        target = local_today_open + timedelta(days=1)
+    if local_now >= target:
+        target = target + timedelta(days=1)
+    while target.weekday() >= 5:  # skip weekend(s) into next Monday
+        target = target + timedelta(days=1)
     delta = target - local_now
     hours = int(delta.total_seconds() // 3600)
     mins = int((delta.total_seconds() % 3600) // 60)
-    return f"next 15:30 CET in {hours}h {mins:02d}m"
+    zone = target.tzname() or "Stockholm"
+    return f"next 15:30 {zone} in {hours}h {mins:02d}m"

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from portfolio.file_utils import load_json, load_jsonl_tail
+from portfolio.file_utils import load_json, load_jsonl, load_jsonl_tail
 
 # Repo data dir. Resolved relative to this file so the module works in
 # both the main checkout and a worktree without further config.
@@ -74,87 +74,125 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
 
 
 def _heartbeat(dd: Path) -> dict[str, Any]:
-    health = load_json(dd / "health_state.json", default={}) or {}
-    last = health.get("last_heartbeat")
-    age_s: float | None = None
-    err: str | None = None
-    if last:
-        try:
-            age_s = (datetime.now(UTC) - _parse_ts(last)).total_seconds()
-        except Exception as e:
-            err = f"heartbeat parse: {type(e).__name__}: {e}"
+    """Codex P2 follow-up: outer try/except so any parse / I/O failure
+    surfaces in-band rather than 500'ing the whole endpoint."""
+    try:
+        health = load_json(dd / "health_state.json", default={}) or {}
+        if not isinstance(health, dict):
+            return _hb_default(error="health_state.json is not a JSON object")
+        last = health.get("last_heartbeat")
+        age_s: float | None = None
+        err: str | None = None
+        if last:
+            try:
+                age_s = (datetime.now(UTC) - _parse_ts(str(last))).total_seconds()
+            except Exception as e:
+                err = f"heartbeat parse: {type(e).__name__}: {e}"
+        out: dict[str, Any] = {
+            "age_seconds": age_s,
+            "last_ts": last,
+            "cycle_count": health.get("cycle_count", 0),
+            "error_count": health.get("error_count", 0),
+        }
+        if err:
+            out["error"] = err
+        return out
+    except Exception as e:
+        return _hb_default(error=f"heartbeat: {type(e).__name__}: {e}")
+
+
+def _hb_default(error: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "age_seconds": age_s,
-        "last_ts": last,
-        "cycle_count": health.get("cycle_count", 0),
-        "error_count": health.get("error_count", 0),
+        "age_seconds": None,
+        "last_ts": None,
+        "cycle_count": 0,
+        "error_count": 0,
     }
-    if err:
-        out["error"] = err
+    if error:
+        out["error"] = error
     return out
 
 
 def _errors_unresolved(dd: Path) -> dict[str, Any]:
     """Walk critical_errors.jsonl. An entry with category="resolution"
     and ``resolves_ts`` pointing at an earlier entry resolves it.
+
+    Codex P1 finding 2026-05-04: this MUST scan the whole file, not a
+    fixed tail. If 500 newer info/resolution rows came after older
+    unresolved criticals, the older ones disappeared from the count
+    and the home page silently flipped to GREEN. critical_errors.jsonl
+    is small (~120 KB at the time of writing); we accept the full scan
+    behind the 30s TTL cache.
     """
     try:
-        entries = load_jsonl_tail(dd / "critical_errors.jsonl", max_entries=500)
+        entries = load_jsonl(dd / "critical_errors.jsonl")
     except Exception as e:
         return {"unresolved": 0, "recent": [], "error": f"errors load: {type(e).__name__}: {e}"}
-    resolved_ts: set[str] = set()
-    by_ts: dict[str, dict] = {}
-    for entry in entries:
-        ts = entry.get("ts")
-        if entry.get("category") == "resolution" and entry.get("resolves_ts"):
-            resolved_ts.add(str(entry["resolves_ts"]))
-            continue
-        # Skip non-critical levels (resolution rows arrive as "info").
-        if entry.get("level") and entry.get("level") != "critical":
-            continue
-        if ts:
-            by_ts[ts] = entry
-    unresolved = [e for ts, e in by_ts.items() if ts not in resolved_ts]
-    unresolved.sort(key=lambda x: x.get("ts", ""), reverse=True)
-    recent = [
-        {
-            "ts": e.get("ts"),
-            "category": e.get("category"),
-            "caller": e.get("caller"),
-            "message": (e.get("message") or "")[:200],
-        }
-        for e in unresolved[:5]
-    ]
-    return {"unresolved": len(unresolved), "recent": recent}
+    try:
+        resolved_ts: set[str] = set()
+        by_ts: dict[str, dict] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            ts = entry.get("ts")
+            if entry.get("category") == "resolution" and entry.get("resolves_ts"):
+                resolved_ts.add(str(entry["resolves_ts"]))
+                continue
+            # Skip non-critical levels (resolution rows arrive as "info").
+            if entry.get("level") and entry.get("level") != "critical":
+                continue
+            if ts:
+                by_ts[ts] = entry
+        unresolved = [e for ts, e in by_ts.items() if ts not in resolved_ts]
+        unresolved.sort(key=lambda x: x.get("ts", ""), reverse=True)
+        recent = [
+            {
+                "ts": e.get("ts"),
+                "category": e.get("category"),
+                "caller": e.get("caller"),
+                "message": (e.get("message") or "")[:200],
+            }
+            for e in unresolved[:5]
+        ]
+        return {"unresolved": len(unresolved), "recent": recent}
+    except Exception as e:
+        return {"unresolved": 0, "recent": [], "error": f"errors aggregate: {type(e).__name__}: {e}"}
 
 
 def _violations_recent(dd: Path) -> dict[str, Any]:
-    """Last-24h CRITICAL contract violations. WARNINGs are noise."""
+    """Last-24h CRITICAL contract violations. WARNINGs are noise.
+
+    Uses adaptive tail growth so we don't undercount on high-volume
+    days. ``contract_violations.jsonl`` can grow unbounded; we read
+    the tail and re-pull more if the oldest entry is still inside the
+    24h window.
+    """
     try:
-        entries = load_jsonl_tail(dd / "contract_violations.jsonl", max_entries=500)
+        entries = _load_last_n_hours(
+            dd / "contract_violations.jsonl", hours=24, ts_field="ts"
+        )
     except Exception as e:
         return {"unresolved": 0, "recent": [], "error": f"violations load: {type(e).__name__}: {e}"}
-    cutoff = datetime.now(UTC) - timedelta(hours=24)
-    recent: list[dict[str, Any]] = []
-    for entry in entries:
-        if entry.get("severity") != "CRITICAL":
-            continue
-        ts = entry.get("ts")
-        try:
-            if ts and _parse_ts(ts) < cutoff:
+    try:
+        recent: list[dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
                 continue
-        except Exception:
-            continue
-        recent.append(
-            {
-                "ts": ts,
-                "invariant": entry.get("invariant"),
-                "severity": entry.get("severity"),
-                "message": (entry.get("message") or "")[:200],
-            }
-        )
-    recent.sort(key=lambda x: x.get("ts", ""), reverse=True)
-    return {"unresolved": len(recent), "recent": recent[:5]}
+            if entry.get("severity") != "CRITICAL":
+                continue
+            ts = entry.get("ts")
+            recent.append(
+                {
+                    "ts": ts,
+                    "invariant": entry.get("invariant"),
+                    "severity": entry.get("severity"),
+                    "message": (entry.get("message") or "")[:200],
+                }
+            )
+        recent.sort(key=lambda x: x.get("ts", ""), reverse=True)
+        return {"unresolved": len(recent), "recent": recent[:5]}
+    except Exception as e:
+        return {"unresolved": 0, "recent": [], "error": f"violations aggregate: {type(e).__name__}: {e}"}
 
 
 def _llm_inference(dd: Path) -> dict[str, Any]:
@@ -172,64 +210,78 @@ def _llm_inference(dd: Path) -> dict[str, Any]:
     either source; their accuracy lives in ``local_llm_report_latest``
     but that is a different metric (was the BUY/SELL right at horizon).
     Kept out of this view rather than mislabelled.
+
+    Codex P2 follow-up: every numeric field is parsed defensively so
+    a malformed ``{"ok": "oops"}`` row no longer crashes the whole
+    payload — that model is skipped with no other side-effects.
     """
-    health = load_json(dd / "health_state.json", default={}) or {}
-    sh = health.get("signal_health", {}) or {}
-    llm_report = load_json(dd / "local_llm_report_latest.json", default={}) or {}
-    llm_health = llm_report.get("health", {}) or {}
+    try:
+        health = load_json(dd / "health_state.json", default={}) or {}
+        sh = health.get("signal_health", {}) if isinstance(health, dict) else {}
+        if not isinstance(sh, dict):
+            sh = {}
+        llm_report = load_json(dd / "local_llm_report_latest.json", default={}) or {}
+        llm_health = llm_report.get("health", {}) if isinstance(llm_report, dict) else {}
+        if not isinstance(llm_health, dict):
+            llm_health = {}
 
-    models: list[dict[str, Any]] = []
+        models: list[dict[str, Any]] = []
 
-    for key, label in (("chronos", "Chronos-2"), ("kronos", "Kronos")):
-        h = llm_health.get(key)
-        if not isinstance(h, dict):
-            continue
-        ok = int(h.get("ok", 0))
-        fail = int(h.get("fail", 0))
-        total = ok + fail
-        if total == 0:
-            continue
-        models.append(
-            {
-                "name": label,
-                "key": key,
-                "total": total,
-                "failures": fail,
-                "success_pct": round(100.0 * ok / total, 1),
-            }
-        )
-
-    for key, label in (
-        ("claude_fundamental", "Claude Fundamental"),
-        ("forecast", "Forecast voter"),
-    ):
-        h = sh.get(key)
-        if not isinstance(h, dict):
-            continue
-        total = int(h.get("total_calls", 0))
-        fail = int(h.get("total_failures", 0))
-        if total == 0:
-            continue
-        models.append(
-            {
-                "name": label,
-                "key": key,
-                "total": total,
-                "failures": fail,
-                "success_pct": round(100.0 * (total - fail) / total, 1),
-                "last_failure_ts": h.get("last_failure"),
-            }
-        )
-
-    overall_pct: float | None = None
-    if models:
-        weight = sum(m["total"] for m in models)
-        if weight > 0:
-            overall_pct = round(
-                sum(m["success_pct"] * m["total"] for m in models) / weight, 1
+        for key, label in (("chronos", "Chronos-2"), ("kronos", "Kronos")):
+            h = llm_health.get(key)
+            if not isinstance(h, dict):
+                continue
+            ok = _safe_int(h.get("ok"))
+            fail = _safe_int(h.get("fail"))
+            if ok is None or fail is None:
+                continue
+            total = ok + fail
+            if total == 0:
+                continue
+            models.append(
+                {
+                    "name": label,
+                    "key": key,
+                    "total": total,
+                    "failures": fail,
+                    "success_pct": round(100.0 * ok / total, 1),
+                }
             )
 
-    return {"models": models, "overall_pct": overall_pct}
+        for key, label in (
+            ("claude_fundamental", "Claude Fundamental"),
+            ("forecast", "Forecast voter"),
+        ):
+            h = sh.get(key)
+            if not isinstance(h, dict):
+                continue
+            total = _safe_int(h.get("total_calls"))
+            fail = _safe_int(h.get("total_failures"))
+            if total is None or fail is None or total <= 0:
+                continue
+            models.append(
+                {
+                    "name": label,
+                    "key": key,
+                    "total": total,
+                    "failures": fail,
+                    "success_pct": round(100.0 * (total - fail) / total, 1),
+                    "last_failure_ts": h.get("last_failure"),
+                }
+            )
+
+        overall_pct: float | None = None
+        if models:
+            weight = sum(m["total"] for m in models)
+            if weight > 0:
+                overall_pct = round(
+                    sum(m["success_pct"] * m["total"] for m in models) / weight, 1
+                )
+
+        return {"models": models, "overall_pct": overall_pct}
+    except Exception as e:
+        return {"models": [], "overall_pct": None,
+                "error": f"llm_inference: {type(e).__name__}: {e}"}
 
 
 def _layer2_24h(dd: Path) -> dict[str, Any]:
@@ -238,9 +290,14 @@ def _layer2_24h(dd: Path) -> dict[str, Any]:
     A trigger fires whenever Layer 1 spawns a Claude CLI subprocess and
     appends to ``claude_invocations.jsonl``. ``status`` is one of
     ``invoked`` (success), ``timeout``, ``error``, ``blocked``.
+
+    Codex P2 follow-up: uses adaptive tail growth so a high-volume day
+    (>2000 invocations in 24h) doesn't silently undercount.
     """
     try:
-        entries = load_jsonl_tail(dd / "claude_invocations.jsonl", max_entries=2000)
+        entries = _load_last_n_hours(
+            dd / "claude_invocations.jsonl", hours=24, ts_field="timestamp"
+        )
     except Exception as e:
         return {
             "triggers_24h": 0,
@@ -250,50 +307,61 @@ def _layer2_24h(dd: Path) -> dict[str, Any]:
             "spark_24h": [0] * 24,
             "error": f"invocations load: {type(e).__name__}: {e}",
         }
+    try:
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        triggers: list[tuple[datetime, dict]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            ts_raw = entry.get("timestamp")
+            if not ts_raw:
+                continue
+            try:
+                ts = _parse_ts(str(ts_raw))
+            except Exception:
+                continue
+            if ts < cutoff:
+                continue
+            triggers.append((ts, entry))
 
-    cutoff = datetime.now(UTC) - timedelta(hours=24)
-    triggers: list[tuple[datetime, dict]] = []
-    for entry in entries:
-        ts_raw = entry.get("timestamp")
-        if not ts_raw:
-            continue
-        try:
-            ts = _parse_ts(ts_raw)
-        except Exception:
-            continue
-        if ts < cutoff:
-            continue
-        triggers.append((ts, entry))
+        triggers.sort(key=lambda x: x[0])
+        success = sum(1 for _, e in triggers if e.get("status") == "invoked")
+        pct = round(100.0 * success / len(triggers), 1) if triggers else None
+        latest_entry = triggers[-1][1] if triggers else None
 
-    triggers.sort(key=lambda x: x[0])
-    success = sum(1 for _, e in triggers if e.get("status") == "invoked")
-    pct = round(100.0 * success / len(triggers), 1) if triggers else None
-    latest_entry = triggers[-1][1] if triggers else None
+        now = datetime.now(UTC)
+        buckets = [0] * 24
+        for ts, _ in triggers:
+            hours_ago = int((now - ts).total_seconds() // 3600)
+            if 0 <= hours_ago < 24:
+                buckets[23 - hours_ago] += 1
 
-    now = datetime.now(UTC)
-    buckets = [0] * 24
-    for ts, _ in triggers:
-        hours_ago = int((now - ts).total_seconds() // 3600)
-        if 0 <= hours_ago < 24:
-            buckets[23 - hours_ago] += 1
+        latest_payload: dict[str, Any] | None = None
+        if latest_entry is not None:
+            latest_payload = {
+                "ts": latest_entry.get("timestamp"),
+                "caller": latest_entry.get("caller"),
+                "status": latest_entry.get("status"),
+                "duration_seconds": latest_entry.get("duration_seconds"),
+                "model": latest_entry.get("model"),
+            }
 
-    latest_payload: dict[str, Any] | None = None
-    if latest_entry is not None:
-        latest_payload = {
-            "ts": latest_entry.get("timestamp"),
-            "caller": latest_entry.get("caller"),
-            "status": latest_entry.get("status"),
-            "duration_seconds": latest_entry.get("duration_seconds"),
-            "model": latest_entry.get("model"),
+        return {
+            "triggers_24h": len(triggers),
+            "success_24h": success,
+            "success_pct": pct,
+            "latest": latest_payload,
+            "spark_24h": buckets,
         }
-
-    return {
-        "triggers_24h": len(triggers),
-        "success_24h": success,
-        "success_pct": pct,
-        "latest": latest_payload,
-        "spark_24h": buckets,
-    }
+    except Exception as e:
+        return {
+            "triggers_24h": 0,
+            "success_24h": 0,
+            "success_pct": None,
+            "latest": None,
+            "spark_24h": [0] * 24,
+            "error": f"layer2 aggregate: {type(e).__name__}: {e}",
+        }
 
 
 def _signal_aggregate(dd: Path) -> dict[str, Any]:
@@ -303,6 +371,10 @@ def _signal_aggregate(dd: Path) -> dict[str, Any]:
     every other signal in the dict counts as HOLD/abstain. We expose
     both ``hold`` (literal vote count) and ``abstain`` (alias) so the
     UI can word the row either way.
+
+    Codex P2 follow-up: tolerate the latest entry being a non-dict
+    (e.g. an empty list or null) — the section reports an in-band
+    error instead of bubbling AttributeError up to the route.
     """
     try:
         entries = load_jsonl_tail(dd / "signal_log.jsonl", max_entries=5)
@@ -310,31 +382,43 @@ def _signal_aggregate(dd: Path) -> dict[str, Any]:
         return {"tickers": [], "error": f"signal_log load: {type(e).__name__}: {e}"}
     if not entries:
         return {"tickers": []}
-
     last = entries[-1]
-    tickers: list[dict[str, Any]] = []
-    for sym, data in (last.get("tickers", {}) or {}).items():
-        signals = data.get("signals", {}) or {}
-        total = len(signals)
-        buy = sum(1 for v in signals.values() if v == "BUY")
-        sell = sum(1 for v in signals.values() if v == "SELL")
-        hold = total - buy - sell
-        active = buy + sell
-        confidence = (active / total) if total else 0.0
-        tickers.append(
-            {
-                "ticker": sym,
-                "consensus": data.get("consensus", "HOLD"),
-                "buy": buy,
-                "sell": sell,
-                "hold": hold,
-                "abstain": hold,
-                "total": total,
-                "confidence": round(confidence, 3),
-                "regime": data.get("regime"),
-            }
-        )
-    return {"ts": last.get("ts"), "tickers": tickers}
+    if not isinstance(last, dict):
+        return {"tickers": [], "error": "signal_log: last entry is not a JSON object"}
+    try:
+        tickers_dict = last.get("tickers", {}) or {}
+        if not isinstance(tickers_dict, dict):
+            return {"ts": last.get("ts"), "tickers": [],
+                    "error": "signal_log.tickers is not a JSON object"}
+        tickers: list[dict[str, Any]] = []
+        for sym, data in tickers_dict.items():
+            if not isinstance(data, dict):
+                continue
+            signals = data.get("signals", {}) or {}
+            if not isinstance(signals, dict):
+                continue
+            total = len(signals)
+            buy = sum(1 for v in signals.values() if v == "BUY")
+            sell = sum(1 for v in signals.values() if v == "SELL")
+            hold = total - buy - sell
+            active = buy + sell
+            confidence = (active / total) if total else 0.0
+            tickers.append(
+                {
+                    "ticker": sym,
+                    "consensus": data.get("consensus", "HOLD"),
+                    "buy": buy,
+                    "sell": sell,
+                    "hold": hold,
+                    "abstain": hold,
+                    "total": total,
+                    "confidence": round(confidence, 3),
+                    "regime": data.get("regime"),
+                }
+            )
+        return {"ts": last.get("ts"), "tickers": tickers}
+    except Exception as e:
+        return {"tickers": [], "error": f"signal_aggregate: {type(e).__name__}: {e}"}
 
 
 def _pnl_footer(dd: Path) -> dict[str, Any]:
@@ -342,14 +426,18 @@ def _pnl_footer(dd: Path) -> dict[str, Any]:
     try:
         ps = load_json(dd / "portfolio_state.json", default={}) or {}
         pb = load_json(dd / "portfolio_state_bold.json", default={}) or {}
+        if not isinstance(ps, dict):
+            ps = {}
+        if not isinstance(pb, dict):
+            pb = {}
+        return {
+            "patient_value_sek": ps.get("portfolio_value", ps.get("equity_sek")),
+            "bold_value_sek": pb.get("portfolio_value", pb.get("equity_sek")),
+            "patient_starting_sek": ps.get("starting_capital", 500_000.0),
+            "bold_starting_sek": pb.get("starting_capital", 500_000.0),
+        }
     except Exception as e:
         return {"error": f"pnl load: {type(e).__name__}: {e}"}
-    return {
-        "patient_value_sek": ps.get("portfolio_value", ps.get("equity_sek")),
-        "bold_value_sek": pb.get("portfolio_value", pb.get("equity_sek")),
-        "patient_starting_sek": ps.get("starting_capital", 500_000.0),
-        "bold_starting_sek": pb.get("starting_capital", 500_000.0),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -439,3 +527,49 @@ def _parse_ts(s: str) -> datetime:
     """Parse an ISO timestamp tolerating trailing Z."""
     s = s.replace("Z", "+00:00")
     return datetime.fromisoformat(s)
+
+
+def _safe_int(v: Any) -> int | None:
+    """``int(v)`` that returns None instead of raising on bad input.
+
+    Used so a ``{"ok": "oops"}`` row inside local_llm_report skips the
+    affected model rather than 500'ing the whole endpoint (codex P2
+    finding 2026-05-04).
+    """
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_last_n_hours(path: Path, *, hours: int, ts_field: str) -> list[dict]:
+    """Tail-read a jsonl file growing the window until the oldest entry
+    is older than the cutoff or we've fully scanned the file.
+
+    Used by ``_layer2_24h`` and ``_violations_recent`` to make the
+    "last 24h" claim authoritative even when activity spikes (codex
+    P2 finding 2026-05-04: previous tail of 2000 lines silently
+    undercounted on high-volume days).
+
+    The returned list is in file order (oldest first). Every step
+    doubles the tail size up to a 50K cap; if the cap is hit we fall
+    back to a full ``load_jsonl`` so the count remains correct.
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    cutoff_iso = cutoff.isoformat()
+    for max_entries in (500, 2_000, 10_000, 50_000):
+        rows = load_jsonl_tail(
+            path, max_entries=max_entries, tail_bytes=max_entries * 512
+        )
+        if not rows:
+            return []
+        oldest = next(
+            (r.get(ts_field) for r in rows if isinstance(r, dict) and r.get(ts_field)),
+            None,
+        )
+        if not oldest or str(oldest) < cutoff_iso:
+            return [r for r in rows if isinstance(r, dict)
+                    and (r.get(ts_field) or "") >= cutoff_iso]
+    rows = load_jsonl(path)
+    return [r for r in rows if isinstance(r, dict)
+            and (r.get(ts_field) or "") >= cutoff_iso]

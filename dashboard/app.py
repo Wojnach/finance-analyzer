@@ -1862,21 +1862,30 @@ def api_system_status():
     See dashboard/system_status.py for the full payload shape and
     severity thresholds. Per-section errors[] envelope so a corrupt
     jsonl line never blanks the hero.
+
+    Cache discipline (codex P2 finding 2026-05-04): the lock covers
+    both the read and the write so concurrent misses serialize. A
+    request that started after the most recent fill won't overwrite a
+    fresher payload, and ``?force=1`` won't lose its refresh behind
+    another in-flight fill.
     """
     from dashboard import system_status as _sys_status
 
     force = request.args.get("force", "").strip() in {"1", "true", "yes"}
-    now = time.monotonic()
     if not force:
         with _SYSTEM_STATUS_LOCK:
             cached = _SYSTEM_STATUS_CACHE.get("value")
-            if cached and (now - _SYSTEM_STATUS_CACHE["at"]) < _SYSTEM_STATUS_TTL_SECONDS:
+            if cached and (time.monotonic() - _SYSTEM_STATUS_CACHE["at"]) < _SYSTEM_STATUS_TTL_SECONDS:
                 return jsonify(cached)
-    payload = _sys_status.compute()
     with _SYSTEM_STATUS_LOCK:
+        # Re-check inside the lock — a concurrent miss may have filled it.
+        cached = _SYSTEM_STATUS_CACHE.get("value")
+        if not force and cached and (time.monotonic() - _SYSTEM_STATUS_CACHE["at"]) < _SYSTEM_STATUS_TTL_SECONDS:
+            return jsonify(cached)
+        payload = _sys_status.compute()
         _SYSTEM_STATUS_CACHE["value"] = payload
-        _SYSTEM_STATUS_CACHE["at"] = now
-    return jsonify(payload)
+        _SYSTEM_STATUS_CACHE["at"] = time.monotonic()
+        return jsonify(payload)
 
 
 @app.route("/api/trading_status")
@@ -1886,21 +1895,24 @@ def api_trading_status():
 
     See dashboard/trading_status.py. Each bot resolves to one of
     SCANNING / TRADING / HALTED / COOLDOWN / OUTSIDE_HOURS / UNKNOWN.
+    Same lock discipline as ``/api/system_status``.
     """
     from dashboard import trading_status as _trading_status
 
     force = request.args.get("force", "").strip() in {"1", "true", "yes"}
-    now = time.monotonic()
     if not force:
         with _TRADING_STATUS_LOCK:
             cached = _TRADING_STATUS_CACHE.get("value")
-            if cached and (now - _TRADING_STATUS_CACHE["at"]) < _TRADING_STATUS_TTL_SECONDS:
+            if cached and (time.monotonic() - _TRADING_STATUS_CACHE["at"]) < _TRADING_STATUS_TTL_SECONDS:
                 return jsonify(cached)
-    payload = _trading_status.compute()
     with _TRADING_STATUS_LOCK:
+        cached = _TRADING_STATUS_CACHE.get("value")
+        if not force and cached and (time.monotonic() - _TRADING_STATUS_CACHE["at"]) < _TRADING_STATUS_TTL_SECONDS:
+            return jsonify(cached)
+        payload = _trading_status.compute()
         _TRADING_STATUS_CACHE["value"] = payload
-        _TRADING_STATUS_CACHE["at"] = now
-    return jsonify(payload)
+        _TRADING_STATUS_CACHE["at"] = time.monotonic()
+        return jsonify(payload)
 
 
 # ---------------------------------------------------------------------------

@@ -364,3 +364,93 @@ class TestPnLFooter:
         out = ss.compute(data_dir=tmp_path)
         assert out["pnl_footer"]["patient_value_sek"] == 495_100.0
         assert out["pnl_footer"]["bold_value_sek"] == 488_300.0
+
+
+# ---------------------------------------------------------------------------
+# Codex P1 / P2 regressions (2026-05-04)
+# ---------------------------------------------------------------------------
+
+
+class TestCodex20260504Regressions:
+    """Lock in fixes for the codex review findings on this PR."""
+
+    def test_unresolved_critical_far_back_still_counts(self, tmp_path: Path):
+        """P1: 500 newer info/resolution rows after an older critical
+        used to drop the older one out of the unresolved count. Must
+        survive the full file scan now.
+        """
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        rows = []
+        # 4 unresolved criticals near the start of the file
+        for i in range(4):
+            rows.append({
+                "ts": _ts(-3600 - i),
+                "level": "critical",
+                "category": "x",
+                "caller": "old",
+                "message": f"older critical {i}",
+            })
+        # Then 600 newer info rows that would push older entries out
+        # of any 500-line tail.
+        for i in range(600):
+            rows.append({
+                "ts": _ts(-100 - i / 100),
+                "level": "info",
+                "category": "noise",
+                "caller": "n/a",
+                "message": "fluff",
+            })
+        _write_jsonl(tmp_path / "critical_errors.jsonl", rows)
+        out = ss.compute(data_dir=tmp_path)
+        assert out["errors"]["unresolved"] == 4
+
+    def test_layer2_more_than_2000_in_24h(self, tmp_path: Path):
+        """P2: with 3000 invocations in the last 24h the previous tail
+        cap of 2000 would have undercounted. Adaptive growth must bring
+        all of them in.
+        """
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        # Spread 3000 invocations evenly across the last 23 hours
+        rows = []
+        for i in range(3000):
+            offset = -82_800 * (i / 2999)  # 0 to 23h ago, evenly spaced
+            rows.append({
+                "timestamp": _ts(offset),
+                "caller": "x",
+                "status": "invoked",
+                "model": "sonnet",
+            })
+        _write_jsonl(tmp_path / "claude_invocations.jsonl", rows)
+        out = ss.compute(data_dir=tmp_path)
+        assert out["layer2"]["triggers_24h"] == 3000
+
+    def test_signal_log_non_dict_does_not_500(self, tmp_path: Path):
+        """P2: an unexpected ``[]`` payload in signal_log.jsonl must
+        surface as an in-band error, not raise.
+        """
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        path = tmp_path / "signal_log.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([]) + "\n", encoding="utf-8")
+        out = ss.compute(data_dir=tmp_path)
+        sa = out["signal_aggregate"]
+        assert sa["tickers"] == []
+        assert "error" in sa  # surfaced, not raised
+
+    def test_llm_report_garbage_value_skipped(self, tmp_path: Path):
+        """P2: a string instead of an int in the local_llm_report no
+        longer raises; the bad model is skipped.
+        """
+        _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
+        _write_json(
+            tmp_path / "local_llm_report_latest.json",
+            {"health": {
+                "chronos": {"ok": "oops", "fail": 0},
+                "kronos": {"ok": 100, "fail": 5},
+            }},
+        )
+        out = ss.compute(data_dir=tmp_path)
+        keys = [m["key"] for m in out["llm_inference"]["models"]]
+        assert "chronos" not in keys  # skipped
+        assert "kronos" in keys       # still works
+
