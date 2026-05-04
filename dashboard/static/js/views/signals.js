@@ -130,9 +130,13 @@ function _renderHeatmapTab(slot) {
   const horizon = _activeHorizon;
   const accSlice = accAll[horizon]?.signals || {};
   const accuracyMap = Object.create(null);
+  // 2026-05-05: also surface the disable reason in the bottom-sheet so
+  // tapping a "DISABLED" cell explains *why* (e.g. "pending live validation").
+  const disabledReasons = Object.create(null);
   for (const [name, info] of Object.entries(accSlice)) {
     const v = info?.pct ?? info?.accuracy ?? info?.accuracy_pct;
     if (Number.isFinite(Number(v))) accuracyMap[name] = Number(v);
+    if (info?.disabled_reason) disabledReasons[name] = info.disabled_reason;
   }
   const disabled = new Set(data?.disabled_signals || []);
 
@@ -141,6 +145,7 @@ function _renderHeatmapTab(slot) {
     tickers,
     accuracy: accuracyMap,
     disabled,
+    disabledReasons,
   }));
 }
 

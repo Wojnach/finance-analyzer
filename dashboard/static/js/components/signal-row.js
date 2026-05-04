@@ -14,6 +14,8 @@ import { fpct } from "../format.js";
  *   accuracyPct?: number|null,   // 0..100
  *   sampleSize?: number|null,
  *   threshold?: number,          // shows a marker line at this % (default 47)
+ *   disabled?: boolean,          // 2026-05-05: render dimmed with "DISABLED" instead of a percentage
+ *   disabledReason?: string|null,// hover/tap tooltip text for disabled rows
  *   onTap?: () => void,
  * }} props
  * @returns {HTMLElement}
@@ -24,6 +26,8 @@ export function signalRow({
   accuracyPct = null,
   sampleSize = null,
   threshold = 47,
+  disabled = false,
+  disabledReason = null,
   onTap = null,
 } = {}) {
   const row = document.createElement("div");
@@ -34,6 +38,10 @@ export function signalRow({
   row.style.padding = "var(--sp-2) var(--sp-1)";
   row.style.borderBottom = "1px solid var(--bdr)";
   row.style.minHeight = "var(--tap-min)";
+  if (disabled) {
+    row.style.opacity = "0.55";
+    if (disabledReason) row.title = `Disabled: ${disabledReason}`;
+  }
   if (onTap) {
     row.style.cursor = "pointer";
     row.addEventListener("click", onTap);
@@ -63,7 +71,8 @@ export function signalRow({
     row.append(document.createElement("span"));
   }
 
-  // 3. Accuracy bar
+  // 3. Accuracy bar (suppressed for disabled signals — their 0% is a
+  // counter-init artifact, not a measurement).
   const barWrap = document.createElement("div");
   barWrap.style.position = "relative";
   barWrap.style.height = "8px";
@@ -71,33 +80,42 @@ export function signalRow({
   barWrap.style.borderRadius = "var(--rad-pill)";
   barWrap.style.overflow = "hidden";
 
-  const fill = document.createElement("div");
   const pct = accuracyPct == null ? 0 : Math.max(0, Math.min(100, accuracyPct));
-  fill.style.height = "100%";
-  fill.style.width = pct + "%";
-  fill.style.background = pct >= threshold ? "var(--grn)" : "var(--red)";
-  barWrap.append(fill);
+  if (!disabled) {
+    const fill = document.createElement("div");
+    fill.style.height = "100%";
+    fill.style.width = pct + "%";
+    fill.style.background = pct >= threshold ? "var(--grn)" : "var(--red)";
+    barWrap.append(fill);
 
-  // Threshold marker
-  const marker = document.createElement("div");
-  marker.style.position = "absolute";
-  marker.style.top = "0";
-  marker.style.bottom = "0";
-  marker.style.left = threshold + "%";
-  marker.style.width = "1px";
-  marker.style.background = "var(--txm)";
-  marker.style.opacity = "0.6";
-  barWrap.append(marker);
+    // Threshold marker
+    const marker = document.createElement("div");
+    marker.style.position = "absolute";
+    marker.style.top = "0";
+    marker.style.bottom = "0";
+    marker.style.left = threshold + "%";
+    marker.style.width = "1px";
+    marker.style.background = "var(--txm)";
+    marker.style.opacity = "0.6";
+    barWrap.append(marker);
+  }
 
   row.append(barWrap);
 
-  // 4. Percentage
+  // 4. Percentage / DISABLED label
   const pctEl = document.createElement("div");
-  pctEl.style.fontSize = "var(--ty-sm)";
   pctEl.style.fontWeight = "600";
   pctEl.style.textAlign = "right";
-  pctEl.style.color = pct >= threshold ? "var(--grn)" : "var(--red)";
-  pctEl.textContent = accuracyPct == null ? "—" : pct.toFixed(0) + "%";
+  if (disabled) {
+    pctEl.style.fontSize = "var(--ty-xs)";
+    pctEl.style.color = "var(--txm)";
+    pctEl.style.letterSpacing = "0.03em";
+    pctEl.textContent = "DISABLED";
+  } else {
+    pctEl.style.fontSize = "var(--ty-sm)";
+    pctEl.style.color = pct >= threshold ? "var(--grn)" : "var(--red)";
+    pctEl.textContent = accuracyPct == null ? "—" : pct.toFixed(0) + "%";
+  }
   row.append(pctEl);
 
   // 5. Sample size
