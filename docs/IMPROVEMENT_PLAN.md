@@ -1,90 +1,108 @@
-# Improvement Plan — Auto-Session 2026-05-04
+# Improvement Plan — Auto-Session 2026-05-05
 
 ## Methodology
 
 3 parallel exploration agents covering core loop/signals/triggers,
-portfolio/risk/reporting, and metals/dashboard/golddigger. Manual verification
-of all claims against source. False positives rejected (gpu_gate deadlock,
-shared_state race — both correctly synchronized).
+portfolio/risk/dashboard, and metals/infrastructure. Manual verification
+of all critical claims against source code. health.py race condition
+rejected (correctly locked). 3 confirmed issues remain.
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### P1 — Critical (production impact)
+### P1 — Critical (production impact, data corruption risk)
 
-**B1: Equity curve annualization uses 252 days for crypto (24/7 assets)**
-- File: `portfolio/equity_curve.py:~228`
-- Sharpe, Sortino, and volatility all annualize with sqrt(252). Crypto trades
-  365 days/year. This understates crypto volatility by ~17% and overstates
-  Sharpe ratio by the same factor.
-- Impact: Risk metrics for BTC/ETH are too optimistic.
-- Fix: Pass `trading_days` parameter based on asset class (252 for stocks,
-  365 for crypto/metals).
+**B1: trade_guards.py record_trade() has no threading lock**
+- File: `portfolio/trade_guards.py:260,310`
+- `record_trade()` does load→mutate→save without holding any lock.
+  If two threads record trades simultaneously (ThreadPoolExecutor in
+  main.py processes tickers in parallel), the second save overwrites
+  the first's mutations. Loss counters, cooldowns, and position rate
+  limits can be corrupted.
+- Impact: Incorrect cooldown multipliers → overtrading violations;
+  incorrect consecutive_losses → wrong escalation level.
+- Fix: Add a module-level `threading.Lock()` around the full RMW
+  sequence in `record_trade()`. Also protect `check_overtrading_guards()`
+  which has the same load-without-lock pattern.
 
-**B2: Contract violation dedup ordering creates duplicate critical_errors**
-- File: `portfolio/loop_contract.py:429-448`
-- `check_layer2_journal_activity()` writes to critical_errors.jsonl (line 431)
-  BEFORE persisting the dedup marker (line 446). If the dedup marker write fails
-  (atomic_write_json error), subsequent cycles re-fire the same violation without
-  dedup. The 7 near-identical contract_violation entries on 2026-05-03 demonstrate
-  this pattern.
-- Impact: Noise in critical_errors.jsonl, false escalation to fix agents.
-- Fix: Persist dedup marker BEFORE writing critical error. If dedup write fails,
-  skip the critical error write (violation still surfaces via Telegram alert).
+**B2: signal_engine.py _cross_ticker_consensus dict race condition**
+- File: `portfolio/signal_engine.py:258,3132-3133,3709`
+- `_cross_ticker_consensus` is a module-level dict written at line 3709
+  inside `generate_signal()` without a lock. When ThreadPoolExecutor
+  processes BTC-USD and MSTR in parallel, MSTR reads BTC's consensus
+  at lines 3132-3133 — potentially seeing stale or torn data.
+- Comment at line 253 claims "GIL protects dict assignment" — this is
+  wrong: membership test + subsequent `.get()` is NOT atomic. More
+  importantly, stale reads cause MSTR to use a PREVIOUS cycle's BTC
+  consensus, not the current one.
+- Impact: MSTR trading decisions based on stale BTC consensus data.
+- Fix: Process BTC-USD FIRST (before MSTR) by sorting tickers so
+  dependencies are resolved before dependents. Add a lock for the dict
+  for safety. Document the ordering requirement.
 
-**B3: Monte Carlo ATR default 2% is wrong for most instruments**
-- File: `portfolio/monte_carlo.py:~281`
-- When `extra.get("atr_pct")` is missing, defaults to 2.0%. Silver warrants
-  have 5-8% daily ATR; BTC 3-4%. Underestimates tail risk.
-- Impact: VaR/CVaR too optimistic when ATR data missing.
-- Fix: Per-asset-class defaults: crypto=3.5, metals=4.0, stocks=2.0.
+### P2 — Moderate (silent degradation)
 
-### P2 — Moderate
-
-**B4: Stuck loading key eviction logged at DEBUG, invisible to operators**
-- File: `portfolio/shared_state.py:75`
-- When a cache key is stuck loading for >120s and force-evicted, only
-  `logger.debug()` is emitted. Operators cannot see that a signal (e.g.,
-  Ministral, Qwen3) was permanently stuck.
-- Fix: Log at WARNING with key name and duration.
-
-**B5: SYSTEM_OVERVIEW.md stale — 100+ lines of resolved bugs**
-- Most bugs listed (BUG-15 through BUG-124) were fixed months ago.
-- Signal/module counts outdated (says "16 enhanced disabled", actually 19).
-- Fix: Archive resolved bugs, update counts.
-
-### P3 — Low
-
-**B6: Calmar ratio on mini equity curve excludes open positions**
-- File: `portfolio/equity_curve.py:~528`
-- Documented limitation, not a code bug.
+**B3: data_collector.py returns empty DataFrame on Binance empty data**
+- File: `portfolio/data_collector.py:90-93`
+- When Binance returns 200 OK with empty data (e.g., during maintenance,
+  new instrument, or rate limit), `_binance_fetch()` records a circuit
+  breaker failure but returns an empty DataFrame instead of raising.
+- Impact: Downstream signal computation receives empty data, logs
+  "insufficient data" warnings, and produces HOLD votes — but the
+  trigger system doesn't know data is missing (it sees a valid HOLD).
+  This masks outages silently.
+- Fix: Raise `ConnectionError` after recording the failure, so the
+  caller's error handling (which already exists) properly classifies
+  this as a data fetch failure.
 
 ---
 
 ## 2. Implementation Batches
 
-### Batch 1: Fix B2 — Contract violation dedup ordering (reliability)
-Files: `portfolio/loop_contract.py`
-- Swap dedup marker write before critical_error write
-- Add guard: if dedup write fails, skip critical error append
-- Test: verify dedup-first semantics
+### Batch 1: Fix B1 — trade_guards.py thread safety
+Files: `portfolio/trade_guards.py`, `tests/test_trade_guards.py`
+- Add `_state_lock = threading.Lock()` at module level
+- Wrap `record_trade()` full body in `with _state_lock:`
+- Wrap `check_overtrading_guards()` read path in `with _state_lock:`
+- Write test: concurrent `record_trade()` calls don't lose updates
 
-### Batch 2: Fix B1 — Equity curve crypto annualization (correctness)
-Files: `portfolio/equity_curve.py`, `tests/test_equity_curve.py`
-- Add `trading_days` parameter to `compute_metrics()`
-- Detect crypto/metals tickers → 365, stocks → 252
-- Update Sharpe/Sortino/volatility formulas
-- Write/update tests
+### Batch 2: Fix B2 — signal_engine cross-ticker consensus ordering
+Files: `portfolio/signal_engine.py`, `portfolio/main.py`
+- Add `_cross_ticker_lock = threading.Lock()` to signal_engine
+- Protect writes to `_cross_ticker_consensus` with the lock
+- In main.py, ensure BTC-USD is processed BEFORE MSTR (sort tickers
+  so dependencies resolve first, or process BTC in the first batch
+  then MSTR in the second)
+- Add comment documenting ordering requirement
 
-### Batch 3: Fix B3 — Monte Carlo per-asset ATR defaults (risk accuracy)
-Files: `portfolio/monte_carlo.py`, `tests/test_monte_carlo.py`
-- Add ASSET_CLASS_ATR_DEFAULTS dict
-- Use ticker→asset class mapping for fallback
-- Write test
+### Batch 3: Fix B3 — data_collector silent failure
+Files: `portfolio/data_collector.py`, `tests/test_data_collector.py`
+- Change line 93 from `return pd.DataFrame()` to `raise ConnectionError(...)`
+- Verify callers already handle ConnectionError (grep for try/except
+  around `binance_klines` and `_binance_fetch`)
+- Write test confirming the exception propagates
 
-### Batch 4: Fix B4 + Documentation (B5)
-Files: `portfolio/shared_state.py`, `docs/SYSTEM_OVERVIEW.md`
-- Elevate stuck-key eviction to WARNING
-- Archive resolved bugs from SYSTEM_OVERVIEW.md
-- Update signal/module counts
+---
+
+## 3. Impact Assessment
+
+| Change | Risk | Rollback |
+|--------|------|----------|
+| B1: Lock in trade_guards | LOW — additive, no behavior change on happy path | Remove lock |
+| B2: Cross-ticker ordering | MEDIUM — changes ticker processing order. If a signal depends on MSTR being processed first (unlikely), it would break | Revert sort |
+| B3: Raise instead of return | MEDIUM — callers that don't handle the exception will see errors. Must verify all callers have try/except | Revert to return pd.DataFrame() |
+
+---
+
+## 4. Not Addressed (future work)
+
+- **signal_engine.py persistence state unbounded memory**: Low severity,
+  only affects test/probe scenarios. Deferred.
+- **file_utils.py Windows lockfile permanent deadlock on crash**: Real
+  issue but rare (requires process crash while holding sidecar lock).
+  Requires significant refactor to fix safely. Deferred.
+- **agent_invocation.py double-logging on timeout path**: Cosmetic,
+  doesn't affect trading decisions. Deferred.
+- **dashboard/app.py no timeout on adaptive JSONL read**: Would require
+  threading/async changes to Flask. Deferred.
