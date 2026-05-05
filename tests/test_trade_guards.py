@@ -491,6 +491,62 @@ class TestLossEscalationDecay:
         )
         assert _get_cooldown_multiplier(4, old) == 4
 
+
+# --- Thread safety: concurrent record_trade() ---
+
+class TestRecordTradeConcurrency:
+    """Verify that concurrent record_trade() calls don't lose updates."""
+
+    def test_concurrent_sells_increment_correctly(self, clean_state):
+        import threading
+
+        n_threads = 10
+
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            barrier = threading.Barrier(n_threads)
+
+            def sell_with_loss(i):
+                barrier.wait()
+                record_trade(f"T{i}", "SELL", "bold", pnl_pct=-1.0)
+
+            threads = [
+                threading.Thread(target=sell_with_loss, args=(i,))
+                for i in range(n_threads)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            state = json.loads(clean_state.read_text(encoding="utf-8"))
+            assert state["consecutive_losses"]["bold"] == n_threads
+            assert len(state["ticker_trades"]) == n_threads
+
+    def test_concurrent_buys_all_recorded(self, clean_state):
+        import threading
+
+        n_threads = 8
+
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            barrier = threading.Barrier(n_threads)
+
+            def buy(i):
+                barrier.wait()
+                record_trade(f"TICKER-{i}", "BUY", "patient")
+
+            threads = [
+                threading.Thread(target=buy, args=(i,))
+                for i in range(n_threads)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            state = json.loads(clean_state.read_text(encoding="utf-8"))
+            assert len(state["ticker_trades"]) == n_threads
+            assert len(state["new_position_timestamps"]["patient"]) == n_threads
+
     def test_record_trade_persists_last_loss_ts(self, clean_state):
         with patch("portfolio.trade_guards.STATE_FILE", clean_state):
             record_trade("BTC-USD", "SELL", "bold", pnl_pct=-3.0)

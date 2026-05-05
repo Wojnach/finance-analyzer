@@ -206,6 +206,17 @@ class TestBinanceFetch:
         assert cb._failure_count == 1
 
     @patch("portfolio.data_collector.fetch_with_retry")
+    def test_empty_data_raises_connection_error(self, mock_fetch):
+        """200 OK with empty data raises ConnectionError (not silent empty DataFrame)."""
+        mock_fetch.return_value = _make_mock_response([])
+        cb = CircuitBreaker("test", failure_threshold=5, recovery_timeout=60)
+
+        with pytest.raises(ConnectionError, match="empty data"):
+            _binance_fetch("https://api.binance.com/api/v3", cb, "spot", "BTCUSDT")
+
+        assert cb._failure_count == 1
+
+    @patch("portfolio.data_collector.fetch_with_retry")
     def test_ohlcv_values_are_correct(self, mock_fetch):
         """Verify that OHLCV values are correctly parsed from the raw data."""
         row = _make_binance_kline_row(o=68000.0, h=68500.0, l=67500.0, c=68200.0, v=123.45)

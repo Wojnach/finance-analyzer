@@ -9,6 +9,7 @@ State is persisted to data/trade_guard_state.json.
 """
 
 import logging
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,6 +28,8 @@ DEFAULT_PATIENT_POSITION_LIMIT = 1
 DEFAULT_PATIENT_POSITION_WINDOW_H = 8
 LOSS_ESCALATION = {0: 1, 1: 1, 2: 2, 3: 4, 4: 8}  # consecutive_losses -> cooldown multiplier
 LOSS_DECAY_HOURS = 24  # halve escalation multiplier every N hours without a trade
+
+_state_lock = threading.Lock()
 
 
 def _load_state():
@@ -120,7 +123,8 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
         return []
 
     warnings = []
-    state = _load_state()
+    with _state_lock:
+        state = _load_state()
     now = datetime.now(UTC)
 
     # --- Guard 1: Per-ticker cooldown ---
@@ -257,57 +261,55 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
         )
         _wiring_confirmed = True
 
-    state = _load_state()
-    now = datetime.now(UTC)
-    now_str = now.isoformat()
+    with _state_lock:
+        state = _load_state()
+        now = datetime.now(UTC)
+        now_str = now.isoformat()
 
-    # Update ticker trade timestamp
-    key = f"{strategy}:{ticker}"
-    if "ticker_trades" not in state:
-        state["ticker_trades"] = {}
-    state["ticker_trades"][key] = now_str
+        # Update ticker trade timestamp
+        key = f"{strategy}:{ticker}"
+        if "ticker_trades" not in state:
+            state["ticker_trades"] = {}
+        state["ticker_trades"][key] = now_str
 
-    # Update consecutive losses on SELL
-    if direction == "SELL" and pnl_pct is not None:
-        if "consecutive_losses" not in state:
-            state["consecutive_losses"] = {"patient": 0, "bold": 0}
-        if "last_loss_ts" not in state:
-            state["last_loss_ts"] = {"patient": None, "bold": None}
-        if pnl_pct < 0:
-            state["consecutive_losses"][strategy] = (
-                state["consecutive_losses"].get(strategy, 0) + 1
-            )
-            state["last_loss_ts"][strategy] = now_str
-        else:
-            state["consecutive_losses"][strategy] = 0
-            state["last_loss_ts"][strategy] = None
+        # Update consecutive losses on SELL
+        if direction == "SELL" and pnl_pct is not None:
+            if "consecutive_losses" not in state:
+                state["consecutive_losses"] = {"patient": 0, "bold": 0}
+            if "last_loss_ts" not in state:
+                state["last_loss_ts"] = {"patient": None, "bold": None}
+            if pnl_pct < 0:
+                state["consecutive_losses"][strategy] = (
+                    state["consecutive_losses"].get(strategy, 0) + 1
+                )
+                state["last_loss_ts"][strategy] = now_str
+            else:
+                state["consecutive_losses"][strategy] = 0
+                state["last_loss_ts"][strategy] = None
 
-    # Track new position timestamps (BUY only)
-    if direction == "BUY":
-        if "new_position_timestamps" not in state:
-            state["new_position_timestamps"] = {"patient": [], "bold": []}
-        if strategy not in state["new_position_timestamps"]:
-            state["new_position_timestamps"][strategy] = []
-        state["new_position_timestamps"][strategy].append(now_str)
+        # Track new position timestamps (BUY only)
+        if direction == "BUY":
+            if "new_position_timestamps" not in state:
+                state["new_position_timestamps"] = {"patient": [], "bold": []}
+            if strategy not in state["new_position_timestamps"]:
+                state["new_position_timestamps"][strategy] = []
+            state["new_position_timestamps"][strategy].append(now_str)
 
-        # Prune old timestamps (keep last 24h).
-        # M8: guard against naive timestamps from state written before the
-        # UTC-aware fix — fromisoformat on old entries returns naive datetimes
-        # that cannot be compared to the aware cutoff.
-        cutoff = now - timedelta(hours=24)
-        pruned = []
-        for ts in state["new_position_timestamps"][strategy]:
-            try:
-                dt = datetime.fromisoformat(ts)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=UTC)
-                if dt >= cutoff:
-                    pruned.append(ts)
-            except (ValueError, TypeError):
-                continue
-        state["new_position_timestamps"][strategy] = pruned
+            # Prune old timestamps (keep last 24h).
+            cutoff = now - timedelta(hours=24)
+            pruned = []
+            for ts in state["new_position_timestamps"][strategy]:
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=UTC)
+                    if dt >= cutoff:
+                        pruned.append(ts)
+                except (ValueError, TypeError):
+                    continue
+            state["new_position_timestamps"][strategy] = pruned
 
-    _save_state(state)
+        _save_state(state)
 
 
 def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
@@ -356,7 +358,8 @@ def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
     # misleading post-BUG-219/PR-R4-4 which wired _record_new_trades().
     # Now only warn when portfolios DO have transactions but guard state is
     # still empty — that's the real signal the wiring is broken.
-    state = _load_state()
+    with _state_lock:
+        state = _load_state()
     if not state.get("ticker_trades") and all_warnings == [] and _portfolios_have_transactions():
         logger.warning(
             "C4: portfolios have transactions but trade_guard_state.json "
