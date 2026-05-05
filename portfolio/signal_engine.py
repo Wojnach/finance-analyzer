@@ -252,10 +252,10 @@ _persistence_lock = threading.Lock()
 
 # Cross-ticker consensus cache: stores the most recent consensus action per
 # ticker so synthetic cross-asset signals can reference other tickers' results.
-# Thread-safe: GIL protects dict assignment; stale reads (MSTR processing
-# before BTC in the same cycle) are acceptable — the 60s loop ensures data
-# is at most one cycle old.
+# Stale reads (MSTR processing before BTC in the same cycle) are acceptable —
+# the 60s loop ensures data is at most one cycle old.
 _cross_ticker_consensus: dict[str, dict] = {}  # {ticker: {"action": str, "confidence": float}}
+_cross_ticker_lock = threading.Lock()
 
 
 def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict[str, str]:
@@ -3129,14 +3129,16 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # 47.8% — worst of all Tier 1. Injecting BTC-USD's consensus as a synthetic
     # signal provides cross-asset information the signal system otherwise ignores.
     # The vote goes through all normal gates (accuracy, regime, persistence).
-    if ticker == "MSTR" and "BTC-USD" in _cross_ticker_consensus:
-        btc_cons = _cross_ticker_consensus["BTC-USD"]
-        btc_action = btc_cons.get("action", "HOLD")
-        if btc_action in ("BUY", "SELL", "HOLD"):
-            votes["btc_proxy"] = btc_action
-            extra_info["btc_proxy_action"] = btc_action
-            extra_info["btc_proxy_confidence"] = btc_cons.get("confidence", 0.0)
-            extra_info["btc_proxy_source"] = "cross_ticker_cache"
+    if ticker == "MSTR":
+        with _cross_ticker_lock:
+            btc_cons = _cross_ticker_consensus.get("BTC-USD")
+        if btc_cons is not None:
+            btc_action = btc_cons.get("action", "HOLD")
+            if btc_action in ("BUY", "SELL", "HOLD"):
+                votes["btc_proxy"] = btc_action
+                extra_info["btc_proxy_action"] = btc_action
+                extra_info["btc_proxy_confidence"] = btc_cons.get("confidence", 0.0)
+                extra_info["btc_proxy_source"] = "cross_ticker_cache"
 
     # BUG-178 diagnostic phase marker (added 2026-04-10, see docstring above
     # at the __pre_dispatch__ writer). We made it through the enhanced-signal
@@ -3706,6 +3708,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
     # Update cross-ticker consensus cache for synthetic cross-asset signals
     if ticker:
-        _cross_ticker_consensus[ticker] = {"action": action, "confidence": conf}
+        with _cross_ticker_lock:
+            _cross_ticker_consensus[ticker] = {"action": action, "confidence": conf}
 
     return action, conf, extra_info
