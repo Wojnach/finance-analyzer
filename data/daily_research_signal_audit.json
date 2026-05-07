@@ -1,755 +1,83 @@
 {
-  "date": "2026-04-29",
-  "summary": "Ranging regime continues across all 5 Tier-1 tickers. BUY-side collapse persists: 16 signals have BUY accuracy <40% at 1d_recent. SELL-side remains healthy (50-100%). Key changes from Apr-28: calendar collapsed from 57.0% alltime to 30.2% recent (-26.8pp, 520 sam), sentiment degraded to 21.3%, ema and news_event are biggest improvers (+26.1pp, +23.5pp). 3h horizon remains dramatically healthier than 1d.",
+  "date": "2026-05-07",
   "top_signals": [
-    {
-      "name": "econ_calendar",
-      "blended_1d": 85.7,
-      "alltime_1d": 62.9,
-      "recent_1d": 95.5,
-      "recent_1d_n": 44,
-      "blended_3h": 59.9,
-      "status": "excellent",
-      "note": "SELL-only. 95.5% recent but small sample (44). Alltime 62.9% (4661 sam) robust. Per-ticker: BTC/ETH 1.8% (gated), XAG 29.5% (gated). Works best on XAU/MSTR."
-    },
-    {
-      "name": "news_event",
-      "blended_1d": 67.9,
-      "alltime_1d": 51.5,
-      "recent_1d": 75.0,
-      "recent_1d_n": 244,
-      "blended_3h": 66.6,
-      "status": "excellent",
-      "note": "SELL-only at 1d (75.0%, 244 sam). Strong at both horizons. Biggest improver at 1d (+23.5pp)."
-    },
-    {
-      "name": "ema",
-      "blended_1d": 68.3,
-      "alltime_1d": 50.0,
-      "recent_1d": 76.1,
-      "recent_1d_n": 67,
-      "blended_3h": 59.7,
-      "status": "excellent_recent",
-      "note": "SELL-only recently (76.1%, 67 sam). Massive improvement but alltime flat 50.0% so regime-driven."
-    },
-    {
-      "name": "bb",
-      "blended_1d": 61.7,
-      "alltime_1d": 54.3,
-      "recent_1d": 64.8,
-      "recent_1d_n": 91,
-      "blended_3h": 45.0,
-      "status": "healthy_1d",
-      "note": "BUY 46.8%, SELL 84.1% at 1d_recent. Strong at 1d but collapsed at 3h (41.7%). Correctly unclustered."
-    },
-    {
-      "name": "ministral",
-      "blended_1d": 60.8,
-      "alltime_1d": 58.6,
-      "recent_1d": 61.8,
-      "recent_1d_n": 68,
-      "blended_3h": 59.5,
-      "status": "healthy",
-      "note": "SELL=100% recent (39 sam), BUY=10.3% (29 sam). Extreme SELL dominance. Stable across horizons."
-    },
-    {
-      "name": "qwen3",
-      "blended_1d": 60.0,
-      "alltime_1d": 60.0,
-      "recent_1d": 0,
-      "recent_1d_n": 0,
-      "blended_3h": 61.1,
-      "status": "healthy",
-      "note": "No recent 1d data. Alltime SELL=74.3% excellent. BUY=31.0% weak. Strong at 3h (61.8%)."
-    },
-    {
-      "name": "rsi",
-      "blended_1d": 59.7,
-      "alltime_1d": 51.8,
-      "recent_1d": 63.1,
-      "recent_1d_n": 444,
-      "blended_3h": 49.6,
-      "status": "healthy_1d",
-      "note": "BUY=43.1%, SELL=79.8% at 1d_recent. SELL carrying the signal. Degraded at 3h (47.2%)."
-    },
-    {
-      "name": "oscillators",
-      "blended_1d": 57.7,
-      "alltime_1d": 45.9,
-      "recent_1d": 62.7,
-      "recent_1d_n": 102,
-      "blended_3h": 40.5,
-      "status": "improving_1d",
-      "note": "Was disabled (45.9% alltime). Recent 62.7% (102 sam). SELL=70.0% (80 sam). Still bad at 3h (39.4%)."
-    }
+    {"signal": "econ_calendar", "accuracy_1d": 60.6, "accuracy_3h": 59.9, "samples": 5981, "notes": "Best active signal. Consistent across horizons. FOMC/CPI proximity correctly drives risk-off."},
+    {"signal": "qwen3", "accuracy_1d": 60.2, "accuracy_3h": 59.4, "samples": 3763, "notes": "Best LLM signal. Low activation (2.2% XAG) but high quality."},
+    {"signal": "fear_greed", "accuracy_1d": 58.6, "accuracy_3h": 53.9, "samples": 10232, "notes": "Solid contrarian at 1d, degrades at 3h."},
+    {"signal": "ministral", "accuracy_1d": 58.5, "accuracy_3h": 52.3, "samples": 6119, "notes": "Good at 1d, average at 3h."},
+    {"signal": "calendar", "accuracy_1d": 56.8, "accuracy_3h": 67.9, "samples": 8867, "notes": "MUCH better at 3h. Day-of-week effects real short-term."},
+    {"signal": "funding", "accuracy_3h": 74.2, "accuracy_1d": 31.2, "samples": 735, "notes": "Best at 3h (74.2%) but terrible at 1d. Correctly horizon-gated."}
   ],
   "worst_signals": [
-    {
-      "name": "sentiment",
-      "blended_1d": 28.7,
-      "alltime_1d": 45.9,
-      "recent_1d": 21.3,
-      "recent_1d_n": 150,
-      "recent_3h": 33.8,
-      "diagnosis": "WORST performer. 98% BUY bias (147/3). BUY=19.7%. Bad at ALL horizons. Structural bullish bias.",
-      "recommendation": "Already accuracy-gated and regime-gated. Model calibration needed long-term."
-    },
-    {
-      "name": "calendar",
-      "blended_1d": 38.2,
-      "alltime_1d": 57.0,
-      "recent_1d": 30.2,
-      "recent_1d_n": 520,
-      "recent_3h": 0,
-      "diagnosis": "MASSIVE COLLAPSE -26.8pp (520 sam). 100% BUY bias. Day-of-week seasonals emit BUY in ranging.",
-      "recommendation": "Accuracy gate + directional gate catch this. Will recover on regime change."
-    },
-    {
-      "name": "realized_skewness",
-      "blended_1d": 33.3,
-      "alltime_1d": 33.3,
-      "recent_1d": 33.3,
-      "recent_1d_n": 90,
-      "diagnosis": "88.9% BUY bias. BUY=27.5%, SELL=80.0% (10 sam). Already disabled.",
-      "recommendation": "Remain disabled. BUY direction actively harmful."
-    },
-    {
-      "name": "momentum_factors",
-      "blended_1d": 39.5,
-      "alltime_1d": 52.9,
-      "recent_1d": 33.8,
-      "recent_1d_n": 967,
-      "recent_3h": 60.1,
-      "diagnosis": "BUY=17.1% (496 sam), SELL=51.4% (471 sam). Massive BUY-side failure but 60.1% at 3h.",
-      "recommendation": "Accuracy-gated at 1d. SELL=51.4% below rescue threshold (55%)."
-    },
-    {
-      "name": "structure",
-      "blended_1d": 39.5,
-      "alltime_1d": 48.3,
-      "recent_1d": 35.7,
-      "recent_1d_n": 874,
-      "recent_3h": 49.9,
-      "diagnosis": "BUY=27.5% (610 sam), SELL=54.5% (264 sam). 69.8% BUY bias. Breakout detection in ranging.",
-      "recommendation": "Accuracy-gated. SELL=54.5% marginally below 55% rescue threshold."
-    },
-    {
-      "name": "claude_fundamental",
-      "blended_1d": 42.2,
-      "alltime_1d": 57.9,
-      "recent_1d": 35.4,
-      "recent_1d_n": 924,
-      "recent_3h": 0,
-      "diagnosis": "99.5% BUY bias (919/5). BUY=35.6%. LLM cascade structural bullish bias. -22.5pp.",
-      "recommendation": "MACRO_WINDOW_FORCE_HOLD + regime-gated + per-ticker disabled. Maximum gating applied."
-    },
-    {
-      "name": "crypto_macro",
-      "blended_1d": 43.0,
-      "alltime_1d": 53.1,
-      "recent_1d": 38.6,
-      "recent_1d_n": 497,
-      "diagnosis": "100% BUY. BUY=38.6%. On-chain metrics bullish but price not responding.",
-      "recommendation": "Accuracy-gated. In fundamental_cluster (0.3x follower penalty)."
-    },
-    {
-      "name": "volume_flow",
-      "blended_1d": 41.7,
-      "alltime_1d": 50.7,
-      "recent_1d": 37.8,
-      "recent_1d_n": 973,
-      "recent_3h": 46.4,
-      "diagnosis": "BUY=21.0% (500 sam), SELL=55.6% (473 sam). In trend_direction (0.12x). Weak both horizons.",
-      "recommendation": "SELL rescued at 0.7x. Maximum gating applied."
-    },
-    {
-      "name": "heikin_ashi",
-      "blended_1d": 43.5,
-      "alltime_1d": 49.5,
-      "recent_1d": 41.0,
-      "recent_1d_n": 751,
-      "recent_3h": 55.0,
-      "diagnosis": "BUY=22.9% (367 sam), SELL=58.3% (384 sam). Trend overlay fails in ranging. 55.0% at 3h.",
-      "recommendation": "SELL rescued at 0.7x. Working correctly."
-    },
-    {
-      "name": "smart_money",
-      "blended_1d": 40.9,
-      "alltime_1d": 51.4,
-      "recent_1d": 36.4,
-      "recent_1d_n": 209,
-      "recent_3h": 63.2,
-      "diagnosis": "BUY=14.9%, SELL=62.1%. Globally disabled. 63.2% at 3h (133 sam).",
-      "recommendation": "Remain disabled. Monitor 3h for re-enable (needs 200+ samples)."
-    }
+    {"signal": "futures_flow", "accuracy_1d": 38.3, "samples": 2168, "notes": "ACTIVELY HARMFUL. 12pp worse than random. Must be force-HOLD."},
+    {"signal": "macd", "accuracy_1d": 44.2, "accuracy_3h": 43.7, "samples": 6136, "notes": "Consistently bad. Only 5.3% activation on XAG."},
+    {"signal": "trend", "accuracy_1d": 46.1, "accuracy_3h": 40.3, "samples": 17880, "notes": "Bad with massive sample. WORSE at 3h. 92-100% correlated with ema/macro_regime."},
+    {"signal": "volatility_sig", "accuracy_1d": 46.3, "accuracy_3h": 47.2, "samples": 7353, "notes": "Below threshold. 92% correlated with ema."},
+    {"signal": "macro_regime", "accuracy_1d": 47.0, "accuracy_3h": 45.1, "samples": 29028, "notes": "At threshold. 92% correlated with trend. Redundant."},
+    {"signal": "forecast", "accuracy_1d": 47.7, "accuracy_3h": 47.2, "samples": 6756, "notes": "Chronos regressed to noise."},
+    {"signal": "heikin_ashi", "accuracy_1d": 49.3, "accuracy_3h": 48.3, "samples": 26620, "notes": "Noise. 100% correlated with ema."},
+    {"signal": "structure", "accuracy_1d": 48.6, "accuracy_3h": 50.0, "samples": 15917, "notes": "99% correlated with claude_fundamental."}
   ],
-  "recent_vs_alltime": {
-    "biggest_improvers_1d": [
-      {
-        "signal": "econ_calendar",
-        "delta": "+32.6pp",
-        "recent": 95.5,
-        "alltime": 62.9,
-        "n": 44,
-        "caveat": "small sample"
-      },
-      {
-        "signal": "ema",
-        "delta": "+26.1pp",
-        "recent": 76.1,
-        "alltime": 50.0,
-        "n": 67,
-        "caveat": "SELL-only"
-      },
-      {
-        "signal": "news_event",
-        "delta": "+23.5pp",
-        "recent": 75.0,
-        "alltime": 51.5,
-        "n": 244,
-        "caveat": "SELL-only"
-      },
-      {
-        "signal": "oscillators",
-        "delta": "+16.8pp",
-        "recent": 62.7,
-        "alltime": 45.9,
-        "n": 102,
-        "caveat": "SELL-driven"
-      },
-      {
-        "signal": "rsi",
-        "delta": "+11.3pp",
-        "recent": 63.1,
-        "alltime": 51.8,
-        "n": 444
-      },
-      {
-        "signal": "bb",
-        "delta": "+10.5pp",
-        "recent": 64.8,
-        "alltime": 54.3,
-        "n": 91
-      }
-    ],
-    "biggest_degraders_1d": [
-      {
-        "signal": "calendar",
-        "delta": "-26.8pp",
-        "recent": 30.2,
-        "alltime": 57.0,
-        "n": 520
-      },
-      {
-        "signal": "sentiment",
-        "delta": "-24.6pp",
-        "recent": 21.3,
-        "alltime": 45.9,
-        "n": 150
-      },
-      {
-        "signal": "claude_fundamental",
-        "delta": "-22.5pp",
-        "recent": 35.4,
-        "alltime": 57.9,
-        "n": 924
-      },
-      {
-        "signal": "momentum_factors",
-        "delta": "-19.1pp",
-        "recent": 33.8,
-        "alltime": 52.9,
-        "n": 967
-      },
-      {
-        "signal": "smart_money",
-        "delta": "-15.0pp",
-        "recent": 36.4,
-        "alltime": 51.4,
-        "n": 209
-      },
-      {
-        "signal": "crypto_macro",
-        "delta": "-14.5pp",
-        "recent": 38.6,
-        "alltime": 53.1,
-        "n": 497
-      },
-      {
-        "signal": "volume_flow",
-        "delta": "-12.9pp",
-        "recent": 37.8,
-        "alltime": 50.7,
-        "n": 973
-      },
-      {
-        "signal": "structure",
-        "delta": "-12.6pp",
-        "recent": 35.7,
-        "alltime": 48.3,
-        "n": 874
-      }
-    ],
-    "biggest_improvers_3h": [
-      {
-        "signal": "trend",
-        "delta": "+21.3pp",
-        "recent": 61.6,
-        "alltime": 40.3,
-        "n": 2283
-      },
-      {
-        "signal": "volatility_sig",
-        "delta": "+13.0pp",
-        "recent": 60.2,
-        "alltime": 47.2,
-        "n": 304
-      },
-      {
-        "signal": "news_event",
-        "delta": "+11.5pp",
-        "recent": 70.0,
-        "alltime": 58.5,
-        "n": 1762
-      },
-      {
-        "signal": "ema",
-        "delta": "+10.5pp",
-        "recent": 62.9,
-        "alltime": 52.4,
-        "n": 2248
-      },
-      {
-        "signal": "ministral",
-        "delta": "+10.3pp",
-        "recent": 62.6,
-        "alltime": 52.3,
-        "n": 684
-      },
-      {
-        "signal": "smart_money",
-        "delta": "+10.1pp",
-        "recent": 63.2,
-        "alltime": 53.1,
-        "n": 133
-      }
-    ],
-    "biggest_degraders_3h": [
-      {
-        "signal": "sentiment",
-        "delta": "-11.3pp",
-        "recent": 33.8,
-        "alltime": 45.1,
-        "n": 3629
-      },
-      {
-        "signal": "bb",
-        "delta": "-10.9pp",
-        "recent": 41.7,
-        "alltime": 52.6,
-        "n": 626
-      },
-      {
-        "signal": "forecast",
-        "delta": "-8.9pp",
-        "recent": 38.3,
-        "alltime": 47.2,
-        "n": 368
-      },
-      {
-        "signal": "rsi",
-        "delta": "-8.1pp",
-        "recent": 47.2,
-        "alltime": 55.3,
-        "n": 3572
-      },
-      {
-        "signal": "mean_reversion",
-        "delta": "-7.6pp",
-        "recent": 45.5,
-        "alltime": 53.1,
-        "n": 1402
-      }
-    ],
-    "stable_signals": [
-      {
-        "signal": "qwen3",
-        "1d": 60.0,
-        "3h": 61.1,
-        "note": "Consistently strong both horizons"
-      },
-      {
-        "signal": "ministral",
-        "1d": 60.8,
-        "3h": 59.5,
-        "note": "Consistent, SELL-dominant"
-      },
-      {
-        "signal": "momentum",
-        "1d": 55.3,
-        "3h": 53.5,
-        "note": "Solid across horizons"
-      },
-      {
-        "signal": "fear_greed",
-        "1d": 58.6,
-        "3h": 53.7,
-        "note": "Stable (no recent 1d data)"
-      }
-    ]
-  },
   "correlation_clusters": [
     {
-      "cluster": "trend_direction (9 members)",
-      "signals": [
-        "ema",
-        "macd",
-        "trend",
-        "heikin_ashi",
-        "volume_flow",
-        "macro_regime",
-        "momentum_factors",
-        "structure",
-        "oscillators"
-      ],
-      "leader_penalty": "leader 1.0x, followers 0.12x",
-      "effective_total_weight": "1.0 + 8*0.12 = 1.96x",
-      "current_state": "Most members regime-gated in ranging. At 3h, trend (61.6%) and momentum_factors (60.1%) are strong but penalized to 0.12x.",
-      "problem": "At 3h in ranging, trend/momentum_factors/heikin_ashi >55% but get 0.12x. Wastes their 3h edge.",
-      "recommendation": "Consider horizon-aware correlation groups."
+      "name": "Trend Followers",
+      "signals": ["ema", "heikin_ashi", "macro_regime", "trend", "shannon_entropy", "momentum_factors", "oscillators", "volatility_sig"],
+      "agreement_rate": "92-100%",
+      "effective_votes": 1,
+      "actual_votes": 8,
+      "issue": "8 signals = 1 independent viewpoint. Trend following overweighted 8x in consensus."
     },
     {
-      "cluster": "macro_external (6 members)",
-      "signals": [
-        "fear_greed",
-        "sentiment",
-        "news_event",
-        "calendar",
-        "econ_calendar",
-        "funding"
-      ],
-      "leader_penalty": "leader 1.0x, followers 0.15x",
-      "current_state": "news_event (67.9% blended) is leader. sentiment (28.7%) and calendar (38.2%) are dead weight.",
-      "problem": "3 of 6 members have BUY accuracy <35%.",
-      "recommendation": "Bias penalty (0.5x at >85% BUY) should catch calendar/sentiment."
+      "name": "Mean Reversion",
+      "signals": ["bb", "mean_reversion", "rsi", "momentum"],
+      "agreement_rate": "93-100%",
+      "effective_votes": 1,
+      "actual_votes": 4,
+      "issue": "4 signals nearly always agree. Low activation (10-15% on XAG)."
     },
     {
-      "cluster": "pattern_based (2 members)",
-      "signals": [
-        "candlestick",
-        "fibonacci"
-      ],
-      "current_state": "fibonacci improving. candlestick stable.",
-      "problem": "Minimal.",
-      "recommendation": "No change."
+      "name": "Fundamental/Calendar",
+      "signals": ["calendar", "claude_fundamental", "structure"],
+      "agreement_rate": "99-100%",
+      "effective_votes": 1,
+      "actual_votes": 3,
+      "issue": "structure 99.1% correlated with claude_fundamental. Redundant."
     },
     {
-      "cluster": "momentum_cluster (3 members)",
-      "signals": [
-        "mean_reversion",
-        "rsi",
-        "momentum"
-      ],
-      "leader_penalty": "leader 1.0x, followers 0.15x",
-      "current_state": "rsi leads (59.7%). All healthy SELL-side (70-80%).",
-      "problem": "None. Best-performing cluster.",
-      "recommendation": "No change."
+      "name": "Permanent BUY (BTC)",
+      "signals": ["crypto_macro", "sentiment", "credit_spread_risk", "claude_fundamental"],
+      "direction_bias": "99-100% BUY when active",
+      "issue": "CRITICAL: Always vote BUY on BTC. Zero predictive value. Add 4 permanent BUY votes creating systemic bullish bias."
     },
     {
-      "cluster": "fundamental_cluster (2 members)",
-      "signals": [
-        "claude_fundamental",
-        "crypto_macro"
-      ],
-      "current_state": "Both collapsed (~42-43%). 100% BUY bias.",
-      "problem": "When they escape gating on regime transition, both emit identical wrong BUY.",
-      "recommendation": "Verify group leader gating at 46% threshold is active."
-    },
-    {
-      "cluster": "cross_asset_flow (2 members)",
-      "signals": [
-        "credit_spread_risk",
-        "futures_flow"
-      ],
-      "current_state": "credit_spread_risk leads (49.7%). Both marginal.",
-      "problem": "BUY accuracy <25% for both. SELL direction works.",
-      "recommendation": "Directional gate catches BUY sides. No change."
-    },
-    {
-      "cluster": "UNCLUSTERED (full 1.0x weight)",
-      "signals": [
-        "bb",
-        "volume",
-        "qwen3",
-        "ministral",
-        "forecast",
-        "onchain"
-      ],
-      "note": "bb intentionally unclustered. LLM signals independent. volume independent.",
-      "recommendation": "No change."
+      "name": "Permanent SELL (BTC)",
+      "signals": ["news_event"],
+      "direction_bias": "100% SELL when active on BTC",
+      "issue": "Only fires SELL. Permanent bearish bias."
     }
   ],
   "regime_performance": {
-    "current_regime": "ranging (all 5 Tier-1 tickers)",
-    "key_finding": "BUY-side accuracy catastrophically low across 16 signals. SELL-side healthy (50-100%). Ranging penalty (0.75x) insufficient for true 30-50% accuracy loss.",
-    "buy_below_25pct": [
-      {
-        "signal": "trend",
-        "buy": 16.5,
-        "sell": 57.9,
-        "n_buy": 382
-      },
-      {
-        "signal": "momentum_factors",
-        "buy": 17.1,
-        "sell": 51.4,
-        "n_buy": 496
-      },
-      {
-        "signal": "sentiment",
-        "buy": 19.7,
-        "sell": 100.0,
-        "n_buy": 147
-      },
-      {
-        "signal": "volume_flow",
-        "buy": 21.0,
-        "sell": 55.6,
-        "n_buy": 500
-      },
-      {
-        "signal": "heikin_ashi",
-        "buy": 22.9,
-        "sell": 58.3,
-        "n_buy": 367
-      },
-      {
-        "signal": "volatility_sig",
-        "buy": 23.7,
-        "sell": 59.6,
-        "n_buy": 312
-      },
-      {
-        "signal": "futures_flow",
-        "buy": 22.4,
-        "sell": 57.3,
-        "n_buy": 76
-      }
-    ],
-    "healthy_sell_signals": [
-      {
-        "signal": "econ_calendar",
-        "sell": 95.5
-      },
-      {
-        "signal": "bb",
-        "sell": 84.1
-      },
-      {
-        "signal": "rsi",
-        "sell": 79.8
-      },
-      {
-        "signal": "ema",
-        "sell": 76.1
-      },
-      {
-        "signal": "news_event",
-        "sell": 75.0
-      },
-      {
-        "signal": "mean_reversion",
-        "sell": 72.2
-      },
-      {
-        "signal": "momentum",
-        "sell": 71.8
-      },
-      {
-        "signal": "volume",
-        "sell": 71.6
-      },
-      {
-        "signal": "candlestick",
-        "sell": 70.6
-      },
-      {
-        "signal": "oscillators",
-        "sell": 70.0
-      },
-      {
-        "signal": "fibonacci",
-        "sell": 69.2
-      }
-    ],
-    "horizon_divergence": {
-      "3h_better_than_1d": [
-        {
-          "signal": "momentum_factors",
-          "gap": "+26.3pp"
-        },
-        {
-          "signal": "smart_money",
-          "gap": "+26.8pp"
-        },
-        {
-          "signal": "trend",
-          "gap": "+19.2pp"
-        },
-        {
-          "signal": "volatility_sig",
-          "gap": "+17.8pp"
-        },
-        {
-          "signal": "heikin_ashi",
-          "gap": "+14.0pp"
-        }
-      ],
-      "1d_better_than_3h": [
-        {
-          "signal": "bb",
-          "gap": "+23.1pp"
-        },
-        {
-          "signal": "oscillators",
-          "gap": "+23.3pp"
-        },
-        {
-          "signal": "rsi",
-          "gap": "+15.9pp"
-        },
-        {
-          "signal": "mean_reversion",
-          "gap": "+9.2pp"
-        }
-      ]
-    }
+    "observation": "Current regime: range-bound. Trend cluster (8 signals) performs worst in ranging markets, explaining mass accuracy degradation.",
+    "trending_favors": ["ema", "trend", "macro_regime", "heikin_ashi", "momentum_factors"],
+    "ranging_favors": ["mean_reversion", "bb", "rsi", "calendar", "econ_calendar"],
+    "regime_agnostic": ["qwen3", "ministral", "fear_greed", "funding"]
   },
-  "per_ticker_consensus": {
-    "1d": {
-      "BTC-USD": 52.5,
-      "ETH-USD": 49.8,
-      "XAG-USD": 49.4,
-      "XAU-USD": 49.4,
-      "MSTR": 47.8
+  "unidirectional_bias_problem": {
+    "description": "Multiple signals show >90% directional bias on specific tickers, meaning they always vote one direction regardless of market conditions.",
+    "affected_signals_btc": {
+      "crypto_macro": "99% BUY (492/499)",
+      "sentiment": "100% BUY (158/158 active)",
+      "credit_spread_risk": "100% BUY (107/107 active)",
+      "claude_fundamental": "100% BUY (141/141 active)",
+      "news_event": "100% SELL (98/98 active)"
     },
-    "3h": {
-      "XAU-USD": 54.3,
-      "XAG-USD": 53.5,
-      "BTC-USD": 50.7,
-      "ETH-USD": 48.4,
-      "MSTR": 45.6
-    },
-    "diagnosis": "MSTR weakest at both horizons. ETH-USD near coin-flip. XAU/XAG healthy at 3h but coin-flip at 1d. Only BTC-USD has 1d edge (52.5%). System has no 1d edge on 4 of 5 tickers."
-  },
-  "directional_rescue_analysis": {
-    "description": "Signals failing overall gate but with one direction above 55% rescue threshold (0.7x weight)",
-    "rescued_signals": [
-      {
-        "signal": "heikin_ashi",
-        "overall_1d": 41.0,
-        "sell_acc": 58.3,
-        "sell_n": 384,
-        "status": "rescued"
-      },
-      {
-        "signal": "volume_flow",
-        "overall_1d": 37.8,
-        "sell_acc": 55.6,
-        "sell_n": 473,
-        "status": "rescued"
-      },
-      {
-        "signal": "volatility_sig",
-        "overall_1d": 42.4,
-        "sell_acc": 59.6,
-        "sell_n": 337,
-        "status": "rescued"
-      },
-      {
-        "signal": "trend",
-        "overall_1d": 42.4,
-        "sell_acc": 57.9,
-        "sell_n": 639,
-        "status": "rescued"
-      }
-    ],
-    "not_rescued": [
-      {
-        "signal": "structure",
-        "overall_1d": 35.7,
-        "sell_acc": 54.5,
-        "reason": "SELL below 55% threshold"
-      },
-      {
-        "signal": "momentum_factors",
-        "overall_1d": 33.8,
-        "sell_acc": 51.4,
-        "reason": "SELL below 55% threshold"
-      },
-      {
-        "signal": "smart_money",
-        "overall_1d": 36.4,
-        "sell_acc": 62.1,
-        "reason": "Globally disabled"
-      }
-    ]
+    "impact": "These 5 signals add a net +3 permanent BUY bias to BTC consensus. This is not prediction, it is noise."
   },
   "recommendations": [
-    {
-      "priority": 1,
-      "action": "MONITOR: calendar collapsed 26.8pp (520 sam). Caught by accuracy + directional gate.",
-      "rationale": "100% BUY bias at 30.2%. Will recover on regime change. No code change needed.",
-      "type": "monitoring"
-    },
-    {
-      "priority": 2,
-      "action": "INVESTIGATE: horizon-aware correlation groups for trend_direction cluster at 3h.",
-      "rationale": "trend/momentum_factors/heikin_ashi have 60%+ at 3h but get 0.12x follower penalty.",
-      "type": "architecture"
-    },
-    {
-      "priority": 3,
-      "action": "VALIDATE: oscillators recovering at 1d (62.7%, 102 sam). Currently disabled.",
-      "rationale": "SELL=70.0% (80 sam). Wait for 200+ samples before re-enabling at 1d.",
-      "type": "monitoring"
-    },
-    {
-      "priority": 4,
-      "action": "NOTE: system has NO 1d edge on ETH/XAG/XAU/MSTR. Only BTC-USD (52.5%) marginal.",
-      "rationale": "Layer 2 should weight 3h consensus more heavily than 1d for metals.",
-      "type": "strategy"
-    },
-    {
-      "priority": 5,
-      "action": "VALIDATE: bb unclustered status. 61.7% at 1d, 41.7% at 3h.",
-      "rationale": "Apr-26 decision validated at 1d. 3h penalty (0.6x horizon weight) working.",
-      "type": "validation"
-    },
-    {
-      "priority": 6,
-      "action": "MONITOR: sentiment worst signal (21.3% 1d, 33.8% 3h). Fully gated.",
-      "rationale": "Structural bullish bias. Long-term fix needs model recalibration.",
-      "type": "monitoring"
-    },
-    {
-      "priority": 7,
-      "action": "CONFIRM: directional rescue operating on 4 signals (SELL at 55.6-59.6%).",
-      "rationale": "Without rescue, system loses 4 directionally-correct SELL voters.",
-      "type": "validation"
-    },
-    {
-      "priority": 8,
-      "action": "CONSIDER: smart_money 3h re-enable. 63.2% at 3h (133 sam) promising.",
-      "rationale": "Wait for 200+ samples before adding to DISABLED_SIGNAL_OVERRIDES.",
-      "type": "future"
-    }
-  ],
-  "meta_analysis": {
-    "system_health": "Gating system (accuracy 47%, directional 40%, regime, per-ticker, correlation, directional rescue) is functioning correctly. All 16+ degraded signals suppressed while 8 healthy signals preserved.",
-    "effective_active_1d": "~8 signals: rsi (59.7%), bb (61.7%), news_event (67.9%), ministral (60.8%), qwen3 (60.0%), momentum (55.3%), mean_reversion (54.1%), volume (54.8%). Plus SELL from 4 directionally-rescued trend signals.",
-    "effective_active_3h": "~12 signals: news_event (66.6%), qwen3 (61.1%), ema (59.7%), ministral (59.5%), momentum_factors (58.3%), trend (55.2%), volatility_sig (56.3%), heikin_ashi (53.0%), fear_greed (53.7%), momentum (53.5%), candlestick (51.6%), macro_regime (50.7%).",
-    "key_risk": "Ranging regime compressed active 1d voters to ~8. If 2-3 more degrade, circuit breaker (5-voter floor) triggers gate relaxation.",
-    "vs_apr28": "calendar collapsed (57->30.2%), sentiment worsened (33.8->21.3%), oscillators improved (45.9->62.7%), ema improved (50->76.1%). BUY-side continues degrading, SELL-side strengthening."
-  }
+    {"priority": 1, "action": "Disable futures_flow (38.3% accuracy)", "effort": "trivial"},
+    {"priority": 2, "action": "Disable macd (44.2%), trend (46.1%), heikin_ashi (49.3%)", "effort": "easy"},
+    {"priority": 3, "action": "Add unidirectional bias gate: exclude signals >90% same-direction over 500+ samples", "effort": "medium"},
+    {"priority": 4, "action": "Implement correlation-cluster voting: group >85% correlated signals, 1 vote per cluster", "effort": "hard"},
+    {"priority": 5, "action": "Regime-conditional signal gating: different weights for trending vs ranging", "effort": "hard"}
+  ]
 }

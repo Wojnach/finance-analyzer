@@ -98,6 +98,19 @@ DISABLED_SIGNALS = {
     "residual_pair_reversion",  # pending live validation (added 2026-04-30)
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
     "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
+    "futures_flow",     # 2026-05-07: 38.3% at 1d (2168 sam). Actively harmful —
+                        # 12pp worse than coin flip. In cross_asset_flow cluster
+                        # but still wastes compute. Was accuracy-gated at runtime
+                        # but formal disable saves ~50ms/cycle.
+    "trend",            # 2026-05-07: 46.1% at 1d (17880 sam), 40.3% at 3h.
+                        # Massive sample, consistently below threshold across ALL
+                        # horizons. 92-100% correlated with ema/macro_regime in
+                        # pure_trend cluster. In ranging regime (current) this is
+                        # pure noise. ema (50.0%) is the cluster leader.
+    "macd",             # 2026-05-07: 44.2% at 1d (6136 sam), 43.7% at 3h.
+                        # Below threshold across all horizons. Only 5.3% activation
+                        # on XAG. In oscillator_trend cluster where momentum_factors
+                        # (53.2%) is the better signal.
     # "econ_calendar" RE-ENABLED 2026-04-23. BUG-218 fixed: added post_event_relief
     # sub-signal that emits BUY after high-impact events pass (4-24h relief window)
     # and during event-free calm windows (>72h to next event). The composite is now

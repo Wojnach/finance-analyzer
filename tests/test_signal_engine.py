@@ -52,10 +52,10 @@ class TestCorrelationGroups:
         assert "volatility_cluster" not in CORRELATION_GROUPS
 
     def test_trend_direction_split_into_subclusters(self):
-        """2026-04-30: trend_direction mega-cluster (9 members) split into 3 sub-clusters.
+        """2026-05-07: trend/macd disabled, groups updated.
 
-        pure_trend: ema, trend, heikin_ashi (MA-based methods)
-        oscillator_trend: macd, momentum_factors, oscillators
+        pure_trend: ema, heikin_ashi (trend removed — 46.1% at 1d)
+        oscillator_trend: momentum_factors, oscillators (macd removed — 44.2% at 1d)
         structural_flow: volume_flow, macro_regime, structure
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
@@ -65,15 +65,15 @@ class TestCorrelationGroups:
         assert "oscillator_trend" in CORRELATION_GROUPS
         assert "structural_flow" in CORRELATION_GROUPS
 
-        assert CORRELATION_GROUPS["pure_trend"] == frozenset({"ema", "trend", "heikin_ashi"})
-        assert CORRELATION_GROUPS["oscillator_trend"] == frozenset({"macd", "momentum_factors", "oscillators"})
+        assert CORRELATION_GROUPS["pure_trend"] == frozenset({"ema", "heikin_ashi"})
+        assert CORRELATION_GROUPS["oscillator_trend"] == frozenset({"momentum_factors", "oscillators"})
         assert CORRELATION_GROUPS["structural_flow"] == frozenset({"volume_flow", "macro_regime", "structure"})
 
-    def test_macd_in_oscillator_trend(self):
-        """macd should be in oscillator_trend sub-cluster (91.9% agreement with ema)."""
+    def test_macd_disabled_not_in_oscillator_trend(self):
+        """2026-05-07: macd disabled (44.2% 1d), removed from oscillator_trend."""
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        assert "macd" in CORRELATION_GROUPS["oscillator_trend"]
+        assert "macd" not in CORRELATION_GROUPS["oscillator_trend"]
 
     def test_macro_regime_in_structural_flow(self):
         """macro_regime should be in structural_flow sub-cluster."""
@@ -277,6 +277,32 @@ class TestDirectionalBiasPenalty:
             activation_rates=activation_rates,
         )
         assert result[0] == "BUY"
+
+    def test_extreme_bias_gets_stronger_penalty(self):
+        """2026-05-07: >95% bias gets 0.2x penalty (vs 0.5x for 85-95%)."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        accuracy_data = {
+            "crypto_macro": {"accuracy": 0.56, "total": 500,
+                             "buy_accuracy": 0.56, "total_buy": 490},
+            "rsi": {"accuracy": 0.55, "total": 100,
+                    "sell_accuracy": 0.55, "total_sell": 50},
+        }
+        activation_rates = {
+            "crypto_macro": {"bias": 0.99, "samples": 500, "normalized_weight": 1.0,
+                             "activation_rate": 0.98, "buy_rate": 0.98, "sell_rate": 0.01},
+            "rsi": {"bias": 0.1, "samples": 100, "normalized_weight": 1.0,
+                    "activation_rate": 0.3, "buy_rate": 0.15, "sell_rate": 0.15},
+        }
+        votes = {"crypto_macro": "BUY", "rsi": "SELL"}
+        result = _weighted_consensus(
+            votes, accuracy_data, "unknown",
+            activation_rates=activation_rates,
+        )
+        assert result[0] == "SELL", (
+            f"crypto_macro at 99% BUY bias should get 0.2x extreme penalty, "
+            f"losing to rsi SELL — got {result[0]}"
+        )
 
     def test_bias_penalty_not_applied_with_few_samples(self):
         """Bias penalty should not fire when samples < _BIAS_MIN_ACTIVE."""
@@ -1150,19 +1176,21 @@ class TestCorrelationPenaltyMultiGroup:
 
 
 class TestCrossAssetFlowGroup:
-    """credit_spread_risk and futures_flow should be in cross_asset_flow group."""
+    """2026-05-07: cross_asset_flow dissolved — futures_flow disabled (38.3%),
+    credit_spread_risk now unclustered at full weight."""
 
-    def test_cross_asset_flow_group_exists(self):
+    def test_cross_asset_flow_group_removed(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "cross_asset_flow" in CORRELATION_GROUPS
+        assert "cross_asset_flow" not in CORRELATION_GROUPS
 
-    def test_credit_spread_risk_in_cross_asset_flow(self):
+    def test_credit_spread_risk_unclustered(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "credit_spread_risk" in CORRELATION_GROUPS["cross_asset_flow"]
+        for group_members in CORRELATION_GROUPS.values():
+            assert "credit_spread_risk" not in group_members
 
-    def test_futures_flow_in_cross_asset_flow(self):
-        from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "futures_flow" in CORRELATION_GROUPS["cross_asset_flow"]
+    def test_futures_flow_disabled(self):
+        from portfolio.tickers import DISABLED_SIGNALS
+        assert "futures_flow" in DISABLED_SIGNALS
 
 
 class TestCrisisModeConditionalTrendPenalty:

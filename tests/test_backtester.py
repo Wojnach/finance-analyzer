@@ -177,7 +177,7 @@ class TestRunBacktest:
                 "tickers": {
                     "BTC-USD": {
                         "regime": "ranging",
-                        "signals": {"rsi": "BUY", "macd": "SELL"},  # tie -> HOLD
+                        "signals": {"rsi": "BUY", "bb": "SELL"},  # tie -> HOLD
                     }
                 },
                 "outcomes": {

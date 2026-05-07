@@ -217,7 +217,9 @@ _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
 # "accuracy" may just reflect market drift rather than genuine edge.
 # E.g., calendar (100% BUY) in a ranging-up market looks accurate by luck.
 _BIAS_THRESHOLD = 0.85  # >85% BUY or >85% SELL triggers penalty
-_BIAS_PENALTY = 0.5  # 0.5x weight for extreme-bias signals
+_BIAS_PENALTY = 0.5  # 0.5x weight for high-bias signals (85-95%)
+_BIAS_EXTREME_THRESHOLD = 0.95  # >95% triggers stronger penalty
+_BIAS_EXTREME_PENALTY = 0.2  # 0.2x weight for extreme-bias signals (>95%)
 _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
 
 # IC-based weight multiplier (2026-04-18): adjusts signal weight based on
@@ -1306,8 +1308,11 @@ _STATIC_CORRELATION_GROUPS = {
     # Previous: 1.0 + 8*0.12 = 1.96x total. Now: 3 * (1.0 + 2*0.20) = 4.20x
     # total, but with 3 independent leaders — better captures disagreement
     # between trend, momentum, and structural signals.
-    "pure_trend": frozenset({"ema", "trend", "heikin_ashi"}),
-    "oscillator_trend": frozenset({"macd", "momentum_factors", "oscillators"}),
+    # 2026-05-07: trend disabled (46.1% 1d, 17880 sam), heikin_ashi borderline (49.3%)
+    # but ema is the sole surviving member. Kept as group in case heikin_ashi re-enabled.
+    "pure_trend": frozenset({"ema", "heikin_ashi"}),
+    # 2026-05-07: macd disabled (44.2% 1d). momentum_factors is the leader.
+    "oscillator_trend": frozenset({"momentum_factors", "oscillators"}),
     "structural_flow": frozenset({"volume_flow", "macro_regime", "structure"}),
     # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
     # found calendar↔fear_greed 100% agreement (501 sam), funding↔fear_greed
@@ -1339,7 +1344,9 @@ _STATIC_CORRELATION_GROUPS = {
     # Both were orphaned and getting full 1.0x weight despite redundancy.
     # Grouped together rather than in trend_direction to avoid inflating that
     # mega-cluster further (already 9 members at 0.12x).
-    "cross_asset_flow": frozenset({"credit_spread_risk", "futures_flow"}),
+    # 2026-05-07: futures_flow disabled (38.3% 1d). credit_spread_risk (53.7%)
+    # now unclustered — single-member groups are invalid per convention.
+    # credit_spread_risk votes at full 1.0x weight independently.
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
@@ -2206,7 +2213,8 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             sell_rate = act_data.get("sell_rate", 0.0)
             bias_direction = "BUY" if buy_rate >= sell_rate else "SELL"
             if vote == bias_direction:
-                weight *= _BIAS_PENALTY
+                penalty = _BIAS_EXTREME_PENALTY if signal_bias > _BIAS_EXTREME_THRESHOLD else _BIAS_PENALTY
+                weight *= penalty
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":

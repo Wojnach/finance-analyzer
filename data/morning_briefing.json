@@ -1,68 +1,65 @@
 {
-  "date": "2026-04-30",
-  "generated_at": "2026-04-29T21:59:59.743767+00:00",
-  "research_session": "2026-04-29 after-hours",
-  "market_regime": "ranging (all 5 tickers)",
-  "key_events_today": [
-    "GDP advance estimate (08:30 ET) \u2014 consensus 0.4%, Atlanta Fed GDPNow -2.7%",
-    "Core PCE March (08:30 ET) \u2014 consensus 0.1% MoM (lowest since 2020)",
-    "ECI Q1 (08:30 ET) \u2014 labor cost pressure gauge",
-    "Chicago PMI (09:45 ET)",
-    "Pending Home Sales (10:00 ET)"
-  ],
-  "overnight_context": {
-    "fomc": "Held 3.5-3.75%, historic 8-4 dissent (Waller, Cook, Jefferson, Kugler wanted cut). Powell staying.",
-    "oil": "Brent $118 (Strait of Hormuz blockade). War premium in metals.",
-    "metals": "XAG $71.46 (all checkpoints through $80 triggered). XAU strong.",
-    "crypto": "BTC $76.6K (post-$75K breakout), ETH $2,296 (lagging, $2.5K next checkpoint).",
-    "mstr": "$161.57 \u2014 BTC treasury proxy. New btc_proxy signal added this session."
+  "date": "2026-05-08",
+  "generated_at": "2026-05-07T21:45:00+00:00",
+  "market_outlook": "neutral",
+  "confidence": 0.55,
+  "headline": "NFP Friday + Iran Binary Risk. Range-bound with asymmetric downside.",
+  "key_levels": {
+    "XAG-USD": {"support": 78.0, "resistance": 82.0, "current": 79.11, "rsi": 34.8, "note": "Oversold, bounce likely but Iran de-escalation pressuring safe-haven metals"},
+    "XAU-USD": {"support": 4650.0, "resistance": 4720.0, "current": 4706.28, "note": "Consolidating near $4700. Iran deal would deflate 5-8%"},
+    "BTC-USD": {"support": 78000.0, "resistance": 82000.0, "current": 79980.0, "note": "9-day ETF inflow streak ($2.7B). $76K support critical per Tom Lee"},
+    "ETH-USD": {"support": 2250.0, "resistance": 2400.0, "current": 2290.87, "note": "Failing at $2400. Weak relative to BTC. EF selling pressure"},
+    "MSTR": {"support": 170.0, "resistance": 190.0, "current": 178.16, "note": "Q1 $12.54B loss, STRC dividend sustainability questioned"}
   },
-  "research_changes_shipped": {
-    "batch_1_signal_cleanup": [
-      "Fibonacci DISABLED (43.6% at 1d, 17K+ samples \u2014 definitively bad)",
-      "Statistical jump regime RE-ENABLED (52.7% at 1d, 110 samples \u2014 above gate)",
-      "Shadow-safe expanded: +complexity_gap_regime, +mahalanobis_turbulence, +crypto_evrp, +hash_ribbons, +fibonacci",
-      "Realized skewness marked KILLED (33.3% at 1d, 90 samples)",
-      "pattern_based correlation group dissolved (fibonacci was only member with candlestick)"
-    ],
-    "batch_2_mstr_btc_proxy": [
-      "MSTR now gets synthetic btc_proxy vote from BTC-USD consensus",
-      "Targets MSTR worst-in-class 47.8% consensus accuracy",
-      "Thread-safe cross-ticker cache, at most 1 cycle stale",
-      "Goes through all normal gates (accuracy, regime, persistence)"
-    ],
-    "batch_3_prophecy": [
-      "All 3 prophecies reviewed with current prices and FOMC context",
-      "Silver: $120 target, 0.8 conviction \u2014 war premium intact, FOMC dovish dissent bullish",
-      "BTC: $100K target, 0.7 conviction \u2014 $75K checkpoint triggered",
-      "ETH: $4K target, 0.6 conviction \u2014 still below $2.5K, coiled spring thesis"
-    ]
-  },
-  "signal_system_status": {
-    "active_signals": 33,
-    "disabled_signals": 19,
-    "total_modules": 52,
-    "new_shadow_tracked": [
-      "complexity_gap_regime",
-      "mahalanobis_turbulence",
-      "crypto_evrp",
-      "hash_ribbons",
-      "fibonacci"
-    ],
-    "tests_passing": 91,
-    "consensus_accuracy_1d": {
-      "BTC-USD": "52.5%",
-      "ETH-USD": "49.8%",
-      "XAG-USD": "49.4%",
-      "XAU-USD": "49.4%",
-      "MSTR": "47.8% (btc_proxy added to improve)"
+  "trade_ideas": [
+    {
+      "instrument": "XAG-USD",
+      "direction": "HOLD (Patient position)",
+      "rationale": "RSI 34.8 oversold suggests bounce, but NFP risk + Iran deal binary risk make new entries premature. Patient holds 12.3sh at $78.80 (+0.4%). Stop at $78.15 (2x ATR). Gold/silver ratio at 62:1 (lowest since 2013) supports long-term thesis. Wait for NFP resolution.",
+      "entry_zone": "N/A (already in position)",
+      "target": "$82.00 short-term, $120 thesis",
+      "stop": "$78.15",
+      "confidence": 0.5
+    },
+    {
+      "instrument": "BTC-USD",
+      "direction": "HOLD (Bold position)",
+      "rationale": "Bold holds 0.2sh BTC at $75,928 (+5.3%). ETF flows extremely strong. $76K is the bull/bear line per Tom Lee. Three technical signals pointing to $85K. Hold through NFP — hot print is modest negative, cold print is strong positive for crypto.",
+      "entry_zone": "N/A (already in position)",
+      "target": "$85,000",
+      "stop": "$79,532 (2x ATR)",
+      "confidence": 0.6
+    },
+    {
+      "instrument": "ETH-USD",
+      "direction": "HOLD (Patient position)",
+      "rationale": "Patient holds 0.4sh at $2,307 (-0.7%). ETH weak relative to BTC, failing at $2,400. EF selling $55M OTC. The $2,500 prophecy checkpoint still pending. No reason to add here. Stop at $2,275.",
+      "entry_zone": "N/A",
+      "target": "$2,500",
+      "stop": "$2,275",
+      "confidence": 0.4
     }
-  },
-  "portfolio_action": "HOLD all. GDP/PCE data today \u2014 high macro volatility. Let data settle before trading.",
-  "risk_flags": [
-    "GDP miss risk: Atlanta GDPNow -2.7% vs consensus +0.4% \u2014 could shock markets",
-    "Oil $118 \u2014 supply disruption risk to global growth",
-    "Consensus accuracy near coin-flip on all tickers \u2014 system has no directional edge at 1d",
-    "FOMC 8-4 dissent signals split Fed \u2014 uncertainty premium elevated"
+  ],
+  "system_improvements_proposed": [
+    "TONIGHT: Disable futures_flow (38.3%), add macd/trend/heikin_ashi to DISABLED_SIGNALS",
+    "TONIGHT: Add unidirectional bias gate — exclude signals with >90% same-direction over 500+ samples",
+    "TONIGHT: Resolve accuracy_degradation critical errors",
+    "BACKLOG: Implement correlation-cluster voting (hard, deferred)",
+    "BACKLOG: Regime-conditional signal gating (hard, deferred)",
+    "BACKLOG: Max-IR bounded signal weighting from quant research"
+  ],
+  "risk_warnings": [
+    "NFP FRIDAY 08:30 ET: April nonfarm payrolls. Prior was massive beat (178K vs 60K). Hot print = stronger USD, metals/crypto down. This is the week's major macro event.",
+    "IRAN BINARY RISK: Tehran reviewing one-page MOU. Deal = oil $80-85, gold -5-8%. Collapse = oil $130+, gold spikes. Response expected 'within days'. Trump threatened 'much higher level' bombing.",
+    "POWELL-WARSH TRANSITION May 15 (8 days): Warsh is more hawkish. Regime change risk for all risk assets.",
+    "MSTR STRC DIVIDEND: Potential forced BTC sales to fund dividend — structural change from never-sell policy.",
+    "12 SIGNALS DEGRADED >15pp: Accuracy degradation detected today. Root cause: range-bound market where trend-following signals (8 of the 12) are failing."
+  ],
+  "research_highlights": [
+    "Signal correlation analysis: 33 active signals are really ~12 independent viewpoints. Trend cluster (8 signals) votes as one. Mean reversion cluster (4) votes as one.",
+    "BTC has 4 permanent-BUY signals (crypto_macro 99% BUY, sentiment 100% BUY, credit_spread_risk 100% BUY, claude_fundamental 100% BUY) creating systemic bullish bias.",
+    "Quant research: VIX-adaptive Kelly sizing reduces drawdown 38%. ADX-conditional MACD weighting improves accuracy during trends.",
+    "Gold/silver ratio at 62:1 (lowest since 2013) — silver outperformance thesis intact.",
+    "Silver structural deficit: 67M oz annual shortfall, 7th consecutive year. China imports hit ATH March 2026."
   ]
 }

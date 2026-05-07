@@ -1,115 +1,124 @@
 {
-  "date": "2026-04-29",
-  "generated_at": "2026-04-29T21:32:57.841668+00:00",
-  "system_health": {
-    "status": "healthy",
-    "cycle_count": 164,
-    "error_count": 0,
-    "uptime_hours": 31.7,
-    "all_signals_ok": true,
-    "last_module_failures": {
-      "date": "2026-04-22",
-      "modules": [
-        "monte_carlo",
-        "price_targets",
-        "equity_curve"
-      ]
+  "date": "2026-05-07",
+  "generated_at": "2026-05-07T21:33:14.994396+00:00",
+  "trades_today": [],
+  "trade_summary": "Zero trades executed. All 20 Layer 2 sessions returned HOLD for both Patient and Bold strategies.",
+  "journal_entries_count": 20,
+  "positions": {
+    "patient": {
+      "ETH-USD": {
+        "shares": 0.4,
+        "entry_approx": 2307,
+        "current": 2291,
+        "pnl_pct": -0.7
+      },
+      "XAG-USD": {
+        "shares": 12.3,
+        "entry_approx": 78.8,
+        "current": 79.11,
+        "pnl_pct": 0.4
+      }
+    },
+    "bold": {
+      "BTC-USD": {
+        "shares": 0.2,
+        "entry_approx": 75928,
+        "current": 79980,
+        "pnl_pct": 5.3
+      }
     }
   },
-  "trades_today": [
-    "No trades executed today. All Layer 2 decisions were HOLD.",
-    "Multiple triggers fired: BTC consensus BUY (59%), XAU SELL->HOLD, MSTR BUY/SELL flips, ETH BUY->HOLD",
-    "Last journal entry at 13:49 UTC: FOMC day, all HOLD. BTC +2.8% from Bold entry."
-  ],
+  "price_action_today": {
+    "XAG-USD": {
+      "open": 81.53,
+      "close": 79.11,
+      "change_pct": -3.0,
+      "note": "Sold off throughout the day, RSI 34.8 oversold"
+    },
+    "XAU-USD": {
+      "open": 4738.36,
+      "close": 4706.28,
+      "change_pct": -0.7,
+      "note": "Mild decline, BUY->HOLD oscillation"
+    },
+    "BTC-USD": {
+      "open": 81026.63,
+      "close": 79980.0,
+      "change_pct": -1.3,
+      "note": "Drifted lower, range-bound"
+    },
+    "ETH-USD": {
+      "open": 2333.01,
+      "close": 2290.87,
+      "change_pct": -1.8,
+      "note": "Followed BTC lower"
+    },
+    "MSTR": {
+      "open": 185.47,
+      "close": 178.16,
+      "change_pct": -3.9,
+      "note": "Worst performer, BTC leverage effect"
+    }
+  },
   "signals_that_were_right": [
-    "Funding rate at 3h: 74.2% accuracy (535 samples) \u2014 strongest individual signal",
-    "Calendar at 3h: 67.9% (4928 samples) \u2014 day-of-week effects persistent",
-    "Econ calendar at 1d: 62.9% (4661 samples) \u2014 event proximity risk-off works",
-    "Qwen3 at 1d: 60.0% (3654 samples) \u2014 local LLM outperforms many technicals",
-    "Fear & Greed at 1d: 58.6% (10232 samples) \u2014 contrarian sentiment reliable",
-    "Ministral at 1d: 58.6% (5951 samples) \u2014 local LLM consistent performer",
-    "Claude Fundamental at 1d: 57.9% (11561 samples) \u2014 cascade adds value"
+    "econ_calendar (60.6% at 1d, 5981 samples) \u2014 best active signal",
+    "qwen3 (60.2% at 1d, 3763 samples) \u2014 strong LLM signal",
+    "fear_greed (58.6% at 1d, 10232 samples) \u2014 reliable contrarian",
+    "ministral (58.5% at 1d, 6119 samples) \u2014 solid local LLM",
+    "calendar (56.8% at 1d, 8867 samples) \u2014 seasonal patterns work",
+    "bb (54.3% at 1d, 8042 samples) \u2014 Bollinger Bands still useful"
   ],
   "signals_that_were_wrong": [
-    "Funding rate at 1d: 31.3% (722 samples) \u2014 INVERTED at longer horizons!",
-    "Realized skewness: 33.3% (90 samples) \u2014 new, barely above random",
-    "Futures flow at 1d: 38.3% (2168 samples) \u2014 persistent underperformer",
-    "ML classifier at 1d: 41.7% (1714 samples) \u2014 worse than coin flip as expected",
-    "Fibonacci at 1d: 43.6% (17024 samples) \u2014 large sample, consistently bad",
-    "MACD at 1d: 44.1% (6049 samples) \u2014 classic indicator fails on our assets",
-    "Oscillators at 3h: 43.0% (1366 samples) \u2014 confirming disabled status",
-    "Trend at 3h: 40.3% (11125 samples) \u2014 trending signals fail in ranging markets",
-    "Sentiment at both horizons: 45.1-45.9% \u2014 CryptoBERT/keyword approach underperforms"
+    "futures_flow (38.3% at 1d, 2168 samples) \u2014 actively harmful, should be disabled",
+    "funding (31.2% at 1d, 735 samples) \u2014 terrible but horizon-gated to 3h/4h",
+    "macd (44.2% at 1d, 6136 samples) \u2014 below 47% threshold, still active",
+    "trend (46.1% at 1d, 17880 samples) \u2014 below threshold with massive sample size",
+    "volatility_sig (46.3% at 1d, 7353 samples) \u2014 below threshold",
+    "macro_regime (47.0% at 1d, 29028 samples) \u2014 right at threshold",
+    "forecast (47.7% at 1d, 6756 samples) \u2014 barely above threshold"
   ],
   "accuracy_changes": {
-    "tier1_1d": {
-      "BTC-USD": {
-        "accuracy": 52.5,
-        "samples": 3889,
-        "status": "marginal"
-      },
-      "ETH-USD": {
-        "accuracy": 49.8,
-        "samples": 3742,
-        "status": "coin_flip"
-      },
-      "XAG-USD": {
-        "accuracy": 49.4,
-        "samples": 2723,
-        "status": "coin_flip"
-      },
-      "XAU-USD": {
-        "accuracy": 49.4,
-        "samples": 2403,
-        "status": "coin_flip"
-      },
-      "MSTR": {
-        "accuracy": 47.8,
-        "samples": 2192,
-        "status": "below_coin_flip"
-      }
-    },
-    "tier1_3h": {
-      "BTC-USD": {
-        "accuracy": 50.7,
-        "samples": 3767,
-        "status": "marginal"
-      },
-      "ETH-USD": {
-        "accuracy": 48.4,
-        "samples": 3652,
-        "status": "coin_flip"
-      },
-      "XAG-USD": {
-        "accuracy": 53.5,
-        "samples": 2563,
-        "status": "marginal_edge"
-      },
-      "XAU-USD": {
-        "accuracy": 54.3,
-        "samples": 2133,
-        "status": "marginal_edge"
-      },
-      "MSTR": {
-        "accuracy": 45.6,
-        "samples": 2066,
-        "status": "below_coin_flip"
-      }
-    },
-    "observation": "All Tier 1 consensus accuracy is near coin-flip. Metals slightly better at 3h (53-54%). Strongest signals (funding@3h, calendar@3h, econ_calendar@1d) are not well-represented in consensus voting."
+    "critical_alert": "12 signals dropped >15pp from 7-day baseline (accuracy_degradation alert at 16:53 UTC)",
+    "alert_status": "Violations cleared on recheck but critical_errors.jsonl entries unresolved",
+    "active_signals_below_47pct": [
+      "futures_flow (38.3%)",
+      "macd (44.2%)",
+      "trend (46.1%)",
+      "volatility_sig (46.3%)"
+    ],
+    "recommendation": "futures_flow and macd should be force-HOLD gated immediately"
   },
   "system_errors": [
-    "No errors today. Last module failures on 2026-04-22 (monte_carlo, price_targets, equity_curve)."
+    "accuracy_degradation: 12 signals dropped >15pp (2 duplicate critical entries at 16:53 UTC)",
+    "No execution errors \u2014 0 signal failures, 93 clean cycles"
   ],
   "key_observations": [
-    "FOMC day \u2014 all decisions correctly HOLD. Event risk overrides signals.",
-    "Signal horizon mismatch: funding rate is 74.2% at 3h but 31.3% at 1d \u2014 we must gate by horizon",
-    "Consensus accuracy for metals at 3h (53-54%) is the only actionable edge in Tier 1",
-    "BTC at 6.6K, near 5K breakout from prophecy. 5K checkpoint pending.",
-    "No metals trades since March 5 \u2014 the execution system has been dormant",
-    "Trend signal at 3h: 40.3% \u2014 ranging market regime is destroying trend followers",
-    "MSTR at 1d consensus of 47.8% with large sample \u2014 signal system has no edge on this ticker",
-    "Best individual signals (econ_calendar, qwen3, ministral, claude_fundamental) above 57% \u2014 these should carry more weight",
-    "Fibonacci consistently bad (43.6% at 1d, 43.3% at 3h, 17024+ samples) \u2014 should be disabled or heavily penalized"
-  ]
+    "Metals down hard: XAG -3%, MSTR -3.9%. Risk-off day across the board.",
+    "XAG-USD oscillated between BUY and HOLD all day \u2014 signal indecision on oversold bounce vs continued weakness",
+    "All 20 Layer 2 sessions were HOLD \u2014 system correctly not chasing in a declining market",
+    "Bold BTC position (+5.3%) is the only profitable open trade, acting as portfolio anchor",
+    "Patient XAG position (+0.4% on entry) was +3.5% intraday at open \u2014 gave back gains",
+    "12 signals degraded >15pp: likely many of the newer/experimental signals regressing to mean",
+    "futures_flow at 38.3% is actively harmful \u2014 worse than a coin flip by a wide margin",
+    "Silver prophecy 20 target intact but short-term selling pressure evident"
+  ],
+  "metals_signal_accuracy": {
+    "llm_XAG_1h": {
+      "accuracy": 0.512,
+      "samples": 1836
+    },
+    "chronos_1h_XAG_1h": {
+      "accuracy": 0.487,
+      "samples": 985
+    },
+    "chronos_3h_XAG_1h": {
+      "accuracy": 0.516,
+      "samples": 1306
+    },
+    "llm_XAG_3h": {
+      "accuracy": 0.42,
+      "samples": 1603,
+      "note": "BAD \u2014 LLM worse at 3h than 1h"
+    }
+  }
 }
