@@ -124,10 +124,15 @@ def _sub_regime_persistence(spread_series: pd.Series) -> str:
     """Count consecutive days the spread has stayed on the same side."""
     if len(spread_series) < 2:
         return "HOLD"
-    current_sign = 1 if float(spread_series.iloc[-1]) > 0 else -1
+    last = float(spread_series.iloc[-1])
+    if last == 0.0:
+        return "HOLD"
+    current_sign = 1 if last > 0 else -1
     days = 0
     for i in range(len(spread_series) - 1, -1, -1):
         val = float(spread_series.iloc[i])
+        if val == 0.0:
+            break
         s = 1 if val > 0 else -1
         if s != current_sign:
             break
@@ -159,7 +164,7 @@ def compute_treasury_risk_rotation_signal(
     ief = treasury["ief"]
     tlt = treasury["tlt"]
     spread_series = _compute_spread_series(ief, tlt)
-    spread_series = spread_series.dropna()
+    spread_series = spread_series.replace([np.inf, -np.inf], np.nan).dropna()
 
     if len(spread_series) < 30:
         return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}, "indicators": {}}

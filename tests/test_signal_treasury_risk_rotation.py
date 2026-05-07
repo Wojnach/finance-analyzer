@@ -197,6 +197,14 @@ class TestSubIndicators:
         spread = pd.Series([-0.01, -0.01, 0.01, 0.01])
         assert _sub_regime_persistence(spread) == "HOLD"
 
+    def test_persistence_zero_spread_is_hold(self):
+        spread = pd.Series([0.0] * 10)
+        assert _sub_regime_persistence(spread) == "HOLD"
+
+    def test_persistence_zeros_break_streak(self):
+        spread = pd.Series([0.01] * 5 + [0.0] + [0.01] * 3)
+        assert _sub_regime_persistence(spread) == "HOLD"
+
 
 class TestHelpers:
 
@@ -216,6 +224,18 @@ class TestHelpers:
         spread_clean = spread.dropna()
         assert len(spread_clean) > 0
         assert float(spread_clean.iloc[-1]) > 0
+
+    def test_zero_price_produces_inf_handled(self, monkeypatch):
+        ief = pd.Series([0.0] + list(np.linspace(90, 95, 299)), name="IEF")
+        tlt = pd.Series(np.linspace(100, 110, 300), name="TLT")
+        monkeypatch.setattr(
+            "portfolio.signals.treasury_risk_rotation._fetch_treasury_data",
+            lambda: {"ief": ief, "tlt": tlt},
+        )
+        df = _make_df()
+        result = compute_treasury_risk_rotation_signal(df)
+        assert result["action"] in ("BUY", "SELL", "HOLD")
+        assert not np.isinf(result["indicators"].get("zscore", 0.0))
 
 
 class TestWithContext:
