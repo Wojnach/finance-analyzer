@@ -263,6 +263,14 @@ def _register_defaults():
                       "portfolio.signals.williams_vix_fix",
                       "compute_williams_vix_fix_signal",
                       max_confidence=0.7)
+    # Treasury risk rotation — bond yield curve shape as cross-asset regime signal
+    # 2026-05-07: Gayed (2014), SSRN 2431022. IEF vs TLT relative performance.
+    # Steepening = risk-on, flattening = risk-off. Inverted for safe havens.
+    # Only signal using bond market data — zero correlation with existing clusters.
+    register_enhanced("treasury_risk_rotation",
+                      "portfolio.signals.treasury_risk_rotation",
+                      "compute_treasury_risk_rotation_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

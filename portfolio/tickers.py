@@ -97,6 +97,7 @@ DISABLED_SIGNALS = {
     "vol_ratio_regime",  # pending live validation (added 2026-04-29)
     "residual_pair_reversion",  # pending live validation (added 2026-04-30)
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
+    "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
     # "econ_calendar" RE-ENABLED 2026-04-23. BUG-218 fixed: added post_event_relief
     # sub-signal that emits BUY after high-impact events pass (4-24h relief window)
     # and during event-free calm windows (>72h to next event). The composite is now
@@ -289,4 +290,5 @@ SIGNAL_NAMES = [
     "vol_ratio_regime",
     "residual_pair_reversion",
     "williams_vix_fix",
+    "treasury_risk_rotation",
 ]
