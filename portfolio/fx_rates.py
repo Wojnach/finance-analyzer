@@ -1,7 +1,7 @@
 """USD/SEK exchange rate fetching with caching and staleness alerts.
 
 NOTE: Not migrated to shared_state._cached() because this module has custom
-staleness behaviour: Telegram alerting when stale, hardcoded 10.85 fallback,
+staleness behaviour: Telegram alerting when stale, hardcoded 10.50 fallback,
 and ConnectionError semantics. These would be lost with _cached().
 """
 
@@ -61,9 +61,9 @@ def fetch_usd_sek():
     # Last resort: hardcoded fallback
     # BUG-117: Use ERROR level — hardcoded rate may be severely stale.
     # Portfolio valuations using this rate could be off by 10-15% if SEK has moved.
-    logger.error("Using hardcoded FX fallback rate 10.85 SEK — no cached or live rate available")
+    logger.error("Using hardcoded FX fallback rate 10.50 SEK — no cached or live rate available")
     _fx_alert_telegram(None)
-    return 10.85
+    return 10.50
 
 
 def _fx_alert_telegram(age_secs):
@@ -78,7 +78,7 @@ def _fx_alert_telegram(age_secs):
         if age_secs is not None:
             msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
         else:
-            msg = "_FX WARNING: Using hardcoded fallback rate 10.85 SEK. No live or cached rate available._"
+            msg = "_FX WARNING: Using hardcoded fallback rate 10.50 SEK. No live or cached rate available._"
         # BUG-105: Route via message store with "error" category so it reaches Telegram.
         # Previously used "fx_alert" which was save-only — user never saw FX warnings.
         from portfolio.message_store import send_or_store

@@ -118,7 +118,7 @@ INITIAL_VALUE_DEFAULT = 500_000  # SEK
 # doesn't disagree with the live fx fetcher.
 _FX_RATE_MIN = 7.0
 _FX_RATE_MAX = 15.0
-_FX_RATE_HARDCODED_FALLBACK = 10.85
+_FX_RATE_HARDCODED_FALLBACK = 10.50
 _FX_CACHE_FILENAME = "fx_rate_cache.json"
 
 
@@ -140,7 +140,7 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
       2. Cached rate from ``DATA_DIR/fx_rate_cache.json`` if present and
          in-band. The cache is best-effort: corrupt JSON or missing/invalid
          rate field is treated as no-cache.
-      3. ``_FX_RATE_HARDCODED_FALLBACK`` (10.85) — matches
+      3. ``_FX_RATE_HARDCODED_FALLBACK`` (10.50) — matches
          portfolio/fx_rates.py:66 so both modules disagree-by-zero on the
          absolute worst-case path.
 
