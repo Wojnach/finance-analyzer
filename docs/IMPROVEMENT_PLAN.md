@@ -1,108 +1,147 @@
-# Improvement Plan — Auto-Session 2026-05-05
+# Improvement Plan — auto-session-2026-05-08
 
-## Methodology
+## Exploration Summary
 
-3 parallel exploration agents covering core loop/signals/triggers,
-portfolio/risk/dashboard, and metals/infrastructure. Manual verification
-of all critical claims against source code. health.py race condition
-rejected (correctly locked). 3 confirmed issues remain.
+Deep exploration via 4 parallel agents + direct reads. Coverage: core loop + signal engine,
+risk + portfolio management, metals + dashboard + infra, signal modules + recent changes.
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### P1 — Critical (production impact, data corruption risk)
+### P0 — Critical
 
-**B1: trade_guards.py record_trade() has no threading lock**
-- File: `portfolio/trade_guards.py:260,310`
-- `record_trade()` does load→mutate→save without holding any lock.
-  If two threads record trades simultaneously (ThreadPoolExecutor in
-  main.py processes tickers in parallel), the second save overwrites
-  the first's mutations. Loss counters, cooldowns, and position rate
-  limits can be corrupted.
-- Impact: Incorrect cooldown multipliers → overtrading violations;
-  incorrect consecutive_losses → wrong escalation level.
-- Fix: Add a module-level `threading.Lock()` around the full RMW
-  sequence in `record_trade()`. Also protect `check_overtrading_guards()`
-  which has the same load-without-lock pattern.
+**B1: BUG-111 — RSI adaptive thresholds not used in outcome reconstruction**
+- File: `portfolio/outcome_tracker.py:34-43`
+- `_derive_signal_vote()` hardcodes RSI at [30, 70] but live `generate_signal()` uses
+  adaptive `rsi_p20/rsi_p80` from rolling percentiles (capped 15-85).
+- Impact: RSI accuracy tracking compares against wrong threshold. Every RSI outcome
+  potentially misclassified, poisoning accuracy data that gates downstream signals.
+- Fix: Read `rsi_p20`/`rsi_p80` from signal snapshot indicators. Fall back to [30, 70]
+  for old snapshots missing these fields.
 
-**B2: signal_engine.py _cross_ticker_consensus dict race condition**
-- File: `portfolio/signal_engine.py:258,3132-3133,3709`
-- `_cross_ticker_consensus` is a module-level dict written at line 3709
-  inside `generate_signal()` without a lock. When ThreadPoolExecutor
-  processes BTC-USD and MSTR in parallel, MSTR reads BTC's consensus
-  at lines 3132-3133 — potentially seeing stale or torn data.
-- Comment at line 253 claims "GIL protects dict assignment" — this is
-  wrong: membership test + subsequent `.get()` is NOT atomic. More
-  importantly, stale reads cause MSTR to use a PREVIOUS cycle's BTC
-  consensus, not the current one.
-- Impact: MSTR trading decisions based on stale BTC consensus data.
-- Fix: Process BTC-USD FIRST (before MSTR) by sorting tickers so
-  dependencies are resolved before dependents. Add a lock for the dict
-  for safety. Document the ordering requirement.
+**B2: Silent Cholesky failure in monte_carlo_risk**
+- File: `portfolio/monte_carlo_risk.py` — nearest-PSD fallback path
+- When Cholesky fails, `_nearest_psd()` is used but no warning logged.
+- Impact: Silent VaR/CVaR degradation with corrupted correlation matrix.
+- Fix: Add `logger.warning()` on Cholesky fallback.
 
-### P2 — Moderate (silent degradation)
+### P1 — High
 
-**B3: data_collector.py returns empty DataFrame on Binance empty data**
-- File: `portfolio/data_collector.py:90-93`
-- When Binance returns 200 OK with empty data (e.g., during maintenance,
-  new instrument, or rate limit), `_binance_fetch()` records a circuit
-  breaker failure but returns an empty DataFrame instead of raising.
-- Impact: Downstream signal computation receives empty data, logs
-  "insufficient data" warnings, and produces HOLD votes — but the
-  trigger system doesn't know data is missing (it sees a valid HOLD).
-  This masks outages silently.
-- Fix: Raise `ConnectionError` after recording the failure, so the
-  caller's error handling (which already exists) properly classifies
-  this as a data fetch failure.
+**B3: outcome_tracker SQLite dual-write failure swallowed**
+- File: `portfolio/outcome_tracker.py:160-167`
+- SQLite write wrapped in bare `try/except` with no logging.
+- Impact: signal_log.db can silently fall behind signal_log.jsonl. Accuracy queries
+  from SQLite return incomplete data.
+- Fix: Log at WARNING level with entry count context.
 
----
+**B4: signal_registry failure sentinel doesn't expire properly**
+- File: `portfolio/signal_registry.py:91`
+- Import failures set `_fail_ts` for cooldown, but on process restart a previously
+  failed signal never retries because the cooldown logic works correctly. The real
+  issue: no periodic retry after initial cooldown expires. A signal that fails at
+  startup due to a transient dependency remains dead for the entire process lifetime.
+- Fix: Add a 5-minute retry window after each cooldown expiry.
 
-## 2. Implementation Batches
+**B5: ~15 bare `except Exception: pass` patterns across codebase**
+- Files: `portfolio/accuracy_degradation.py:956`, `portfolio/agent_invocation.py:1053`,
+  and others found via grep.
+- Impact: Silent failure modes. The 3-week Layer 2 auth outage was partially caused
+  by this pattern hiding errors.
+- Fix: Replace bare `pass` with `logger.debug("...", exc_info=True)` minimum.
+  For critical paths (journal writes, accuracy snapshots), use WARNING.
 
-### Batch 1: Fix B1 — trade_guards.py thread safety
-Files: `portfolio/trade_guards.py`, `tests/test_trade_guards.py`
-- Add `_state_lock = threading.Lock()` at module level
-- Wrap `record_trade()` full body in `with _state_lock:`
-- Wrap `check_overtrading_guards()` read path in `with _state_lock:`
-- Write test: concurrent `record_trade()` calls don't lose updates
+**B6: Signal sub-indicator exceptions silently swallowed**
+- Files: All composite signal modules (momentum.py, oscillators.py, volatility.py, etc.)
+- Pattern: `except Exception: sub_signals["x"] = "HOLD"` with no logging.
+- Impact: Bugs in sub-indicators (IndexError, AttributeError) are invisible. Signal
+  votes HOLD without anyone knowing computation failed.
+- Fix: Add `logger.warning("sub-indicator %s failed: %s", name, e)` to catch blocks.
 
-### Batch 2: Fix B2 — signal_engine cross-ticker consensus ordering
-Files: `portfolio/signal_engine.py`, `portfolio/main.py`
-- Add `_cross_ticker_lock = threading.Lock()` to signal_engine
-- Protect writes to `_cross_ticker_consensus` with the lock
-- In main.py, ensure BTC-USD is processed BEFORE MSTR (sort tickers
-  so dependencies resolve first, or process BTC in the first batch
-  then MSTR in the second)
-- Add comment documenting ordering requirement
+### P2 — Medium
 
-### Batch 3: Fix B3 — data_collector silent failure
-Files: `portfolio/data_collector.py`, `tests/test_data_collector.py`
-- Change line 93 from `return pd.DataFrame()` to `raise ConnectionError(...)`
-- Verify callers already handle ConnectionError (grep for try/except
-  around `binance_klines` and `_binance_fetch`)
-- Write test confirming the exception propagates
+**B7: FX rate hardcoded fallback (10.85 SEK/USD)**
+- File: `portfolio/risk_management.py:125-184`
+- Three-tier fallback chain ends at hardcoded 10.85. Current SEK/USD ~10.3 → 5% error.
+- Impact: Could trigger false drawdown breach on extended API outage.
+- Fix: Update to 10.50, add staleness counter.
+
+**B8: equity_curve drops day when prev_val == 0**
+- File: `portfolio/equity_curve.py:104`
+- Zero previous value silently drops daily return instead of recording 0%.
+- Impact: Biases Sharpe/Sortino during portfolio initialization.
+- Fix: Treat zero prev_val as 0% return.
 
 ---
 
-## 3. Impact Assessment
+## 2. Architecture Improvements
 
-| Change | Risk | Rollback |
-|--------|------|----------|
-| B1: Lock in trade_guards | LOW — additive, no behavior change on happy path | Remove lock |
-| B2: Cross-ticker ordering | MEDIUM — changes ticker processing order. If a signal depends on MSTR being processed first (unlikely), it would break | Revert sort |
-| B3: Raise instead of return | MEDIUM — callers that don't handle the exception will see errors. Must verify all callers have try/except | Revert to return pd.DataFrame() |
+### A1: Standardize DATA_DIR path resolution across signal modules
+- Problem: Inconsistent path patterns. Some use `Path(__file__).resolve().parent.parent.parent / "data"`,
+  others use `os.path.dirname()` chains, one (cot_positioning) was using relative paths (fixed 2026-05-02).
+- Fix: Add `DATA_DIR` constant to `signal_utils.py` and import it.
+- Impact: Prevents future CWD-relative path bugs. ~5 files need updating.
+
+### A2: Extract common z-score helper to signal_utils
+- Problem: 3+ signal modules independently compute z-scores with near-identical code.
+- Fix: Add `zscore(series, window)` to `signal_utils.py`. Replace inline implementations.
+- Impact: ~30 lines of deduplication. Lower maintenance burden.
 
 ---
 
-## 4. Not Addressed (future work)
+## 3. Useful Features
 
-- **signal_engine.py persistence state unbounded memory**: Low severity,
-  only affects test/probe scenarios. Deferred.
-- **file_utils.py Windows lockfile permanent deadlock on crash**: Real
-  issue but rare (requires process crash while holding sidecar lock).
-  Requires significant refactor to fix safely. Deferred.
-- **agent_invocation.py double-logging on timeout path**: Cosmetic,
-  doesn't affect trading decisions. Deferred.
-- **dashboard/app.py no timeout on adaptive JSONL read**: Would require
-  threading/async changes to Flask. Deferred.
+### F1: Loop contract — SQLite/JSONL reconciliation check
+- Add invariant to `verify_contract()` comparing signal_log.jsonl line count vs
+  signal_log.db row count. WARNING if divergence > 100.
+- Why: Makes B3 (dual-write gap) observable.
+- Impact: ~20 lines in loop_contract.py.
+
+---
+
+## 4. Refactoring TODOs
+
+### R1: Replace bare `except Exception: pass` with logging (~15 locations)
+### R2: Add logging to signal sub-indicator catch blocks (~20 locations)
+### R3: Standardize DATA_DIR in signal modules using relative path chains
+
+---
+
+## 5. Execution Batches
+
+### Batch 1: Critical bug fixes (B1, B2) — 2 files
+1. `portfolio/outcome_tracker.py` — B1: Fix RSI threshold reconstruction
+2. `portfolio/monte_carlo_risk.py` — B2: Add Cholesky fallback warning
+
+### Batch 2: Silent failure observability (B3, B5, B6) — ~10 files
+1. `portfolio/outcome_tracker.py` — B3: Log SQLite write failures
+2. `portfolio/accuracy_degradation.py` — B5: Replace bare pass with logging
+3. `portfolio/agent_invocation.py` — B5: Replace bare pass with logging
+4. Signal modules — B6: Add logging to sub-indicator catch blocks
+   (momentum.py, oscillators.py, volatility.py, candlestick.py, structure.py,
+   heikin_ashi.py, mean_reversion.py, macro_regime.py)
+
+### Batch 3: Medium fixes + utility (B7, B8, A2) — 3 files
+1. `portfolio/risk_management.py` — B7: Update FX fallback
+2. `portfolio/equity_curve.py` — B8: Handle zero prev_val
+3. `portfolio/signal_utils.py` — A2: Add zscore helper
+
+### Batch 4: Path standardization (A1) + loop contract (F1) — ~6 files
+1. `portfolio/signal_utils.py` — A1: Add DATA_DIR constant
+2. Signal modules with non-standard paths — A1: Import DATA_DIR
+3. `portfolio/loop_contract.py` — F1: Add SQLite/JSONL reconciliation
+
+### Batch 5: Documentation + verification
+1. `docs/SYSTEM_OVERVIEW.md` — Update
+2. `docs/SESSION_PROGRESS.md` — Final session notes
+3. Full test suite run
+4. Merge, push
+
+---
+
+## Risk Assessment
+
+- **Batch 1**: Low risk. outcome_tracker change adds field reads with fallback. monte_carlo_risk adds logging only.
+- **Batch 2**: Very low risk. All changes add logging without changing behavior.
+- **Batch 3**: Low risk. FX fallback is a constant update. equity_curve change affects edge case only. zscore is new utility function.
+- **Batch 4**: Low risk. Path changes are mechanical. Loop contract check is additive.
