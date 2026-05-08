@@ -820,7 +820,7 @@ class TestFetchUsdSek:
         ):
             rate = fetch_usd_sek()
 
-        assert rate == 10.85
+        assert rate == 10.50
 
 
 # --- Stock timeframes config ---
