@@ -830,3 +830,123 @@ class TestPerTickerConsensusPenalty:
         assert len(ptc_entries) == 1
         # 0.6 + (0.459 - 0.52) * 4.0 = 0.6 - 0.244 = 0.356
         assert abs(ptc_entries[0]["mult"] - 0.356) < 0.01
+
+
+# --- Stage 5b: Ensemble entropy guard ---
+
+class TestEnsembleEntropy:
+    """Stage 5b: high 3-way disagreement (BUY/SELL/HOLD) caps confidence."""
+
+    def test_near_uniform_split_gets_06x(self):
+        """~33% each → normalized entropy ~1.0 → 0.6x."""
+        extra = _base_extra(
+            voters=20, buy_count=10, sell_count=10,
+            _total_applicable=30,  # 10 buy, 10 sell, 10 hold
+        )
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 1
+        assert ent_entries[0]["mult"] == 0.6
+        assert ent_entries[0]["entropy"] >= 0.9
+
+    def test_moderate_disagreement_gets_08x(self):
+        """60-30-10 split → normalized entropy ~0.82 → 0.8x."""
+        # 18 buy, 9 sell, 3 hold out of 30 total
+        extra = _base_extra(
+            voters=27, buy_count=18, sell_count=9,
+            _total_applicable=30,
+        )
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 1
+        assert ent_entries[0]["mult"] == 0.8
+        assert 0.8 <= ent_entries[0]["entropy"] < 0.9
+
+    def test_clear_majority_no_penalty(self):
+        """80-10-10 split → entropy ~0.56 → no penalty."""
+        # 24 buy, 3 sell, 3 hold out of 30
+        extra = _base_extra(
+            voters=27, buy_count=24, sell_count=3,
+            _total_applicable=30,
+        )
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 0
+
+    def test_too_few_applicable_skips(self):
+        """Below 5 total applicable signals → entropy noisy, skip."""
+        extra = _base_extra(
+            voters=3, buy_count=2, sell_count=1,
+            _total_applicable=4,  # below _ENTROPY_MIN_APPLICABLE
+        )
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 0
+
+    def test_hold_action_skips_entropy(self):
+        """HOLD action bypasses entropy check."""
+        extra = _base_extra(
+            voters=20, buy_count=10, sell_count=10,
+            _total_applicable=30,
+        )
+        action, conf, log = apply_confidence_penalties(
+            "HOLD", 0.0, "ranging", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 0
+
+    def test_zero_conf_skips_entropy(self):
+        """Zero confidence bypasses entropy check (already gated)."""
+        extra = _base_extra(
+            voters=20, buy_count=10, sell_count=10,
+            _total_applicable=30,
+        )
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.0, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 0
+
+    def test_entropy_stored_in_extra_info(self):
+        """Normalized entropy value persisted for debugging."""
+        extra = _base_extra(
+            voters=20, buy_count=10, sell_count=10,
+            _total_applicable=30,
+        )
+        apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        assert "_ensemble_entropy" in extra
+        assert 0.9 <= extra["_ensemble_entropy"] <= 1.0
+
+    def test_sell_action_also_penalized(self):
+        """SELL signals with high entropy also get penalized."""
+        extra = _base_extra(
+            voters=20, buy_count=10, sell_count=10,
+            _total_applicable=30,
+        )
+        action, conf, log = apply_confidence_penalties(
+            "SELL", 0.7, "trending-down", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 1
+
+    def test_two_way_split_below_threshold(self):
+        """50-50 BUY/SELL with zero HOLD → entropy 0.63 → no penalty."""
+        extra = _base_extra(
+            voters=20, buy_count=10, sell_count=10,
+            _total_applicable=20,  # no HOLD at all
+        )
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", None, {}
+        )
+        ent_entries = [p for p in log if p["stage"] == "ensemble_entropy"]
+        assert len(ent_entries) == 0

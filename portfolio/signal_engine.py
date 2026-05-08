@@ -2413,7 +2413,7 @@ def _compute_adx(df, period=14):
 
 
 def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df, config):
-    """Apply a 6-stage multiplicative confidence penalty cascade.
+    """Apply an 8-stage multiplicative confidence penalty cascade.
 
     Stages:
       1. Regime penalty — dampens confidence in choppy/volatile markets
@@ -2421,6 +2421,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
       3. Trap detection — catches bull/bear traps (price vs volume divergence)
       4. Dynamic MIN_VOTERS — raises the bar in uncertain markets
       5. Unanimity penalty — over-agreement often means the move is priced in
+      5b. Ensemble entropy — high 3-way disagreement caps confidence
       6. Per-ticker consensus — penalizes tickers where ensemble accuracy < 50%
       7. Calibration compression — compress overconfident predictions to honest levels
 
@@ -2531,6 +2532,28 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
             elif agreement_ratio >= 0.8:  # 80-90% agreement
                 conf *= 0.75
                 penalty_log.append({"stage": "unanimity", "agreement": round(agreement_ratio, 3), "mult": 0.75})
+
+    # --- Stage 5b: Ensemble entropy guard ---
+    # High Shannon entropy across BUY/SELL/HOLD means signals genuinely disagree —
+    # the winning direction is near-random. Cap confidence.
+    _ENTROPY_MIN_APPLICABLE = 5
+    if action != "HOLD" and conf > 0.0:
+        import math as _math_ent
+        _ent_buy = extra_info.get("_buy_count", 0)
+        _ent_sell = extra_info.get("_sell_count", 0)
+        _ent_total = extra_info.get("_total_applicable", _ent_buy + _ent_sell)
+        _ent_hold = max(0, _ent_total - _ent_buy - _ent_sell)
+        if _ent_total >= _ENTROPY_MIN_APPLICABLE:
+            _probs = [c / _ent_total for c in (_ent_buy, _ent_sell, _ent_hold) if c > 0]
+            _entropy = -sum(p * _math_ent.log2(p) for p in _probs)
+            _norm_entropy = _entropy / _math_ent.log2(3)
+            extra_info["_ensemble_entropy"] = round(_norm_entropy, 4)
+            if _norm_entropy >= 0.9:
+                conf *= 0.6
+                penalty_log.append({"stage": "ensemble_entropy", "entropy": round(_norm_entropy, 3), "mult": 0.6})
+            elif _norm_entropy >= 0.8:
+                conf *= 0.8
+                penalty_log.append({"stage": "ensemble_entropy", "entropy": round(_norm_entropy, 3), "mult": 0.8})
 
     # --- Stage 6: Per-ticker consensus accuracy penalty ---
     # RES-2026-04-17: The consensus system has below-coinflip accuracy for some
