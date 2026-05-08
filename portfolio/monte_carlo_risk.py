@@ -253,7 +253,11 @@ class PortfolioRiskSimulator:
         try:
             L = np.linalg.cholesky(self._corr)
         except np.linalg.LinAlgError:
-            # Fall back to nearest PSD if not PD
+            logger.warning(
+                "Cholesky decomposition failed for %d-asset correlation matrix — "
+                "falling back to nearest PSD projection",
+                self._n_assets,
+            )
             L = np.linalg.cholesky(_nearest_psd(self._corr))
 
         # Step 2: Independent standard normals

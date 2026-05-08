@@ -31,7 +31,6 @@ def _derive_signal_vote(name, indicators, extra):
         rsi = indicators.get("rsi")
         if rsi is None:
             return "HOLD"
-        # BUG-111: Should use adaptive thresholds from rsi_p20/rsi_p80
         rsi_lower = indicators.get("rsi_p20", 30)
         rsi_upper = indicators.get("rsi_p80", 70)
         rsi_lower = max(rsi_lower, 15)
@@ -164,7 +163,7 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         db.insert_snapshot(entry)
         db.close()
     except Exception as e:
-        logger.debug("SQLite snapshot write failed: %s", e)
+        logger.warning("SQLite snapshot write failed (JSONL has data, SQLite may lag): %s", e)
 
     return entry
 

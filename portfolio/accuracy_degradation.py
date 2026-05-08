@@ -954,7 +954,7 @@ def build_daily_summary(*, latest: dict, baseline: dict | None,
         snap_age_days = _snapshot_age_days(baseline, now) if baseline else 0.0
         snap_age = f"{snap_age_days:.1f}d"
     except Exception:
-        pass
+        logger.debug("Snapshot age computation failed", exc_info=True)
 
     sig_count = len(signals_recent or {})
     lines.append("")
