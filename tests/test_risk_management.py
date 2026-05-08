@@ -1006,11 +1006,11 @@ class TestFxRateResolution:
         assert _resolve_fx_rate({"fx_rate": 0.01}) == 10.85
 
     def test_no_cache_no_summary_uses_hardcoded_fallback(self, tmp_path, monkeypatch):
-        """No agent_summary, no disk cache — last resort 10.85 (NOT 1.0)."""
+        """No agent_summary, no disk cache — last resort 10.50 (NOT 1.0)."""
         from portfolio.risk_management import _resolve_fx_rate
         monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
         rate = _resolve_fx_rate({})
-        assert rate == 10.85, "last-resort fallback must be 10.85, not 1.0"
+        assert rate == 10.50, "last-resort fallback must be 10.50, not 1.0"
 
     def test_corrupt_cache_falls_back_to_hardcoded(self, tmp_path, monkeypatch):
         from portfolio.risk_management import _resolve_fx_rate
@@ -1018,7 +1018,7 @@ class TestFxRateResolution:
         cache_path = tmp_path / "fx_rate_cache.json"
         cache_path.write_text("not valid json", encoding="utf-8")
         rate = _resolve_fx_rate({})
-        assert rate == 10.85
+        assert rate == 10.50
 
     def test_cache_with_invalid_rate_falls_back(self, tmp_path, monkeypatch):
         """Cache file present but rate field is missing/invalid."""
@@ -1027,7 +1027,7 @@ class TestFxRateResolution:
         cache_path = tmp_path / "fx_rate_cache.json"
         cache_path.write_text(json.dumps({"rate": "n/a"}), encoding="utf-8")
         rate = _resolve_fx_rate({})
-        assert rate == 10.85
+        assert rate == 10.50
 
     def test_good_summary_rate_updates_disk_cache(self, tmp_path, monkeypatch):
         """When summary provides a valid rate, persist it for next-time fallback."""

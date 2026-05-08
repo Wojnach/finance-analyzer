@@ -17,7 +17,11 @@ and at least 50 rows of data.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 import pandas as pd
 
 from portfolio.signal_utils import majority_vote, sma
@@ -431,12 +435,14 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
     try:
         trend = _detect_trend(close, period=20)
     except Exception:
+        logger.debug("fibonacci trend detection failed", exc_info=True)
         trend = "flat"
 
     # -- Find swing high / low ---------------------------------------------
     try:
         swing_high, swing_low, sh_idx, sl_idx = _find_swing_high_low(df)
     except Exception:
+        logger.debug("fibonacci swing high/low detection failed", exc_info=True)
         return hold_result
 
     # Sanity check: swing range must be non-zero
@@ -469,6 +475,7 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
         sub_signals["fib_retracement"] = fib_ret_action
         indicators.update(fib_ret_info)
     except Exception:
+        logger.debug("fib_retracement failed", exc_info=True)
         sub_signals["fib_retracement"] = "HOLD"
 
     # 2. Golden Pocket
@@ -479,6 +486,7 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
         sub_signals["golden_pocket"] = gp_action
         indicators.update(gp_info)
     except Exception:
+        logger.debug("golden_pocket failed", exc_info=True)
         sub_signals["golden_pocket"] = "HOLD"
 
     # 3. Fibonacci Extension
@@ -489,6 +497,7 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
         sub_signals["fib_extension"] = ext_action
         indicators.update(ext_info)
     except Exception:
+        logger.debug("fib_extension failed", exc_info=True)
         sub_signals["fib_extension"] = "HOLD"
 
     # 4. Standard Pivot Points
@@ -499,6 +508,7 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
         sub_signals["pivot_standard"] = piv_action
         indicators.update(piv_info)
     except Exception:
+        logger.debug("pivot_standard failed", exc_info=True)
         sub_signals["pivot_standard"] = "HOLD"
         indicators["pivot"] = float("nan")
         indicators["r1"] = float("nan")
@@ -512,6 +522,7 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
         sub_signals["pivot_camarilla"] = cam_action
         indicators.update(cam_info)
     except Exception:
+        logger.debug("pivot_camarilla failed", exc_info=True)
         sub_signals["pivot_camarilla"] = "HOLD"
         indicators["cam_r3"] = float("nan")
         indicators["cam_s3"] = float("nan")

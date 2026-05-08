@@ -19,8 +19,11 @@ and at least 20 rows of data (for Bollinger Band calculation).
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from portfolio.signal_utils import majority_vote, rsi, safe_float, sma
 
@@ -483,7 +486,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
                         original_close.iloc[i - 1] * (1 + adj_ret)
                     )
         except Exception:
-            pass  # fall through to raw data
+            logger.debug("mean_reversion detrend failed, using raw data", exc_info=True)
     close = df[col_map["close"]].astype(float)
     high = df[col_map["high"]].astype(float)
     low = df[col_map["low"]].astype(float)
@@ -499,6 +502,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         sub_signals["rsi2_mr"] = rsi2_sig
         indicators["rsi2"] = safe_float(rsi2_val)
     except Exception:
+        logger.debug("rsi2_mr failed", exc_info=True)
         sub_signals["rsi2_mr"] = "HOLD"
         indicators["rsi2"] = float("nan")
 
@@ -508,6 +512,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         sub_signals["rsi3_mr"] = rsi3_sig
         indicators["rsi3"] = safe_float(rsi3_val)
     except Exception:
+        logger.debug("rsi3_mr failed", exc_info=True)
         sub_signals["rsi3_mr"] = "HOLD"
         indicators["rsi3"] = float("nan")
 
@@ -517,6 +522,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         sub_signals["ibs"] = ibs_sig
         indicators["ibs"] = safe_float(ibs_val)
     except Exception:
+        logger.debug("ibs failed", exc_info=True)
         sub_signals["ibs"] = "HOLD"
         indicators["ibs"] = float("nan")
 
@@ -526,6 +532,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         sub_signals["consecutive_days"] = cons_sig
         indicators["consecutive_days"] = cons_count
     except Exception:
+        logger.debug("consecutive_days failed", exc_info=True)
         sub_signals["consecutive_days"] = "HOLD"
         indicators["consecutive_days"] = 0
 
@@ -538,6 +545,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         indicators["gap_pct"] = safe_float(gap_pct_val)
         indicators["gap_fill_pct"] = safe_float(fill_pct_val)
     except Exception:
+        logger.debug("gap_fill failed", exc_info=True)
         sub_signals["gap_fill"] = "HOLD"
         indicators["gap_pct"] = 0.0
         indicators["gap_fill_pct"] = 0.0
@@ -552,6 +560,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
             sub_signals["bb_pct_b"] = "HOLD"
             indicators["bb_pct_b"] = float("nan")
     except Exception:
+        logger.debug("bb_pct_b failed", exc_info=True)
         sub_signals["bb_pct_b"] = "HOLD"
         indicators["bb_pct_b"] = float("nan")
 
@@ -562,6 +571,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         indicators["combined_ibs"] = safe_float(comb_ibs)
         indicators["combined_rsi2"] = safe_float(comb_rsi2)
     except Exception:
+        logger.debug("ibs_rsi2_combined failed", exc_info=True)
         sub_signals["ibs_rsi2_combined"] = "HOLD"
         indicators["combined_ibs"] = float("nan")
         indicators["combined_rsi2"] = float("nan")
@@ -573,6 +583,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None)
         indicators["half_life"] = safe_float(hl_val)
         indicators["zscore"] = safe_float(zs_val)
     except Exception:
+        logger.debug("half_life_mr failed", exc_info=True)
         sub_signals["half_life_mr"] = "HOLD"
         indicators["half_life"] = float("nan")
         indicators["zscore"] = float("nan")

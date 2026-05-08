@@ -1051,7 +1051,7 @@ def _write_fishing_context(journal_entry):
                 'tactic_weight': 0.0,
             })
         except Exception:
-            pass  # last resort: can't even write neutral
+            logger.warning("Failed to write neutral journal entry", exc_info=True)
 
 
 def _record_new_trades():

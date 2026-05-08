@@ -712,6 +712,13 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
     # CRITICAL_ERROR_DISPATCH_INVARIANTS).
     violations.extend(check_snapshot_freshness_safe())
 
+    # 14. Signal log dual-write reconciliation (2026-05-08).
+    # JSONL is the append-only source of truth; SQLite mirrors it for
+    # fast reads. If the SQLite write fails silently (B3), the DB falls
+    # behind. This check compares snapshot counts and warns if divergence
+    # exceeds a threshold.
+    violations.extend(check_signal_log_reconciliation_safe())
+
     return violations
 
 
@@ -815,6 +822,60 @@ def _check_snapshot_freshness() -> list[Violation]:
             "age_hours": round(age_hours, 1),
             "warn_threshold_hours": SNAPSHOT_STALE_WARN_HOURS,
             "critical_threshold_hours": SNAPSHOT_STALE_CRITICAL_HOURS,
+        },
+    )]
+
+
+_SIGNAL_LOG_DIVERGENCE_THRESHOLD = 100
+_SIGNAL_LOG_JSONL = DATA_DIR / "signal_log.jsonl"
+_SIGNAL_LOG_DB = DATA_DIR / "signal_log.db"
+
+
+def check_signal_log_reconciliation_safe() -> list[Violation]:
+    """Wrapped signal_log JSONL/SQLite reconciliation check."""
+    try:
+        return _check_signal_log_reconciliation()
+    except Exception as e:
+        logger.debug("signal log reconciliation check failed: %s", e)
+        return []
+
+
+def _check_signal_log_reconciliation() -> list[Violation]:
+    """Compare signal_log.jsonl line count vs signal_log.db snapshot count."""
+    import sqlite3
+
+    if not _SIGNAL_LOG_JSONL.exists() or not _SIGNAL_LOG_DB.exists():
+        return []
+
+    jsonl_count = 0
+    with open(_SIGNAL_LOG_JSONL, "rb") as f:
+        for _ in f:
+            jsonl_count += 1
+
+    conn = sqlite3.connect(str(_SIGNAL_LOG_DB), timeout=5)
+    try:
+        (db_count,) = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
+    finally:
+        conn.close()
+
+    divergence = abs(jsonl_count - db_count)
+    if divergence <= _SIGNAL_LOG_DIVERGENCE_THRESHOLD:
+        return []
+
+    return [Violation(
+        invariant="signal_log_reconciliation",
+        severity="WARNING",
+        message=(
+            f"signal_log dual-write divergence: JSONL has {jsonl_count} "
+            f"entries but SQLite has {db_count} snapshots "
+            f"(delta={divergence}, threshold={_SIGNAL_LOG_DIVERGENCE_THRESHOLD}). "
+            f"SQLite writes may be silently failing."
+        ),
+        details={
+            "jsonl_count": jsonl_count,
+            "db_count": db_count,
+            "divergence": divergence,
+            "threshold": _SIGNAL_LOG_DIVERGENCE_THRESHOLD,
         },
     )]
 

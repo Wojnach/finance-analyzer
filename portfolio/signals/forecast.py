@@ -340,6 +340,7 @@ def _run_kronos_inner(candles, horizons, _ticker, t0):
             cfg = load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
             fc = cfg.get("forecast", {})
         except Exception:
+            logger.debug("Forecast config load failed, using defaults", exc_info=True)
             fc = {}
 
         input_data = json.dumps({

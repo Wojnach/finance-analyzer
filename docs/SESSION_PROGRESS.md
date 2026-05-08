@@ -1,5 +1,41 @@
 # Session Progress
 
+## Auto-Improve Session (2026-05-08 morning)
+
+**Session start:** 2026-05-08 ~08:00 UTC
+**Status:** IN PROGRESS — merging to main
+**Branch:** `improve/auto-session-2026-05-08`
+**Commits:** 4 batches
+
+### What changed
+
+Autonomous improvement session: deep exploration → plan → implement in batches.
+
+**Batch 1 — Silent failure logging (4 files):**
+- `monte_carlo_risk.py`: WARNING on Cholesky fallback to nearest PSD
+- `outcome_tracker.py`: removed stale BUG-111 comment, upgraded SQLite write failure to WARNING
+- `accuracy_degradation.py`: replaced bare `except: pass` with debug logging
+- `agent_invocation.py`: replaced bare `except: pass` with warning logging
+
+**Batch 2 — Signal module observability (8 files, 47 catch blocks):**
+- Added `logger.debug(..., exc_info=True)` to silent sub-signal HOLD fallbacks in fibonacci, mean_reversion, momentum_factors, hurst_regime
+- Added debug logging to config-load fallbacks in credit_spread, gold_real_yield_paradox, forecast
+- Added debug logging to silent `continue`/`return False` in claude_fundamental
+
+**Batch 3 — FX fallback + equity curve (4 files):**
+- Updated hardcoded FX fallback from 10.85 → 10.50 SEK/USD in both `risk_management.py` and `fx_rates.py` (5% error reduction)
+- `equity_curve.py`: zero prev_val now records 0% return instead of dropping the day (fixes Sharpe/Sortino bias at initialization)
+
+**Batch 4 — Loop contract reconciliation (1 file):**
+- New invariant #14: compares signal_log.jsonl line count vs signal_log.db snapshot count, warns on divergence >100
+
+### Skipped (low impact / already addressed)
+- A1 DATA_DIR standardization: only 3 signal modules, all already correct
+- A2 zscore helper: inline implementations differ enough, marginal dedup
+- B4 signal_registry retry: needs careful design for retry semantics, deferred
+
+---
+
 ## System-Health-First Home (2026-05-04 evening, /fgl)
 
 **Session start:** 2026-05-04 ~16:30 CEST

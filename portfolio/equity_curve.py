@@ -104,6 +104,8 @@ def _daily_returns(curve: list[dict], value_key: str) -> list[float]:
         if prev_val > 0:
             daily_ret = ((curr_val - prev_val) / prev_val) * 100
             returns.append(daily_ret)
+        else:
+            returns.append(0.0)
 
     return returns
 

@@ -266,7 +266,7 @@ def compute_gold_real_yield_paradox_signal(
             if cfg:
                 fred_key = cfg.get("golddigger", {}).get("fred_api_key", "") or ""
         except Exception:
-            pass
+            logger.debug("config.json fallback read failed", exc_info=True)
 
     if not fred_key:
         logger.debug("No FRED API key — cannot compute GYDI")
