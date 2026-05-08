@@ -20,8 +20,12 @@ and at least 160 rows of data (for 150-bar R/S window + buffer).
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from portfolio.signal_utils import ema, majority_vote, rsi, safe_float
 
@@ -281,6 +285,7 @@ def compute_hurst_regime_signal(df: pd.DataFrame,
             sub_signals["trend_direction"] = trend_vote
             indicators["ema_spread_pct"] = spread
         except Exception:
+            logger.debug("hurst_regime failed", exc_info=True)
             sub_signals["hurst_regime"] = "HOLD"
             sub_signals["trend_direction"] = "HOLD"
             indicators["ema_spread_pct"] = float("nan")
@@ -297,6 +302,7 @@ def compute_hurst_regime_signal(df: pd.DataFrame,
             sub_signals["mr_extreme"] = mr_vote
             indicators["rsi14"] = safe_float(rsi_val)
         except Exception:
+            logger.debug("mr_extreme failed", exc_info=True)
             sub_signals["hurst_regime"] = "HOLD"
             sub_signals["mr_extreme"] = "HOLD"
             indicators["rsi14"] = float("nan")
@@ -319,6 +325,7 @@ def compute_hurst_regime_signal(df: pd.DataFrame,
         sub_signals["hurst_momentum"] = h_mom_vote
         indicators["hurst_roc"] = safe_float(h_roc)
     except Exception:
+        logger.debug("hurst_momentum failed", exc_info=True)
         sub_signals["hurst_momentum"] = "HOLD"
         indicators["hurst_roc"] = float("nan")
 

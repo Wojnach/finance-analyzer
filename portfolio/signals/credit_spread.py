@@ -285,7 +285,7 @@ def compute_credit_spread_signal(
             cfg = load_json("config.json", default={}) or {}
             fred_key = cfg.get("golddigger", {}).get("fred_api_key", "") or ""
         except Exception:
-            pass
+            logger.debug("config.json fallback read failed", exc_info=True)
 
     if not fred_key:
         logger.debug("No FRED API key available for credit spread signal")

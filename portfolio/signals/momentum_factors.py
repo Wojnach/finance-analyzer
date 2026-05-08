@@ -18,10 +18,13 @@ and at least 50 rows of data.
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
 
 from portfolio.signal_utils import majority_vote
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.
@@ -355,6 +358,7 @@ def _apply_seasonality(df: pd.DataFrame, context: dict | None) -> pd.DataFrame:
                 )
         return detrended
     except Exception:
+        logger.debug("momentum_factors detrend failed, using raw data", exc_info=True)
         return df
 
 
@@ -430,6 +434,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         sub_signals["ts_momentum_12_1"] = ts_sig
         indicators["ts_momentum_pct"] = ts_val
     except Exception:
+        logger.debug("ts_momentum_12_1 failed", exc_info=True)
         sub_signals["ts_momentum_12_1"] = "HOLD"
         indicators["ts_momentum_pct"] = float("nan")
 
@@ -439,6 +444,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         sub_signals["roc_20"] = roc_sig
         indicators["roc_20"] = roc_val
     except Exception:
+        logger.debug("roc_20 failed", exc_info=True)
         sub_signals["roc_20"] = "HOLD"
         indicators["roc_20"] = float("nan")
 
@@ -448,6 +454,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         sub_signals["high_proximity"] = hp_sig
         indicators["high_proximity"] = hp_val
     except Exception:
+        logger.debug("high_proximity failed", exc_info=True)
         sub_signals["high_proximity"] = "HOLD"
         indicators["high_proximity"] = float("nan")
 
@@ -457,6 +464,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         sub_signals["low_reversal"] = lr_sig
         indicators["low_proximity"] = lr_val
     except Exception:
+        logger.debug("low_reversal failed", exc_info=True)
         sub_signals["low_reversal"] = "HOLD"
         indicators["low_proximity"] = float("nan")
 
@@ -466,6 +474,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         sub_signals["consecutive_bars"] = cb_sig
         indicators["consecutive_bars"] = cb_val
     except Exception:
+        logger.debug("consecutive_bars failed", exc_info=True)
         sub_signals["consecutive_bars"] = "HOLD"
         indicators["consecutive_bars"] = 0
 
@@ -476,6 +485,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         indicators["acceleration_recent"] = acc_recent
         indicators["acceleration_older"] = acc_older
     except Exception:
+        logger.debug("price_acceleration failed", exc_info=True)
         sub_signals["price_acceleration"] = "HOLD"
         indicators["acceleration_recent"] = float("nan")
         indicators["acceleration_older"] = float("nan")
@@ -487,6 +497,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
         indicators["vol_momentum_price_chg"] = vwm_price
         indicators["vol_momentum_ratio"] = vwm_ratio
     except Exception:
+        logger.debug("volume_weighted_momentum failed", exc_info=True)
         sub_signals["volume_weighted_momentum"] = "HOLD"
         indicators["vol_momentum_price_chg"] = float("nan")
         indicators["vol_momentum_ratio"] = float("nan")

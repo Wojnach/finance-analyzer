@@ -195,6 +195,7 @@ def _get_earnings_calendar():
                     "days_until": days_until,
                 }
         except Exception:
+            logger.debug("Earnings fetch failed for ticker", exc_info=True)
             continue
 
     _earnings_cache["data"] = result
@@ -763,6 +764,7 @@ def _is_tier_biased(tier: str) -> bool:
         from portfolio.file_utils import load_jsonl_tail
         entries = load_jsonl_tail(_CF_LOG, max_entries=400)
     except Exception:
+        logger.debug("CF bias detection: log load failed", exc_info=True)
         return False
 
     bias_rate, n, label = _bias_rate_from_entries(entries, tier)
@@ -808,6 +810,7 @@ def _is_tier_biased_for_ticker(tier: str, ticker: str) -> bool:
         from portfolio.file_utils import load_jsonl_tail
         entries = load_jsonl_tail(_CF_LOG, max_entries=500)
     except Exception:
+        logger.debug("CF per-ticker bias detection: log load failed", exc_info=True)
         return False
 
     bias_rate, n, label = _bias_rate_from_entries(entries, tier, ticker=ticker)
