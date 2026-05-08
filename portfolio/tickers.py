@@ -98,6 +98,7 @@ DISABLED_SIGNALS = {
     "residual_pair_reversion",  # pending live validation (added 2026-04-30)
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
     "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
+    "intraday_seasonality",  # pending live validation (added 2026-05-08)
     "futures_flow",     # 2026-05-07: 38.3% at 1d (2168 sam). Actively harmful —
                         # 12pp worse than coin flip. In cross_asset_flow cluster
                         # but still wastes compute. Was accuracy-gated at runtime
@@ -304,4 +305,5 @@ SIGNAL_NAMES = [
     "residual_pair_reversion",
     "williams_vix_fix",
     "treasury_risk_rotation",
+    "intraday_seasonality",
 ]

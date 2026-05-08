@@ -271,6 +271,14 @@ def _register_defaults():
                       "portfolio.signals.treasury_risk_rotation",
                       "compute_treasury_risk_rotation_signal",
                       requires_context=True, max_confidence=0.7)
+    # Intraday seasonality gate — hour-of-day confidence multipliers (all assets)
+    # 2026-05-08: Concretum Group 2025 (Sharpe 1.6 BTC Asia-open), ScienceDirect 2024
+    # (33% annualized BTC 22:00-23:00 UTC), CME Group 2026 (60-70% gold daily range
+    # in London-NY overlap). Zero correlation with existing signal clusters.
+    register_enhanced("intraday_seasonality",
+                      "portfolio.signals.intraday_seasonality",
+                      "compute_intraday_seasonality_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
