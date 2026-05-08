@@ -12,6 +12,7 @@ from portfolio.signals.intraday_seasonality import (
     _classify_asset,
     _get_utc_hour_and_dow,
     _hour_alpha_vote,
+    _trend_direction,
     compute_intraday_seasonality_signal,
 )
 
@@ -203,3 +204,39 @@ class TestDirectionality:
         result = compute_intraday_seasonality_signal(df)
         if result["action"] != "HOLD":
             assert result["action"] == "SELL"
+
+
+class TestNaNSafety:
+    def test_trend_direction_nan_returns_hold(self):
+        close = pd.Series([np.nan] * 30)
+        vote, strength = _trend_direction(close)
+        assert vote == "HOLD"
+        assert strength == 0.0
+
+    def test_full_signal_all_nan_close(self):
+        df = _make_df(n=30)
+        df["close"] = np.nan
+        result = compute_intraday_seasonality_signal(df)
+        assert result["action"] == "HOLD"
+        assert result["confidence"] == 0.0
+
+    def test_confidence_never_nan(self):
+        df = _make_df(n=50)
+        df.iloc[-5:, df.columns.get_loc("close")] = np.nan
+        result = compute_intraday_seasonality_signal(df)
+        assert not np.isnan(result["confidence"])
+
+
+class TestTimezoneHandling:
+    def test_tz_aware_utc_index(self):
+        df = _make_df(n=30, with_datetime_index=True, hour=14)
+        df.index = df.index.tz_localize("UTC")
+        hour, dow = _get_utc_hour_and_dow(df)
+        assert hour == (14 + 29) % 24
+
+    def test_tz_aware_non_utc_converts(self):
+        df = _make_df(n=30, with_datetime_index=True, hour=14)
+        df.index = df.index.tz_localize("US/Eastern")
+        hour, _ = _get_utc_hour_and_dow(df)
+        expected_utc = (14 + 29 + 4) % 24  # EDT = UTC-4
+        assert hour == expected_utc

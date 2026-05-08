@@ -1,7 +1,7 @@
 """Intraday seasonality gate signal.
 
 Exploits empirical hour-of-day and day-of-week return patterns to modulate
-signal confidence. Three sub-indicators vote via majority:
+signal confidence. Three sub-indicators:
 
   1. Hour Alpha        — UTC hour maps to empirical return multiplier per asset class
   2. Day-of-Week Bias  — Monday crypto boost, Wednesday FOMC caution
@@ -27,7 +27,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import ema, majority_vote, safe_float
+from portfolio.signal_utils import ema, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,9 @@ def _get_utc_hour_and_dow(df: pd.DataFrame) -> tuple[int, int]:
         try:
             last_ts = df.index[-1]
             if hasattr(last_ts, "hour"):
+                if last_ts.tzinfo is not None:
+                    utc_ts = last_ts.astimezone(datetime.timezone.utc)
+                    return utc_ts.hour, utc_ts.weekday()
                 return last_ts.hour, last_ts.weekday()
         except Exception:
             pass
@@ -136,7 +139,9 @@ def _trend_direction(close: pd.Series) -> tuple[str, float]:
     last_slow = safe_float(ema21.iloc[-1])
     if last_fast is None or last_slow is None:
         return "HOLD", 0.0
-    pct_diff = (last_fast - last_slow) / last_slow if last_slow != 0 else 0.0
+    if np.isnan(last_fast) or np.isnan(last_slow) or last_slow == 0:
+        return "HOLD", 0.0
+    pct_diff = (last_fast - last_slow) / last_slow
     if pct_diff > 0.002:
         return "BUY", abs(pct_diff)
     if pct_diff < -0.002:
