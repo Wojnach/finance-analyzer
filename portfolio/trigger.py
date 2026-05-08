@@ -47,6 +47,14 @@ FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3
 SUSTAINED_DURATION_S = 120
 
+# Per-ticker flip cooldown (2026-05-08): after a sustained flip fires a Layer 2
+# trigger, suppress further sustained flip triggers for the SAME ticker for
+# FLIP_COOLDOWN_S seconds.  Prevents whiplash where volatile tickers (e.g. MSTR)
+# produce 3+ sustained flips in under an hour, each invoking Layer 2 for a HOLD.
+# Does NOT suppress consensus triggers (section 1), price moves (section 3), or
+# F&G crossings (section 4) — only section-2 sustained flips.
+FLIP_COOLDOWN_S = 1800  # 30 min
+
 # Ranging regime dampening (2026-04-22): when a ticker's regime is "ranging",
 # require a minimum consensus confidence before triggering Layer 2. In ranging
 # markets, consensus oscillates between HOLD and weak BUY/SELL, producing 20+
@@ -249,6 +257,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     #    long cadences (e.g. 600s); at the historical 60s cadence the count
     #    gate still dominates and behavior is unchanged.
     prev_triggered = prev.get("signals", {})
+    flip_cooldowns = state.get("flip_cooldowns", {})
     _flip_now_ts = time.time()
     for ticker, sig in signals.items():
         current_action = sig["action"]
@@ -258,9 +267,19 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 
         triggered_action = prev_triggered.get(ticker, {}).get("action")
         if triggered_action and current_action != triggered_action and (count_ok or duration_ok):
+            last_flip_ts = flip_cooldowns.get(ticker, 0)
+            if (_flip_now_ts - last_flip_ts) < FLIP_COOLDOWN_S:
+                logger.info(
+                    "Flip cooldown: %s %s->%s suppressed (%.0fs remaining)",
+                    ticker, triggered_action, current_action,
+                    FLIP_COOLDOWN_S - (_flip_now_ts - last_flip_ts),
+                )
+                continue
+            flip_cooldowns[ticker] = _flip_now_ts
             reasons.append(
                 f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
             )
+    state["flip_cooldowns"] = flip_cooldowns
 
     # 3. Price move >2% since last trigger
     prev_prices = prev.get("prices", {})

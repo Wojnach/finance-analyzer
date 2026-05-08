@@ -1420,3 +1420,102 @@ class TestTierDownshiftClassify:
                 ["XAU-USD flipped BUY->HOLD (sustained)"],
                 state=self._steady_state(),
             ) == 1
+
+
+# ---------------------------------------------------------------------------
+# Flip cooldown: rapid sustained flips suppressed for same ticker
+# ---------------------------------------------------------------------------
+
+class TestFlipCooldown:
+    """Per-ticker cooldown prevents rapid sustained flips (whiplash)."""
+
+    def test_second_flip_within_cooldown_suppressed(self, isolate_state_files):
+        """A second sustained flip within FLIP_COOLDOWN_S is suppressed."""
+        prices = {"MSTR": 180}
+        sf = isolate_state_files["state_file"]
+
+        check_triggers({"MSTR": _sig("HOLD")}, prices, {}, {})
+        check_triggers({"MSTR": _sig("BUY")}, prices, {}, {})
+
+        for _ in range(SUSTAINED_CHECKS - 1):
+            _suppress_cooldown(sf)
+            check_triggers({"MSTR": _sig("SELL")}, prices, {}, {})
+
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers({"MSTR": _sig("SELL")}, prices, {}, {})
+        flip_reasons = [r for r in reasons if "flipped" in r]
+        assert len(flip_reasons) == 1, "First flip should fire"
+
+        for _ in range(SUSTAINED_CHECKS):
+            _suppress_cooldown(sf)
+            check_triggers({"MSTR": _sig("BUY")}, prices, {}, {})
+
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers({"MSTR": _sig("BUY")}, prices, {}, {})
+        flip_reasons = [r for r in reasons if "flipped" in r]
+        assert len(flip_reasons) == 0, "Second flip within cooldown should be suppressed"
+
+    def test_flip_after_cooldown_expires_fires(self, isolate_state_files, monkeypatch):
+        """A sustained flip fires normally after FLIP_COOLDOWN_S expires."""
+        monkeypatch.setattr(trigger_mod, "FLIP_COOLDOWN_S", 5)
+        prices = {"MSTR": 180}
+        sf = isolate_state_files["state_file"]
+
+        check_triggers({"MSTR": _sig("HOLD")}, prices, {}, {})
+        check_triggers({"MSTR": _sig("BUY")}, prices, {}, {})
+
+        for _ in range(SUSTAINED_CHECKS - 1):
+            _suppress_cooldown(sf)
+            check_triggers({"MSTR": _sig("SELL")}, prices, {}, {})
+
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers({"MSTR": _sig("SELL")}, prices, {}, {})
+        assert any("flipped" in r for r in reasons), "First flip fires"
+
+        import time as _time
+        _time.sleep(6)
+
+        for _ in range(SUSTAINED_CHECKS - 1):
+            _suppress_cooldown(sf)
+            check_triggers({"MSTR": _sig("BUY")}, prices, {}, {})
+
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers({"MSTR": _sig("BUY")}, prices, {}, {})
+        flip_reasons = [r for r in reasons if "flipped" in r]
+        assert len(flip_reasons) == 1, "Flip after cooldown expiry should fire"
+
+    def test_cooldown_per_ticker_independent(self, isolate_state_files):
+        """Cooldown on MSTR does not affect BTC-USD triggers."""
+        prices = {"MSTR": 180, "BTC-USD": 80000}
+        sf = isolate_state_files["state_file"]
+
+        check_triggers(
+            {"MSTR": _sig("HOLD"), "BTC-USD": _sig("HOLD")},
+            prices, {}, {},
+        )
+        check_triggers(
+            {"MSTR": _sig("BUY"), "BTC-USD": _sig("HOLD")},
+            prices, {}, {},
+        )
+
+        for _ in range(SUSTAINED_CHECKS - 1):
+            _suppress_cooldown(sf)
+            check_triggers(
+                {"MSTR": _sig("SELL"), "BTC-USD": _sig("HOLD")},
+                prices, {}, {},
+            )
+
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers(
+            {"MSTR": _sig("SELL"), "BTC-USD": _sig("HOLD")},
+            prices, {}, {},
+        )
+        assert any("MSTR" in r and "flipped" in r for r in reasons), "MSTR flip fires"
+
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers(
+            {"MSTR": _sig("HOLD"), "BTC-USD": _sig("SELL")},
+            prices, {}, {},
+        )
+        btc_reasons = [r for r in reasons if "BTC-USD" in r]
+        assert len(btc_reasons) >= 1, "BTC-USD should trigger despite MSTR cooldown"
