@@ -1,0 +1,30 @@
+# Codex Adversarial Review — infrastructure subsystem
+
+Reviewer: codex / gpt-5.4 (xhigh reasoning)
+Date: 2026-05-09
+Branch: review/2026-05-08-infrastructure (off empty-baseline)
+
+Format: `[Pri] file.py:line — problem | FIX: repair`
+
+---
+
+[P1] portfolio/file_utils.py:59 — `atomic_write_json()` replaces the path itself, so writing through a symlink like live `config.json` severs the external secrets link and leaves a plain file in-repo | FIX: detect symlinks and atomically rewrite the resolved target rather than calling `os.replace()` on the link path.
+[P2] portfolio/file_utils.py:266 — `atomic_write_jsonl()` rewrites whole JSONL files without taking the same sidecar lock as `atomic_append_jsonl()`, so concurrent appenders can lose lines on replace | FIX: guard full-file rewrites with the shared `.lock` protocol or make callers stop appenders before rewriting.
+[P2] portfolio/log_rotation.py:231 — `rotate_jsonl()` records `size_mb` but never enforces `max_size_mb`, so hot JSONL files can grow far past policy until entries merely age out | FIX: trim/archive oldest rows until both the age and size limits are satisfied.
+[P1] portfolio/log_rotation.py:319 — `rotate_jsonl()` reads, archives, and replaces the live file without coordinating with concurrent writers, so appends that land during rotation are silently discarded | FIX: rotate under the same cross-process lock used by JSONL appenders or swap writers onto a fresh file before rewriting.
+[P2] portfolio/log_rotation.py:392 — `rotate_text()` copies/compresses the current log and then truncates it in place, so lines written during that window vanish from both the archive and the live file | FIX: rotate text logs under an exclusive writer lock or atomically rename the live file before writers continue.
+[P2] portfolio/logging_config.py:36 — `logging.StreamHandler()` defaults to `stderr`, so the code does not actually write to the documented stdout capture path and operators can miss live logs in `loop_out.txt` | FIX: construct the handler with `stream=sys.stdout` and keep the comment/config in sync.
+[P0] portfolio/telegram_poller.py:361 — `/mode` writes `config.json` via `atomic_write_json()` even though `CLAUDE.md` says that file is a symlink to external secrets, so one Telegram command can corrupt the live config link | FIX: resolve and rewrite the symlink target explicitly or route mode changes to a separate non-symlink state file.
+[P2] portfolio/message_throttle.py:104 — `_send_now()` clears `pending_text` and advances `last_analysis_sent` even when `config` is missing or `send_or_store()` fails, so analysis alerts can be dropped and then throttled as if they were delivered | FIX: only mutate throttle state after a confirmed send and leave the pending message queued on failure.
+[P2] portfolio/alert_budget.py:38 — emergency alerts are appended to `_sent_timestamps`, so stop-loss/crash messages still burn the normal hourly budget despite the documented bypass | FIX: track emergency sends separately or skip charging them against the normal bucket.
+[P2] portfolio/prophecy.py:93 — `{**BELIEF_TEMPLATE, **belief_dict}` is a shallow copy, so default list fields like `checkpoints`, `tags`, and evidence can be shared across beliefs and mutate each other | FIX: deep-copy the template or allocate fresh lists for every mutable field when creating a belief.
+[P2] portfolio/prophecy.py:232 — naive ISO deadlines trigger an aware-vs-naive `TypeError` that is swallowed, so checkpoints with timezone-less deadlines never expire | FIX: normalize parsed deadlines to UTC before comparison or reject naive timestamps explicitly.
+[P1] portfolio/gpu_gate.py:80 — if `psutil` is unavailable `_pid_alive()` returns `True`, which disables stale-lock reaping and can wedge all GPU work behind a dead PID indefinitely | FIX: fall back to an OS-level pid-exists check instead of assuming the owner is alive.
+[P1] portfolio/process_lock.py:36 — `acquire_lock_file()` creates a brand-new zero-byte lock file and then asks Windows `msvcrt.locking(..., 1)` to lock one byte, which can fail for the first owner as if another process already held the lock | FIX: pre-seed the lock file with a byte before locking or use a sidecar lockfile pattern like `atomic_append_jsonl()`.
+[P1] portfolio/subprocess_utils.py:132 — `_run_with_job_object()` ignores the boolean return from `AssignProcessToJobObject`, so failed assignment is treated as success and child processes can orphan silently | FIX: check the return value, raise/log on zero, and fall back explicitly when Job Object assignment fails.
+[P1] portfolio/subprocess_utils.py:175 — `popen_in_job()` also ignores the boolean return from `AssignProcessToJobObject`, so long-running children may escape cleanup while callers think they are protected | FIX: verify the API return value and return `(proc, None)` with a warning when assignment fails.
+[P1] portfolio/subprocess_utils.py:239 — `kill_orphaned_by_cmdline()` increments `killed` without checking `taskkill`’s exit status, so failed terminations are reported as successes and orphan sweep outages are masked | FIX: only count the process when `taskkill` returns zero and log `stderr` otherwise.
+[P2] portfolio/api_utils.py:33 — `load_config()` swallows every read/parse error once a cache exists and serves the stale config without any log, so broken or rotated credentials can remain silently active | FIX: use the atomic file helpers and log/invalidate the cache on read failures instead of silently returning stale data.
+[P2] dashboard/app.py:1096 — the heatmap hardcodes a 30-signal universe even though `CLAUDE.md`’s current signal set runs to 34, so live voters are omitted and operator debugging of `MIN_VOTERS=3` can be wrong | FIX: derive the signal list from the canonical registry instead of maintaining a manual array here.
+[P1] dashboard/app.py:1161 — if importing `DISABLED_SIGNALS` fails the endpoint silently returns `disabled_signals=[]`, which makes force-HOLD gates disappear from the operator view | FIX: fail the endpoint loudly or surface the import error instead of pretending that no signals are disabled.
+COUNT line: P0=1 P1=8 P2=10 P3=0
