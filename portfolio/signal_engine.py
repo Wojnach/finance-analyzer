@@ -3591,7 +3591,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
     # Time-of-day confidence adjustment
     tod_factor = _time_of_day_factor(horizon=horizon)
-    conf *= tod_factor
     weighted_conf *= tod_factor
 
     # Store raw consensus in extra for debugging, then use weighted as primary

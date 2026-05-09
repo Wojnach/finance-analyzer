@@ -309,4 +309,5 @@ SIGNAL_NAMES = [
     "williams_vix_fix",
     "treasury_risk_rotation",
     "intraday_seasonality",
+    "btc_proxy",
 ]
