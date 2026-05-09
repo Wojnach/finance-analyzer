@@ -73,22 +73,19 @@ def fetch_usd_sek():
 
 def _fx_alert_telegram(age_secs):
     """Send a one-shot Telegram alert about FX rate issues. Fires at most once per 4h."""
+    now = time.time()
     with _fx_lock:
         last_alert = _fx_cache.get("_last_fx_alert", 0)
-    now = time.time()
-    if now - last_alert < 14400:  # 4h cooldown between alerts
-        return
+        if now - last_alert < 14400:  # 4h cooldown between alerts
+            return
+        _fx_cache["_last_fx_alert"] = now
     try:
         config = _load_config()
         if age_secs is not None:
             msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
         else:
             msg = f"_FX WARNING: Using hardcoded fallback rate {FX_RATE_FALLBACK} SEK. No live or cached rate available._"
-        # BUG-105: Route via message store with "error" category so it reaches Telegram.
-        # Previously used "fx_alert" which was save-only — user never saw FX warnings.
         from portfolio.message_store import send_or_store
         send_or_store(msg, config, category="error")
-        with _fx_lock:
-            _fx_cache["_last_fx_alert"] = now
     except Exception as e:
         logger.debug("FX Telegram alert failed: %s", e)

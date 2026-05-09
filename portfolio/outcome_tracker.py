@@ -418,7 +418,10 @@ def backfill_outcomes(max_entries=2000):
         logger.debug("SignalDB open failed: %s", e)
 
     for entry in entries:
-        entry_ts = datetime.fromisoformat(entry["ts"]).timestamp()
+        try:
+            entry_ts = datetime.fromisoformat(entry["ts"]).timestamp()
+        except (KeyError, ValueError, TypeError):
+            continue
         tickers = entry.get("tickers", {})
         outcomes = entry.get("outcomes", {})
 

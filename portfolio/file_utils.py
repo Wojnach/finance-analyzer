@@ -117,6 +117,9 @@ def load_jsonl(path, limit=None):
         f = open(path, encoding="utf-8")
     except FileNotFoundError:
         return []
+    except OSError as e:
+        logger.warning("load_jsonl: cannot open %s: %s", path.name, e)
+        return []
     with f:
         for line in f:
             line = line.strip()
