@@ -310,5 +310,6 @@ SIGNAL_NAMES = [
     "williams_vix_fix",
     "treasury_risk_rotation",
     "intraday_seasonality",
+    "cubic_trend_persistence",
     "btc_proxy",
 ]
