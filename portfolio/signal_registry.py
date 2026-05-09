@@ -279,6 +279,13 @@ def _register_defaults():
                       "portfolio.signals.intraday_seasonality",
                       "compute_intraday_seasonality_signal",
                       requires_context=True, max_confidence=0.7)
+    # Cubic trend persistence — R(t+1) = b*phi + c*phi^3 (all assets)
+    # 2026-05-09: arXiv:2501.16772 (2025). Universal across equities, bonds,
+    # currencies, commodities. 330yr data. Weak trends persist, strong revert.
+    register_enhanced("cubic_trend_persistence",
+                      "portfolio.signals.cubic_trend_persistence",
+                      "compute_cubic_trend_persistence_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
