@@ -99,6 +99,9 @@ DISABLED_SIGNALS = {
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
     "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
     "intraday_seasonality",  # pending live validation (added 2026-05-08)
+    "calendar",         # 2026-05-09: 29.3% recent accuracy — structural BUY bias
+                        # (6/8 sub-signals BUY-only). Actively harmful. Was per-horizon
+                        # blacklisted at 1d but still voted at other horizons.
     "futures_flow",     # 2026-05-07: 38.3% at 1d (2168 sam). Actively harmful —
                         # 12pp worse than coin flip. In cross_asset_flow cluster
                         # but still wastes compute. Was accuracy-gated at runtime

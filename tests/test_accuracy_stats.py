@@ -649,9 +649,9 @@ class TestGetDisabledReason:
 
     def test_returns_none_for_active_signal(self):
         from portfolio.tickers import get_disabled_reason
-        # rsi, macd, ema are core actives — never disabled.
+        # rsi, ema are core actives — never disabled.
         assert get_disabled_reason("rsi") is None
-        assert get_disabled_reason("macd") is None
+        assert get_disabled_reason("ema") is None
 
     def test_returns_none_for_unknown_signal(self):
         from portfolio.tickers import get_disabled_reason

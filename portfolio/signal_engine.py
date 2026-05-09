@@ -346,6 +346,7 @@ _SHADOW_SAFE_SIGNALS = frozenset({
     "crypto_evrp",
     "hash_ribbons",
     "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
+    "calendar",  # 2026-05-09: disabled at 29.3%, shadow-track for recovery
 })
 
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
@@ -538,7 +539,7 @@ for _k, _inner in _TICKER_DISABLED_BY_HORIZON.items():
         assert isinstance(_sigs, frozenset), (
             f"_TICKER_DISABLED_BY_HORIZON[{_k!r}][{_tk!r}] must be a "
             f"frozenset (got {type(_sigs).__name__})")
-del _k, _inner
+del _k, _inner, _tk, _sigs
 
 
 def _get_horizon_disabled_signals(ticker: str | None, horizon: str | None) -> frozenset:

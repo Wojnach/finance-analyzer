@@ -420,7 +420,9 @@ def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=10.0, entries=None):
             if not outcome:
                 continue
 
-            change_pct = outcome.get("change_pct", 0)
+            change_pct = outcome.get("change_pct")
+            if change_pct is None:
+                continue
             signals = tdata.get("signals", {})
 
             for sig_name in SIGNAL_NAMES:

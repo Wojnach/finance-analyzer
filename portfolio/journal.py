@@ -222,6 +222,8 @@ def _detect_warnings(entries):
                 outlook = outlooks[0]
                 first_price = prices_list[0]
                 last_price = prices_list[-1]
+                if first_price == 0:
+                    continue
                 pct_change = (last_price - first_price) / first_price
                 if outlook == "bullish" and pct_change < -0.005:
                     warnings.append(
