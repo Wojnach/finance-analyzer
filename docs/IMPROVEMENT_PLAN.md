@@ -1,9 +1,10 @@
-# Improvement Plan — auto-session-2026-05-08
+# Improvement Plan — auto-session-2026-05-09
 
 ## Exploration Summary
 
-Deep exploration via 4 parallel agents + direct reads. Coverage: core loop + signal engine,
-risk + portfolio management, metals + dashboard + infra, signal modules + recent changes.
+Deep exploration via 4 parallel agents (signal pipeline, orchestration, portfolio/risk,
+metals/dashboard/infra) + manual reading. Prior session (2026-05-08) already fixed B2-B8
+and batches 2-4 from the old plan. This session found new issues.
 
 ---
 
@@ -11,137 +12,151 @@ risk + portfolio management, metals + dashboard + infra, signal modules + recent
 
 ### P0 — Critical
 
-**B1: BUG-111 — RSI adaptive thresholds not used in outcome reconstruction**
-- File: `portfolio/outcome_tracker.py:34-43`
-- `_derive_signal_vote()` hardcodes RSI at [30, 70] but live `generate_signal()` uses
-  adaptive `rsi_p20/rsi_p80` from rolling percentiles (capped 15-85).
-- Impact: RSI accuracy tracking compares against wrong threshold. Every RSI outcome
-  potentially misclassified, poisoning accuracy data that gates downstream signals.
-- Fix: Read `rsi_p20`/`rsi_p80` from signal snapshot indicators. Fall back to [30, 70]
-  for old snapshots missing these fields.
-
-**B2: Silent Cholesky failure in monte_carlo_risk**
-- File: `portfolio/monte_carlo_risk.py` — nearest-PSD fallback path
-- When Cholesky fails, `_nearest_psd()` is used but no warning logged.
-- Impact: Silent VaR/CVaR degradation with corrupted correlation matrix.
-- Fix: Add `logger.warning()` on Cholesky fallback.
+**B1: Calendar signal at 29.3% — actively harmful, not disabled**
+- File: `portfolio/tickers.py` (DISABLED_SIGNALS)
+- Calendar signal dropped from 48.8% baseline to 29.3% recent. Critical error has
+  escalated 26x consecutive. Has structural BUY bias (6 of 8 sub-signals are BUY-only).
+  Already per-horizon blacklisted at 1d for every ticker but still runs and votes at
+  other horizons. accuracy_degradation monitor spamming critical_errors.jsonl.
+- Fix: Add `"calendar"` to DISABLED_SIGNALS. Add to `_SHADOW_SAFE_SIGNALS` in
+  signal_engine.py. Resolve critical error entries.
 
 ### P1 — High
 
-**B3: outcome_tracker SQLite dual-write failure swallowed**
-- File: `portfolio/outcome_tracker.py:160-167`
-- SQLite write wrapped in bare `try/except` with no logging.
-- Impact: signal_log.db can silently fall behind signal_log.jsonl. Accuracy queries
-  from SQLite return incomplete data.
-- Fix: Log at WARNING level with entry count context.
+**B2: fx_rate hardcoded fallback 10.0 in monte_carlo_risk.py**
+- File: `portfolio/monte_carlo_risk.py:430`
+- `compute_portfolio_var()` uses `agent_summary.get("fx_rate", 10.0)` — bypasses the
+  3-tier cache chain in risk_management.py. On feed outage, SEK VaR is wrong by ~5%.
+- Fix: Extract FX constants to `fx_rates.py` and import shared fallback function.
 
-**B4: signal_registry failure sentinel doesn't expire properly**
-- File: `portfolio/signal_registry.py:91`
-- Import failures set `_fail_ts` for cooldown, but on process restart a previously
-  failed signal never retries because the cooldown logic works correctly. The real
-  issue: no periodic retry after initial cooldown expires. A signal that fails at
-  startup due to a transient dependency remains dead for the entire process lifetime.
-- Fix: Add a 5-minute retry window after each cooldown expiry.
+**B3: Division by zero in journal.py `_detect_warnings`**
+- File: `portfolio/journal.py:225`
+- `(last_price - first_price) / first_price` with no guard for `first_price=0`.
+  Propagates to `write_context()`, aborting Layer 2 context generation.
+- Fix: Add `if first_price > 0` guard.
 
-**B5: ~15 bare `except Exception: pass` patterns across codebase**
-- Files: `portfolio/accuracy_degradation.py:956`, `portfolio/agent_invocation.py:1053`,
-  and others found via grep.
-- Impact: Silent failure modes. The 3-week Layer 2 auth outage was partially caused
-  by this pattern hiding errors.
-- Fix: Replace bare `pass` with `logger.debug("...", exc_info=True)` minimum.
-  For critical paths (journal writes, accuracy snapshots), use WARNING.
+**B4: `signal_accuracy_cost_adjusted()` crashes on None change_pct**
+- File: `portfolio/accuracy_stats.py:432`
+- `abs(change_pct)` raises TypeError when change_pct is None (missing backfill).
+  Base `signal_accuracy()` has a None guard but this function does not.
+- Fix: Add `if change_pct is None: continue`.
 
-**B6: Signal sub-indicator exceptions silently swallowed**
-- Files: All composite signal modules (momentum.py, oscillators.py, volatility.py, etc.)
-- Pattern: `except Exception: sub_signals["x"] = "HOLD"` with no logging.
-- Impact: Bugs in sub-indicators (IndexError, AttributeError) are invisible. Signal
-  votes HOLD without anyone knowing computation failed.
-- Fix: Add `logger.warning("sub-indicator %s failed: %s", name, e)` to catch blocks.
+**B5: `update_module_failures()` / `update_health()` clobber race**
+- File: `portfolio/health.py`
+- Both do independent read-modify-write of health_state.json. `update_module_failures()`
+  is called from `reporting.py` before `update_health()` in main.py. The second write
+  clobbers `last_module_failures` from the first.
+- Fix: Merge the two into a single update call, or make `update_health()` preserve
+  existing fields it doesn't own.
+
+**B6: `load_jsonl` missing OSError guard**
+- File: `portfolio/file_utils.py:117`
+- `load_jsonl` opens file with plain `open()`, no OSError guard. On Windows,
+  PermissionError (antivirus lock) propagates uncaught. `load_jsonl_tail` catches this.
+- Fix: Add `except OSError` guard matching `load_jsonl_tail` pattern.
 
 ### P2 — Medium
 
-**B7: FX rate hardcoded fallback (10.85 SEK/USD)**
-- File: `portfolio/risk_management.py:125-184`
-- Three-tier fallback chain ends at hardcoded 10.85. Current SEK/USD ~10.3 → 5% error.
-- Impact: Could trigger false drawdown breach on extended API outage.
-- Fix: Update to 10.50, add staleness counter.
+**B7: btc_proxy vote never tracked for accuracy**
+- File: `portfolio/signal_engine.py:3162-3172`
+- Synthetic btc_proxy vote for MSTR injected but not in SIGNAL_NAMES. Never logged
+  by outcome_tracker. Accumulates zero accuracy data. Bypasses accuracy gate trivially.
+- Fix: Add "btc_proxy" to SIGNAL_NAMES in tickers.py.
 
-**B8: equity_curve drops day when prev_val == 0**
-- File: `portfolio/equity_curve.py:104`
-- Zero previous value silently drops daily return instead of recording 0%.
-- Impact: Biases Sharpe/Sortino during portfolio initialization.
-- Fix: Treat zero prev_val as 0% return.
+**B8: Double Telegram alert race in fx_rates.py**
+- File: `portfolio/fx_rates.py:87`
+- `_last_fx_alert` updated after network call outside lock. Two threads can both pass
+  cooldown check and both send alerts.
+- Fix: Set `_last_fx_alert` under lock before network call (optimistic lock).
 
----
+**B9: outcome_tracker timestamp parsing without guard**
+- File: `portfolio/outcome_tracker.py:421`
+- `datetime.fromisoformat(entry["ts"])` without try/except. Corrupt JSONL entry
+  aborts entire backfill batch.
+- Fix: Wrap in try/except like other timestamp parsing in the file.
 
-## 2. Architecture Improvements
+**B10: Leaked module-level loop variables**
+- File: `portfolio/signal_engine.py:541`
+- After `_TICKER_DISABLED_BY_HORIZON` validation, `_tk` and `_sigs` remain in namespace.
+  `_k` and `_inner` deleted but not these.
+- Fix: Add `del _tk, _sigs`.
 
-### A1: Standardize DATA_DIR path resolution across signal modules
-- Problem: Inconsistent path patterns. Some use `Path(__file__).resolve().parent.parent.parent / "data"`,
-  others use `os.path.dirname()` chains, one (cot_positioning) was using relative paths (fixed 2026-05-02).
-- Fix: Add `DATA_DIR` constant to `signal_utils.py` and import it.
-- Impact: Prevents future CWD-relative path bugs. ~5 files need updating.
+### P3 — Low
 
-### A2: Extract common z-score helper to signal_utils
-- Problem: 3+ signal modules independently compute z-scores with near-identical code.
-- Fix: Add `zscore(series, window)` to `signal_utils.py`. Replace inline implementations.
-- Impact: ~30 lines of deduplication. Lower maintenance burden.
+**B11: Dead tod_factor application to discarded conf**
+- File: `portfolio/signal_engine.py:3593`
+- `conf *= tod_factor` on raw unweighted conf that is immediately overwritten. Dead code.
+- Fix: Remove.
 
----
+**B12: Dead correlation pairs for removed tickers**
+- File: `portfolio/risk_management.py:731-738`
+- CORRELATED_PAIRS lists AMD, AVGO, TSM, GOOGL, META, AMZN, AAPL — all removed.
+- Fix: Remove dead pairs.
 
-## 3. Useful Features
+**B13: `import math` inside hot-path function**
+- File: `portfolio/risk_management.py:290`
+- `import math` inside `check_drawdown()` called every 60s. Python caches but bad style.
+- Fix: Move to top-level.
 
-### F1: Loop contract — SQLite/JSONL reconciliation check
-- Add invariant to `verify_contract()` comparing signal_log.jsonl line count vs
-  signal_log.db row count. WARNING if divergence > 100.
-- Why: Makes B3 (dual-write gap) observable.
-- Impact: ~20 lines in loop_contract.py.
+**B14: FX constants duplicated without shared constant**
+- Files: `portfolio/fx_rates.py:66`, `portfolio/risk_management.py:121`
+- Both use 10.50 and band 7.0-15.0 independently.
+- Fix: Extract constants to fx_rates.py.
 
----
-
-## 4. Refactoring TODOs
-
-### R1: Replace bare `except Exception: pass` with logging (~15 locations)
-### R2: Add logging to signal sub-indicator catch blocks (~20 locations)
-### R3: Standardize DATA_DIR in signal modules using relative path chains
-
----
-
-## 5. Execution Batches
-
-### Batch 1: Critical bug fixes (B1, B2) — 2 files
-1. `portfolio/outcome_tracker.py` — B1: Fix RSI threshold reconstruction
-2. `portfolio/monte_carlo_risk.py` — B2: Add Cholesky fallback warning
-
-### Batch 2: Silent failure observability (B3, B5, B6) — ~10 files
-1. `portfolio/outcome_tracker.py` — B3: Log SQLite write failures
-2. `portfolio/accuracy_degradation.py` — B5: Replace bare pass with logging
-3. `portfolio/agent_invocation.py` — B5: Replace bare pass with logging
-4. Signal modules — B6: Add logging to sub-indicator catch blocks
-   (momentum.py, oscillators.py, volatility.py, candlestick.py, structure.py,
-   heikin_ashi.py, mean_reversion.py, macro_regime.py)
-
-### Batch 3: Medium fixes + utility (B7, B8, A2) — 3 files
-1. `portfolio/risk_management.py` — B7: Update FX fallback
-2. `portfolio/equity_curve.py` — B8: Handle zero prev_val
-3. `portfolio/signal_utils.py` — A2: Add zscore helper
-
-### Batch 4: Path standardization (A1) + loop contract (F1) — ~6 files
-1. `portfolio/signal_utils.py` — A1: Add DATA_DIR constant
-2. Signal modules with non-standard paths — A1: Import DATA_DIR
-3. `portfolio/loop_contract.py` — F1: Add SQLite/JSONL reconciliation
-
-### Batch 5: Documentation + verification
-1. `docs/SYSTEM_OVERVIEW.md` — Update
-2. `docs/SESSION_PROGRESS.md` — Final session notes
-3. Full test suite run
-4. Merge, push
+**B15: mojibake dict duplicate keys in message_store**
+- File: `portfolio/message_store.py:37-48`
+- Multiple `'â'` dict keys — Python keeps last only. Some mojibake goes unrepaired.
+- Fix: Deduplicate or restructure.
 
 ---
 
-## Risk Assessment
+## 2. Execution Batches
 
-- **Batch 1**: Low risk. outcome_tracker change adds field reads with fallback. monte_carlo_risk adds logging only.
-- **Batch 2**: Very low risk. All changes add logging without changing behavior.
-- **Batch 3**: Low risk. FX fallback is a constant update. equity_curve change affects edge case only. zscore is new utility function.
-- **Batch 4**: Low risk. Path changes are mechanical. Loop contract check is additive.
+### Batch 1: Critical signal fix + crash guards (4 files, low risk)
+1. B1: Disable calendar signal in tickers.py + shadow-track in signal_engine.py
+2. B3: Division-by-zero guard in journal.py
+3. B4: None guard in accuracy_stats.py
+4. B10: Clean leaked module variables in signal_engine.py
+
+### Batch 2: Financial correctness (3 files, medium risk)
+1. B2: fx_rate fallback chain — shared constants in fx_rates.py, import in
+   monte_carlo_risk.py and risk_management.py
+2. B12: Remove dead correlation pairs in risk_management.py
+3. B14: FX constants consolidation (same files as B2)
+
+### Batch 3: State integrity + thread safety (4 files, medium risk)
+1. B5: Health state clobber fix in health.py
+2. B6: OSError guard in file_utils.py load_jsonl
+3. B8: FX double-alert race in fx_rates.py
+4. B9: Timestamp guard in outcome_tracker.py
+
+### Batch 4: Cleanup (4 files, low risk)
+1. B7: btc_proxy in SIGNAL_NAMES (tickers.py)
+2. B11: Dead tod_factor line (signal_engine.py)
+3. B13: import math to top level (risk_management.py)
+4. B15: mojibake dict fix (message_store.py)
+
+### Batch 5: Verify + document + ship
+1. Full test suite
+2. Update docs/SYSTEM_OVERVIEW.md
+3. Merge, push, restart loops
+
+---
+
+## 3. Risk Assessment
+
+- **Batch 1**: Low risk. Calendar disable is additive (already accuracy-gated everywhere).
+  Guards are defensive additions.
+- **Batch 2**: Low risk. Constant consolidation, dead code removal.
+- **Batch 3**: Medium risk. health.py change alters write pattern. file_utils and
+  fx_rates changes add guards. Need careful testing.
+- **Batch 4**: Low risk. All additive or cleanup changes.
+
+---
+
+## 4. Deferred (too risky or too large for autonomous session)
+
+- `generate_signal()` is 1100+ lines. Decomposition would be high-value but high-risk.
+- signal_accuracy_ewma() dead code removal — may be needed for research.
+- Metals loop crash recovery + Telegram unification — large scope, touches production.
+- Dashboard auth hardening (CF header validation) — policy decision needed.

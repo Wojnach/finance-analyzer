@@ -1,5 +1,48 @@
 # Session Progress
 
+## Auto-Improve Session (2026-05-09 morning)
+
+**Session start:** 2026-05-09 ~08:00 UTC
+**Status:** COMPLETE — merging to main
+**Branch:** `improve/auto-session-2026-05-09`
+**Commits:** 4 batches, 12 bugs fixed across 9 portfolio files + 2 test files
+
+### What changed
+
+Autonomous improvement session: deep exploration (4 parallel agents) → plan (15 bugs, P0-P3) → implement in 4 batches.
+
+**Batch 1 — Critical signal fix + crash guards (4 files):**
+- B1: Disabled calendar signal (29.3% accuracy, structural BUY bias) in `tickers.py` + shadow-tracked in `signal_engine.py`
+- B3: Division-by-zero guard in `journal.py` `_detect_warnings` when first_price=0
+- B4: None guard in `accuracy_stats.py` `signal_accuracy_cost_adjusted()` — dict.get() returns None for existing keys with None value
+- B10: Cleaned leaked `_tk`, `_sigs` module-level variables in `signal_engine.py`
+
+**Batch 2 — Financial correctness (4 files):**
+- B2: Fixed `monte_carlo_risk.py` fx_rate fallback 10.0 → imported `FX_RATE_FALLBACK` (10.50) from `fx_rates.py`
+- B14: Extracted FX constants (FALLBACK/MIN/MAX) to `fx_rates.py`, deduplicated from `risk_management.py`
+- B12: Removed 8 dead CORRELATED_PAIRS entries (NVDA, AMD, AVGO, TSM, GOOGL, META, AMZN, AAPL)
+- B13: Moved `import math` from inside `check_drawdown()` to module top-level
+
+**Batch 3 — State integrity + thread safety (3 files):**
+- B6: Added OSError guard to `file_utils.py` `load_jsonl` (Windows antivirus PermissionError)
+- B8: Fixed FX double-alert race in `fx_rates.py` — optimistic lock pattern
+- B9: Added timestamp parsing guard in `outcome_tracker.py` backfill loop
+
+**Batch 4 — Cleanup (2 files):**
+- B7: Added "btc_proxy" to SIGNAL_NAMES for accuracy tracking
+- B11: Removed dead `conf *= tod_factor` in `signal_engine.py`
+
+### Verified false positives (no change needed)
+- B5: Health state clobber — already fixed by existing `_health_lock`
+- B15: Mojibake dict duplicate keys — all 11 keys are unique byte sequences
+
+### Deferred (too risky for autonomous session)
+- `generate_signal()` 1100+ line decomposition
+- Metals loop crash recovery + Telegram unification
+- Dashboard auth hardening
+
+---
+
 ## Auto-Improve Session (2026-05-08 morning)
 
 **Session start:** 2026-05-08 ~08:00 UTC
