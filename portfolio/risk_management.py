@@ -11,10 +11,12 @@ Provides:
 import datetime
 import json
 import logging
+import math
 import pathlib
 import threading
 
 from portfolio.file_utils import atomic_append_jsonl, load_json
+from portfolio.fx_rates import FX_RATE_FALLBACK, FX_RATE_MAX, FX_RATE_MIN
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +114,7 @@ DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 INITIAL_VALUE_DEFAULT = 500_000  # SEK
 
 # Adversarial review 05-01 P1-15 (2026-05-02): persistent fallback for fx_rate.
-# Sane historical USD/SEK band (matches portfolio/fx_rates.py:42 sanity gate).
-# The hardcoded last-resort value matches portfolio/fx_rates.py:66 — both
-# modules need the same number so a fallback path through risk_management
-# doesn't disagree with the live fx fetcher.
-_FX_RATE_MIN = 7.0
-_FX_RATE_MAX = 15.0
-_FX_RATE_HARDCODED_FALLBACK = 10.50
+# FX constants imported from portfolio.fx_rates (single source of truth).
 _FX_CACHE_FILENAME = "fx_rate_cache.json"
 
 
@@ -140,7 +136,7 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
       2. Cached rate from ``DATA_DIR/fx_rate_cache.json`` if present and
          in-band. The cache is best-effort: corrupt JSON or missing/invalid
          rate field is treated as no-cache.
-      3. ``_FX_RATE_HARDCODED_FALLBACK`` (10.50) — matches
+      3. ``FX_RATE_FALLBACK`` (10.50) — matches
          portfolio/fx_rates.py:66 so both modules disagree-by-zero on the
          absolute worst-case path.
 
@@ -153,7 +149,7 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
         rate = float(raw) if raw is not None else None
     except (TypeError, ValueError):
         rate = None
-    if rate is not None and _FX_RATE_MIN <= rate <= _FX_RATE_MAX:
+    if rate is not None and FX_RATE_MIN <= rate <= FX_RATE_MAX:
         # Cache the good rate for future fallback paths.
         try:
             from portfolio.file_utils import atomic_write_json
@@ -170,7 +166,7 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
     if isinstance(cached, dict):
         try:
             cached_rate = float(cached.get("rate"))
-            if _FX_RATE_MIN <= cached_rate <= _FX_RATE_MAX:
+            if FX_RATE_MIN <= cached_rate <= FX_RATE_MAX:
                 return cached_rate
         except (TypeError, ValueError):
             pass
@@ -179,9 +175,9 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
         "fx_rate fallback to hardcoded %.2f — agent_summary missing/invalid "
         "and no usable cache at %s. Portfolio valuations may be ~10%% off if "
         "SEK has moved.",
-        _FX_RATE_HARDCODED_FALLBACK, DATA_DIR / _FX_CACHE_FILENAME,
+        FX_RATE_FALLBACK, DATA_DIR / _FX_CACHE_FILENAME,
     )
-    return _FX_RATE_HARDCODED_FALLBACK
+    return FX_RATE_FALLBACK
 
 
 def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
@@ -287,7 +283,6 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
     # Guard against NaN/Inf in peak_value or current_value — corrupted
     # history or failed computation. NaN silently passes all comparison
     # checks (NaN > 50.0 is False), bypassing the circuit breaker.
-    import math
     if not math.isfinite(peak_value) or not math.isfinite(current_value):
         logger.critical(
             "check_drawdown: non-finite value detected (peak=%.2f, current=%.2f) "
@@ -727,14 +722,6 @@ CORRELATED_PAIRS = {
     "BTC-USD": ["ETH-USD"],
     "XAG-USD": ["XAU-USD"],
     "XAU-USD": ["XAG-USD"],
-    "NVDA": ["AMD", "AVGO", "TSM"],
-    "AMD": ["NVDA", "AVGO", "TSM"],
-    "AVGO": ["NVDA", "AMD", "TSM"],
-    "TSM": ["NVDA", "AMD", "AVGO"],
-    "GOOGL": ["META", "AMZN"],
-    "META": ["GOOGL", "AMZN"],
-    "AMZN": ["GOOGL", "META"],
-    "AAPL": ["GOOGL", "META", "AMZN"],
 }
 
 

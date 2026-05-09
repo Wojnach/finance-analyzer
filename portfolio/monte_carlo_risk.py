@@ -27,6 +27,7 @@ import numpy as np
 from scipy.stats import norm
 from scipy.stats import t as t_dist
 
+from portfolio.fx_rates import FX_RATE_FALLBACK
 from portfolio.monte_carlo import (
     MIN_VOLATILITY,
     drift_from_probability,
@@ -427,7 +428,7 @@ def compute_portfolio_var(
     """
     holdings = portfolio_state.get("holdings", {})
     signals = agent_summary.get("signals", {})
-    fx_rate = agent_summary.get("fx_rate", 10.0)
+    fx_rate = agent_summary.get("fx_rate", FX_RATE_FALLBACK)
 
     # Build positions dict
     positions = {}

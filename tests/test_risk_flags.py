@@ -168,7 +168,7 @@ class TestCorrelationRisk:
 
     def test_no_flag_when_uncorrelated(self):
         pf = _make_portfolio(holdings={"XAU-USD": {"shares": 10.0}})
-        result = check_correlation_risk("NVDA", "BUY", pf)
+        result = check_correlation_risk("MSTR", "BUY", pf)
         assert result is None
 
     def test_no_flag_when_correlated_not_held(self):
@@ -178,12 +178,11 @@ class TestCorrelationRisk:
 
     def test_multiple_correlated_held(self):
         pf = _make_portfolio(holdings={
-            "AMD": {"shares": 100},
-            "TSM": {"shares": 50},
+            "BTC-USD": {"shares": 1},
         })
-        result = check_correlation_risk("NVDA", "BUY", pf)
+        result = check_correlation_risk("ETH-USD", "BUY", pf)
         assert result is not None
-        assert len(result["correlated_held"]) >= 2
+        assert len(result["correlated_held"]) >= 1
 
     def test_zero_shares_not_held(self):
         pf = _make_portfolio(holdings={"BTC-USD": {"shares": 0}})
@@ -194,8 +193,8 @@ class TestCorrelationRisk:
         """Verify key relationships are defined bidirectionally."""
         assert "BTC-USD" in CORRELATED_PAIRS.get("ETH-USD", [])
         assert "ETH-USD" in CORRELATED_PAIRS.get("BTC-USD", [])
-        assert "NVDA" in CORRELATED_PAIRS.get("AMD", [])
-        assert "AMD" in CORRELATED_PAIRS.get("NVDA", [])
+        assert "XAU-USD" in CORRELATED_PAIRS.get("XAG-USD", [])
+        assert "XAG-USD" in CORRELATED_PAIRS.get("XAU-USD", [])
 
 
 # --- ATR stop proximity ---

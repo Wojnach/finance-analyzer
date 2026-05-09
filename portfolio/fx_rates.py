@@ -14,6 +14,11 @@ from portfolio.http_retry import fetch_with_retry
 
 logger = logging.getLogger("portfolio.fx_rates")
 
+# Shared FX constants — imported by risk_management.py and monte_carlo_risk.py
+FX_RATE_FALLBACK = 10.50
+FX_RATE_MIN = 7.0
+FX_RATE_MAX = 15.0
+
 # BUG-215: Thread-safe FX cache. Accessed from 8-worker ThreadPoolExecutor.
 _fx_lock = threading.Lock()
 _fx_cache = {"rate": None, "time": 0}
@@ -39,7 +44,7 @@ def fetch_usd_sek():
         rate = float(r.json()["rates"]["SEK"])
         # BUG-117: Sanity check — SEK/USD should be in 7-15 range historically.
         # If outside this range, the API may be returning bad data.
-        if not (7.0 <= rate <= 15.0):
+        if not (FX_RATE_MIN <= rate <= FX_RATE_MAX):
             logger.error("FX rate %.4f SEK/USD outside sane bounds (7-15) — ignoring", rate)
         else:
             with _fx_lock:
@@ -61,9 +66,9 @@ def fetch_usd_sek():
     # Last resort: hardcoded fallback
     # BUG-117: Use ERROR level — hardcoded rate may be severely stale.
     # Portfolio valuations using this rate could be off by 10-15% if SEK has moved.
-    logger.error("Using hardcoded FX fallback rate 10.50 SEK — no cached or live rate available")
+    logger.error("Using hardcoded FX fallback rate %.2f SEK — no cached or live rate available", FX_RATE_FALLBACK)
     _fx_alert_telegram(None)
-    return 10.50
+    return FX_RATE_FALLBACK
 
 
 def _fx_alert_telegram(age_secs):
@@ -78,7 +83,7 @@ def _fx_alert_telegram(age_secs):
         if age_secs is not None:
             msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
         else:
-            msg = "_FX WARNING: Using hardcoded fallback rate 10.50 SEK. No live or cached rate available._"
+            msg = f"_FX WARNING: Using hardcoded fallback rate {FX_RATE_FALLBACK} SEK. No live or cached rate available._"
         # BUG-105: Route via message store with "error" category so it reaches Telegram.
         # Previously used "fx_alert" which was save-only — user never saw FX warnings.
         from portfolio.message_store import send_or_store
