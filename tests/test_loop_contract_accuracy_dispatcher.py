@@ -33,7 +33,18 @@ from portfolio.loop_contract import (
 
 @pytest.fixture()
 def critical_errors_paths(tmp_path, monkeypatch):
-    """Redirect critical_errors.jsonl + the dedup state file to tmp."""
+    """Redirect critical_errors.jsonl + the dedup state file to tmp.
+
+    2026-05-10: also silence every contract check EXCEPT
+    accuracy_degradation. Originally only the file paths were redirected,
+    but ``verify_and_act`` runs the full pipeline: ``check_layer2_journal_activity``
+    reads production health_state.json / layer2_journal.jsonl and writes
+    its own row into the patched critical_errors file when a real
+    production trigger is recent. That row was contaminating
+    ``test_warning_escalated_to_critical_writes_critical_error`` (expected
+    1 row, observed 2). Stubbing the unrelated checks here keeps tests in
+    this file focused on the accuracy_degradation dispatch path.
+    """
     crit_file = tmp_path / "critical_errors.jsonl"
     state_file = tmp_path / "contract_state.json"
     monkeypatch.setattr(
@@ -42,6 +53,21 @@ def critical_errors_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "portfolio.loop_contract.CONTRACT_STATE_FILE", state_file,
     )
+    # Silence the unrelated invariants. accuracy_degradation is the only
+    # check these tests exercise; everything else returns [] so its dispatch
+    # writes are the only rows landing in crit_file.
+    for fn_name in (
+        "check_layer2_journal_activity",
+        "check_snapshot_freshness_safe",
+        "check_signal_log_reconciliation_safe",
+        "check_portfolio_arithmetic_safe",
+        "check_atomic_write_residue_safe",
+        "check_journal_uniqueness_safe",
+    ):
+        monkeypatch.setattr(
+            f"portfolio.loop_contract.{fn_name}",
+            lambda *_a, **_kw: [],
+        )
     return crit_file, state_file
 
 
