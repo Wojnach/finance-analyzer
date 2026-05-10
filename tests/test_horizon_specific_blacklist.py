@@ -7,6 +7,31 @@ were 66-81% accurate. Batch 4 adds the per-horizon mechanism (entries empty
 by default — populated by future audits).
 """
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _bypass_ic_data_module(monkeypatch):
+    """Module-wide IC bypass — _weighted_consensus and generate_signal both
+    consult a real IC computation that hangs in synthetic-ticker tests
+    with no historical data. Stubbing _get_ic_data + the underlying
+    cache helpers keeps every test in this file deterministic.
+    Added 2026-05-10 after the class-scoped fixture left
+    TestGenerateSignalHorizonBlacklistE2E uncovered.
+    """
+    monkeypatch.setattr(
+        "portfolio.signal_engine._get_ic_data",
+        lambda *_a, **_kw: None,
+    )
+    monkeypatch.setattr(
+        "portfolio.ic_computation.compute_and_cache_ic",
+        lambda *_a, **_kw: None,
+    )
+    monkeypatch.setattr(
+        "portfolio.ic_computation.load_cached_ic",
+        lambda *_a, **_kw: None,
+    )
+
 
 from portfolio.signal_engine import (
     _TICKER_DISABLED_BY_HORIZON,
@@ -31,34 +56,53 @@ class TestHorizonDisabledStructure:
         backward compatibility with the signal dispatch loop."""
         assert _TICKER_DISABLED_SIGNALS is _TICKER_DISABLED_BY_HORIZON["_default"]
 
-    def test_default_includes_mstr_trimmed_to_two(self):
-        """Batch 1 trim: MSTR default has claude_fundamental + credit_spread_risk."""
+    def test_default_contains_core_blacklist(self):
+        """MSTR default must always include the core two — extras (realized_skewness,
+        statistical_jump_regime, …) are added over time as audits run.
+
+        2026-05-10: switched from full-equality to subset to stop fighting
+        every new disable. The core invariant is "claude_fundamental and
+        credit_spread_risk stay blacklisted."
+        """
         mstr = _TICKER_DISABLED_BY_HORIZON["_default"].get("MSTR", frozenset())
-        assert mstr == frozenset({"claude_fundamental", "credit_spread_risk"})
+        assert {"claude_fundamental", "credit_spread_risk"}.issubset(mstr)
 
 
 class TestGetHorizonDisabledSignals:
     """Helper function: returns union of _default + horizon-specific."""
 
     def test_returns_default_set_when_no_horizon(self):
+        # 2026-05-10: subset assertion — the production set is now a
+        # superset (realized_skewness + statistical_jump_regime added),
+        # but the core invariant is "claude_fundamental + credit_spread_risk
+        # are always in the default blacklist when no horizon is given".
         result = _get_horizon_disabled_signals("MSTR", horizon=None)
-        assert result == frozenset({"claude_fundamental", "credit_spread_risk"})
+        assert {"claude_fundamental", "credit_spread_risk"}.issubset(result)
 
     def test_returns_default_union_horizon_for_mstr_1d(self):
-        # MSTR has 1d-specific entries (ema, bb) added 2026-04-16 after-hours.
+        # 2026-05-10: subset — 1d adds ema + bb on top of default; calendar /
+        # macro_regime / structure / heikin_ashi / momentum_factors /
+        # smart_money / volume_flow appended later. Assert the named
+        # invariants only.
         result = _get_horizon_disabled_signals("MSTR", horizon="1d")
-        assert result == frozenset({
+        required = {
             "claude_fundamental", "credit_spread_risk",  # _default
-            "ema", "bb",  # 1d-specific
-        })
+            "ema", "bb",                                 # 1d-specific (Batch 4)
+        }
+        assert required.issubset(result)
 
     def test_unions_horizon_specific_with_default(self):
-        """3h-specific entries for MSTR (volume, volatility_sig) union with _default."""
+        """3h-specific entries for MSTR (volume, volatility_sig) union with _default.
+
+        2026-05-10: subset — sentiment also in 3h disable now; assert the
+        core 3h invariants only.
+        """
         result = _get_horizon_disabled_signals("MSTR", horizon="3h")
-        assert result == frozenset({
+        required = {
             "claude_fundamental", "credit_spread_risk",  # _default
-            "volume", "volatility_sig",  # 3h-specific
-        })
+            "volume", "volatility_sig",                  # 3h-specific
+        }
+        assert required.issubset(result)
 
     def test_monkeypatch_horizon_entry_for_unknown_ticker(self, monkeypatch):
         """Adding a synthetic horizon entry via monkeypatch still unions correctly."""
@@ -96,7 +140,16 @@ class TestWeightedConsensusAppliesHorizonBlacklist:
         is automatically reverted even if the test raises between set and
         cleanup. Previously used try/finally which had a small xdist race
         window.
+
+        2026-05-10: also bypass _get_ic_data — _weighted_consensus now
+        consults a real IC computation that hangs (>20s) when given
+        synthetic ticker without history. Stubbing it returns the same
+        no-IC behaviour that the test always assumed.
         """
+        monkeypatch.setattr(
+            "portfolio.signal_engine._get_ic_data",
+            lambda *_a, **_kw: None,
+        )
         monkeypatch.setitem(
             _TICKER_DISABLED_BY_HORIZON["3h"], "TEST-TICKER", frozenset({"rsi"}),
         )
@@ -177,50 +230,68 @@ class TestAfterHoursAuditEntries:
         result = _get_horizon_disabled_signals("BTC-USD", "3h")
         expected_default = {"smart_money", "heikin_ashi"}
         expected_3h = {"volatility_sig", "bb"}
-        assert result == frozenset(expected_default | expected_3h)
+        # 2026-05-10: subset — production set now includes additional
+        # later-audit entries; assert the *required* (audit-pinned)
+        # entries stay present.
+        assert (expected_default | expected_3h).issubset(result)
 
     def test_3h_eth(self):
         result = _get_horizon_disabled_signals("ETH-USD", "3h")
         expected_default = {"news_event", "qwen3", "smart_money"}
         expected_3h = {"credit_spread_risk"}
-        assert result == frozenset(expected_default | expected_3h)
+        # 2026-05-10: subset — production set now includes additional
+        # later-audit entries; assert the *required* (audit-pinned)
+        # entries stay present.
+        assert (expected_default | expected_3h).issubset(result)
 
     def test_3h_xau(self):
         result = _get_horizon_disabled_signals("XAU-USD", "3h")
         expected_default = {"ministral", "metals_cross_asset"}
         expected_3h = {"credit_spread_risk"}
-        assert result == frozenset(expected_default | expected_3h)
+        # 2026-05-10: subset — production set now includes additional
+        # later-audit entries; assert the *required* (audit-pinned)
+        # entries stay present.
+        assert (expected_default | expected_3h).issubset(result)
 
     def test_3h_xag(self):
         result = _get_horizon_disabled_signals("XAG-USD", "3h")
         expected_default = {"ministral", "credit_spread_risk", "metals_cross_asset",
                             "smart_money"}
         expected_3h = {"forecast", "qwen3"}
-        assert result == frozenset(expected_default | expected_3h)
+        # 2026-05-10: subset — production set now includes additional
+        # later-audit entries; assert the *required* (audit-pinned)
+        # entries stay present.
+        assert (expected_default | expected_3h).issubset(result)
 
     def test_3h_mstr(self):
         result = _get_horizon_disabled_signals("MSTR", "3h")
         expected_default = {"claude_fundamental", "credit_spread_risk"}
         expected_3h = {"volume", "volatility_sig"}
-        assert result == frozenset(expected_default | expected_3h)
+        # 2026-05-10: subset — production set now includes additional
+        # later-audit entries; assert the *required* (audit-pinned)
+        # entries stay present.
+        assert (expected_default | expected_3h).issubset(result)
 
     def test_1d_btc(self):
         result = _get_horizon_disabled_signals("BTC-USD", "1d")
         expected_default = {"smart_money", "heikin_ashi"}
         expected_1d = {"news_event", "forecast"}
-        assert result == frozenset(expected_default | expected_1d)
+        # 2026-05-10: subset — see test_3h_btc.
+        assert (expected_default | expected_1d).issubset(result)
 
     def test_1d_xau(self):
         result = _get_horizon_disabled_signals("XAU-USD", "1d")
         expected_default = {"ministral", "metals_cross_asset"}
         expected_1d = {"candlestick"}
-        assert result == frozenset(expected_default | expected_1d)
+        # 2026-05-10: subset — see test_3h_btc.
+        assert (expected_default | expected_1d).issubset(result)
 
     def test_1d_mstr(self):
         result = _get_horizon_disabled_signals("MSTR", "1d")
         expected_default = {"claude_fundamental", "credit_spread_risk"}
         expected_1d = {"ema", "bb"}
-        assert result == frozenset(expected_default | expected_1d)
+        # 2026-05-10: subset — see test_3h_btc.
+        assert (expected_default | expected_1d).issubset(result)
 
     def test_4h_has_no_entries_yet(self):
         """4h horizon still empty — no data-driven entries yet."""

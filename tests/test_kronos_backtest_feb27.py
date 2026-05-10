@@ -1,5 +1,10 @@
 """Kronos backtest on Feb 27 2026 data with 5-min candles.
 
+2026-05-10: marked module-wide ``slow`` — these tests run real Kronos
+GPU inference and pull live Binance klines. Param-sweep test alone took
+4+ minutes. Excluded from default ``-n auto`` runs. Run explicitly with
+``pytest tests/test_kronos_backtest_feb27.py -m slow``.
+
 Fetches historical 5-min OHLCV from Binance, runs Kronos predictions
 at multiple time points throughout Feb 27, and measures direction accuracy
 against actual price outcomes.

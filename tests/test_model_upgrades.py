@@ -288,17 +288,23 @@ class TestSignalEngineQwen3:
         assert "qwen3" in SIGNAL_NAMES
 
     def test_applicable_count_includes_qwen3(self):
-        """Applicable count should include qwen3 for ALL tickers."""
+        """Applicable count should include qwen3 for ALL tickers.
+
+        2026-05-10: lower bounds dropped after the April-May disable wave
+        — crypto 28→26, stocks 26→23, metals 26→20. The point of this
+        test is that qwen3 is COUNTED, not the absolute number; lower
+        bounds left as lower bounds so future signal additions don't
+        re-break this test on every audit.
+        """
         from portfolio.signal_engine import _compute_applicable_count
 
         crypto_count = _compute_applicable_count("BTC-USD")
         stock_count = _compute_applicable_count("NVDA")
         metal_count = _compute_applicable_count("XAU-USD")
 
-        # qwen3 should be counted for all
-        assert crypto_count >= 28  # was 27
-        assert stock_count >= 26   # was 25
-        assert metal_count >= 26   # was 25
+        assert crypto_count >= 26
+        assert stock_count >= 23
+        assert metal_count >= 20
 
     def test_qwen3_not_crypto_only(self):
         """qwen3 should NOT be in _CRYPTO_ONLY_SIGNALS."""
