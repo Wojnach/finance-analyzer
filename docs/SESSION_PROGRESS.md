@@ -2988,6 +2988,15 @@ tests/test_risk_management.py
 portfolio/loop_contract.py
 tests/test_loop_contract_invariants.py
 
+### 2026-05-10 11:47 UTC | test-trust-2026-05-10
+05bf9626 fix(test-trust): codex review — schema + cast None + scan recursion + mypy gate
+mypy.ini
+portfolio/loop_contract.py
+portfolio/risk_management.py
+portfolio/signal_engine.py
+tests/test_loop_contract_invariants.py
+tests/test_property_invariants.py
+
 User concern driving this work: doesn't trust Claude-written tests because
 Claude writes both code and tests. Goal: defenses that fire in production
 even when tests are wrong. Defense layers:
@@ -3001,3 +3010,25 @@ was stale after ed0013cc denominator fix landed earlier today (the
 denominator changed from /stop_price to /current_price but the test
 assertion never updated). Exact class of bug Claude ships when test+code
 diverge in same edit. Fixed.
+
+Codex adversarial review caught 4 critical bugs in MY work — exactly the
+class user wanted defended against. All fixed in 05bf9626. Most important:
+loop_contract used "cash" not "cash_sek" — would have CRITICAL-fired on
+every healthy cycle in production. Tests passed because they used the
+same wrong field name. Adversarial review is what caught it.
+
+### 2026-05-10 11:49 UTC | main
+2111066d docs(session): consolidated test-trust progress notes (merge conflict resolution)
+.claude/settings.json
+data/daily_research_macro.json
+data/daily_research_quant.json
+data/daily_research_review.json
+data/daily_research_signal_audit.json
+data/daily_research_ticker_deep_dive.json
+data/morning_briefing.json
+data/oil_warrant_catalog.json
+docs/RESEARCH_PLAN.md
+docs/SESSION_PROGRESS.md
+portfolio/accuracy_degradation.py
+portfolio/golddigger/runner.py
+portfolio/loop_contract.py
