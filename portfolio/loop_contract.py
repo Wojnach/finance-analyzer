@@ -719,6 +719,24 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
     # exceeds a threshold.
     violations.extend(check_signal_log_reconciliation_safe())
 
+    # 15. Portfolio arithmetic (2026-05-10, trust-hardening). Verifies
+    # cash ≥ 0 and holdings shape across Patient/Bold/Warrants state
+    # files. Catches buy-bypassed-cash-guard and NaN-poisoned-shares
+    # bugs that example tests miss because they never load live state.
+    violations.extend(check_portfolio_arithmetic_safe())
+
+    # 16. Atomic write residue (2026-05-10, trust-hardening). Scans
+    # data/ for orphaned .tmp files older than 5min — a stuck .tmp
+    # means atomic_write_json died between write and rename and the
+    # caller's update silently never landed.
+    violations.extend(check_atomic_write_residue_safe())
+
+    # 17. Journal uniqueness (2026-05-10, trust-hardening). Last 50
+    # layer2_journal entries: same trigger_id within 10min = retry-storm
+    # symptom (Layer 2 dedup state didn't persist; T3 timeout respawn
+    # didn't see prior write).
+    violations.extend(check_journal_uniqueness_safe())
+
     return violations
 
 
@@ -877,6 +895,313 @@ def _check_signal_log_reconciliation() -> list[Violation]:
             "divergence": divergence,
             "threshold": _SIGNAL_LOG_DIVERGENCE_THRESHOLD,
         },
+    )]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 2026-05-10: trust-hardening invariants. These run every cycle and catch
+# bug classes that integration/example tests historically miss. The whole
+# point: production runs the assert, not the test suite. A test that's
+# wrong (Claude wrote it) can't suppress these because they don't depend
+# on the test suite to run.
+# ──────────────────────────────────────────────────────────────────────
+
+# Portfolio state files (Patient + Bold + Warrants).
+_PORTFOLIO_STATE_FILES = (
+    DATA_DIR / "portfolio_state.json",
+    DATA_DIR / "portfolio_state_bold.json",
+    DATA_DIR / "portfolio_state_warrants.json",
+)
+
+# Orphaned .tmp scan: only flag stale enough to rule out the brief window
+# during which a healthy atomic_write_json sits between write-and-rename.
+_TMP_RESIDUE_MIN_AGE_S = 5 * 60
+_TMP_RESIDUE_MAX_FILES = 100  # scan budget cap
+_TMP_RESIDUE_MAX_REPORT = 5    # truncate violation message after this many
+
+# Layer 2 journal duplicate-trigger lookback. Same trigger_id appearing
+# inside this window is a retry-storm symptom (the agent fired twice for
+# the same trigger event) — see the 2026-04-16 silent-auth incident
+# where T3 timeouts respawned without dedup state.
+_JOURNAL_UNIQUENESS_TAIL = 50
+_JOURNAL_UNIQUENESS_WINDOW_S = 600  # 10 min — same trigger inside this window is a duplicate
+
+
+def check_portfolio_arithmetic_safe() -> list[Violation]:
+    """Verify portfolio invariants: cash non-negative; holdings well-formed.
+
+    Catches bug classes that example tests miss because every example
+    test starts from a synthetic fresh state — only the live state file
+    exposes accumulated arithmetic drift (negative cash from over-spend,
+    NaN propagation into shares, holdings with non-numeric quantities).
+    Each violation includes which file failed so the user can inspect
+    the exact state that triggered it.
+
+    Wrapped in try/except so a malformed state file (which is itself a
+    different invariant — atomic_write_residue) can't take down the
+    whole contract framework.
+    """
+    try:
+        return _check_portfolio_arithmetic()
+    except Exception as e:
+        logger.warning("portfolio arithmetic check failed: %s", e)
+        return []
+
+
+def _check_portfolio_arithmetic() -> list[Violation]:
+    violations: list[Violation] = []
+    for state_path in _PORTFOLIO_STATE_FILES:
+        if not state_path.exists():
+            # Day-1 deployment / strategy not yet bootstrapped — not a violation.
+            continue
+        state = load_json(state_path, default=None)
+        if not isinstance(state, dict):
+            violations.append(Violation(
+                invariant="portfolio_arithmetic",
+                severity="CRITICAL",
+                message=(
+                    f"portfolio state at {state_path.name} is not a dict — "
+                    f"file is malformed or atomic write left a partial copy."
+                ),
+                details={"path": str(state_path), "type": type(state).__name__},
+            ))
+            continue
+
+        cash = state.get("cash")
+        if not isinstance(cash, int | float):
+            violations.append(Violation(
+                invariant="portfolio_arithmetic",
+                severity="CRITICAL",
+                message=(
+                    f"{state_path.name}: 'cash' field is missing or "
+                    f"non-numeric ({cash!r})."
+                ),
+                details={"path": str(state_path), "cash": repr(cash)},
+            ))
+            continue
+
+        # Cash must never go negative — Patient/Bold strategies bound buy
+        # sizing by available cash in portfolio_mgr.execute_buy().
+        # A negative reading means a guard somewhere bypassed that check.
+        if cash < 0:
+            violations.append(Violation(
+                invariant="portfolio_arithmetic",
+                severity="CRITICAL",
+                message=(
+                    f"{state_path.name}: cash is negative ({cash:.2f} SEK). "
+                    f"A buy bypassed the available-cash guard or an FX "
+                    f"valuation overflowed."
+                ),
+                details={"path": str(state_path), "cash": cash},
+            ))
+
+        holdings = state.get("holdings", {})
+        if not isinstance(holdings, dict):
+            violations.append(Violation(
+                invariant="portfolio_arithmetic",
+                severity="WARNING",
+                message=(
+                    f"{state_path.name}: 'holdings' is not a dict "
+                    f"({type(holdings).__name__})."
+                ),
+                details={"path": str(state_path)},
+            ))
+            continue
+
+        for ticker, pos in holdings.items():
+            if not isinstance(pos, dict):
+                violations.append(Violation(
+                    invariant="portfolio_arithmetic",
+                    severity="WARNING",
+                    message=(
+                        f"{state_path.name}: holdings[{ticker!r}] is not "
+                        f"a dict."
+                    ),
+                    details={"path": str(state_path), "ticker": ticker},
+                ))
+                continue
+            shares = pos.get("shares", 0)
+            if not isinstance(shares, int | float):
+                violations.append(Violation(
+                    invariant="portfolio_arithmetic",
+                    severity="WARNING",
+                    message=(
+                        f"{state_path.name}: holdings[{ticker!r}].shares "
+                        f"is non-numeric ({shares!r})."
+                    ),
+                    details={"path": str(state_path), "ticker": ticker},
+                ))
+                continue
+            # NaN check — float('nan') is technically numeric but propagates
+            # silently through valuation; treat as malformed.
+            if isinstance(shares, float) and shares != shares:
+                violations.append(Violation(
+                    invariant="portfolio_arithmetic",
+                    severity="CRITICAL",
+                    message=(
+                        f"{state_path.name}: holdings[{ticker!r}].shares "
+                        f"is NaN — has poisoned downstream valuation."
+                    ),
+                    details={"path": str(state_path), "ticker": ticker},
+                ))
+            if shares < 0:
+                # Long-only system; negative shares means a sell credited
+                # the position instead of debiting it.
+                violations.append(Violation(
+                    invariant="portfolio_arithmetic",
+                    severity="CRITICAL",
+                    message=(
+                        f"{state_path.name}: holdings[{ticker!r}].shares "
+                        f"is negative ({shares}). System is long-only; a "
+                        f"sell debited the position with the wrong sign."
+                    ),
+                    details={
+                        "path": str(state_path),
+                        "ticker": ticker,
+                        "shares": shares,
+                    },
+                ))
+    return violations
+
+
+def check_atomic_write_residue_safe() -> list[Violation]:
+    """Scan data/ for orphaned .tmp files older than 5 minutes.
+
+    portfolio.file_utils.atomic_write_json writes to ``<path>.tmp`` then
+    os.replace's onto ``<path>``. A persistent .tmp means the writer
+    process died between write and rename — silently. The file the
+    caller wanted to update never got the new content; readers see the
+    old content and proceed unaware. The 5 min minimum age rules out
+    the brief window during which a healthy atomic_write is in flight.
+    """
+    try:
+        return _check_atomic_write_residue()
+    except Exception as e:
+        logger.debug("atomic write residue scan failed: %s", e)
+        return []
+
+
+def _check_atomic_write_residue() -> list[Violation]:
+    if not DATA_DIR.exists():
+        return []
+    cutoff = time.time() - _TMP_RESIDUE_MIN_AGE_S
+    stale: list[dict] = []
+    scanned = 0
+    # Bounded scan — DATA_DIR can grow large with archives.
+    for path in DATA_DIR.iterdir():
+        scanned += 1
+        if scanned > _TMP_RESIDUE_MAX_FILES:
+            break
+        name = path.name
+        # atomic_write_json writes to <path>.tmp; some callers use other
+        # suffixes (.tmp.NNNN, .tmp-PID). Match any '.tmp' segment.
+        if not (name.endswith(".tmp") or ".tmp." in name or "-tmp-" in name):
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > cutoff:
+            continue  # in-flight write, skip
+        stale.append({
+            "path": str(path),
+            "age_s": round(time.time() - mtime, 1),
+        })
+    if not stale:
+        return []
+    return [Violation(
+        invariant="atomic_write_residue",
+        severity="WARNING",
+        message=(
+            f"{len(stale)} orphaned .tmp file(s) in data/ older than "
+            f"{_TMP_RESIDUE_MIN_AGE_S // 60}m: "
+            f"{', '.join(Path(s['path']).name for s in stale[:_TMP_RESIDUE_MAX_REPORT])}"
+            f"{'…' if len(stale) > _TMP_RESIDUE_MAX_REPORT else ''}. "
+            f"atomic_write_json crashed mid-write — readers see stale data."
+        ),
+        details={
+            "count": len(stale),
+            "stale_files": stale[:_TMP_RESIDUE_MAX_REPORT],
+            "scanned": scanned,
+        },
+    )]
+
+
+def check_journal_uniqueness_safe() -> list[Violation]:
+    """Verify last N Layer-2 journal entries have unique trigger_ids
+    within a 10-min window.
+
+    Catches the retry-storm bug class: same trigger_id appearing twice
+    inside the lookback window means Layer 2 fired the same decision
+    event twice, either because the dedup state didn't persist or
+    because a T3 timeout respawn didn't see the prior journal write.
+    Single-PR safety: emits WARNING, never CRITICAL — this can be a
+    benign re-emit on a manual /restart, and we don't want to page the
+    user for ambiguous cases.
+    """
+    try:
+        return _check_journal_uniqueness()
+    except Exception as e:
+        logger.debug("journal uniqueness check failed: %s", e)
+        return []
+
+
+def _check_journal_uniqueness() -> list[Violation]:
+    if not LAYER2_JOURNAL_FILE.exists():
+        return []
+    # Tail the last N entries — full file scan is wasteful at 60s cadence.
+    tail: list[dict] = []
+    try:
+        import json
+        # Cheap tail: read whole file, take last N lines. JSONL is small
+        # in practice (one entry per Layer-2 decision = a few hundred per
+        # year). If this ever grows, swap to seek-from-end.
+        with open(LAYER2_JOURNAL_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in lines[-_JOURNAL_UNIQUENESS_TAIL:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                tail.append(json.loads(line))
+            except (ValueError, TypeError):
+                continue
+    except OSError:
+        return []
+
+    seen: dict[str, datetime] = {}
+    duplicates: list[dict] = []
+    for entry in tail:
+        trig = entry.get("trigger_id")
+        if not trig or not isinstance(trig, str):
+            continue
+        ts = _parse_iso(entry.get("timestamp") or entry.get("ts"))
+        if ts is None:
+            continue
+        prior = seen.get(trig)
+        if prior is not None:
+            delta_s = abs((ts - prior).total_seconds())
+            if delta_s <= _JOURNAL_UNIQUENESS_WINDOW_S:
+                duplicates.append({
+                    "trigger_id": trig,
+                    "delta_s": round(delta_s),
+                    "second_ts": ts.isoformat(),
+                })
+        seen[trig] = ts
+    if not duplicates:
+        return []
+    return [Violation(
+        invariant="journal_uniqueness",
+        severity="WARNING",
+        message=(
+            f"{len(duplicates)} duplicate trigger_id(s) in last "
+            f"{_JOURNAL_UNIQUENESS_TAIL} layer2_journal entries within "
+            f"{_JOURNAL_UNIQUENESS_WINDOW_S // 60}m: "
+            f"{', '.join(d['trigger_id'] for d in duplicates[:3])}"
+            f"{'…' if len(duplicates) > 3 else ''}. "
+            f"Layer 2 dedup state may have failed."
+        ),
+        details={"duplicates": duplicates[:5]},
     )]
 
 
