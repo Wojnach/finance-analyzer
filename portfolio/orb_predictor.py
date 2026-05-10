@@ -29,10 +29,25 @@ import requests
 # === Constants ===
 BINANCE_FAPI_KLINES = "https://fapi.binance.com/fapi/v1/klines"
 SYMBOL = "XAGUSDT"
-MORNING_START_UTC = 8   # 09:00 CET = 08:00 UTC (winter)
-MORNING_END_UTC = 10    # 11:00 CET = 10:00 UTC (winter)
 DAY_START_UTC = 8       # Full trading day starts 08:00 UTC
 DAY_END_UTC = 22        # Full trading day ends 22:00 UTC
+
+
+def _morning_window_utc() -> tuple[int, int]:
+    """Return (start_hour_utc, end_hour_utc) for 09:00-11:00 CET/CEST.
+
+    CET (winter): 09:00 CET = 08:00 UTC, 11:00 CET = 10:00 UTC
+    CEST (summer): 09:00 CEST = 07:00 UTC, 11:00 CEST = 09:00 UTC
+    """
+    from portfolio.market_timing import _is_eu_dst
+    now = datetime.now(UTC)
+    if _is_eu_dst(now):
+        return 7, 9
+    return 8, 10
+
+
+MORNING_START_UTC = 8   # default, overridden at runtime by _morning_window_utc()
+MORNING_END_UTC = 10
 
 
 @dataclass
@@ -100,8 +115,8 @@ class ORBPredictor:
     def __init__(
         self,
         symbol: str = SYMBOL,
-        morning_start_utc: int = MORNING_START_UTC,
-        morning_end_utc: int = MORNING_END_UTC,
+        morning_start_utc: int | None = None,
+        morning_end_utc: int | None = None,
         day_start_utc: int = DAY_START_UTC,
         day_end_utc: int = DAY_END_UTC,
         min_morning_candles: int = 4,
@@ -109,6 +124,10 @@ class ORBPredictor:
         min_morning_range_pct: float = 0.01,
     ):
         self.symbol = symbol
+        if morning_start_utc is None or morning_end_utc is None:
+            _start, _end = _morning_window_utc()
+            morning_start_utc = morning_start_utc or _start
+            morning_end_utc = morning_end_utc or _end
         self.morning_start_utc = morning_start_utc
         self.morning_end_utc = morning_end_utc
         self.day_start_utc = day_start_utc

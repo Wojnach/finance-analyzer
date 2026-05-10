@@ -370,7 +370,7 @@ def compute_stop_levels(holdings: dict, agent_summary: dict) -> dict:
 
         # Distance from current price to stop
         if stop_price > 0:
-            distance_to_stop_pct = ((current_price - stop_price) / stop_price) * 100
+            distance_to_stop_pct = ((current_price - stop_price) / current_price) * 100
         else:
             distance_to_stop_pct = float("inf")
 
