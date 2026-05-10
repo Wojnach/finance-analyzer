@@ -220,7 +220,12 @@ class TestDrawdownCircuitBreaker:
         assert not result["breached"]
         assert result["current_drawdown_pct"] == 0.0
 
-    def test_drawdown_breached(self, tmp_path):
+    def test_drawdown_breached(self, tmp_path, monkeypatch):
+        # 2026-05-10: same DATA_DIR isolation as test_no_drawdown — without
+        # this, production portfolio_value_history.jsonl peak (~503972)
+        # leaks into _streaming_max and changes the computed drawdown.
+        from portfolio import risk_management
+        monkeypatch.setattr(risk_management, "DATA_DIR", tmp_path)
         from portfolio.risk_management import check_drawdown
         pf_path = tmp_path / "portfolio_state.json"
         # Cash is 300K out of 500K initial — 40% drawdown
