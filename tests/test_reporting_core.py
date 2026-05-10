@@ -148,13 +148,20 @@ def mock_held_tickers_empty():
 
 @pytest.fixture
 def mock_atomic_write():
-    """Patch _atomic_write_json to capture written data without disk I/O."""
+    """Patch atomic_write_json to capture written data without disk I/O.
+
+    2026-05-10: was patching ``portfolio.reporting._atomic_write_json``
+    (private import from portfolio_mgr). Commit 7f7fc178 switched
+    reporting.py to ``from portfolio.file_utils import atomic_write_json``
+    — the patch target needs to match the new public name. 24 tests
+    in this file were silently broken until updated.
+    """
     written = {}
 
     def _capture(path, data):
         written[str(path)] = data
 
-    with patch("portfolio.reporting._atomic_write_json", side_effect=_capture):
+    with patch("portfolio.reporting.atomic_write_json", side_effect=_capture):
         yield written
 
 
@@ -866,7 +873,7 @@ class TestWriteAgentSummary:
     def _mock_everything(self):
         """Return a patch context stack that mocks all sub-module imports."""
         patches = [
-            patch("portfolio.reporting._atomic_write_json"),
+            patch("portfolio.reporting.atomic_write_json"),
             patch("portfolio.reporting._write_compact_summary"),
             patch("portfolio.reporting.detect_regime", return_value="range-bound"),
             patch("portfolio.reporting.portfolio_value", return_value=500000),
@@ -888,7 +895,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.5
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="range-bound"):
                     with patch("portfolio.reporting.portfolio_value", return_value=500000):
@@ -925,7 +932,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.0
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="range-bound"):
                     with patch("portfolio.reporting.portfolio_value", return_value=740000):
@@ -954,7 +961,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.0
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="trending-up"):
                     with patch("portfolio.reporting.portfolio_value", return_value=500000):
@@ -1004,7 +1011,7 @@ class TestWriteAgentSummary:
                 raise ImportError("test: alpha_vantage unavailable")
             return real_import(name, *args, **kwargs)
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="range-bound"):
                     with patch("portfolio.reporting.portfolio_value", return_value=500000):
@@ -1035,7 +1042,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.0
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="range-bound"):
                     with patch("portfolio.reporting.portfolio_value", return_value=500000):
@@ -1064,7 +1071,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.0
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="range-bound"):
                     with patch("portfolio.reporting.portfolio_value", return_value=500000):
@@ -1113,7 +1120,7 @@ class TestWriteAgentSummary:
             ],
         }
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.detect_regime", return_value="range-bound"):
                     with patch("portfolio.reporting.portfolio_value", return_value=500000):
@@ -1141,7 +1148,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.0
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.portfolio_value", return_value=0):
                     with patch("portfolio.reporting.get_enhanced_signals", return_value={}):
@@ -1163,7 +1170,7 @@ class TestWriteAgentSummary:
         fx_rate = 10.0
         tf_data = {}
 
-        with patch("portfolio.reporting._atomic_write_json"):
+        with patch("portfolio.reporting.atomic_write_json"):
             with patch("portfolio.reporting._write_compact_summary"):
                 with patch("portfolio.reporting.portfolio_value", return_value=500000):
                     with patch("portfolio.reporting.get_enhanced_signals", return_value={}):
