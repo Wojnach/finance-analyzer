@@ -245,3 +245,100 @@ merging any mobile-affecting PR:
 
 Failures during this checklist are not test failures — log them as
 follow-up issues and assess whether to roll back or patch.
+
+## Mutation Testing (mutmut)
+
+Claude writes both the production code AND the tests in this repo. A bug
+in the code can be papered over by an equally-confused test that asserts
+the wrong thing — and CI stays green. Mutation testing closes that loop:
+mutmut modifies the code under test (flips a `<`, deletes a line, swaps a
+sign) and re-runs the suite. If a mutated version still passes, the test
+is weak — it claims to verify the behaviour but doesn't actually catch
+the bug the mutation introduced. A surviving mutant is unambiguous
+evidence of a missing assertion.
+
+Run a single-module mutation pass (scoped, slow — 10–30 min per module):
+
+```bash
+.venv/Scripts/python.exe scripts/run_mutation_test.py --module portfolio/signal_engine.py
+```
+
+Inspect any survivors after the run finishes:
+
+```bash
+mutmut results                  # list bucket counts + IDs
+mutmut show <mutant_id>         # show the diff mutmut applied
+mutmut apply <mutant_id>        # apply the diff to your worktree to study it
+                                # (revert with: git checkout -- <file>)
+```
+
+Pilot scope: `signal_engine.py`, `risk_management.py`, `portfolio_mgr.py`
+(see `[tool.mutmut]` in `pyproject.toml`).
+
+Threshold policy:
+
+- **Today (2026-05-10):** 50% kill-rate gate — a survivor budget,
+  enforced by `scripts/run_mutation_test.py` exit code.
+- **Target by 2026-06-01:** 80% kill rate. Tighten the threshold flag in
+  CI as test coverage hardens.
+
+Full-suite mutmut runs are slow (10–30 min per module, single-threaded
+inside each pytest invocation). Run scoped during PR review of high-risk
+changes; CI runs the full pilot scope nightly only.
+
+## Property-Based Tests (Hypothesis)
+
+Properties are universal truths about a function — invariants that must
+hold for every valid input ("after a buy then a sell of the same size,
+cash returns to its original value modulo fees", "VaR is monotone in
+confidence level"). Hypothesis generates thousands of random inputs,
+including pathological edge cases (empty lists, NaN, INT_MAX, unicode),
+and shrinks any failing input to a minimal reproducer. Where unit tests
+check 3 examples you thought of, properties check 10,000 the library
+thought of.
+
+Run the property suite with statistics:
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/test_property_invariants.py -v --hypothesis-show-statistics
+```
+
+Adding a new property is one decorator + one assertion:
+
+```python
+from hypothesis import given, strategies as st
+
+@given(st.lists(st.floats(min_value=0.01, max_value=1e6), min_size=1))
+def test_portfolio_value_non_negative(prices):
+    # Invariant: a long-only portfolio with positive prices has positive value.
+    assert portfolio_value(prices) > 0
+```
+
+A failing property is either a real bug OR a wrong property. Investigate
+the shrunk counterexample before "fixing" by relaxing the property — the
+whole point of Hypothesis is that it finds inputs you wouldn't have
+written by hand. Loosening the invariant defeats the test.
+
+## Type Checking (mypy --strict)
+
+```bash
+.venv/Scripts/python.exe -m mypy --config-file mypy.ini \
+    portfolio/signal_engine.py \
+    portfolio/portfolio_mgr.py \
+    portfolio/risk_management.py \
+    portfolio/loop_contract.py
+```
+
+Pilot scope: the four modules above. Expand the gate by adding a new
+`[mypy-portfolio.<module>]` section to `mypy.ini` per module — keep the
+rest of the codebase unchecked until each module is hardened.
+
+Suppression policy: every `# type: ignore[…]` comment must include a
+date and rationale, e.g.
+
+```python
+result = legacy_thing()  # type: ignore[no-untyped-call]  # 2026-05-10: third-party stub missing, see issue #NNN
+```
+
+Bare `# type: ignore` (no error code, no comment) is forbidden — it
+silences future errors too and rots the gate.

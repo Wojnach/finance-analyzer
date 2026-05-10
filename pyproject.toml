@@ -54,3 +54,11 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["portfolio", "dashboard"]
+
+[tool.mutmut]
+# Limit to riskiest pure-logic modules. Wider mutation runs are slow.
+paths_to_mutate = "portfolio/signal_engine.py,portfolio/risk_management.py,portfolio/portfolio_mgr.py"
+# Use the project venv pytest with parallelism for speed.
+runner = ".venv/Scripts/python.exe -m pytest -x -n auto --timeout=30 -q tests/"
+# Skip mutations on these patterns — comments/docstrings/logging shouldn't gate the build.
+also_copy = "config.json"
