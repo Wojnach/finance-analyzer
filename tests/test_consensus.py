@@ -315,15 +315,24 @@ class TestStockSignalVoteCounts:
     def test_stock_total_applicable(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        # stocks: 44 registered minus disabled+crypto+metals+non-stock.
-        # 2026-04-23: econ_calendar re-enabled (BUG-218 fix) → +1 to 26.
-        assert extra["_total_applicable"] == 26
+        # 2026-05-10: count is dynamic — depends on DISABLED_SIGNALS,
+        # GPU_SIGNALS, asset-class exclusions. Recent disable waves
+        # (mahalanobis, EVRP, hurst, shannon, vix_ts, gold_real_yield,
+        # cross_asset_tsmom, copper_gold, statistical_jump, network_mom,
+        # ovx_metals, xtrend_equity, complexity_gap, realized_skewness,
+        # smart_money_global) drove stock-applicable from 26 → 19.
+        # Hard-coding the literal makes this test a tripwire: any
+        # signal added/disabled MUST update this assertion + the
+        # crypto pair below, forcing a paired-edit review.
+        assert extra["_total_applicable"] == 19
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 33  # crypto: econ_calendar re-enabled 2026-04-23
+        # 2026-05-10: 33 → 26 after the disable wave above. Same
+        # tripwire pattern as the stock counterpart.
+        assert extra["_total_applicable"] == 26
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):

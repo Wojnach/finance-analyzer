@@ -115,33 +115,47 @@ class TestVoteCountIntegrity:
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_vote_counts(self, _mock, _gpu_mock):
-        """For stocks, total applicable = 28 (econ_calendar re-enabled 2026-04-23)."""
+        """Stock applicable count — tripwire for signal add/disable.
+
+        2026-05-10: 28 → 21 after April–May disable wave (mahalanobis,
+        EVRP, hurst, shannon, vix_ts, gold_real_yield, cross_asset_tsmom,
+        copper_gold, statistical_jump, network_mom, ovx_metals,
+        xtrend_equity, complexity_gap, realized_skewness, smart_money).
+        Pair with test_consensus.py::test_stock_total_applicable=19
+        (delta = GPU signals counted here, not there).
+        """
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
-        assert extra["_total_applicable"] == 28
+        assert extra["_total_applicable"] == 21
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
-        """For metals, total applicable = 29 (econ_calendar re-enabled 2026-04-23)."""
+        """Metals applicable count — same tripwire pattern.
+
+        2026-05-10: 29 → 20 after disable wave.
+        """
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 29
+        assert extra["_total_applicable"] == 20
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_28_applicable(self, _mock, _gpu_mock):
-        """Every stock symbol should have exactly 28 total applicable signals (GPU included)."""
+    def test_all_stock_symbols_have_21_applicable(self, _mock, _gpu_mock):
+        """Every stock symbol should have exactly 21 total applicable signals.
+
+        2026-05-10: was 28, dropped to 21 (see test_stock_vote_counts above).
+        """
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 28, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 28"
+            assert extra["_total_applicable"] == 21, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 21"
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +393,7 @@ class TestWriteAgentSummary:
             try:
                 def capture_write(path, data):
                     captured["data"] = data
-                with mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write):
+                with mock.patch("portfolio.reporting.atomic_write_json", side_effect=capture_write):
                     write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
             except Exception:
                 pass
@@ -420,7 +434,7 @@ class TestWriteAgentSummary:
             captured["data"] = data
 
         with mock.patch("portfolio.reporting._cached", side_effect=_null_cached), \
-             mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write), \
+             mock.patch("portfolio.reporting.atomic_write_json", side_effect=capture_write), \
              mock.patch("portfolio.api_utils.load_config", return_value={}):
             write_agent_summary(signals, {"BTC-USD": 69000.0}, 10.50, state,
                               {"BTC-USD": []})

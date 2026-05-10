@@ -176,7 +176,7 @@ class TestLogSignalSnapshotUsesPassedVotes:
 
 
 class TestAgentSummaryATR:
-    @mock.patch("portfolio.reporting._atomic_write_json")
+    @mock.patch("portfolio.reporting.atomic_write_json")
     @mock.patch("portfolio.reporting._cached", side_effect=_null_cached)
     @mock.patch("portfolio.api_utils.load_config", return_value={})
     def test_atr_in_agent_summary(self, _mock_config, _mock_cached, _mock_write):
@@ -451,7 +451,7 @@ class TestCrossAssetSignals:
 
 
 class TestAgentSummaryAllFields:
-    @mock.patch("portfolio.reporting._atomic_write_json")
+    @mock.patch("portfolio.reporting.atomic_write_json")
     @mock.patch("portfolio.reporting._cached", side_effect=_null_cached)
     @mock.patch("portfolio.api_utils.load_config", return_value={})
     def test_includes_all_new_fields(self, _mock_config, _mock_cached, _mock_write):

@@ -341,7 +341,7 @@ class TestForecastSignalsInSummary:
         }
 
         # Mock out everything to isolate the forecast_signals logic
-        with patch("portfolio.reporting._atomic_write_json") as mock_write, \
+        with patch("portfolio.reporting.atomic_write_json") as mock_write, \
              patch("portfolio.reporting._write_compact_summary"), \
              patch("portfolio.reporting._cached", return_value=None), \
              patch("portfolio.reporting.portfolio_value", return_value=500000), \
@@ -398,7 +398,7 @@ class TestForecastSignalsInSummary:
             "transactions": [],
         }
 
-        with patch("portfolio.reporting._atomic_write_json"), \
+        with patch("portfolio.reporting.atomic_write_json"), \
              patch("portfolio.reporting._write_compact_summary"), \
              patch("portfolio.reporting._cached", return_value=None), \
              patch("portfolio.reporting.portfolio_value", return_value=500000), \
@@ -425,7 +425,7 @@ class TestForecastSignalsInSummary:
             "transactions": [],
         }
 
-        with patch("portfolio.reporting._atomic_write_json"), \
+        with patch("portfolio.reporting.atomic_write_json"), \
              patch("portfolio.reporting._write_compact_summary"), \
              patch("portfolio.reporting._cached", return_value=None), \
              patch("portfolio.reporting.portfolio_value", return_value=500000), \
@@ -464,7 +464,7 @@ class TestForecastSignalsInSummary:
             },
         }
 
-        with patch("portfolio.reporting._atomic_write_json") as mock_write, \
+        with patch("portfolio.reporting.atomic_write_json") as mock_write, \
              patch("portfolio.reporting._get_held_tickers", return_value=set()):
             _write_compact_summary(summary)
 
@@ -499,7 +499,7 @@ class TestProphecyInSummary:
             },
         }
 
-        with patch("portfolio.reporting._atomic_write_json") as mock_write, \
+        with patch("portfolio.reporting.atomic_write_json") as mock_write, \
              patch("portfolio.reporting._get_held_tickers", return_value=set()):
             _write_compact_summary(summary)
 
@@ -518,7 +518,7 @@ class TestProphecyInSummary:
             # prophecy not in summary at all
         }
 
-        with patch("portfolio.reporting._atomic_write_json") as mock_write, \
+        with patch("portfolio.reporting.atomic_write_json") as mock_write, \
              patch("portfolio.reporting._get_held_tickers", return_value=set()):
             _write_compact_summary(summary)
 
@@ -547,7 +547,7 @@ class TestForecastAccuracyInSummary:
             },
         }
 
-        with patch("portfolio.reporting._atomic_write_json") as mock_write, \
+        with patch("portfolio.reporting.atomic_write_json") as mock_write, \
              patch("portfolio.reporting._get_held_tickers", return_value=set()):
             _write_compact_summary(summary)
 
@@ -565,7 +565,7 @@ class TestForecastAccuracyInSummary:
             "fear_greed": {},
         }
 
-        with patch("portfolio.reporting._atomic_write_json") as mock_write, \
+        with patch("portfolio.reporting.atomic_write_json") as mock_write, \
              patch("portfolio.reporting._get_held_tickers", return_value=set()):
             _write_compact_summary(summary)
 

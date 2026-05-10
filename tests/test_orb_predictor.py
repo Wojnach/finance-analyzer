@@ -3,17 +3,36 @@
 Covers MorningRange calculation, DayResult computation, prediction logic,
 warrant translation, summary statistics, and edge cases. All data is mocked
 with deterministic values -- no network calls.
+
+2026-05-10: After commit ed0013cc made the morning window DST-aware via
+``_morning_window_utc()``, ``ORBPredictor()`` started picking up the
+*runtime* DST state at init time. Tests that hard-code candle hours
+(08:00-09:45 UTC) silently fail when the test happens to run during EU
+summer time (window becomes 07:00-09:00 UTC; only 4 of the 8 candles
+fit). The autouse fixture below pins the window to 08:00-10:00 UTC for
+every test in this file so the candle generator stays deterministic.
+The underlying production behaviour (DST-aware in real loops) is
+covered by ``portfolio.market_timing._is_eu_dst`` tests.
 """
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from portfolio import orb_predictor
 from portfolio.orb_predictor import (
     ORBPredictor,
     Prediction,
     WarrantTarget,
 )
+
+
+@pytest.fixture(autouse=True)
+def _pin_orb_morning_window(monkeypatch):
+    """Pin ``_morning_window_utc`` to (8, 10) for deterministic tests."""
+    monkeypatch.setattr(
+        orb_predictor, "_morning_window_utc", lambda: (8, 10)
+    )
 
 # ---------------------------------------------------------------------------
 # Helpers for building mock kline data

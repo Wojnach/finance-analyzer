@@ -261,20 +261,25 @@ class TestMonthEndEffect:
 
 
 class TestSellInMay:
-    """May-October triggers SELL, November-April triggers BUY."""
+    """Strong months (Nov, Dec, Jan, Apr) BUY; weak May-Oct HOLD; transitional HOLD.
 
-    def test_may_sell(self):
+    2026-05-10: SELL bias removed in commit b56f653c after the SELL leg
+    crashed accuracy to 29.3% (structural 6-month-of-year bias dragged
+    below coin flip). Weak-period months now return HOLD. Tests updated.
+    """
+
+    def test_may_hold(self):
         action, indicators = _sell_in_may(date(2026, 5, 15))
-        assert action == "SELL"
+        assert action == "HOLD"
         assert indicators["is_weak_period"] is True
 
-    def test_july_sell(self):
+    def test_july_hold(self):
         action, indicators = _sell_in_may(date(2026, 7, 1))
-        assert action == "SELL"
+        assert action == "HOLD"
 
-    def test_october_sell(self):
+    def test_october_hold(self):
         action, indicators = _sell_in_may(date(2026, 10, 31))
-        assert action == "SELL"
+        assert action == "HOLD"
 
     def test_november_buy(self):
         action, indicators = _sell_in_may(date(2026, 11, 1))
@@ -290,10 +295,10 @@ class TestSellInMay:
         assert action == "BUY"
 
     def test_sell_in_may_in_composite(self):
-        """June date should produce sell_in_may = SELL in composite."""
+        """June (weak period) — sell_in_may = HOLD in composite (b56f653c)."""
         df = _make_df_on_date("2026-06-15", n=10)
         result = compute_calendar_signal(df)
-        assert result["sub_signals"]["sell_in_may"] == "SELL"
+        assert result["sub_signals"]["sell_in_may"] == "HOLD"
 
     def test_november_in_composite(self):
         """November date should produce sell_in_may = BUY in composite."""
@@ -469,23 +474,27 @@ class TestCompositeVoting:
         # Multiple BUY sub-signals should dominate
         assert result["action"] == "BUY"
 
-    def test_sell_majority_in_summer(self):
-        """Mid-summer Monday should lean toward SELL."""
+    def test_summer_monday_day_of_week_sell(self):
+        """Mid-summer Monday: only day_of_week SELL after sell_in_may neutralised.
+
+        2026-05-10 (b56f653c): sell_in_may no longer fires SELL in summer.
+        Monday still triggers day_of_week SELL; sell_in_may is HOLD.
+        """
         # 2026-07-06 is a Monday
         df = _make_df_on_date("2026-07-06", n=10)
         result = compute_calendar_signal(df)
-        # day_of_week: Monday = SELL
-        # sell_in_may: July = SELL
         assert result["sub_signals"]["day_of_week"] == "SELL"
-        assert result["sub_signals"]["sell_in_may"] == "SELL"
+        assert result["sub_signals"]["sell_in_may"] == "HOLD"
 
-    def test_single_vote_below_quorum_produces_hold(self):
-        """Single sub-signal vote is below quorum (2) — produces HOLD."""
-        # Oct 6, 2026 (Tuesday): only sell_in_may=SELL (1 vote)
-        # With quorum=2, single SELL is not enough → HOLD
+    def test_october_tuesday_all_hold(self):
+        """Oct 6 Tuesday: post-b56f653c no calendar SELL fires; composite HOLD.
+
+        Pre-fix: sell_in_may=SELL (1 vote) below quorum→HOLD.
+        Post-fix: sell_in_may=HOLD too; result still HOLD via different path.
+        """
         df = _make_df_on_date("2026-10-06", n=10)
         result = compute_calendar_signal(df)
-        assert result["sub_signals"]["sell_in_may"] == "SELL"
+        assert result["sub_signals"]["sell_in_may"] == "HOLD"
         assert result["action"] == "HOLD"
 
     def test_quorum_met_produces_signal(self):
