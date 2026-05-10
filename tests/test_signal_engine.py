@@ -1103,10 +1103,10 @@ class TestMSTRSignalBlacklist:
         from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
         assert "volatility_sig" not in _TICKER_DISABLED_SIGNALS["MSTR"]
 
-    def test_mstr_sentiment_NOT_disabled(self):
-        # 2026-04-16: sentiment removed (80.0% at 1d, n=80).
+    def test_mstr_sentiment_disabled(self):
+        # 2026-05-10: sentiment crashed 90.4% -> 39.2% after regime change
         from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
-        assert "sentiment" not in _TICKER_DISABLED_SIGNALS["MSTR"]
+        assert "sentiment" in _TICKER_DISABLED_SIGNALS["MSTR"]
 
     def test_mstr_volume_NOT_disabled(self):
         # 2026-04-16: volume removed (62.3% at 1d, n=77).

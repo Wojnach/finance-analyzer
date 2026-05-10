@@ -167,7 +167,7 @@ ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 # (e.g., a signal at 49.5% over 6000 samples may still have real edge in
 # specific regimes that the aggregate accuracy hides).
 _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD = 0.50
-_ACCURACY_GATE_HIGH_SAMPLE_MIN = 10000
+_ACCURACY_GATE_HIGH_SAMPLE_MIN = 7000
 
 # Directional accuracy gate: signals whose BUY or SELL accuracy is below this
 # threshold get that direction force-HOLD'd while the other direction can still
@@ -429,6 +429,11 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         "MSTR": frozenset({"claude_fundamental", "credit_spread_risk",
                           "statistical_jump_regime",  # 27.0% 1d (74 sam)
                           "realized_skewness",        # 36.0% 1d (50 sam)
+                          # 2026-05-10: crashed 40-58pp after never-sell policy broken May 5
+                          "sentiment",          # 90.4% -> 39.2%
+                          "volume_flow",        # 82.3% -> 33.7%
+                          "heikin_ashi",        # 78.6% -> 35.0%
+                          "momentum_factors",   # 88.7% -> 30.4%
                           }),
     },
     # 2026-04-16 after-hours audit: signals that PASS global gate (>0.47)
@@ -520,8 +525,31 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
                            "macro_regime",        # 40.3% 1d (1475 sam) — moved from _default to preserve 3h
                            }),
     },
-    "3d": {},
-    "5d": {},
+    "3d": {
+        # 2026-05-10: signals with <45% accuracy at 3d horizon (global).
+        # ministral 37.2% (6214 sam), credit_spread_risk 38.6% (1545 sam),
+        # ema 39.9% (16662 sam) — all actively harmful at this horizon.
+        "BTC-USD": frozenset({"ministral", "credit_spread_risk", "ema"}),
+        "ETH-USD": frozenset({"ministral", "credit_spread_risk", "ema"}),
+        "XAG-USD": frozenset({"ministral", "credit_spread_risk", "ema"}),
+        "XAU-USD": frozenset({"ministral", "credit_spread_risk", "ema"}),
+        "MSTR": frozenset({"ministral", "credit_spread_risk", "ema"}),
+    },
+    "5d": {
+        # 2026-05-10: signals with <45% accuracy at 5d horizon.
+        # funding 32.1% (728), news_event 42.2% (8251), ema 42.3% (15596),
+        # credit_spread_risk 43.1% (1455), heikin_ashi 44.1% (24761).
+        "BTC-USD": frozenset({"funding", "news_event", "ema",
+                              "credit_spread_risk", "heikin_ashi"}),
+        "ETH-USD": frozenset({"funding", "news_event", "ema",
+                              "credit_spread_risk", "heikin_ashi"}),
+        "XAG-USD": frozenset({"news_event", "ema",
+                              "credit_spread_risk", "heikin_ashi"}),
+        "XAU-USD": frozenset({"news_event", "ema",
+                              "credit_spread_risk", "heikin_ashi"}),
+        "MSTR": frozenset({"news_event", "ema",
+                           "credit_spread_risk", "heikin_ashi"}),
+    },
     "10d": {},
 }
 
