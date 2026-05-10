@@ -84,9 +84,13 @@ class TestSignalNamesImport:
         assert ml_names is tickers_names
 
     def test_signal_names_count(self):
-        """Signal names count matches tickers.SIGNAL_NAMES."""
+        """Signal names count matches tickers.SIGNAL_NAMES.
+
+        2026-05-10: count grew 45 → 61 after the April-May additions.
+        Tripwire pattern: paired-edit any signal add/remove.
+        """
         from portfolio.meta_learner import SIGNAL_NAMES
-        assert len(SIGNAL_NAMES) == 45  # 2026-04-19: statistical_jump_regime added
+        assert len(SIGNAL_NAMES) == 61
 
 
 # ===========================================================================

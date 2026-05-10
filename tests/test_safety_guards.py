@@ -200,7 +200,14 @@ class TestLoadingTimestampsCleanup:
 class TestDrawdownCircuitBreaker:
     """check_drawdown should work correctly and thresholds are sane."""
 
-    def test_no_drawdown(self, tmp_path):
+    def test_no_drawdown(self, tmp_path, monkeypatch):
+        # 2026-05-10: check_drawdown now consults the production
+        # ``data/portfolio_value_history.jsonl`` for the all-time peak
+        # via _streaming_max — bypassing only the portfolio_state file
+        # leaks live history into the test (peak ~503972 → 0.79% draw).
+        # Patch DATA_DIR so history_path lands in tmp_path with no file.
+        from portfolio import risk_management
+        monkeypatch.setattr(risk_management, "DATA_DIR", tmp_path)
         from portfolio.risk_management import check_drawdown
         pf_path = tmp_path / "portfolio_state.json"
         pf_path.write_text(json.dumps({

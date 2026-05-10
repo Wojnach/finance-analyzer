@@ -250,8 +250,18 @@ class TestSignalInterface:
         assert 0.0 <= result["confidence"] <= 1.0
 
     def test_has_sub_signals(self, monkeypatch):
+        # 2026-05-10: deep-context schema changed from
+        # ``refresh_data.cot_gold`` to
+        # ``external_research.cot_positioning.live``. Old mock returned
+        # an empty dict because the new code path couldn't find COT data.
+        # (Other tests in this class still use the old schema and pass
+        # because they only assert on the generic empty-result shape.)
         cot_data = _make_cot_data()
-        deep_ctx = {"refresh_data": {"cot_gold": cot_data, "fred": {}}}
+        deep_ctx = {
+            "external_research": {
+                "cot_positioning": {"live": cot_data},
+            },
+        }
         monkeypatch.setattr(
             "portfolio.signals.cot_positioning._load_deep_context",
             lambda t: deep_ctx,

@@ -137,12 +137,16 @@ class TestComputeSignalICPerTicker:
 
 class TestGetSignalICRanking:
     def test_ranking_order(self, monkeypatch):
+        # 2026-05-10: ranking now filters NEGATIVE IC signals — macd's
+        # IC=-0.08 is no longer ranked at all. Returned list contains only
+        # signals with positive IC, ordered by IC desc. Test was written
+        # before the filter and asserted macd at position 2.
         mock_cache = {
             "time": 9999999999,
             "horizon": "1d",
             "global": {
                 "rsi": {"ic": 0.15, "samples": 100},
-                "macd": {"ic": -0.08, "samples": 50},
+                "macd": {"ic": -0.08, "samples": 50},  # negative — filtered
                 "ema": {"ic": 0.02, "samples": 200},
             },
         }
@@ -152,9 +156,7 @@ class TestGetSignalICRanking:
         )
         ranked = get_signal_ic_ranking(horizon="1d", min_samples=30)
         names = [r[0] for r in ranked]
-        assert names[0] == "rsi"
-        assert names[1] == "macd"
-        assert names[2] == "ema"
+        assert names == ["rsi", "ema"]  # macd filtered out (negative IC)
 
 
 class TestDataDirIsAbsolute:

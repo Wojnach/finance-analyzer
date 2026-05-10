@@ -6,9 +6,13 @@ from portfolio.local_llm_report import build_local_llm_report, maybe_export_loca
 
 def test_build_local_llm_report_recommendations(tmp_path, monkeypatch):
     pred_path = tmp_path / "forecast_predictions.jsonl"
+    # 2026-05-10: hard-coded ts "2026-04-07" fell outside the 30-day window
+    # once real time advanced past 2026-05-07. Use a relative timestamp so
+    # this test stays valid as the calendar moves.
+    recent_ts = datetime.now(UTC).isoformat()
     pred_entries = [
         {
-            "ts": "2026-04-07T12:00:00+00:00",  # recent entry, well within 30-day window
+            "ts": recent_ts,
             "gating_action": "raw",
             "subsignal_gating": {
                 "chronos_1h": {"gating": "held"},

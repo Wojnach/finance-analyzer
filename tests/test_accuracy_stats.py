@@ -751,10 +751,14 @@ class TestApiAccuracyEnrichment:
         dash._API_ACCURACY_CACHE["ts"] = 0
 
         client = dash.app.test_client()
-        # Fall back to bearer auth via the dashboard token.
-        token = dash.app.config.get("DASHBOARD_TOKEN") or ""
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        resp = client.get("/api/accuracy", headers=headers)
+        # 2026-05-10: bearer auth path required a non-empty DASHBOARD_TOKEN
+        # which is unset in test config — every assertion 401'd. Use the
+        # same _no_auth pattern test_dashboard.py uses (patches
+        # ``dashboard.auth._get_dashboard_token`` to return None,
+        # disabling the gate cleanly).
+        from unittest.mock import patch as _patch
+        with _patch("dashboard.auth._get_dashboard_token", return_value=None):
+            resp = client.get("/api/accuracy")
         assert resp.status_code == 200, resp.data
         body = resp.get_json()
         assert "1d" in body

@@ -31,6 +31,9 @@ class TestComputeIndicators:
     def test_returns_all_keys(self):
         df = make_candles([100 + i * 0.1 for i in range(100)])
         ind = compute_indicators(df)
+        # 2026-05-10: compute_indicators added "adx" key. Use subset
+        # assertion + explicit "adx in keys" so future indicator additions
+        # don't break this test; missing legacy keys still fail.
         expected = {
             "close",
             "rsi",
@@ -46,8 +49,11 @@ class TestComputeIndicators:
             "atr_pct",
             "rsi_p20",
             "rsi_p80",
+            "adx",
         }
-        assert expected == set(ind.keys())
+        assert expected.issubset(set(ind.keys())), \
+            f"missing keys: {expected - set(ind.keys())}"
+        assert "adx" in ind
 
     def test_rsi_range(self):
         df = make_candles([100 + i * 0.1 for i in range(100)])

@@ -26,10 +26,16 @@ class TestUpdateSeasonalityProfiles:
         assert len(result["XAG-USD"]) == 24
         mock_save.assert_called_once()
 
+    @patch("portfolio.seasonality_updater.load_profiles")
     @patch("portfolio.seasonality_updater._fetch_hourly_klines")
     @patch("portfolio.seasonality_updater.save_profiles")
-    def test_handles_fetch_failure(self, mock_save, mock_fetch):
+    def test_handles_fetch_failure(self, mock_save, mock_fetch, mock_load):
+        # 2026-05-10: update_seasonality_profiles now seeds from
+        # load_profiles() before refreshing — so a fetch failure leaves
+        # the *existing on-disk* profile in the result. Patch load_profiles
+        # to start empty so the fetch-failure path is exercised cleanly.
         from portfolio.seasonality_updater import update_seasonality_profiles
+        mock_load.return_value = {}
         mock_fetch.return_value = None
         result = update_seasonality_profiles(["XAG-USD"])
         assert "XAG-USD" not in result

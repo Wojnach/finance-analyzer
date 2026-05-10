@@ -792,7 +792,10 @@ def test_eod_exit_fires_at_configured_buffer(monkeypatch):
 
     trader = _make_trader(cash=5000)
 
-    # Seed a position that would otherwise sail through all exit rules
+    # Seed a position that would otherwise sail through all exit rules.
+    # 2026-05-10: original used entry_price=10.0 with current_bid=10.5
+    # → +5% warrant P&L tripped WARRANT_TAKE_PROFIT before EOD could fire.
+    # Use entry_price=10.5 (flat P&L) so only EOD can produce a sell.
     trader.state["positions"]["pos_eod_test"] = {
         "warrant_key": "MINI_L_SILVER_AVA_TEST",
         "warrant_name": "MINI L SILVER AVA TEST",
@@ -801,7 +804,7 @@ def test_eod_exit_fires_at_configured_buffer(monkeypatch):
         "underlying": "XAG-USD",
         "direction": "LONG",
         "units": 100,
-        "entry_price": 10.0,
+        "entry_price": 10.5,
         "entry_underlying": 75.0,
         "entry_ts": mst._now_utc().isoformat(),
         "peak_underlying": 75.0,
