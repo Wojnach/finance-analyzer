@@ -469,8 +469,10 @@ class TestComputeStopLevels:
         r = result["ETH-USD"]
         # stop = 2000 * (1 - 2*5/100) = 2000 * 0.90 = 1800
         assert r["stop_price_usd"] == 1800.0
-        # distance = (2000 - 1800) / 1800 * 100 = 11.1111%
-        assert abs(r["distance_to_stop_pct"] - 11.1111) < 0.01
+        # 2026-05-10: denominator is current_price after ed0013cc — old assertion
+        # (11.11% via /stop_price) was stale, never updated when the fix landed.
+        # distance = (current - stop) / current * 100 = (2000 - 1800) / 2000 * 100 = 10%
+        assert abs(r["distance_to_stop_pct"] - 10.0) < 0.01
 
     def test_multiple_holdings(self):
         """Multiple holdings each get their own stop level."""

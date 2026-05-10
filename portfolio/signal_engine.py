@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -29,9 +30,11 @@ logger = logging.getLogger("portfolio.signal_engine")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _LOCAL_MODEL_ACCURACY_TTL = 1800
 
-# ADX computation cache — keyed by id(df) so each DataFrame is computed at most once.
-# Naturally expires when DataFrames are garbage-collected between cycles.
-_adx_cache: dict[int, float | None] = {}
+# ADX computation cache — keyed by (id(df), len(df), last_close) tuple so a
+# new DataFrame allocated at the same address as a freed one doesn't get a
+# stale hit (see _compute_adx for the C1 content-key rationale, 2026-05-10
+# fixed the annotation drift that read ``dict[int, …]``).
+_adx_cache: dict[tuple[int, int, float], float | None] = {}
 _adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
 _ADX_CACHE_MAX = 200  # prevent unbounded growth
 
@@ -655,7 +658,7 @@ CORE_SIGNAL_NAMES = frozenset({
 })
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
-_prev_sentiment = {}  # in-memory cache; seeded from sentiment_state.json on first call
+_prev_sentiment: dict[str, str] = {}  # in-memory cache; seeded from sentiment_state.json on first call
 _prev_sentiment_loaded = False
 _sentiment_lock = threading.Lock()  # BUG-85: protect concurrent access from ThreadPoolExecutor
 _sentiment_dirty = False  # Track whether in-memory state diverged from disk
@@ -1065,7 +1068,9 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
     if not horizon:
         return {}
     cache_key = f"dynamic_horizon_weights_{horizon}"
-    return _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL, lambda: _compute_dynamic_horizon_weights(horizon))
+    # cast: _cached returns Any (cached values come from arbitrary JSON);
+    # _compute_dynamic_horizon_weights guarantees dict[str, float].
+    return cast(dict[str, float], _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL, lambda: _compute_dynamic_horizon_weights(horizon)))
 
 
 # Signals that only apply to specific asset classes
@@ -1224,7 +1229,7 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
         # Compute pairwise agreement rate (non-HOLD pairs only)
         from collections import defaultdict
         signal_to_group: dict[str, int] = {}
-        groups: dict[int, set] = defaultdict(set)
+        groups: dict[int, set[str]] = defaultdict(set)
         next_group = 0
 
         sig_list = list(df.columns)
@@ -1252,7 +1257,10 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
                         groups[g2].add(s1)
                         signal_to_group[s1] = g2
                     elif g1 != g2:
-                        # Merge groups
+                        # Merge groups. By elimination of the prior elifs both
+                        # g1 and g2 are non-None here, but mypy can't narrow
+                        # via ``!=``; assert makes the invariant explicit.
+                        assert g1 is not None and g2 is not None
                         merged = groups[g1] | groups[g2]
                         groups[g1] = merged
                         del groups[g2]
@@ -1275,8 +1283,8 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
 
 def _get_correlation_groups() -> dict[str, frozenset[str]]:
     """Get current correlation groups, preferring dynamic over static."""
-    return _cached("dynamic_corr_groups", _DYNAMIC_CORR_TTL,
-                   _compute_dynamic_correlation_groups)
+    return cast(dict[str, frozenset[str]], _cached("dynamic_corr_groups", _DYNAMIC_CORR_TTL,
+                   _compute_dynamic_correlation_groups))
 
 
 # Static correlation groups (fallback when dynamic computation unavailable).
@@ -1665,7 +1673,7 @@ def _get_ic_data(horizon: str) -> dict | None:
     with _ic_data_lock:
         cached = _ic_data_cache.get(horizon)
         if cached and now - cached.get("_loaded_at", 0) < _IC_DATA_TTL:
-            return cached
+            return cast(dict[Any, Any], cached)
 
     try:
         from portfolio.ic_computation import compute_and_cache_ic, load_cached_ic
@@ -1676,7 +1684,7 @@ def _get_ic_data(horizon: str) -> dict | None:
             cache["_loaded_at"] = now
             with _ic_data_lock:
                 _ic_data_cache[horizon] = cache
-            return cache
+            return cast(dict[Any, Any], cache)
     except Exception:
         logger.debug("IC data unavailable for %s", horizon, exc_info=True)
     return None
@@ -1704,7 +1712,7 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
         now_ts = _time.time()
     with _macro_window_cache_lock:
         if now_ts - _macro_window_cache["ts"] < _MACRO_WINDOW_CACHE_TTL_S:
-            return _macro_window_cache["value"]
+            return bool(_macro_window_cache["value"])
         try:
             from portfolio.econ_dates import is_macro_window
             active = bool(is_macro_window())
@@ -1804,7 +1812,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         ("sell_accuracy", "total_sell"),
     )
     if accuracy_data:
-        _sanitized = {}
+        _sanitized: dict[Any, dict[str, Any]] = {}
         for _k, _v in accuracy_data.items():
             if not isinstance(_v, dict):
                 _sanitized[_k] = {}
@@ -1877,7 +1885,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # macro window. Without this, sentiment can keep its slot at full
     # raw accuracy and exclude a peer that would have voted more reliably.
     def _topn_accuracy_key(s: str) -> float:
-        base = accuracy_data.get(s, {}).get("accuracy", 0.5)
+        base = float(accuracy_data.get(s, {}).get("accuracy", 0.5))
         if macro_active and s in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
             base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
         return base
@@ -1906,7 +1914,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # below sentiment's already-halved weight, making the overlay
     # actively reinforce the wrong signal.
     def _leader_accuracy_key(s: str) -> float:
-        base = accuracy_data.get(s, {}).get("accuracy", 0.5)
+        base = float(accuracy_data.get(s, {}).get("accuracy", 0.5))
         if macro_active and s in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
             base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
         return base
@@ -1927,7 +1935,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # 2026-04-06: Lowered from 0.47 → 0.46 to catch borderline cases where
     # sentiment (blended ~46.4%) barely escapes as group leader.
     _GROUP_LEADER_GATE_THRESHOLD = 0.46
-    group_gated_signals = set()
+    group_gated_signals: set[str] = set()
     for group_name, group_sigs in _active_corr_groups.items():
         leader = group_leaders.get(group_name)
         if leader:
@@ -3260,7 +3268,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Example: fibonacci went from 43% all-time to 68.2% recent — should not be gated.
     _RECENT_EXEMPT_ACC = 0.55
     _RECENT_EXEMPT_MIN_SAMPLES = 50
-    _recent_acc_data = {}
+    _recent_acc_data: dict[str, Any] = {}
     try:
         from portfolio.accuracy_stats import get_or_compute_recent_accuracy
         # get_or_compute_recent_accuracy expects the base horizon, not the cache key

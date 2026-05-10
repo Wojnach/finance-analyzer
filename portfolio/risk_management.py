@@ -102,12 +102,12 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
         with _peak_cache_lock:
             cached_after = _peak_cache.get(cache_key)
         if cached_after is not None:
-            return cached_after["peak"]
-        return peak
+            return float(cached_after["peak"])
+        return float(peak)
 
     with _peak_cache_lock:
         _peak_cache[cache_key] = {"peak": peak, "offset": end_offset}
-    return peak
+    return float(peak)
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
@@ -206,7 +206,7 @@ def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
             avg_cost = pos.get("avg_cost_usd", 0)
             holdings_value += shares * avg_cost * fx_rate
 
-    return cash + holdings_value
+    return float(cash + holdings_value)
 
 
 def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
@@ -974,7 +974,8 @@ def compute_all_risk_flags(signals, patient_pf, bold_pf, agent_summary, config=N
 
     summary_parts = []
     if all_flags:
-        by_flag = {}
+        from typing import Any as _Any
+        by_flag: dict[str, list[dict[str, _Any]]] = {}
         for f in all_flags:
             by_flag.setdefault(f["flag"], []).append(f)
         for flag_name, flags in by_flag.items():
