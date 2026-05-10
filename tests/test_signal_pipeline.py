@@ -117,18 +117,16 @@ class TestVoteCountIntegrity:
     def test_stock_vote_counts(self, _mock, _gpu_mock):
         """Stock applicable count — tripwire for signal add/disable.
 
-        2026-05-10: 28 → 21 after April–May disable wave (mahalanobis,
-        EVRP, hurst, shannon, vix_ts, gold_real_yield, cross_asset_tsmom,
-        copper_gold, statistical_jump, network_mom, ovx_metals,
-        xtrend_equity, complexity_gap, realized_skewness, smart_money).
-        Pair with test_consensus.py::test_stock_total_applicable=19
+        2026-05-11 (codex C1): 21 → 18 after MSTR _default disable bump
+        (sentiment, volume_flow, heikin_ashi, momentum_factors).
+        Pair with test_consensus.py::test_stock_total_applicable=16
         (delta = GPU signals counted here, not there).
         """
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
-        assert extra["_total_applicable"] == 21
+        assert extra["_total_applicable"] == 18
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
@@ -144,18 +142,18 @@ class TestVoteCountIntegrity:
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_21_applicable(self, _mock, _gpu_mock):
-        """Every stock symbol should have exactly 21 total applicable signals.
+    def test_all_stock_symbols_have_18_applicable(self, _mock, _gpu_mock):
+        """Every stock symbol should have exactly 18 total applicable signals.
 
-        2026-05-10: was 28, dropped to 21 (see test_stock_vote_counts above).
+        2026-05-11 (codex C1): dropped 21→18 after MSTR _default disable bump.
         """
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 21, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 21"
+            assert extra["_total_applicable"] == 18, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 18"
 
 
 # ---------------------------------------------------------------------------

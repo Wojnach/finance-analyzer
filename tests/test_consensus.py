@@ -315,16 +315,10 @@ class TestStockSignalVoteCounts:
     def test_stock_total_applicable(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        # 2026-05-10: count is dynamic — depends on DISABLED_SIGNALS,
-        # GPU_SIGNALS, asset-class exclusions. Recent disable waves
-        # (mahalanobis, EVRP, hurst, shannon, vix_ts, gold_real_yield,
-        # cross_asset_tsmom, copper_gold, statistical_jump, network_mom,
-        # ovx_metals, xtrend_equity, complexity_gap, realized_skewness,
-        # smart_money_global) drove stock-applicable from 26 → 19.
-        # Hard-coding the literal makes this test a tripwire: any
-        # signal added/disabled MUST update this assertion + the
-        # crypto pair below, forcing a paired-edit review.
-        assert extra["_total_applicable"] == 19
+        # 2026-05-11: 19 → 16 after commit added 4 MSTR _default disables
+        # (sentiment, volume_flow, heikin_ashi, momentum_factors). Codex
+        # review C1 surfaced this; production paired-edit was skipped.
+        assert extra["_total_applicable"] == 16
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):

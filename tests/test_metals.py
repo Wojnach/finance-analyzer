@@ -209,7 +209,7 @@ class TestMetalsSignalConfig:
         assert extra["_total_applicable"] == 20
 
     def test_stocks_total_applicable(self):
-        """Stocks: 28 → 21 after April-May disable wave (2026-05-10)."""
+        """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""
         from unittest.mock import patch
 
         from portfolio.main import generate_signal
@@ -231,8 +231,8 @@ class TestMetalsSignalConfig:
         }
         with patch("portfolio.market_timing.should_skip_gpu", return_value=False):
             action, conf, extra = generate_signal(ind, ticker="MSTR")
-        # 2026-05-10: 28 → 21 after disable wave.
-        assert extra["_total_applicable"] == 21
+        # 2026-05-11 (codex C1): 21 → 18 after MSTR _default disable bump.
+        assert extra["_total_applicable"] == 18
 
     def test_crypto_total_applicable(self):
         """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""

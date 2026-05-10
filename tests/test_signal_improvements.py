@@ -128,10 +128,13 @@ class TestNamedVotes:
         assert "ministral" in votes
         # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
         assert "custom_lora" not in votes
-        # All SIGNAL_NAMES entries get a vote entry (including disabled = HOLD).
-        # 2026-05-10: 60 total after April-May signal additions (was 50 in
-        # April). Tripwire: each new signal added MUST update this literal.
-        assert len(votes) == 60
+        # 2026-05-11 (codex review M1): assert SIGNAL_NAMES sync instead of a
+        # hard-coded literal. The previous '== 60' tripwire drifted on every
+        # signal add — replacing with len(SIGNAL_NAMES) - 1 keeps the
+        # invariant (votes covers all signals except the disabled
+        # custom_lora) while staying robust to future additions.
+        from portfolio.tickers import SIGNAL_NAMES
+        assert len(votes) == len(SIGNAL_NAMES) - 1
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):

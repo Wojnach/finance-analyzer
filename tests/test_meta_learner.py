@@ -86,13 +86,20 @@ class TestSignalNamesImport:
     def test_signal_names_count(self):
         """Signal names count matches tickers.SIGNAL_NAMES.
 
-        2026-05-10: count grew 45 → 61 → 62 across the day's audits. Use
-        a lower bound rather than equality so audit drift doesn't keep
-        re-failing this every cycle. The point is "count grew, not shrank";
-        a regression that REMOVES signals will still fire.
+        2026-05-11 (codex review M1): switched back to equality with
+        ``tickers.SIGNAL_NAMES`` so the two stay in sync. The 2026-05-10
+        attempt at a permissive lower bound (>= 60) silently accepted
+        drift where meta_learner's list lagged behind tickers. The
+        invariant we actually want: ``meta_learner.SIGNAL_NAMES ==
+        tickers.SIGNAL_NAMES`` length-wise; any change to one must
+        propagate.
         """
-        from portfolio.meta_learner import SIGNAL_NAMES
-        assert len(SIGNAL_NAMES) >= 60
+        from portfolio.meta_learner import SIGNAL_NAMES as MLN
+        from portfolio.tickers import SIGNAL_NAMES as TKN
+        assert len(MLN) == len(TKN), (
+            f"meta_learner.SIGNAL_NAMES has {len(MLN)} entries, "
+            f"tickers.SIGNAL_NAMES has {len(TKN)} — they must stay in sync"
+        )
 
 
 # ===========================================================================
