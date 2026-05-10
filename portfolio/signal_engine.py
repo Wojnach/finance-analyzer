@@ -913,7 +913,6 @@ def _get_regime_gated(regime: str, horizon: str | None = None) -> frozenset[str]
 HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
     "3h": {
         "news_event": 1.4,      # 70.0% at 3h_recent (1762 sam)
-        "smart_money": 1.3,     # 63.2% at 3h (vs 31.9% at 1d) — boosted from 1.2
         "ema": 1.3,             # 62.9% at 3h (vs 48.6% at 1d)
         "ministral": 1.3,       # 62.6% at 3h (vs 42.4% at 1d) — boosted from 1.2
         "qwen3": 1.2,           # 61.8% at 3h
@@ -923,16 +922,13 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "momentum": 1.1,        # 56.1% at 3h (378 sam) — NEW 2026-04-27
         "heikin_ashi": 1.1,     # 55.0% at 3h (vs 42.7% at 1d) — NEW 2026-04-27
         "sentiment": 0.4,       # 33.8% at 3h — tightened from 0.5
-        # "fibonacci" removed 2026-04-29 — signal formally disabled
         "forecast": 0.5,        # 38.3% at 3h
-        "oscillators": 0.6,     # 39.4% at 3h — tightened from 0.7
         "bb": 0.6,              # 41.7% at 3h (but 62.5% at 1d)
         "mean_reversion": 0.7,  # 45.5% at 3h (but 51.8% at 1d)
         "volume_flow": 0.7,     # 46.4% at 3h — NEW 2026-04-27
     },
     "4h": {
         "news_event": 1.4,
-        "smart_money": 1.3,
         "ema": 1.3,
         "ministral": 1.3,
         "qwen3": 1.2,
@@ -942,9 +938,7 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "momentum": 1.1,
         "heikin_ashi": 1.1,
         "sentiment": 0.4,
-        # "fibonacci" removed 2026-04-29 — signal formally disabled
         "forecast": 0.5,
-        "oscillators": 0.6,
         "bb": 0.6,
         "mean_reversion": 0.7,
         "volume_flow": 0.7,
@@ -955,8 +949,6 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "credit_spread_risk": 1.1,  # 56.4% at 1d_recent (140 sam), SELL 77.9% — NEW 2026-04-27
         "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — NEW 2026-04-27
         "macd": 1.1,            # 54.8% at 1d_recent (93 sam)
-        "calendar": 1.1,        # 54.0% at 1d_recent (385 sam) — reduced from 1.2
-        # "fibonacci" removed 2026-04-29 — signal formally disabled
         "mean_reversion": 1.1,  # 51.8% at 1d_recent — reduced from 1.3
         "news_event": 1.4,      # 70.0% at 1d_recent (340 sam)! — was 0.5 (SELL-focused works now)
         "claude_fundamental": 0.5,  # 40.5% at 1d_recent (1178 sam) — NEW 2026-04-27 penalty
@@ -966,7 +958,6 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "volatility_sig": 0.5,  # 45.5% at 1d_recent
         "structure": 0.5,       # 33.7% at 1d_recent — tightened from 0.6
         "forecast": 0.5,        # 44.6% at 1d_recent
-        "smart_money": 0.5,     # 31.9% at 1d_recent — tightened from 0.6
         "ema": 0.5,             # 48.6% at 1d_recent — tightened from 0.6
         "trend": 0.5,           # 37.7% at 1d_recent — tightened from 0.6
         "heikin_ashi": 0.6,     # 42.7% at 1d_recent — tightened from 0.7

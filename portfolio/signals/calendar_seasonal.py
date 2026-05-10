@@ -158,7 +158,7 @@ def _sell_in_may(last_date: date) -> tuple[str, dict]:
     indicators = {"month": month, "is_weak_period": is_weak_period}
 
     if is_weak_period:
-        return "SELL", indicators
+        return "HOLD", indicators
     if is_strong_month:
         return "BUY", indicators
     return "HOLD", indicators
