@@ -1068,9 +1068,15 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
     if not horizon:
         return {}
     cache_key = f"dynamic_horizon_weights_{horizon}"
-    # cast: _cached returns Any (cached values come from arbitrary JSON);
-    # _compute_dynamic_horizon_weights guarantees dict[str, float].
-    return cast(dict[str, float], _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL, lambda: _compute_dynamic_horizon_weights(horizon)))
+    # Codex 2026-05-10: _cached returns None on dogpile/timeout/error
+    # paths (shared_state.py:88, 109, 123, 126). The previous bare cast
+    # silenced the type but left ``signal_name in horizon_mults`` to
+    # crash at runtime when None leaked through. Coerce to {} here so
+    # the contract — "horizon weights are always a dict" — holds at the
+    # boundary where the lie used to live.
+    weights = _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL,
+                      lambda: _compute_dynamic_horizon_weights(horizon))
+    return cast(dict[str, float], weights) if weights else {}
 
 
 # Signals that only apply to specific asset classes
@@ -1282,9 +1288,17 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
 
 
 def _get_correlation_groups() -> dict[str, frozenset[str]]:
-    """Get current correlation groups, preferring dynamic over static."""
-    return cast(dict[str, frozenset[str]], _cached("dynamic_corr_groups", _DYNAMIC_CORR_TTL,
-                   _compute_dynamic_correlation_groups))
+    """Get current correlation groups, preferring dynamic over static.
+
+    Codex 2026-05-10: ``_cached`` can return None on dogpile/error; the
+    sole caller already does ``... or _STATIC_CORRELATION_GROUPS`` so a
+    None leak isn't a runtime crash here, but the bare cast lied about
+    the actual return type. Treat empty/None as "no dynamic groups
+    available" so the type matches reality.
+    """
+    groups = _cached("dynamic_corr_groups", _DYNAMIC_CORR_TTL,
+                     _compute_dynamic_correlation_groups)
+    return cast(dict[str, frozenset[str]], groups) if groups else {}
 
 
 # Static correlation groups (fallback when dynamic computation unavailable).
@@ -2319,7 +2333,12 @@ def _build_llm_context(ticker, ind, timeframes, extra_info):
 
 def _gate_local_model_vote(signal_name, vote, ticker, config=None):
     """Apply accuracy-based abstention to local model votes."""
-    info = {
+    # 2026-05-10 (codex re-review): explicit dict[str, Any] — initial
+    # values mix str / None / int and later rounds add float (accuracy)
+    # and int (samples). Without annotation mypy locks the value type
+    # to the union of the literal initialisers and rejects every later
+    # assignment.
+    info: dict[str, Any] = {
         "gating": "raw",
         "accuracy": None,
         "samples": 0,
@@ -2620,9 +2639,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             ticker,
         )
 
-    votes = {}
-    shadow_votes = {}  # disabled signals computed for accuracy tracking only
-    extra_info = {}
+    # 2026-05-10 (codex re-review): explicit annotations so the strict pilot
+    # sees the heterogeneous shape we rely on. Without these mypy infers
+    # ``dict[Any, bool]`` from the first truthy assignment and reports a
+    # cascade of false-positive [assignment]/[arg-type] errors at every
+    # subsequent extra_info["..."] = <non-bool> line (Codex flagged 30+).
+    votes: dict[str, str] = {}
+    shadow_votes: dict[str, str] = {}  # disabled signals tracked for accuracy
+    extra_info: dict[str, Any] = {}
 
     # BUG-178 diagnostic phase marker (added 2026-04-10, diag/bug178-end-of-cycle-snapshot).
     # The per-ticker last-signal tracker is updated inside the enhanced-signal

@@ -906,12 +906,15 @@ def _check_signal_log_reconciliation() -> list[Violation]:
 # on the test suite to run.
 # ──────────────────────────────────────────────────────────────────────
 
-# Portfolio state files (Patient + Bold + Warrants).
+# Portfolio state files (Patient + Bold). Warrant portfolio uses a
+# different schema (no cash field — see portfolio/warrant_portfolio.py:19);
+# excluded from the cash-balance check. Codex 2026-05-10: original list
+# included warrants and would CRITICAL-fire on every healthy cycle.
 _PORTFOLIO_STATE_FILES = (
     DATA_DIR / "portfolio_state.json",
     DATA_DIR / "portfolio_state_bold.json",
-    DATA_DIR / "portfolio_state_warrants.json",
 )
+_PORTFOLIO_CASH_FIELD = "cash_sek"  # see portfolio_mgr.py:22 — NOT 'cash'
 
 # Orphaned .tmp scan: only flag stale enough to rule out the brief window
 # during which a healthy atomic_write_json sits between write-and-rename.
@@ -967,14 +970,14 @@ def _check_portfolio_arithmetic() -> list[Violation]:
             ))
             continue
 
-        cash = state.get("cash")
+        cash = state.get(_PORTFOLIO_CASH_FIELD)
         if not isinstance(cash, int | float):
             violations.append(Violation(
                 invariant="portfolio_arithmetic",
                 severity="CRITICAL",
                 message=(
-                    f"{state_path.name}: 'cash' field is missing or "
-                    f"non-numeric ({cash!r})."
+                    f"{state_path.name}: {_PORTFOLIO_CASH_FIELD!r} field is "
+                    f"missing or non-numeric ({cash!r})."
                 ),
                 details={"path": str(state_path), "cash": repr(cash)},
             ))
@@ -1087,11 +1090,16 @@ def _check_atomic_write_residue() -> list[Violation]:
     cutoff = time.time() - _TMP_RESIDUE_MIN_AGE_S
     stale: list[dict] = []
     scanned = 0
-    # Bounded scan — DATA_DIR can grow large with archives.
-    for path in DATA_DIR.iterdir():
+    # Codex 2026-05-10: original used iterdir() which only saw top-level
+    # files. atomic_write_json leaves <target>.tmp BESIDE the target — that
+    # can be inside data/models/, data/archive/, etc. rglob('*') walks
+    # subdirs so these orphans get caught. Same bounded-scan budget.
+    for path in DATA_DIR.rglob("*"):
         scanned += 1
         if scanned > _TMP_RESIDUE_MAX_FILES:
             break
+        if not path.is_file():
+            continue
         name = path.name
         # atomic_write_json writes to <path>.tmp; some callers use other
         # suffixes (.tmp.NNNN, .tmp-PID). Match any '.tmp' segment.
@@ -1135,9 +1143,11 @@ def check_journal_uniqueness_safe() -> list[Violation]:
     inside the lookback window means Layer 2 fired the same decision
     event twice, either because the dedup state didn't persist or
     because a T3 timeout respawn didn't see the prior journal write.
-    Single-PR safety: emits WARNING, never CRITICAL — this can be a
-    benign re-emit on a manual /restart, and we don't want to page the
-    user for ambiguous cases.
+    Emits WARNING — this can be a benign re-emit on a manual /restart.
+    NOTE: ViolationTracker self-escalates a repeating WARNING to CRITICAL
+    after several consecutive cycles (see :class:`ViolationTracker`),
+    which is the desired behaviour for a *persistent* duplicate pattern
+    but means transient one-shot duplicates page only after they recur.
     """
     try:
         return _check_journal_uniqueness()

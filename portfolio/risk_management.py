@@ -164,12 +164,18 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
     # Try disk cache.
     cached = load_json(DATA_DIR / _FX_CACHE_FILENAME, default=None)
     if isinstance(cached, dict):
-        try:
-            cached_rate = float(cached.get("rate"))
-            if FX_RATE_MIN <= cached_rate <= FX_RATE_MAX:
-                return cached_rate
-        except (TypeError, ValueError):
-            pass
+        # 2026-05-10 (codex re-review): cached.get("rate") is Any|None;
+        # the except below catches the None→float TypeError at runtime,
+        # but mypy's strict arg-type check fires first. Explicit None
+        # check makes the runtime guard visible to the type checker.
+        rate_raw = cached.get("rate")
+        if rate_raw is not None:
+            try:
+                cached_rate = float(rate_raw)
+                if FX_RATE_MIN <= cached_rate <= FX_RATE_MAX:
+                    return cached_rate
+            except (TypeError, ValueError):
+                pass
 
     logger.warning(
         "fx_rate fallback to hardcoded %.2f — agent_summary missing/invalid "

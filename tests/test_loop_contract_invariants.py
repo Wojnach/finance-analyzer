@@ -35,7 +35,7 @@ def _write_state(path: Path, payload: dict) -> None:
 def test_portfolio_arithmetic_passes_on_healthy_state(tmp_path, monkeypatch):
     state = tmp_path / "portfolio_state.json"
     _write_state(state, {
-        "cash": 250_000.0,
+        "cash_sek": 250_000.0,
         "holdings": {
             "BTC-USD": {"shares": 0.5, "avg_cost_usd": 60_000},
         },
@@ -46,7 +46,7 @@ def test_portfolio_arithmetic_passes_on_healthy_state(tmp_path, monkeypatch):
 
 def test_portfolio_arithmetic_flags_negative_cash(tmp_path, monkeypatch):
     state = tmp_path / "portfolio_state.json"
-    _write_state(state, {"cash": -1000.0, "holdings": {}})
+    _write_state(state, {"cash_sek": -1000.0, "holdings": {}})
     monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))
     violations = loop_contract.check_portfolio_arithmetic_safe()
     assert len(violations) == 1
@@ -55,13 +55,30 @@ def test_portfolio_arithmetic_flags_negative_cash(tmp_path, monkeypatch):
     assert "negative" in violations[0].message.lower()
 
 
+def test_portfolio_arithmetic_flags_wrong_field_name(tmp_path, monkeypatch):
+    """Regression: codex 2026-05-10 caught us using "cash" instead of "cash_sek".
+
+    A state file with the OLD wrong field name must trigger a CRITICAL
+    "missing or non-numeric" violation — proves we read the correct key.
+    """
+    state = tmp_path / "portfolio_state.json"
+    _write_state(state, {"cash": 100.0, "holdings": {}})  # legacy-shaped
+    monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))
+    violations = loop_contract.check_portfolio_arithmetic_safe()
+    assert len(violations) == 1
+    assert violations[0].severity == "CRITICAL"
+    assert "cash_sek" in violations[0].message
+
+
 def test_portfolio_arithmetic_flags_nan_shares(tmp_path, monkeypatch):
     state = tmp_path / "portfolio_state.json"
     # NaN can't survive json.dumps directly without allow_nan; emit raw.
     state.write_text(
-        '{"cash": 100.0, "holdings": {"BTC-USD": {"shares": NaN}}}',
+        '{"cash_sek": 100.0, "holdings": {"BTC-USD": {"shares": NaN}}}',
         encoding="utf-8",
     )
+    # Codex 2026-05-10: explicitly verify the field name; original test
+    # used "cash" which masked the schema mismatch the production code had.
     # load_json wraps json.loads with default kwargs (allow_nan=True), so
     # NaN parses through. Patch path tuple and run.
     monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))
@@ -77,7 +94,7 @@ def test_portfolio_arithmetic_flags_nan_shares(tmp_path, monkeypatch):
 def test_portfolio_arithmetic_flags_negative_shares(tmp_path, monkeypatch):
     state = tmp_path / "portfolio_state.json"
     _write_state(state, {
-        "cash": 100.0,
+        "cash_sek": 100.0,
         "holdings": {"ETH-USD": {"shares": -0.5}},
     })
     monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))

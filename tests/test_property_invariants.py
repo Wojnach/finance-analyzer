@@ -6,11 +6,21 @@ tests with `hypothesis` cannot be silently faked: a property is a universal
 quantifier over a strategy, and Claude cannot tilt the property without
 breaking the property itself.
 
+Scope (Codex 2026-05-10 review):
+  These properties test SEQUENTIAL CONTRACTS — not concurrent atomicity.
+  P2 verifies that ``atomic_append_jsonl`` round-trips writes in order
+  for a single producer. P3 verifies ``atomic_write_json`` cleans up its
+  tempfile on success. Neither exercises crash-injection or concurrent
+  writers; if you need that coverage, add a separate suite that uses
+  ``multiprocessing`` + a fault-injection harness. The properties as
+  written still gate against the "Claude rewrote the function and broke
+  basic round-trip" failure mode, which is the current threat model.
+
 Each property here asserts something that MUST be true regardless of input:
   1. Portfolio bookkeeping conservation: total_value = cash + Σ qty·price.
-  2. JSONL round-trip: appending then reading returns the originals in order.
-  3. Atomic write hygiene: no .tmp residue on success.
-  4. Signal voting determinism: same input → same output.
+  2. JSONL append→read round-trip: same data, same order, no torn lines.
+  3. atomic_write_json hygiene: no .tmp residue beside the target on success.
+  4. _weighted_consensus determinism: same input → same output.
   5. load_json contract: missing path → default returned (no raise).
 """
 from __future__ import annotations
