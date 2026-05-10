@@ -1,162 +1,71 @@
-# Improvement Plan — auto-session-2026-05-09
+# Improvement Plan — Auto-Session 2026-05-10
 
-## Exploration Summary
-
-Deep exploration via 4 parallel agents (signal pipeline, orchestration, portfolio/risk,
-metals/dashboard/infra) + manual reading. Prior session (2026-05-08) already fixed B2-B8
-and batches 2-4 from the old plan. This session found new issues.
-
----
+## Date: 2026-05-10 (Sunday)
+## Branch: improve/auto-session-2026-05-10
 
 ## 1. Bugs & Problems Found
 
-### P0 — Critical
+### CRITICAL
 
-**B1: Calendar signal at 29.3% — actively harmful, not disabled**
-- File: `portfolio/tickers.py` (DISABLED_SIGNALS)
-- Calendar signal dropped from 48.8% baseline to 29.3% recent. Critical error has
-  escalated 26x consecutive. Has structural BUY bias (6 of 8 sub-signals are BUY-only).
-  Already per-horizon blacklisted at 1d for every ticker but still runs and votes at
-  other horizons. accuracy_degradation monitor spamming critical_errors.jsonl.
-- Fix: Add `"calendar"` to DISABLED_SIGNALS. Add to `_SHADOW_SAFE_SIGNALS` in
-  signal_engine.py. Resolve critical error entries.
+| # | Issue | File:Line | Impact |
+|---|-------|-----------|--------|
+| C1 | `send_telegram(msg)` missing required `config` — raises silent `TypeError` | `main.py:936,948` | Safeguard alerts never reach Telegram |
+| C2 | CF header bypass: LAN clients spoof `Cf-Access-Authenticated-User-Email` | `dashboard/auth.py:131` | Unauthorized dashboard access |
+| C3 | COT positioning reads wrong deep context path (dead 27 days) | `signals/cot_positioning.py:347` | Signal produces 0 samples |
+| C4 | `prune_jsonl` uses predictable `.tmp` path (not `mkstemp`) | `file_utils.py:320` | Race on concurrent prune |
+| C5 | `crypto_loop._pid_alive` missing `subprocess` import on POSIX | `data/crypto_loop.py` | `NameError` crash |
+| C6 | `forecast_accuracy.py` raw `read_text()` instead of `load_jsonl` | `forecast_accuracy.py:75,92,380` | Torn-line data integrity |
 
-### P1 — High
+### HIGH
 
-**B2: fx_rate hardcoded fallback 10.0 in monte_carlo_risk.py**
-- File: `portfolio/monte_carlo_risk.py:430`
-- `compute_portfolio_var()` uses `agent_summary.get("fx_rate", 10.0)` — bypasses the
-  3-tier cache chain in risk_management.py. On feed outage, SEK VaR is wrong by ~5%.
-- Fix: Extract FX constants to `fx_rates.py` and import shared fallback function.
+| # | Issue | File:Line | Impact |
+|---|-------|-----------|--------|
+| H1 | `reporting.py` imports private `_atomic_write_json` from portfolio_mgr | `reporting.py:11` | Fragile alias coupling |
+| H2 | Dead `CORRELATED_PAIRS` for removed tickers | `risk_management.py` | Dead code |
+| H3 | Stale `HORIZON_SIGNAL_WEIGHTS` for disabled signals | `signal_engine.py` | Dead weight |
+| H4 | Swedish holidays missing Whit Monday | `market_timing.py:216` | Warrant trading on closed day |
+| H5 | `claude_invocations.jsonl` never pruned | `claude_gate.py` | Unbounded growth |
+| H6 | `crypto_cross_asset.py` orphan — never registered | `signals/crypto_cross_asset.py` | Dead file |
+| H7 | `_CORE_SIGNALS` + `@register_signal` unused | `signal_registry.py` | Dead API |
+| H8 | `_loading_timestamps` not cleaned on error path | `shared_state.py:113` | Spurious eviction logs |
+| H9 | `_sell_in_may` SELL bias — root cause of calendar 29.3% | `calendar_seasonal.py:160` | Blocks signal re-enable |
+| H10 | 9 unresolved calendar critical_errors from 2026-05-09 | `data/critical_errors.jsonl` | Alert noise |
 
-**B3: Division by zero in journal.py `_detect_warnings`**
-- File: `portfolio/journal.py:225`
-- `(last_price - first_price) / first_price` with no guard for `first_price=0`.
-  Propagates to `write_context()`, aborting Layer 2 context generation.
-- Fix: Add `if first_price > 0` guard.
+### MEDIUM
 
-**B4: `signal_accuracy_cost_adjusted()` crashes on None change_pct**
-- File: `portfolio/accuracy_stats.py:432`
-- `abs(change_pct)` raises TypeError when change_pct is None (missing backfill).
-  Base `signal_accuracy()` has a None guard but this function does not.
-- Fix: Add `if change_pct is None: continue`.
+| # | Issue | File:Line | Impact |
+|---|-------|-----------|--------|
+| M1 | ORB predictor DST bug | `orb_predictor.py:32` | Wrong morning window in summer |
+| M2 | `distance_to_stop_pct` wrong denominator | `risk_management.py:373` | Overstated safety margin |
+| M3 | `_write_lock` dead code | `gpu_gate.py:98` | Dead function |
+| M4 | Dead `CORRELATION_PRIORS` for removed tickers | `monte_carlo_risk.py` | Dead data |
 
-**B5: `update_module_failures()` / `update_health()` clobber race**
-- File: `portfolio/health.py`
-- Both do independent read-modify-write of health_state.json. `update_module_failures()`
-  is called from `reporting.py` before `update_health()` in main.py. The second write
-  clobbers `last_module_failures` from the first.
-- Fix: Merge the two into a single update call, or make `update_health()` preserve
-  existing fields it doesn't own.
+## 2. Implementation Batches
 
-**B6: `load_jsonl` missing OSError guard**
-- File: `portfolio/file_utils.py:117`
-- `load_jsonl` opens file with plain `open()`, no OSError guard. On Windows,
-  PermissionError (antivirus lock) propagates uncaught. `load_jsonl_tail` catches this.
-- Fix: Add `except OSError` guard matching `load_jsonl_tail` pattern.
+### Batch 1: Critical bugs (6 files)
+1. `portfolio/main.py` — Fix `send_telegram(msg)` → `send_telegram(msg, config)`
+2. `dashboard/auth.py` — Only trust CF header when `dashboard_token` is configured
+3. `portfolio/file_utils.py` — Fix `prune_jsonl` to use `tempfile.mkstemp`
+4. `data/crypto_loop.py` — Add `subprocess` import at module level
+5. `portfolio/forecast_accuracy.py` — Use `file_utils.load_jsonl` for all reads
+6. `portfolio/signals/cot_positioning.py` — Fix deep context path
 
-### P2 — Medium
+### Batch 2: Signal cleanup (4 files, 1 deletion)
+1. `portfolio/signals/calendar_seasonal.py` — `_sell_in_may` SELL→HOLD
+2. `portfolio/signal_engine.py` — Clean `HORIZON_SIGNAL_WEIGHTS`
+3. `portfolio/signal_registry.py` — Remove `_CORE_SIGNALS` dead code
+4. DELETE `portfolio/signals/crypto_cross_asset.py`
 
-**B7: btc_proxy vote never tracked for accuracy**
-- File: `portfolio/signal_engine.py:3162-3172`
-- Synthetic btc_proxy vote for MSTR injected but not in SIGNAL_NAMES. Never logged
-  by outcome_tracker. Accumulates zero accuracy data. Bypasses accuracy gate trivially.
-- Fix: Add "btc_proxy" to SIGNAL_NAMES in tickers.py.
+### Batch 3: Infrastructure cleanup (7 files)
+1. `portfolio/reporting.py` — Fix import to `file_utils.atomic_write_json`
+2. `portfolio/risk_management.py` — Remove dead `CORRELATED_PAIRS` + fix stop denominator
+3. `portfolio/monte_carlo_risk.py` — Remove dead `CORRELATION_PRIORS`
+4. `portfolio/market_timing.py` — Add Whit Monday to Swedish holidays
+5. `portfolio/shared_state.py` — Fix `_loading_timestamps` error-path cleanup
+6. `portfolio/gpu_gate.py` — Remove dead `_write_lock`
+7. `portfolio/main.py` — Add `claude_invocations.jsonl` to pruning list
 
-**B8: Double Telegram alert race in fx_rates.py**
-- File: `portfolio/fx_rates.py:87`
-- `_last_fx_alert` updated after network call outside lock. Two threads can both pass
-  cooldown check and both send alerts.
-- Fix: Set `_last_fx_alert` under lock before network call (optimistic lock).
-
-**B9: outcome_tracker timestamp parsing without guard**
-- File: `portfolio/outcome_tracker.py:421`
-- `datetime.fromisoformat(entry["ts"])` without try/except. Corrupt JSONL entry
-  aborts entire backfill batch.
-- Fix: Wrap in try/except like other timestamp parsing in the file.
-
-**B10: Leaked module-level loop variables**
-- File: `portfolio/signal_engine.py:541`
-- After `_TICKER_DISABLED_BY_HORIZON` validation, `_tk` and `_sigs` remain in namespace.
-  `_k` and `_inner` deleted but not these.
-- Fix: Add `del _tk, _sigs`.
-
-### P3 — Low
-
-**B11: Dead tod_factor application to discarded conf**
-- File: `portfolio/signal_engine.py:3593`
-- `conf *= tod_factor` on raw unweighted conf that is immediately overwritten. Dead code.
-- Fix: Remove.
-
-**B12: Dead correlation pairs for removed tickers**
-- File: `portfolio/risk_management.py:731-738`
-- CORRELATED_PAIRS lists AMD, AVGO, TSM, GOOGL, META, AMZN, AAPL — all removed.
-- Fix: Remove dead pairs.
-
-**B13: `import math` inside hot-path function**
-- File: `portfolio/risk_management.py:290`
-- `import math` inside `check_drawdown()` called every 60s. Python caches but bad style.
-- Fix: Move to top-level.
-
-**B14: FX constants duplicated without shared constant**
-- Files: `portfolio/fx_rates.py:66`, `portfolio/risk_management.py:121`
-- Both use 10.50 and band 7.0-15.0 independently.
-- Fix: Extract constants to fx_rates.py.
-
-**B15: mojibake dict duplicate keys in message_store**
-- File: `portfolio/message_store.py:37-48`
-- Multiple `'â'` dict keys — Python keeps last only. Some mojibake goes unrepaired.
-- Fix: Deduplicate or restructure.
-
----
-
-## 2. Execution Batches
-
-### Batch 1: Critical signal fix + crash guards (4 files, low risk)
-1. B1: Disable calendar signal in tickers.py + shadow-track in signal_engine.py
-2. B3: Division-by-zero guard in journal.py
-3. B4: None guard in accuracy_stats.py
-4. B10: Clean leaked module variables in signal_engine.py
-
-### Batch 2: Financial correctness (3 files, medium risk)
-1. B2: fx_rate fallback chain — shared constants in fx_rates.py, import in
-   monte_carlo_risk.py and risk_management.py
-2. B12: Remove dead correlation pairs in risk_management.py
-3. B14: FX constants consolidation (same files as B2)
-
-### Batch 3: State integrity + thread safety (4 files, medium risk)
-1. B5: Health state clobber fix in health.py
-2. B6: OSError guard in file_utils.py load_jsonl
-3. B8: FX double-alert race in fx_rates.py
-4. B9: Timestamp guard in outcome_tracker.py
-
-### Batch 4: Cleanup (4 files, low risk)
-1. B7: btc_proxy in SIGNAL_NAMES (tickers.py)
-2. B11: Dead tod_factor line (signal_engine.py)
-3. B13: import math to top level (risk_management.py)
-4. B15: mojibake dict fix (message_store.py)
-
-### Batch 5: Verify + document + ship
-1. Full test suite
-2. Update docs/SYSTEM_OVERVIEW.md
-3. Merge, push, restart loops
-
----
-
-## 3. Risk Assessment
-
-- **Batch 1**: Low risk. Calendar disable is additive (already accuracy-gated everywhere).
-  Guards are defensive additions.
-- **Batch 2**: Low risk. Constant consolidation, dead code removal.
-- **Batch 3**: Medium risk. health.py change alters write pattern. file_utils and
-  fx_rates changes add guards. Need careful testing.
-- **Batch 4**: Low risk. All additive or cleanup changes.
-
----
-
-## 4. Deferred (too risky or too large for autonomous session)
-
-- `generate_signal()` is 1100+ lines. Decomposition would be high-value but high-risk.
-- signal_accuracy_ewma() dead code removal — may be needed for research.
-- Metals loop crash recovery + Telegram unification — large scope, touches production.
-- Dashboard auth hardening (CF header validation) — policy decision needed.
+### Batch 4: Final fixes (3 files)
+1. `portfolio/orb_predictor.py` — DST-aware morning window
+2. `portfolio/tickers.py` — Update calendar comment (root cause fixed)
+3. `data/critical_errors.jsonl` — Resolve 9 calendar entries
