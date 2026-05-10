@@ -2960,3 +2960,44 @@ tests/test_agent_invocation_watchdog.py
 d7d622fa fix(layer2): address review findings — extend lock, harden contention test
 portfolio/agent_invocation.py
 tests/test_agent_invocation_watchdog.py
+
+### 2026-05-10 09:30 UTC | test-trust-2026-05-10
+7191db0c docs: plan test-trust hardening (mypy+hypothesis+mutmut+invariants)
+docs/plans/2026-05-10-test-trust-hardening.md
+
+### 2026-05-10 09:35 UTC | test-trust-2026-05-10
+79037a45 test: configure mutmut + property tests + mypy in TESTING.md
+pyproject.toml
+scripts/run_mutation_test.py
+docs/TESTING.md
+
+### 2026-05-10 09:38 UTC | test-trust-2026-05-10
+70a5644d test: add Hypothesis property tests (portfolio + atomic I/O + signal determinism)
+tests/test_property_invariants.py
+
+### 2026-05-10 09:50 UTC | test-trust-2026-05-10
+b0af4292 feat(types): mypy --strict pilot on 4 hot modules + drive-by test fix
+mypy.ini
+requirements-dev.txt
+portfolio/signal_engine.py
+portfolio/risk_management.py
+tests/test_risk_management.py
+
+### 2026-05-10 10:05 UTC | test-trust-2026-05-10
+7cb1740a feat(loop_contract): 3 trust-hardening runtime invariants
+portfolio/loop_contract.py
+tests/test_loop_contract_invariants.py
+
+User concern driving this work: doesn't trust Claude-written tests because
+Claude writes both code and tests. Goal: defenses that fire in production
+even when tests are wrong. Defense layers:
+- mypy strict pilot (4 modules) — catches sharp type errors at edit time
+- Hypothesis property tests — universal truths Claude can't fake
+- mutmut config — kills weak tests via mutation
+- 3 new loop_contract invariants — fire every cycle in production
+
+Drive-by: tests/test_risk_management.py::test_distance_to_stop assertion
+was stale after ed0013cc denominator fix landed earlier today (the
+denominator changed from /stop_price to /current_price but the test
+assertion never updated). Exact class of bug Claude ships when test+code
+diverge in same edit. Fixed.
