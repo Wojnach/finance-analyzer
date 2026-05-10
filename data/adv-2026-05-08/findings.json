@@ -1,0 +1,111 @@
+{
+  "total": 13,
+  "p0": 3,
+  "p1": 10,
+  "findings": [
+    {
+      "tier": "P0",
+      "file": "portfolio/agent_invocation.py",
+      "line": 1142,
+      "title": "Timeout-enforcement dead code path when _agent_timeout == 0",
+      "problem": "if _agent_timeout and elapsed > _agent_timeout silently skips when _agent_timeout is 0 (falsy)",
+      "fix": "Use explicit comparison: if _agent_timeout > 0 and elapsed > _agent_timeout"
+    },
+    {
+      "tier": "P0",
+      "file": "portfolio/agent_invocation.py",
+      "line": 839,
+      "title": "Byte offset capture for auth-error detection is racy",
+      "problem": "Captures _agent_log_start_offset BEFORE file is opened for append. Early subprocess output may be missed by auth-error scan.",
+      "fix": "Capture offset AFTER opening file, or use temp file with atomic rename"
+    },
+    {
+      "tier": "P0",
+      "file": "portfolio/trigger.py",
+      "line": 231,
+      "title": "Consensus baseline consumed when ranging dampening suppresses trigger",
+      "problem": "triggered_consensus updated even when trigger suppressed. Next cycle misses valid consensus crossing.",
+      "fix": "Update triggered_consensus only when trigger actually fires"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/agent_invocation.py",
+      "line": 580,
+      "title": "Module global _agent_timeout stale during reentrancy",
+      "problem": "_agent_timeout overwritten by new tier. Old agent killed with wrong timeout.",
+      "fix": "Use dict keyed by pid: {pid: timeout}"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/agent_invocation.py",
+      "line": 1323,
+      "title": "_agent_log_start_offset not cleared on completion",
+      "problem": "Inconsistent cleanup pattern; stale state persists.",
+      "fix": "Clear _agent_log_start_offset = 0 at line 1323"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/agent_invocation.py",
+      "line": 544,
+      "title": "Stack overflow auto-disable is sticky",
+      "problem": "Once counter reaches 5, no agent spawned, so never completes, never resets. Permanent lockout.",
+      "fix": "Add 24h timeout-based decay"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/trigger.py",
+      "line": 189,
+      "title": "Startup grace period flag ignored on in-process restart",
+      "problem": "Module-level flag not reset on loop restart. Spurious triggers on restart.",
+      "fix": "Tie grace period to process PID"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/agent_invocation.py",
+      "line": 293,
+      "title": "Decision feedback loop O(N) full-journal scans",
+      "problem": "Every invocation scans entire journal. Scales poorly over weeks.",
+      "fix": "Limit to last 100 entries"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/main.py",
+      "line": 658,
+      "title": "ThreadPoolExecutor futures not actually killed on timeout",
+      "problem": "cancel() is best-effort. Worker threads leak resources.",
+      "fix": "Add 5s grace period + log still-running threads"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/agent_invocation.py",
+      "line": 1148,
+      "title": "Timeout kill failure not persisted",
+      "problem": "kill_ok=False lost. Hung agent indistinguishable from killed agent in logs.",
+      "fix": "Include kill_status field in returned dict"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/trigger.py",
+      "line": 434,
+      "title": "classify_tier() uses UTC for day-of-week, wrong at UTC/CET boundary",
+      "problem": "now_utc.weekday() wrong date at midnight UTC. Tier misclassified.",
+      "fix": "Use CET time for market_open check"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/health.py",
+      "line": 140,
+      "title": "Heartbeat daemon killed abruptly on loop exit",
+      "problem": "Daemon thread has 2s to exit while writing health_state.json. File corruption risk.",
+      "fix": "Gracefully drain daemon before main thread exits"
+    },
+    {
+      "tier": "P1",
+      "file": "portfolio/agent_invocation.py",
+      "line": 809,
+      "title": "Broad exception handling masks import errors",
+      "problem": "ALL exceptions swallowed when locating claude. ImportError converts to silent fallback.",
+      "fix": "Only catch FileNotFoundError, re-raise ImportError"
+    }
+  ]
+}

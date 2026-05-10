@@ -1,0 +1,90 @@
+ADVERSARIAL REVIEW — Portfolio-Risk Subsystem
+2026-05-08
+
+portfolio/risk_management.py:760-770
+Missing price triggers silent undervaluation in concentration check.
+If live price missing and avg_cost_usd is zero, existing_value becomes 0,
+falsely lowering concentration_pct. No guard on whether price is valid.
+Fix: Check price > 0 before using; return None if invalid.
+
+portfolio/risk_management.py:206-211
+Holdings value falls back to avg_cost_usd (stale by days) if live price
+missing. Undervalues rallied positions. More critical: if avg_cost_usd is
+zero (corrupt), holdings_value becomes 0 and circuit breaker reports false
+safety. No critical-level log on fallback.
+Fix: Log CRITICAL when falling back to avg_cost_usd for material holdings.
+
+portfolio/warrant_portfolio.py:88
+Returns None if underlying_entry_price_usd is zero, silently omitting PnL.
+But zero can result from API timeout during BUY transaction (line 238-247).
+The VWAP averaging logic then skips updating underlying_entry_price_usd if
+new price is zero, leaving stale reference and wrong P&L calculation.
+Fix: Log warning when underlying_entry_price_usd is zero or missing.
+
+portfolio/equity_curve.py:104-108
+Added (commit 08e0f378) returns.append(0.0) when prev_val==0 to fill cold-start.
+But this biases Sharpe ratio upward by lowering volatility estimate during
+portfolio initialization. Zero is treated as "flat day" (correct) but in context
+of ramp-up it's "no data" (should skip). Sharpe overstated by ~1-2% on new portfolios.
+Fix: Skip day entirely (continue) instead of appending 0.0.
+
+portfolio/kelly_sizing.py:280-289
+Fallback logic hides data source. If per-ticker accuracy exists but has zero
+votes, fallbacks to consensus. Source string still says "per-ticker weighted
+accuracy" even though it's actually consensus. Misleads downstream users about
+confidence level.
+Fix: Update source string after each fallback step to reflect actual source.
+
+portfolio/risk_management.py:776-778
+When cash=0 (fully invested), proposed_alloc becomes 0, but concentration
+check still runs with new_position_value = existing + 0. False positive
+if holding exists. If fx_rate is NaN (despite 2026-05-08 guards),
+existing_value becomes 0 and concentration check passes silently.
+Fix: Add math.isfinite(fx_rate) guard before line 770.
+
+portfolio/risk_management.py:372-374
+ATR stop capped at 15% (for warrants) hides tight stops. A warrant with
+20% ATR day becomes 15% capped — tight relative to observed volatility but
+user sees no warning. Violates "never place stops near MINI barriers" principle.
+Fix: Log warning when ATR cap applied (atr_pct > 15).
+
+portfolio/kelly_sizing.py:326
+Min trade size check at 500 SEK. If kelly_fraction returns 0.0 (broken
+accuracy), returns recommended_sek = 0, silently disabling trading.
+No error raised; no critical log. Broken signal silently stops all trading.
+Fix: Raise ValueError if kelly_pct==0 after all fallbacks.
+
+portfolio/equity_curve.py:378
+DIVISION BY ZERO: distance_to_stop_pct = inf if stop_price <= 0
+(from capped ATR or zero entry price). Infinity not clamped downstream.
+Confuses dashboards reporting stop proximity.
+Fix: Clamp distance_to_stop_pct to max 999.0 when stop_price <= 0.
+
+portfolio/circuit_breaker.py:98-99, 106
+_half_open_probe_sent flag set but never checked in production logic.
+State machine relies only on _state enum. Latent bug if allow_request()
+returns True but caller never executes the request — flag leaks.
+Fix: Remove _half_open_probe_sent; document that allow_request()=True
+means "caller MUST execute request before next call".
+
+portfolio/cost_model.py:55
+round_trip_pct() assumes slippage_bps same on BUY and SELL. But
+warrant bid-ask widens unpredictably; crossing ask vs crossing bid
+can differ by 2-5 bps. Model silently undercounts sell-side slippage.
+Fix: Add slippage_bps_sell separate from slippage_bps_buy or document assumption.
+
+portfolio/equity_curve.py:413
+Rounds matched shares to 8 decimals regardless of instrument type.
+Warrants trade in whole units (should be 0 decimals), cosmetically
+reports "1.00000000". Misleading in reports; could amplify rounding
+error in downstream profit_factor calculations.
+Fix: Format shares by instrument type (crypto=8, warrants=0).
+
+portfolio/risk_management.py:156-165
+check_concentration_risk only called for BUY action. But concentration
+risk also applies to SELL (reducing coverage). A SELL that drops portfolio
+coverage below diversification threshold is not flagged. One-directional check.
+Fix: Also check concentration for SELL action (opposite threshold).
+
+Summary: 13 findings — 4 P1 (silent failures, misvaluation), 5 P2 (edge cases),
+4 P3 (cosmetic/assumptions).
