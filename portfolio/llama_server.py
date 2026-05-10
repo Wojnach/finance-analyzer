@@ -268,7 +268,45 @@ def _query_free_vram_mb():
         return None
 
 
-def _wait_for_vram_reclaim(min_free_mb: int = 5632, max_wait: float = 4.0) -> float:
+# Plex transcode detection: cached query of nvidia-smi compute-apps.
+# 2026-05-11: Plex Media Server hard-crashed twice (17:21:33, 18:50:17) when a
+# model swap evicted its NVENC encoder context. Detection cadence is per-swap
+# so a 5 s TTL is plenty and keeps the polling loop in _wait_for_vram_reclaim
+# from re-shelling out to nvidia-smi on every iteration.
+_PLEX_PROBE_TTL_SEC = 5.0
+_plex_probe_cache: "tuple[float, bool] | None" = None
+
+
+def _plex_transcode_active() -> bool:
+    """Return True iff Plex Transcoder.exe currently holds a CUDA context.
+
+    Direct evidence of NVENC use — the encoder context is the thing the CUDA
+    driver evicts under VRAM pressure, which is what crashes Plex. Cached for
+    5 s so the active-poll loop in _wait_for_vram_reclaim doesn't hammer
+    nvidia-smi. Returns False on any error — never blocks the finance loop.
+    """
+    global _plex_probe_cache
+    now = time.time()
+    if _plex_probe_cache is not None and (now - _plex_probe_cache[0]) < _PLEX_PROBE_TTL_SEC:
+        return _plex_probe_cache[1]
+    active = False
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=process_name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0 and "plex transcoder" in result.stdout.lower():
+            active = True
+    except Exception as e:
+        logger.debug("nvidia-smi compute-apps query failed: %s", e)
+    _plex_probe_cache = (now, active)
+    return active
+
+
+def _wait_for_vram_reclaim(min_free_mb: int = 5632, max_wait: float = 4.0,
+                           plex_safe: bool = False) -> float:
     """Poll nvidia-smi until at least `min_free_mb` is free, up to `max_wait` seconds.
 
     Returns the wall-clock seconds spent waiting, for logging/observability.
@@ -287,7 +325,21 @@ def _wait_for_vram_reclaim(min_free_mb: int = 5632, max_wait: float = 4.0) -> fl
     to the full 4 s sleep — never faster than the original, always at least
     as safe. The feedback memory note on PowerShell quoting applies equally
     here: single string, no variable interpolation, nothing bash can eat.
+
+    2026-05-11 (plex-vram-coord): added `plex_safe`. When True, raises the
+    free-VRAM floor to 7168 MB (>=7 GB free) and extends the timeout to 30 s.
+    Rationale: when Plex is hardware-transcoding it holds a CUDA NVENC
+    encoder context of ~0.5 GB and is constantly working it. If the swap
+    proceeds while VRAM is tight, the new model's working-set allocation
+    forces CUDA to evict Plex's context, which crashes/hangs Plex. The 7 GB
+    floor covers 8B Q4 weights (~4.5 GB) + KV cache (~0.8 GB) + transient
+    load peaks (~1 GB) + Plex headroom (~0.5 GB). Caller passes the
+    plex-active flag through from `_start_server` so we never need to query
+    nvidia-smi twice for the same swap.
     """
+    if plex_safe:
+        min_free_mb = max(min_free_mb, 7168)
+        max_wait = max(max_wait, 30.0)
     start = time.time()
     deadline = start + max_wait
     first_probe = _query_free_vram_mb()
@@ -320,6 +372,20 @@ def _start_server(name):
         logger.info("llama-server or model %s not found", name)
         return False
 
+    # 2026-05-11 (plex-vram-coord): detect Plex transcoding before the kill so
+    # we know whether to require extra VRAM headroom. Plex's NVENC encoder
+    # context (~0.5 GB) gets evicted by CUDA when the swap pushes total
+    # allocation past 10 GB on the RTX 3080, hard-crashing Plex (confirmed
+    # twice 2026-05-10). We probe once per swap and feed the flag through the
+    # reclaim wait + into the abort decision below.
+    plex_active = _plex_transcode_active()
+    if plex_active:
+        logger.info(
+            "llama-server: Plex transcoding active, using safe VRAM reclaim "
+            "(>=7 GB free, <=30 s wait) before loading %s",
+            name,
+        )
+
     _stop_server()
     # 2026-04-10 (perf/llama-swap-reduction): replaced `time.sleep(4)` with an
     # active poll. The old sleep was there because Windows VRAM release is
@@ -327,8 +393,22 @@ def _start_server(name):
     # on why 4 s exists. In steady state most swaps only need 0.5-2 s, so the
     # poll saves ~2-3 s per swap (×3 swaps = ~6-10 s/cycle) while preserving
     # the 4 s ceiling as a hard fallback.
-    waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=4.0)
+    waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=4.0, plex_safe=plex_active)
     logger.debug("VRAM reclaim poll: %.2fs before launching %s", waited, name)
+
+    # Plex-aware abort: if Plex is still transcoding AND we couldn't reach the
+    # safe headroom within max_wait, loading the new model is more likely to
+    # crash Plex than to succeed cleanly. Caller (_ensure_model →
+    # query_llama_server) returns None on False, and the caller falls back to
+    # its subprocess inference path. Slower than HTTP but never racing.
+    if plex_active:
+        free_now = _query_free_vram_mb() or 0
+        if free_now < 7168:
+            logger.warning(
+                "llama-server: aborting %s swap — Plex transcoding and only %d MB free (<7168)",
+                name, free_now,
+            )
+            return False
 
     try:
         cmd = [
