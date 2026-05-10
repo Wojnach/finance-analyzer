@@ -62,12 +62,14 @@ def _call_model(context, lora_path=None):
 
     # 2026-05-11 (plex-vram-coord): same gate as qwen3_signal._call_qwen3 — when
     # query_llama_server returns None during a Plex transcode and VRAM is tight,
-    # the cold-start subprocess below would evict Plex's NVENC context. See
-    # portfolio.llama_server.model_load_safe for the threshold rationale.
+    # the cold-start subprocess below would evict Plex's NVENC context. Signal
+    # abstention via the existing "model": "skipped" sentinel (matches the
+    # GPU-busy convention at line 110 below) so the vote isn't counted as a
+    # real Ministral prediction. WARNING level for log-grep visibility.
     from portfolio.llama_server import model_load_safe
     if not model_load_safe():
-        logger.info("ministral: skipping subprocess fallback — Plex transcoding and VRAM tight")
-        return {"action": "HOLD", "reasoning": "Plex transcode in progress", "model": "Ministral-3-8B"}
+        logger.warning("ministral: abstaining — Plex transcoding and VRAM <7168MB; skipping subprocess fallback")
+        return {"action": "HOLD", "reasoning": "skipped: Plex transcode active, VRAM tight", "model": "skipped"}
 
     # Fallback: subprocess (cold start)
     logger.info("llama-server unavailable, falling back to subprocess")
