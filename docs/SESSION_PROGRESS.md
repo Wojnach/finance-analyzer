@@ -1,5 +1,48 @@
 # Session Progress
 
+## Auto-Improve Session (2026-05-10 morning)
+
+**Session start:** 2026-05-10 ~08:00 UTC
+**Status:** COMPLETE — merging to main
+**Branch:** `improve/auto-session-2026-05-10`
+**Commits:** 4 batches, 20 issues fixed across 15 files + 1 deletion
+
+### What changed
+
+Autonomous improvement session: deep exploration → plan (6C, 10H, 4M bugs) → 4 batch implementation.
+
+**Batch 1 — Critical bugs (5 files):**
+- C1: `main.py` `send_telegram(msg)` missing required `config` — TypeError silently swallowed, safeguard alerts never reached Telegram. Fixed to `send_or_store(msg, config)`.
+- C2: `dashboard/auth.py` CF header bypass — LAN attacker could spoof single `Cf-Access-Authenticated-User-Email` header. Now requires BOTH email + JWT assertion headers.
+- C3: `cot_positioning.py` read wrong deep context path (`refresh_data` vs `external_research.cot_positioning.live`). Signal dead 27 days since re-enable.
+- C5: `crypto_loop.py` missing `subprocess` import at module level — `NameError` on POSIX.
+- C6: `forecast_accuracy.py` raw `read_text()` → `load_jsonl()` for atomic I/O safety (3 sites).
+
+**Batch 2 — Signal cleanup (3 files, 1 deletion):**
+- H9: `calendar_seasonal._sell_in_may` SELL→HOLD for May-Oct — root cause of 29.3% accuracy crash.
+- H3: Removed stale HORIZON_SIGNAL_WEIGHTS entries for disabled signals (smart_money, oscillators, calendar).
+- H6: Deleted orphan `crypto_cross_asset.py` — never registered, never called.
+
+**Batch 3 — Infrastructure cleanup (6 files):**
+- H1: `reporting.py` fixed import from private `_atomic_write_json` to public `atomic_write_json`.
+- H4: `market_timing.py` added Whit Monday (Annandag Pingst, easter+50) to Swedish holidays.
+- H5: `main.py` added `claude_invocations.jsonl` to JSONL pruning list (was unbounded).
+- H8: `shared_state.py` fixed `_loading_timestamps` leak on error path (spurious eviction logs).
+- M3: `gpu_gate.py` removed dead `_write_lock` function.
+- M4: `monte_carlo_risk.py` removed 12 dead CORRELATION_PRIORS for removed tickers.
+
+**Batch 4 — Final fixes (2 files + critical_errors resolution):**
+- M1: `orb_predictor.py` morning window DST-aware via `_morning_window_utc()`.
+- M2: `risk_management.py` `distance_to_stop_pct` denominator fixed (`stop_price` → `current_price`).
+- H10: Resolved 11 `accuracy_degradation` critical_errors entries (root cause: calendar SELL bias).
+
+### Skipped (false positive or low risk/reward)
+- C4: `prune_jsonl` already uses `tempfile.mkstemp` correctly (agent was wrong)
+- H2: `CORRELATED_PAIRS` already only has active tickers (cleaned in 2026-05-09 session)
+- H7: `_CORE_SIGNALS` kept — removing would break existing tests for marginal benefit
+
+---
+
 ## Auto-Improve Session (2026-05-09 morning)
 
 **Session start:** 2026-05-09 ~08:00 UTC
