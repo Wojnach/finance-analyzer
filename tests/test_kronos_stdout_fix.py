@@ -110,8 +110,18 @@ class TestExtractJsonFromStdout:
 
 # --- _run_kronos with contaminated stdout tests ---
 
+
+@pytest.mark.slow
 class TestRunKronosContaminatedStdout:
-    """Test that _run_kronos handles contaminated stdout via _extract_json_from_stdout."""
+    """Test that _run_kronos handles contaminated stdout via _extract_json_from_stdout.
+
+    2026-05-10: marked ``slow`` — every test calls real _run_kronos, which
+    acquires gpu_gate → invokes nvidia-smi via get_vram_usage. Subprocess
+    cost dominates over the JSON-parsing assertions; under ``-n auto`` the
+    polling sleep stacks against parallel workers and breaches the 60s
+    timeout. Pure-parsing path is covered by TestExtractJsonFromStdout
+    above (no GPU). Run explicitly with ``-m slow``.
+    """
 
     @patch("portfolio.signals.forecast.subprocess.run")
     def test_stdout_with_prefix_text_then_json(self, mock_run):

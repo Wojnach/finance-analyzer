@@ -80,8 +80,17 @@ class TestKronosCircuitBreaker:
     def test_initially_closed(self):
         assert not _kronos_circuit_open()
 
+    @pytest.mark.slow
     @patch("portfolio.signals.forecast.subprocess.run")
     def test_trips_on_subprocess_failure(self, mock_run):
+        # 2026-05-10: marked ``slow`` — this test mocks
+        # ``portfolio.signals.forecast.subprocess.run`` but NOT
+        # ``portfolio.gpu_gate.get_vram_usage``, which spawns its own
+        # nvidia-smi subprocess from inside gpu_gate. Under ``-n auto``
+        # with the circuit breaker un-tripped (first run), gpu_gate sits
+        # in its 1s polling loop until the timeout fires. Run explicitly
+        # with ``-m slow`` or wire the same get_vram_usage patch the
+        # adjacent ``test_skips_when_tripped`` already uses.
         mock_run.return_value = MagicMock(returncode=1, stderr="CUDA error")
         result = _run_kronos([{"close": 100}] * 50)
         assert result is None
