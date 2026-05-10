@@ -204,10 +204,12 @@ class TestMetalsSignalConfig:
             "atr_pct": 0.57,
         }
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
-        assert extra["_total_applicable"] == 29  # econ_calendar re-enabled 2026-04-23
+        # 2026-05-10: 29 → 20 after April-May disable wave (mahalanobis,
+        # EVRP, hurst, shannon, vix_ts, gold_real_yield, etc).
+        assert extra["_total_applicable"] == 20
 
     def test_stocks_total_applicable(self):
-        """Stocks should have 28 applicable signals (econ_calendar re-enabled 2026-04-23)."""
+        """Stocks: 28 → 21 after April-May disable wave (2026-05-10)."""
         from unittest.mock import patch
 
         from portfolio.main import generate_signal
@@ -229,10 +231,11 @@ class TestMetalsSignalConfig:
         }
         with patch("portfolio.market_timing.should_skip_gpu", return_value=False):
             action, conf, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 28  # econ_calendar re-enabled 2026-04-23
+        # 2026-05-10: 28 → 21 after disable wave.
+        assert extra["_total_applicable"] == 21
 
     def test_crypto_total_applicable(self):
-        """Crypto should have 33 applicable signals (econ_calendar re-enabled 2026-04-23)."""
+        """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""
         from portfolio.main import generate_signal
         ind = {
             "close": 67000.0,
@@ -251,5 +254,5 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        # 29 base + funding re-enabled + onchain + econ_calendar re-enabled = 33
-        assert extra["_total_applicable"] == 33
+        # 2026-05-10: 33 → 26 after disable wave.
+        assert extra["_total_applicable"] == 26

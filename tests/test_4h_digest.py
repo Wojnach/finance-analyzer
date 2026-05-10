@@ -39,31 +39,43 @@ def _hours_ago_iso(h):
 # ---------------------------------------------------------------------------
 
 class TestGetLastDigestTime:
-    """BUG-14: narrowed exception types + load_json usage."""
+    """BUG-14: narrowed exception types + load_json usage.
+
+    2026-05-10: tests originally patched only ``DATA_DIR`` but the code
+    reads from ``_DIGEST_STATE_FILE`` — a module-level Path constant
+    bound at import time. Patching DATA_DIR did nothing; production
+    digest_state.json was being read instead. Patch BOTH and only fall
+    back to trigger_state.json when ``_DIGEST_STATE_FILE`` is empty.
+    """
 
     def test_returns_zero_when_file_missing(self, tmp_path):
-        with patch("portfolio.digest.DATA_DIR", tmp_path):
+        with patch("portfolio.digest.DATA_DIR", tmp_path), \
+             patch("portfolio.digest._DIGEST_STATE_FILE", tmp_path / "digest_state.json"):
             from portfolio.digest import _get_last_digest_time
             assert _get_last_digest_time() == 0
 
     def test_returns_stored_time(self, tmp_path):
         ts = time.time() - 3600
-        (tmp_path / "trigger_state.json").write_text(
+        # Code prefers digest_state.json over trigger_state.json migration.
+        (tmp_path / "digest_state.json").write_text(
             json.dumps({"last_digest_time": ts})
         )
-        with patch("portfolio.digest.DATA_DIR", tmp_path):
+        with patch("portfolio.digest.DATA_DIR", tmp_path), \
+             patch("portfolio.digest._DIGEST_STATE_FILE", tmp_path / "digest_state.json"):
             from portfolio.digest import _get_last_digest_time
             assert _get_last_digest_time() == ts
 
     def test_returns_zero_when_file_corrupt(self, tmp_path):
-        (tmp_path / "trigger_state.json").write_text("{{{invalid json")
-        with patch("portfolio.digest.DATA_DIR", tmp_path):
+        (tmp_path / "digest_state.json").write_text("{{{invalid json")
+        with patch("portfolio.digest.DATA_DIR", tmp_path), \
+             patch("portfolio.digest._DIGEST_STATE_FILE", tmp_path / "digest_state.json"):
             from portfolio.digest import _get_last_digest_time
             assert _get_last_digest_time() == 0
 
     def test_returns_zero_when_key_missing(self, tmp_path):
-        (tmp_path / "trigger_state.json").write_text(json.dumps({"other_key": 1}))
-        with patch("portfolio.digest.DATA_DIR", tmp_path):
+        (tmp_path / "digest_state.json").write_text(json.dumps({"other_key": 1}))
+        with patch("portfolio.digest.DATA_DIR", tmp_path), \
+             patch("portfolio.digest._DIGEST_STATE_FILE", tmp_path / "digest_state.json"):
             from portfolio.digest import _get_last_digest_time
             assert _get_last_digest_time() == 0
 

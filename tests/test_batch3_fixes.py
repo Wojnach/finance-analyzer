@@ -199,8 +199,14 @@ class TestBug93HalfOpenProbe:
 class TestBug100EmptyBinanceResponse:
     """Empty Binance kline response should record failure, not success."""
 
-    def test_empty_response_returns_empty_df(self):
-        """Empty data returns empty DataFrame."""
+    def test_empty_response_raises_connection_error(self):
+        """Empty data raises ConnectionError (treated as outage, not silent success).
+
+        2026-05-10: BUG-100 fix evolved — empty Binance response no longer
+        returns an empty DataFrame; it now raises so the circuit breaker
+        records the failure and the loop stops trading on a stale silence.
+        Test renamed + assertion updated.
+        """
         from portfolio.data_collector import _binance_fetch
 
         mock_response = MagicMock()
@@ -211,13 +217,11 @@ class TestBug100EmptyBinanceResponse:
         mock_cb.allow_request.return_value = True
 
         with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response):
-            result = _binance_fetch("http://test", mock_cb, "test", "BTCUSDT")
-
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 0
+            with pytest.raises(ConnectionError, match="empty data"):
+                _binance_fetch("http://test", mock_cb, "test", "BTCUSDT")
 
     def test_empty_response_records_failure(self):
-        """Empty data records circuit breaker failure."""
+        """Empty data records circuit breaker failure (still raises after)."""
         from portfolio.data_collector import _binance_fetch
 
         mock_response = MagicMock()
@@ -228,7 +232,8 @@ class TestBug100EmptyBinanceResponse:
         mock_cb.allow_request.return_value = True
 
         with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response):
-            _binance_fetch("http://test", mock_cb, "test", "BTCUSDT")
+            with pytest.raises(ConnectionError):
+                _binance_fetch("http://test", mock_cb, "test", "BTCUSDT")
 
         mock_cb.record_failure.assert_called_once()
         mock_cb.record_success.assert_not_called()

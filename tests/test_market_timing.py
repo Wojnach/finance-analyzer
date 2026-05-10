@@ -952,6 +952,11 @@ class TestSwedishMarketHolidays:
 
     def test_2026_holidays(self):
         holidays = swedish_market_holidays(2026)
+        # 2026-05-10: Whit Monday (Annandag Pingst, Easter+50) added to
+        # the calendar (portfolio/market_timing.py:224). Although it is
+        # no longer a public holiday in Sweden post-2005 (replaced by
+        # National Day), Nasdaq Stockholm closes that session — match
+        # the code's calendar here.
         expected = {
             date(2026, 1, 1),    # New Year's Day
             date(2026, 1, 6),    # Epiphany
@@ -959,7 +964,8 @@ class TestSwedishMarketHolidays:
             date(2026, 4, 6),    # Easter Monday
             date(2026, 5, 1),    # May Day
             date(2026, 5, 14),   # Ascension Day (Easter + 39)
-            date(2026, 5, 23),   # Whitsun Eve / Pingstafton (Easter + 49)
+            date(2026, 5, 23),   # Whitsun Eve / Pingstafton (Easter + 48)
+            date(2026, 5, 25),   # Whit Monday / Annandag Pingst (Easter + 50)
             date(2026, 6, 6),    # National Day
             date(2026, 6, 19),   # Midsummer Eve
             date(2026, 12, 24),  # Christmas Eve
@@ -982,10 +988,10 @@ class TestSwedishMarketHolidays:
         assert date(2027, 6, 25) in swedish_market_holidays(2027)
 
     def test_holiday_count(self):
-        """Swedish market has 13 holidays per year."""
+        """Swedish market has 14 holidays per year (Whit Monday added 2026-05-10)."""
         for year in range(2024, 2031):
             holidays = swedish_market_holidays(year)
-            assert len(holidays) == 13, f"Year {year}: expected 13, got {len(holidays)}"
+            assert len(holidays) == 14, f"Year {year}: expected 14, got {len(holidays)}"
 
     def test_whitsun_eve_2026(self):
         """Whitsun Eve (Pingstafton) 2026 = Sat May 23 (Easter + 49)."""

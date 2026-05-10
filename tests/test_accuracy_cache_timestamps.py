@@ -146,14 +146,20 @@ class TestBlendAccuracyData:
 
         alltime = {"rsi": {"accuracy": 0.60, "total": 200, "correct": 120, "pct": 60.0}}
         result = blend_accuracy_data(alltime, None)
-        assert result == alltime
+        # 2026-05-10: blend_accuracy_data now annotates with `enabled` flag
+        # (DISABLED_SIGNALS lookup). Assert the original fields survive
+        # rather than full equality so future enrichments don't break this.
+        for k, v in alltime["rsi"].items():
+            assert result["rsi"][k] == v
 
     def test_blend_recent_only(self):
         from portfolio.accuracy_stats import blend_accuracy_data
 
         recent = {"rsi": {"accuracy": 0.70, "total": 100, "correct": 70, "pct": 70.0}}
         result = blend_accuracy_data(None, recent)
-        assert result == recent
+        # See test_blend_alltime_only — same enrichment-tolerant assertion.
+        for k, v in recent["rsi"].items():
+            assert result["rsi"][k] == v
 
     def test_blend_empty_returns_empty(self):
         from portfolio.accuracy_stats import blend_accuracy_data

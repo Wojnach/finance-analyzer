@@ -79,15 +79,19 @@ class TestTreasuryKeyAlignment:
         from portfolio.signals.macro_regime import _yield_10y_momentum
 
         # Simulate what main.py passes: macro["treasury"] = get_treasury()
+        # 2026-05-10: signal threshold tightened from ±1.5 to ±0.15 (15bps)
+        # in macro_regime.py:210-212 — old test value of -0.2 now triggers BUY.
+        # Keep the contract test (key is read correctly) by using a value
+        # inside the new dead-band.
         treasury_output = {
-            "10y": {"yield_pct": 4.5, "change_5d": -0.2},
+            "10y": {"yield_pct": 4.5, "change_5d": -0.10},
         }
         macro = {"treasury": treasury_output}
-        # change_5d = -0.2 is between -1.5 and +1.5 → HOLD
+        # change_5d = -0.10 is between -0.15 and +0.15 → HOLD
         action, indicators = _yield_10y_momentum(macro)
         assert action == "HOLD"
         assert indicators["treasury_10y"] == 4.5
-        assert indicators["treasury_10y_change_5d"] == -0.2
+        assert indicators["treasury_10y_change_5d"] == -0.10
 
     def test_yield_10y_with_change_direction(self):
         """10Y uses 5d change direction, not absolute level."""
@@ -388,11 +392,14 @@ class TestFullPipelineIntegration:
         from portfolio.signals.macro_regime import compute_macro_regime_signal
 
         df = _make_df(n=5)  # short, SMA signals = HOLD
+        # 2026-05-10: 10y change_5d threshold tightened ±1.5 → ±0.15.
+        # Original 0.5 was HOLD, now SELL. Use 0.10 to keep the
+        # 1-BUY-1-SELL-tie semantics this test exists to verify.
         macro = {
-            "dxy": {"value": 105.0, "change_5d_pct": 1.5},   # SELL
+            "dxy": {"value": 105.0, "change_5d_pct": 1.5},    # SELL
             "treasury": {
-                "spread_2s10s": 1.0,    # BUY
-                "10y": {"yield_pct": 4.2, "change_5d": 0.5},  # HOLD
+                "spread_2s10s": 1.0,                          # BUY
+                "10y": {"yield_pct": 4.2, "change_5d": 0.10}, # HOLD (within ±0.15)
             },
             "fed": {"days_until": 10},                         # HOLD
         }

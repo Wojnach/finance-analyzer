@@ -193,7 +193,21 @@ class TestParseOpus:
 
 # --- Cascade logic ---
 
+
 class TestCascade:
+    @pytest.fixture(autouse=True)
+    def _disable_cascade_bias_detection(self, monkeypatch):
+        """Bias detection (_is_tier_biased, 2026-04-25) suppresses non-HOLD
+        votes when a tier shows >75% directional bias. TestCascade loads
+        only one ticker per tier — automatically 100% biased and turns every
+        BUY/SELL into a synthesized HOLD, defeating cascade-order assertions.
+        Class-scoped so TestPerTickerBiasDetection / TestBiasDetection still
+        exercise the production bias path.
+        """
+        from portfolio.signals import claude_fundamental as cf
+        monkeypatch.setattr(cf, "_is_tier_biased", lambda *_a, **_kw: False)
+        monkeypatch.setattr(cf, "_is_tier_biased_for_ticker", lambda *_a, **_kw: False)
+
     def test_opus_wins_over_sonnet(self):
         """When Opus has a non-HOLD result, it should win."""
         with _lock:
