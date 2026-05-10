@@ -286,6 +286,14 @@ def _register_defaults():
                       "portfolio.signals.cubic_trend_persistence",
                       "compute_cubic_trend_persistence_signal",
                       max_confidence=0.7)
+    # VWAP Z-Score MR — volume-weighted mean reversion (all assets)
+    # 2026-05-10: FMZ VWAP StdDev MR (77.78% win rate). Different from BB
+    # (volume-weighted anchor vs SMA anchor). Three sub-signals: vwap_z,
+    # vwap_slope, volume_confirm. Pure OHLCV, all assets.
+    register_enhanced("vwap_zscore_mr",
+                      "portfolio.signals.vwap_zscore_mr",
+                      "compute_vwap_zscore_mr_signal",
+                      max_confidence=0.85)
 
 
 _register_defaults()

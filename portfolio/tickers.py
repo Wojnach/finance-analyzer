@@ -100,6 +100,7 @@ DISABLED_SIGNALS = {
     "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
     "intraday_seasonality",  # pending live validation (added 2026-05-08)
     "cubic_trend_persistence",  # pending live validation (added 2026-05-09)
+    "vwap_zscore_mr",  # pending live validation (added 2026-05-10)
     "calendar",         # 2026-05-09: 29.3% recent accuracy — structural BUY bias
                         # (6/8 sub-signals BUY-only). Actively harmful. Was per-horizon
                         # blacklisted at 1d but still voted at other horizons.
@@ -311,5 +312,6 @@ SIGNAL_NAMES = [
     "treasury_risk_rotation",
     "intraday_seasonality",
     "cubic_trend_persistence",
+    "vwap_zscore_mr",
     "btc_proxy",
 ]
