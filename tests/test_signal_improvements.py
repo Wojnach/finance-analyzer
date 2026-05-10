@@ -129,8 +129,9 @@ class TestNamedVotes:
         # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
         assert "custom_lora" not in votes
         # All SIGNAL_NAMES entries get a vote entry (including disabled = HOLD).
-        # 2026-04-23: 50 total (11 core + 39 enhanced, all in _votes dict).
-        assert len(votes) == 50
+        # 2026-05-10: 60 total after April-May signal additions (was 50 in
+        # April). Tripwire: each new signal added MUST update this literal.
+        assert len(votes) == 60
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
@@ -208,11 +209,14 @@ class TestAgentSummaryATR:
 
 class TestDetectRegime:
     def test_trending_up(self):
-        ind = make_indicators(ema9=135.0, ema21=130.0, rsi=55, atr_pct=2.0)
+        # 2026-05-10: ADX gate added — adx<20 forces ranging regardless of
+        # EMA gap. Provide adx=25 so the trending-up branch is reachable.
+        ind = make_indicators(ema9=135.0, ema21=130.0, rsi=55, atr_pct=2.0, adx=25.0)
         assert detect_regime(ind, is_crypto=True) == "trending-up"
 
     def test_trending_down(self):
-        ind = make_indicators(ema9=125.0, ema21=130.0, rsi=45, atr_pct=2.0)
+        # 2026-05-10: ADX gate — see test_trending_up.
+        ind = make_indicators(ema9=125.0, ema21=130.0, rsi=45, atr_pct=2.0, adx=25.0)
         assert detect_regime(ind, is_crypto=True) == "trending-down"
 
     def test_ranging(self):
@@ -306,17 +310,21 @@ class TestWeightedConsensus:
         assert action == "BUY"
 
     def test_low_sample_uses_neutral_weight(self):
-        # 2026-04-17: original used funding + volume, but funding was added
-        # to REGIME_GATED_SIGNALS[ranging] (force-HOLD in ranging). That
-        # collapsed the tie into a single SELL vote. Swapped to two non-gated
-        # default-weighted signals: sentiment (BUY) + volume (SELL).
-        votes = {"sentiment": "BUY", "volume": "SELL"}
+        # 2026-05-10: history of this test —
+        # 2026-04-17: original used funding+volume; funding gated in ranging.
+        # Switched to sentiment+volume. Then 2026-04-27 sentiment was also
+        # added to REGIME_GATED_SIGNALS[ranging] (40.1% accuracy, BUY bias).
+        # Now sentiment force-HOLDs and volume SELL alone wins.
+        # Use rsi+bb instead — both ungated in ranging, both have the SAME
+        # 1.5x regime multiplier so the tie property still holds when
+        # accuracy weights collapse to neutral 0.5 under low samples.
+        votes = {"rsi": "BUY", "bb": "SELL"}
         acc = {
-            "sentiment": {"accuracy": 0.9, "total": 5},  # too few samples
-            "volume": {"accuracy": 0.9, "total": 5},
+            "rsi": {"accuracy": 0.9, "total": 5},  # too few samples
+            "bb": {"accuracy": 0.9, "total": 5},
         }
         action, conf = _weighted_consensus(votes, acc, "ranging")
-        # Both get weight 0.5 (neutral), no regime mults → tie → HOLD
+        # Both collapse to weight 0.5 × 1.5 = 0.75 → tie → HOLD.
         assert action == "HOLD"
 
     def test_all_hold_returns_hold(self):

@@ -2,6 +2,13 @@
 
 Verifies that after one GPU failure, subsequent calls skip instantly
 instead of waiting for timeouts on every ticker.
+
+2026-05-10: production config moved Kronos to ``kronos_enabled="shadow"``
+(_KRONOS_SHADOW=True). In shadow mode ``_health_weighted_vote`` excludes
+Kronos sub-signals from the composite even when ``kronos_ok=True``. The
+autouse fixture below pins ``_KRONOS_SHADOW=False`` so circuit-breaker
+unit tests exercise the full live-Kronos path. Shadow-mode behaviour
+gets its own dedicated test (test_kronos_shadow_excluded).
 """
 
 import time
@@ -10,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from portfolio.signals import forecast as _forecast_mod
 from portfolio.signals.forecast import (
     _chronos_circuit_open,
     _health_weighted_vote,
@@ -19,6 +27,24 @@ from portfolio.signals.forecast import (
     compute_forecast_signal,
     reset_circuit_breakers,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_kronos_shadow(monkeypatch):
+    """Force live-Kronos mode + bypass per-ticker accuracy gate.
+
+    2026-05-10: production accuracy_cache.json has e.g. BTC-USD chronos
+    at 23.6% (well below the 55% hold threshold), which makes the full
+    pipeline force HOLD regardless of sub-signal majority. The full-path
+    tests below verify the *vote-aggregation* path, not the accuracy
+    gate. Returning ``None`` from ``_load_forecast_accuracy`` forces the
+    "insufficient_data" branch to fall through with the base action.
+    """
+    monkeypatch.setattr(_forecast_mod, "_KRONOS_SHADOW", False)
+    monkeypatch.setattr(_forecast_mod, "_KRONOS_ENABLED", True)
+    monkeypatch.setattr(
+        _forecast_mod, "_load_forecast_accuracy", lambda *_a, **_kw: None
+    )
 
 
 @pytest.fixture(autouse=True)

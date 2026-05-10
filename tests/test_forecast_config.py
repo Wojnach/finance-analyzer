@@ -251,13 +251,20 @@ class TestReportingEnrichment:
         assert gating["SOUN"]["action"] == "held"  # low accuracy → held, not inverted
         assert gating["NEW"]["action"] == "insufficient_data"
 
-    def test_kronos_enabled_config(self):
-        """kronos_enabled config should control Kronos state."""
+    def test_kronos_enabled_config(self, monkeypatch):
+        """kronos_enabled config should control Kronos state.
+
+        2026-05-10: original test asserted ``_KRONOS_ENABLED is False`` as
+        the "module default", but ``_init_kronos_enabled()`` runs at
+        import and reads config.json — production config now has
+        ``kronos_enabled = "shadow"`` so the live module flag is True.
+        Use monkeypatch to isolate from runtime state and verify the
+        flag is *settable*; the config-init logic itself is covered by
+        ``test_init_kronos_enabled_*`` elsewhere in this class.
+        """
         import portfolio.signals.forecast as mod
-        # Module default is False
+        # Reset to the documented module default before asserting.
+        monkeypatch.setattr(mod, "_KRONOS_ENABLED", False)
         assert mod._KRONOS_ENABLED is False
-        # Config could re-enable it (but this is runtime behavior,
-        # we just verify the module-level flag)
-        mod._KRONOS_ENABLED = True
+        monkeypatch.setattr(mod, "_KRONOS_ENABLED", True)
         assert mod._KRONOS_ENABLED is True
-        mod._KRONOS_ENABLED = False  # restore
