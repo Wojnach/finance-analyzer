@@ -1,0 +1,18 @@
+# Dev-only tools — install with:
+#   .venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+#
+# Production dependencies are managed via pyproject.toml [project].dependencies.
+# This file collects validation-tooling (type checkers, property tests,
+# mutation tests) that should NOT ship with the trading runtime but MUST
+# run in CI / pre-PR locally.
+
+# Static type checking — pilot scope in mypy.ini
+mypy>=1.10
+
+# Property-based testing — universal-truth invariants Claude can't fake.
+# See tests/test_property_invariants.py.
+hypothesis>=6.100
+
+# Mutation testing — kills weak tests that pass on broken code.
+# See scripts/run_mutation_test.py and docs/TESTING.md.
+mutmut>=2.4
