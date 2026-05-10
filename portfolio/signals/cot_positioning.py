@@ -341,13 +341,15 @@ def compute_cot_positioning_signal(
     # Load precomputed deep context
     deep_ctx = _load_deep_context(ticker)
 
-    # Extract COT data from deep context
+    # Extract COT data from deep context.
+    # metals_precompute stores COT at external_research.cot_positioning.live
     cot_data = None
     if deep_ctx:
-        refresh = deep_ctx.get("refresh_data", {})
-        if isinstance(refresh, dict):
-            cot_key = f"cot_{metal}"
-            cot_data = refresh.get(cot_key)
+        ext = deep_ctx.get("external_research", {})
+        if isinstance(ext, dict):
+            cot_section = ext.get("cot_positioning", {})
+            if isinstance(cot_section, dict):
+                cot_data = cot_section.get("live")
 
     if not cot_data or not isinstance(cot_data, dict):
         logger.debug("No COT data available for %s", ticker)

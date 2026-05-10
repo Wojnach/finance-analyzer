@@ -124,11 +124,14 @@ def require_auth(f):
 
         # 0. Cloudflare Access — added 2026-05-02. CF strips inbound
         # Cf-Access-* headers at its edge and re-injects them only after
-        # successful Access policy evaluation, so seeing this header proves
-        # the request went through Access AND matched the policy. Spoofing
-        # requires bypassing CF Access entirely, which our tunnel topology
-        # doesn't allow from the public internet.
-        if request.headers.get("Cf-Access-Authenticated-User-Email"):
+        # successful Access policy evaluation. Require BOTH the email
+        # header AND the JWT assertion header — CF Access always sends
+        # both, but a LAN attacker spoofing headers would need to know
+        # about and forge both. Without the JWT check, any LAN client
+        # could set the email header and bypass auth entirely.
+        cf_email = request.headers.get("Cf-Access-Authenticated-User-Email")
+        cf_jwt = request.headers.get("Cf-Access-Jwt-Assertion")
+        if cf_email and cf_jwt:
             return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
 
         # 1. Cookie

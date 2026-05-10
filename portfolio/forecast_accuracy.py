@@ -4,7 +4,6 @@ Reads forecast_predictions.jsonl, backfills actual prices at 1h/24h horizons,
 and computes per-model per-ticker per-horizon accuracy statistics.
 """
 
-import json
 import logging
 import threading
 import time
@@ -12,7 +11,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_jsonl
+from portfolio.file_utils import atomic_write_jsonl, load_jsonl
 
 logger = logging.getLogger("portfolio.forecast_accuracy")
 
@@ -69,40 +68,20 @@ def invalidate_forecast_accuracy_cache():
 def load_predictions(predictions_file=None):
     """Load all forecast predictions from JSONL file."""
     path = predictions_file or PREDICTIONS_FILE
-    if not path.exists():
-        return []
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return entries
+    return load_jsonl(str(path))
 
 
 def load_health_stats(health_file=None):
     """Load forecast health stats (success/failure rates per model)."""
     path = health_file or HEALTH_FILE
-    if not path.exists():
-        return {}
     stats = defaultdict(lambda: {"ok": 0, "fail": 0, "total": 0})
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            model = entry.get("model", "unknown")
-            if entry.get("ok"):
-                stats[model]["ok"] += 1
-            else:
-                stats[model]["fail"] += 1
-            stats[model]["total"] += 1
-        except json.JSONDecodeError:
-            continue
+    for entry in load_jsonl(str(path)):
+        model = entry.get("model", "unknown")
+        if entry.get("ok"):
+            stats[model]["ok"] += 1
+        else:
+            stats[model]["fail"] += 1
+        stats[model]["total"] += 1
 
     result = {}
     for model, s in stats.items():
@@ -371,18 +350,12 @@ def _lookup_price_at_time(ticker, target_time, snapshot_file=None,
     Documented in docs/PLAN_missing_backfills_20260501.md.
     """
     path = snapshot_file or (DATA_DIR / "price_snapshots_hourly.jsonl")
-    if not path.exists():
-        return None
 
     best_price = None
     best_delta = timedelta(hours=tolerance_hours)
 
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for snap in load_jsonl(str(path)):
         try:
-            snap = json.loads(line)
             snap_time = datetime.fromisoformat(snap.get("ts", ""))
             delta = abs(snap_time - target_time)
             if delta < best_delta:
@@ -390,7 +363,7 @@ def _lookup_price_at_time(ticker, target_time, snapshot_file=None,
                 if ticker in prices:
                     best_price = prices[ticker]
                     best_delta = delta
-        except (json.JSONDecodeError, ValueError, TypeError):
+        except (ValueError, TypeError):
             continue
 
     return best_price

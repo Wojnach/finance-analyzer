@@ -932,8 +932,8 @@ def run(force_report=False, active_symbols=None):
                        f"Accuracy data is degrading.")
                 logger.warning(msg)
                 try:
-                    from portfolio.telegram_notifications import send_telegram
-                    send_telegram(msg)
+                    from portfolio.message_store import send_or_store
+                    send_or_store(msg, config, category="error")
                 except Exception:
                     logger.warning("Failed to send outcome staleness alert", exc_info=True)
 
@@ -944,8 +944,8 @@ def run(force_report=False, active_symbols=None):
                        f"These signals contribute nothing to consensus.")
                 logger.warning(msg)
                 try:
-                    from portfolio.telegram_notifications import send_telegram
-                    send_telegram(msg)
+                    from portfolio.message_store import send_or_store
+                    send_or_store(msg, config, category="error")
                 except Exception:
                     logger.warning("Failed to send dead signals alert", exc_info=True)
         except Exception as e:
