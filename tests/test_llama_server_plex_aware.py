@@ -205,3 +205,50 @@ class TestStartServerPlexAware:
         mock_popen.return_value = proc
         assert _start_server("ministral3") is True
         mock_popen.assert_called_once()
+
+
+class TestModelLoadSafe:
+    """`model_load_safe()` is the pre-flight gate for subprocess fallbacks."""
+
+    @patch("portfolio.llama_server._query_free_vram_mb")
+    @patch("portfolio.llama_server._plex_transcode_active", return_value=False)
+    def test_safe_when_plex_idle(self, mock_plex, mock_free):
+        """Plex idle → always safe, even if VRAM is low."""
+        from portfolio.llama_server import model_load_safe
+        mock_free.return_value = 2000  # very low — doesn't matter
+        assert model_load_safe() is True
+
+    @patch("portfolio.llama_server._query_free_vram_mb", return_value=8000)
+    @patch("portfolio.llama_server._plex_transcode_active", return_value=True)
+    def test_safe_when_plex_busy_but_vram_ok(self, mock_plex, mock_free):
+        """Plex busy + ≥7168 MB free → safe to load."""
+        from portfolio.llama_server import model_load_safe
+        assert model_load_safe() is True
+
+    @patch("portfolio.llama_server._query_free_vram_mb", return_value=4000)
+    @patch("portfolio.llama_server._plex_transcode_active", return_value=True)
+    def test_unsafe_when_plex_busy_and_vram_low(self, mock_plex, mock_free):
+        """Plex busy + <7168 MB free → unsafe, caller must skip load."""
+        from portfolio.llama_server import model_load_safe
+        assert model_load_safe() is False
+
+    @patch("portfolio.llama_server._query_free_vram_mb", return_value=None)
+    @patch("portfolio.llama_server._plex_transcode_active", return_value=True)
+    def test_safe_when_nvidia_smi_broken(self, mock_plex, mock_free):
+        """nvidia-smi failure → fail-open (don't permanently block the loop)."""
+        from portfolio.llama_server import model_load_safe
+        assert model_load_safe() is True
+
+    @patch("portfolio.llama_server._query_free_vram_mb", return_value=7168)
+    @patch("portfolio.llama_server._plex_transcode_active", return_value=True)
+    def test_threshold_is_inclusive(self, mock_plex, mock_free):
+        """Exactly 7168 MB free → safe (>= comparison)."""
+        from portfolio.llama_server import model_load_safe
+        assert model_load_safe() is True
+
+    @patch("portfolio.llama_server._query_free_vram_mb", return_value=7167)
+    @patch("portfolio.llama_server._plex_transcode_active", return_value=True)
+    def test_threshold_just_below_unsafe(self, mock_plex, mock_free):
+        """7167 MB free is one MB below the floor → unsafe."""
+        from portfolio.llama_server import model_load_safe
+        assert model_load_safe() is False

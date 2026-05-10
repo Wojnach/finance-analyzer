@@ -305,6 +305,38 @@ def _plex_transcode_active() -> bool:
     return active
 
 
+# Plex-safe free-VRAM floor for spawning an 8B Q4 model with NVENC running.
+# Matches the threshold used by _wait_for_vram_reclaim's plex_safe mode and
+# the abort gate in _start_server — single source of truth so callers that
+# bypass query_llama_server (subprocess fallbacks) get identical protection.
+PLEX_SAFE_MIN_FREE_MB = 7168
+
+
+def model_load_safe() -> bool:
+    """Return True if it's safe to begin loading an 8B model onto the GPU now.
+
+    Intended as a pre-flight check for callers that own their own model load
+    (subprocess fallbacks in `qwen3_signal._call_qwen3`, `ministral_signal._call_model`,
+    etc) and would otherwise bypass the abort logic inside `_start_server`.
+
+    The check is intentionally conservative: only blocks when *both* conditions
+    are true — Plex is transcoding AND free VRAM < PLEX_SAFE_MIN_FREE_MB.
+    Either alone is fine. Returning False means the caller should skip the
+    model load and return a HOLD-equivalent instead of spawning a cold
+    subprocess that could evict Plex's NVENC context.
+
+    Errors (nvidia-smi missing, permission, etc) → returns True. We never
+    block the finance loop on a tooling failure — a missed signal is recoverable,
+    a permanent block is not.
+    """
+    if not _plex_transcode_active():
+        return True
+    free = _query_free_vram_mb()
+    if free is None:
+        return True  # tooling failure — fail-open
+    return free >= PLEX_SAFE_MIN_FREE_MB
+
+
 def _wait_for_vram_reclaim(min_free_mb: int = 5632, max_wait: float = 4.0,
                            plex_safe: bool = False) -> float:
     """Poll nvidia-smi until at least `min_free_mb` is free, up to `max_wait` seconds.

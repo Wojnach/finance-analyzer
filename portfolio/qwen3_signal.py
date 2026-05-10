@@ -71,6 +71,17 @@ def _call_qwen3(context):
             result["confidence"] = confidence
         return result
 
+    # 2026-05-11 (plex-vram-coord): query_llama_server returning None can mean
+    # the server died OR the swap was aborted because Plex is transcoding. In
+    # the latter case, the subprocess fallback below would cold-start an 8B
+    # model with -ngl 99 — exactly the VRAM allocation that crashes Plex. The
+    # `model_load_safe` gate enforces the same 7-GB free-VRAM floor used by
+    # _start_server's abort. If unsafe, return HOLD instead of falling back.
+    from portfolio.llama_server import model_load_safe
+    if not model_load_safe():
+        logger.info("qwen3: skipping subprocess fallback — Plex transcoding and VRAM tight")
+        return {"action": "HOLD", "reasoning": "Plex transcode in progress", "model": "Qwen3-8B"}
+
     # Fallback: subprocess (cold start)
     logger.info("llama-server unavailable for qwen3, falling back to subprocess")
     repo_root = Path(__file__).resolve().parent.parent
