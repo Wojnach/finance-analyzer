@@ -8,7 +8,8 @@ from pathlib import Path
 import portfolio.shared_state as _ss
 from portfolio.file_utils import load_json
 from portfolio.indicators import detect_regime
-from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value
+from portfolio.file_utils import atomic_write_json
+from portfolio.portfolio_mgr import portfolio_value
 from portfolio.shared_state import _cached
 from portfolio.signal_registry import get_enhanced_signals
 from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS
@@ -798,7 +799,7 @@ def write_agent_summary(
         }
 
     _update_signal_state_since(summary)
-    _atomic_write_json(AGENT_SUMMARY_FILE, summary)
+    atomic_write_json(AGENT_SUMMARY_FILE, summary)
     _write_compact_summary(summary)
     return summary
 
@@ -830,7 +831,7 @@ def _update_signal_state_since(summary: dict) -> None:
         prev = load_json(SIGNAL_STATE_SINCE_FILE, default={})
         now_iso = datetime.now(UTC).isoformat()
         payload = update_state_since(prev, current_votes, now_iso)
-        _atomic_write_json(SIGNAL_STATE_SINCE_FILE, payload)
+        atomic_write_json(SIGNAL_STATE_SINCE_FILE, payload)
     except Exception as e:
         logger.warning("Failed to update signal_state_since.json: %s", e)
 
@@ -1008,7 +1009,7 @@ def _write_compact_summary(summary):
     except Exception:
         logger.debug("Failed to load signal health for compact summary", exc_info=True)
 
-    _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
+    atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 
 
 # ---------------------------------------------------------------------------
@@ -1191,7 +1192,7 @@ def _write_tier1_summary(summary):
     for ticker, sig in signals.items():
         t1["all_prices"][ticker] = round(sig.get("price_usd", 0), 2)
 
-    _atomic_write_json(TIER1_FILE, t1)
+    atomic_write_json(TIER1_FILE, t1)
 
 
 def _write_tier2_summary(summary, triggered_tickers=None):
@@ -1304,4 +1305,4 @@ def _write_tier2_summary(summary, triggered_tickers=None):
         if key in summary:
             t2[key] = summary[key]
 
-    _atomic_write_json(TIER2_FILE, t2)
+    atomic_write_json(TIER2_FILE, t2)

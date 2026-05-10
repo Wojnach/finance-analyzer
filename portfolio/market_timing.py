@@ -221,6 +221,7 @@ def swedish_market_holidays(year):
         date(year, 5, 1),                             # May Day
         easter + timedelta(days=39),                  # Ascension Day
         easter + timedelta(days=48),                  # Whitsun Eve (Pingstafton)
+        easter + timedelta(days=50),                  # Whit Monday (Annandag Pingst)
         date(year, 6, 6),                             # National Day
         midsummer_eve,                                # Midsummer Eve
         date(year, 12, 24),                           # Christmas Eve

@@ -95,13 +95,6 @@ def _read_lock() -> dict:
         return {}
 
 
-def _write_lock(model_name: str):
-    _GPU_LOCK_FILE.write_text(
-        f"{model_name}|{os.getpid()}|{time.time()}|{threading.get_ident()}",
-        encoding="utf-8",
-    )
-
-
 def _release_lock():
     with suppress(OSError):
         _GPU_LOCK_FILE.unlink(missing_ok=True)

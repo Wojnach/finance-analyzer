@@ -114,18 +114,6 @@ def _nearest_psd(matrix: np.ndarray) -> np.ndarray:
 CORRELATION_PRIORS = {
     ("BTC-USD", "ETH-USD"): 0.75,
     ("XAG-USD", "XAU-USD"): 0.85,
-    ("NVDA", "AMD"): 0.70,
-    ("NVDA", "AVGO"): 0.65,
-    ("NVDA", "TSM"): 0.60,
-    ("AMD", "AVGO"): 0.60,
-    ("AMD", "TSM"): 0.55,
-    ("AVGO", "TSM"): 0.55,
-    ("GOOGL", "META"): 0.65,
-    ("GOOGL", "AMZN"): 0.60,
-    ("META", "AMZN"): 0.60,
-    ("AAPL", "GOOGL"): 0.55,
-    ("AAPL", "META"): 0.50,
-    ("AAPL", "AMZN"): 0.55,
 }
 
 

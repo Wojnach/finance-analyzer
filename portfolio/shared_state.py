@@ -104,12 +104,14 @@ def _cached(key, ttl, func, *args):
     except KeyboardInterrupt:
         with _cache_lock:
             _loading_keys.discard(key)
+            _loading_timestamps.pop(key, None)
         logger.warning("[%s] interrupted (KeyboardInterrupt), returning None", key)
         return None
     except Exception as e:
         logger.warning("[%s] error: %s", key, e)
         with _cache_lock:
             _loading_keys.discard(key)
+            _loading_timestamps.pop(key, None)
             if key in _tool_cache:
                 age = now - _tool_cache[key]["time"]
                 max_stale = ttl * _MAX_STALE_FACTOR

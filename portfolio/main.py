@@ -357,7 +357,7 @@ def _run_post_cycle(config, report=None):
     # Per-file isolation: a locked file doesn't block the others.
     from portfolio.file_utils import prune_jsonl
     _prune_failures = []
-    for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl"):
+    for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl", "claude_invocations.jsonl"):
         try:
             prune_jsonl(DATA_DIR / name, max_entries=5000)
         except Exception as e_prune:
