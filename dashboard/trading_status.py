@@ -20,8 +20,8 @@ answered by the (state, reason) pair. State precedence:
     2. HALTED   — bot wrote halted=True (reads halted_reason)
     3. COOLDOWN — fishing engine: last_trade + cooldown_s > now
     4. TRADING  — open position present
-    5. OUTSIDE_HOURS — outside the Avanza commodity-warrant window
-                      (15:30–21:55 Europe/Stockholm)
+    5. OUTSIDE_HOURS — outside the Avanza trading window
+                      (08:30–21:30 Europe/Stockholm)
     6. SCANNING — running normally, no signal strong enough yet
 
 GoldDigger and Elongir maintain ``halted_reason`` themselves, so we
@@ -42,13 +42,18 @@ from portfolio.file_utils import load_json
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-# Avanza commodity-warrant session in Europe/Stockholm — DST handled by
-# zoneinfo. GoldDigger uses 15:30–21:55, the metals/fish/elongir bots
-# share the same Avanza warrant window in practice. Tunable here so the
-# dashboard's notion of "outside hours" matches what the bots enforce.
+# Avanza trading session in Europe/Stockholm — DST handled by zoneinfo.
+# 2026-05-11: unified to 08:30–21:30 across all four bots after a user
+# report that the dashboard was rendering OUTSIDE_HOURS at 14:23 CEST
+# even though Elongir's actual config session is 08:30–21:30. The old
+# 15:30–21:55 window matched GoldDigger's US-focused config and was
+# misapplied here to metals/elongir/fishing. EU open is ~09:00 CET, US
+# close is ~22:00 CET; 08:30–21:30 brackets the warrant-tradeable window
+# the user actually trades on and matches the per-bot configs after the
+# parallel patch to portfolio/golddigger/config.py.
 SESSION_TZ = ZoneInfo("Europe/Stockholm")
-SESSION_OPEN = dtime(15, 30)
-SESSION_CLOSE = dtime(21, 55)
+SESSION_OPEN = dtime(8, 30)
+SESSION_CLOSE = dtime(21, 30)
 
 UTC = timezone.utc
 

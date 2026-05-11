@@ -39,12 +39,15 @@ class GolddiggerConfig:
     max_positions: int = 1
 
     # --- Session window (Stockholm time / CET) ---
-    session_start_hour: int = 15
+    # 2026-05-11: widened from 15:30–21:55 (US-only) to 08:30–21:30 to
+    # match the unified trading window the other bots use. Gold still
+    # moves most when US is open, but the bot's entry threshold + spread
+    # cap already gate weak EU-hours signals — no need to lock out the
+    # whole pre-US window at the session level.
+    session_start_hour: int = 8
     session_start_minute: int = 30
     session_end_hour: int = 21
-    session_end_minute: int = 55
-    # Overlap of Avanza commodity warrants (08:15-21:55 CET) and
-    # US market (15:30-22:00 CET). Gold moves most when US is open.
+    session_end_minute: int = 30
 
     # --- Avanza instrument ---
     bull_orderbook_id: str = ""   # BULL GULD X20 AVA orderbook ID
