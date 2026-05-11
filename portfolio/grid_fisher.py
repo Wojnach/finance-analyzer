@@ -606,11 +606,25 @@ def reconcile_against_live(
                 continue
             if tier.order_id and tier.order_id in open_order_ids:
                 continue
-            # Order is missing from live. Decide fill vs cancel.
-            expected_after_fill = inst.inventory_units + tier.qty
-            if live_vol >= expected_after_fill:
+            # Order is missing from live. Distinguish full fill / partial
+            # fill / cancel by the live position delta vs cached
+            # inventory (state already accounts for any earlier tiers
+            # processed this loop because record_fill mutates inst).
+            delta = live_vol - inst.inventory_units
+            if delta >= tier.qty:
                 record_fill(inst, tier.tier, tier.price, side="buy")
                 res.filled_buys.append((ob_id, tier.tier, tier.price))
+            elif delta > 0:
+                # Partial fill — the order filled `delta` units before
+                # being cancelled (or capped by quote-side liquidity).
+                # Record the fill with reduced qty so inventory accounting
+                # stays honest, and log the drift so an operator can spot
+                # repeated partials and tune tier sizing.
+                original_qty = tier.qty
+                tier.qty = int(delta)
+                record_fill(inst, tier.tier, tier.price, side="buy")
+                res.filled_buys.append((ob_id, tier.tier, tier.price))
+                res.inventory_drift.append((ob_id, original_qty, int(delta)))
             else:
                 cancel_buy_tier(inst, tier.tier)
                 res.cancelled_buys.append((ob_id, tier.tier))
@@ -620,10 +634,18 @@ def reconcile_against_live(
                 continue
             if tier.order_id and tier.order_id in open_order_ids:
                 continue
-            expected_after_fill = max(inst.inventory_units - tier.qty, 0)
-            if live_vol <= expected_after_fill:
+            inventory_drop = inst.inventory_units - live_vol
+            if inventory_drop >= tier.qty:
                 record_fill(inst, tier.tier, tier.price, side="sell")
                 res.filled_sells.append((ob_id, tier.tier, tier.price))
+            elif inventory_drop > 0:
+                original_qty = tier.qty
+                tier.qty = int(inventory_drop)
+                record_fill(inst, tier.tier, tier.price, side="sell")
+                res.filled_sells.append((ob_id, tier.tier, tier.price))
+                res.inventory_drift.append(
+                    (ob_id, original_qty, int(inventory_drop))
+                )
             else:
                 # Mark sell tier as cancelled in-place — there is no
                 # dedicated helper because sells are cleared via rotation.
@@ -752,7 +774,15 @@ class GridFisher:
     # ---- placement --------------------------------------------------------
 
     def cancel_armed_buys(self, inst: InstrumentState) -> int:
-        """Cancel every ARMED buy tier on *inst*. Returns count cancelled."""
+        """Cancel every ARMED buy tier on *inst*. Returns count cancelled.
+
+        Avanza's cancel endpoint returns a JSON body even on rejection
+        (no exception). Only marks the tier ``CANCELLED`` after a
+        confirmed ``orderRequestStatus == "SUCCESS"`` response, so a
+        broker-side rejection leaves the order ARMED in state and the
+        next tick's reconcile picks it up correctly — preventing
+        duplicate placements on top of a still-resting buy.
+        """
         n = 0
         for tier in list(inst.buy_ladder):
             if tier.status != ORDER_ARMED:
@@ -763,20 +793,29 @@ class GridFisher:
                 n += 1
                 continue
             try:
-                self.session.cancel_order(tier.order_id)
-                cancel_buy_tier(inst, tier.tier)
-                self._log("cancel_buy", ob_id=inst.ob_id, ticker=inst.ticker,
-                          tier=tier.tier, order_id=tier.order_id,
-                          price=tier.price, qty=tier.qty)
-                n += 1
+                result = self.session.cancel_order(tier.order_id) or {}
             except Exception as exc:  # noqa: BLE001 — session errors vary
                 logger.warning(
-                    "grid_fisher: cancel_order failed for %s tier %d: %s",
+                    "grid_fisher: cancel_order raised for %s tier %d: %s",
                     inst.ob_id, tier.tier, exc,
                 )
                 self._log("cancel_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker, tier=tier.tier,
                           order_id=tier.order_id, error=str(exc))
+                continue
+            status = result.get("orderRequestStatus")
+            if status != "SUCCESS":
+                self._log("cancel_rejected", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.tier,
+                          order_id=tier.order_id,
+                          avanza_status=status,
+                          message=result.get("message"))
+                continue
+            cancel_buy_tier(inst, tier.tier)
+            self._log("cancel_buy", ob_id=inst.ob_id, ticker=inst.ticker,
+                      tier=tier.tier, order_id=tier.order_id,
+                      price=tier.price, qty=tier.qty)
+            n += 1
         return n
 
     def place_buy_ladder(
@@ -952,9 +991,20 @@ class GridFisher:
         # Cancel old stop, place a new one sized to the full current
         # inventory. Stop sells use trigger_price as the activation
         # level and sell_price as the limit (set just below for fast fill).
+        # NOTE: stop-loss orders use a DIFFERENT API surface than regular
+        # orders. cancel_order on a stop ID returns "crossing prices"
+        # errors (March 3 incident — see avanza_session.cancel_stop_loss
+        # docstring). place_stop_loss returns {status, stoplossOrderId},
+        # not {orderRequestStatus, orderId}.
         if inst.stop_loss_id and not self._probe_only:
             try:
-                self.session.cancel_order(inst.stop_loss_id)
+                cancel_fn = getattr(self.session, "cancel_stop_loss", None)
+                if cancel_fn is None:
+                    logger.debug(
+                        "session has no cancel_stop_loss; skipping stop cancel"
+                    )
+                else:
+                    cancel_fn(inst.stop_loss_id)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("stop cancel failed: %s", exc)
 
@@ -965,9 +1015,15 @@ class GridFisher:
                 result = self.session.place_stop_loss(
                     inst.ob_id, stop_price, stop_sell_price,
                     inst.inventory_units,
-                )
-                if (result or {}).get("orderRequestStatus") == "SUCCESS":
-                    new_stop_id = str((result or {}).get("orderId"))
+                ) or {}
+                if result.get("status") == "SUCCESS":
+                    new_stop_id = str(result.get("stoplossOrderId") or "") or None
+                else:
+                    self._log("place_stop_rejected", ob_id=inst.ob_id,
+                              ticker=inst.ticker, price=stop_price,
+                              qty=inst.inventory_units,
+                              avanza_status=result.get("status"),
+                              message=result.get("message"))
             except Exception as exc:  # noqa: BLE001
                 self._log("place_stop_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker, price=stop_price,
@@ -1066,6 +1122,16 @@ class GridFisher:
                       ticker=inst.ticker, tier=tier)
         for ob, cached, live in reconcile.inventory_drift:
             self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+
+        # Roll up realised per-instrument P&L into the global counter so
+        # ``should_halt_global`` actually sees the running session loss.
+        # Derived (not accumulated) to avoid double-counting across
+        # ticks — instrument session_pnl_sek already aggregates every
+        # realised sell since the last roll_session.
+        self.state.global_session_pnl_sek = sum(
+            inst.session_pnl_sek
+            for inst in self.state.by_instrument.values()
+        )
 
         # Global halt check (after fills are realised so the latest P&L is
         # reflected).

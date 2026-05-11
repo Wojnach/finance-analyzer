@@ -77,13 +77,22 @@ class FakeSession:
                                   "trigger": trigger_price,
                                   "sell": sell_price, "qty": volume,
                                   "order_id": order_id})
-        return {"orderRequestStatus": "SUCCESS", "orderId": order_id}
+        # Avanza returns {status, stoplossOrderId} — NOT the
+        # orderRequestStatus/orderId shape regular orders use.
+        return {"status": "SUCCESS", "stoplossOrderId": order_id}
 
     def cancel_order(self, order_id: str):
         self.cancelled.append(order_id)
         self.open_orders = [o for o in self.open_orders
                             if str(o.get("orderId")) != str(order_id)]
         return {"orderRequestStatus": "SUCCESS"}
+
+    def cancel_stop_loss(self, stop_id: str):
+        # Stops use a different API surface; mirror the order-cancel
+        # contract for test simplicity but track separately for
+        # assertions that need to distinguish.
+        self.cancelled.append(stop_id)
+        return {"status": "SUCCESS"}
 
     def get_open_orders(self):
         return list(self.open_orders)
@@ -225,6 +234,44 @@ class TestReconcileFills:
         assert res.filled_sells == [("1650161", 0, 43.30)]
         assert inst.inventory_units == 0
         assert inst.session_pnl_sek == pytest.approx(24 * (43.30 - 42.50))
+
+    def test_buy_partial_fill_records_actual_delta(self):
+        state = gf.GridFisherState(session_id="2026-05-11")
+        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
+                               cert_name="BULL", active_direction="LONG")
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY1", price=42.50, qty=24,
+            placed_ts="t", status=ORDER_ARMED,
+        ))
+        state.by_instrument["1650161"] = inst
+        # Only 10 units arrived in position (broker partial then cancel)
+        positions = [{"orderbook_id": "1650161", "volume": 10}]
+        res = reconcile_against_live(state, open_order_ids=set(),
+                                     positions=positions)
+        assert res.filled_buys == [("1650161", 0, 42.50)]
+        assert inst.inventory_units == 10
+        # Inventory drift logged: original 24 → actual 10
+        assert (("1650161", 24, 10)) in res.inventory_drift
+
+    def test_sell_partial_fill_records_actual_delta(self):
+        state = gf.GridFisherState(session_id="2026-05-11")
+        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
+                               cert_name="BULL", active_direction="LONG")
+        inst.inventory_units = 24
+        inst.avg_entry_price = 42.50
+        inst.sell_ladder.append(TierOrder(
+            tier=0, order_id="SELL1", price=43.30, qty=24,
+            placed_ts="t", status=ORDER_ARMED,
+        ))
+        state.by_instrument["1650161"] = inst
+        # Live volume dropped by 6 (partial)
+        positions = [{"orderbook_id": "1650161", "volume": 18}]
+        res = reconcile_against_live(state, open_order_ids=set(),
+                                     positions=positions)
+        assert res.filled_sells == [("1650161", 0, 43.30)]
+        assert inst.inventory_units == 18
+        assert inst.session_pnl_sek == pytest.approx(6 * (43.30 - 42.50))
+        assert any(d == ("1650161", 24, 6) for d in res.inventory_drift)
 
     def test_partial_fill_only_filled_tier_transitions(self):
         state = gf.GridFisherState(session_id="2026-05-11")
@@ -449,6 +496,22 @@ class TestCancelArmedBuys:
         assert len(fake_session.cancelled) == 3
         assert all(t.status == ORDER_CANCELLED for t in inst.buy_ladder)
 
+    def test_cancel_rejection_keeps_buy_armed(self, fisher, fake_session,
+                                              monkeypatch):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        fisher.place_buy_ladder(inst, bid=42.50)
+        # Broker now rejects every cancel — no exception, just non-SUCCESS
+        def _reject(_order_id):
+            return {"orderRequestStatus": "ERROR", "message": "denied"}
+        monkeypatch.setattr(fake_session, "cancel_order", _reject)
+        n = fisher.cancel_armed_buys(inst)
+        # Zero successful cancellations
+        assert n == 0
+        # State still has all 3 buys ARMED — next tick will retry rather
+        # than double-place on top of resting orders.
+        assert all(t.status == ORDER_ARMED for t in inst.buy_ladder)
+
 
 # ---------------------------------------------------------------------------
 # tick() — main entry
@@ -514,7 +577,10 @@ class TestTick:
     def test_global_halt_persists(self, fisher, fake_session, monkeypatch):
         # Make halt trigger on tiny loss
         monkeypatch.setattr(gf, "GRID_PER_SESSION_LOSS_LIMIT_SEK", 1)
-        fisher.state.global_session_pnl_sek = -100
+        # tick() derives global_session_pnl_sek from per-instrument
+        # session_pnl, so the loss has to live on the instrument.
+        bull = fisher.state.by_instrument["1650161"]
+        bull.session_pnl_sek = -100
         report = fisher.tick(signal_data={})
         assert report.get("halted")
         assert fisher.state.halted
