@@ -280,6 +280,14 @@ def _register_defaults():
                       "portfolio.signals.vwap_zscore_mr",
                       "compute_vwap_zscore_mr_signal",
                       max_confidence=0.85)
+    # Gold overnight bias — LBMA fix session drift (metals only); capped at 0.7
+    # 2026-05-11: Sprott Money 2024, LBMA data 1970-2024. 54-year edge:
+    # overnight (PM->AM fix) = positive drift, London PM = negative drift.
+    # Completely uncorrelated with all existing signal clusters.
+    register_enhanced("gold_overnight_bias",
+                      "portfolio.signals.gold_overnight_bias",
+                      "compute_gold_overnight_bias_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
