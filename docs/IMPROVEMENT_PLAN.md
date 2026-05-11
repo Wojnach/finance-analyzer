@@ -1,71 +1,94 @@
-# Improvement Plan — Auto-Session 2026-05-10
+# Improvement Plan — Auto-Session 2026-05-11
 
-## Date: 2026-05-10 (Sunday)
-## Branch: improve/auto-session-2026-05-10
+## Date: 2026-05-11 (Sunday)
+## Branch: improve/auto-session-2026-05-11
 
 ## 1. Bugs & Problems Found
 
-### CRITICAL
+### CRITICAL — Silent Failure Path
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| C1 | `send_telegram(msg)` missing required `config` — raises silent `TypeError` | `main.py:936,948` | Safeguard alerts never reach Telegram |
-| C2 | CF header bypass: LAN clients spoof `Cf-Access-Authenticated-User-Email` | `dashboard/auth.py:131` | Unauthorized dashboard access |
-| C3 | COT positioning reads wrong deep context path (dead 27 days) | `signals/cot_positioning.py:347` | Signal produces 0 samples |
-| C4 | `prune_jsonl` uses predictable `.tmp` path (not `mkstemp`) | `file_utils.py:320` | Race on concurrent prune |
-| C5 | `crypto_loop._pid_alive` missing `subprocess` import on POSIX | `data/crypto_loop.py` | `NameError` crash |
-| C6 | `forecast_accuracy.py` raw `read_text()` instead of `load_jsonl` | `forecast_accuracy.py:75,92,380` | Torn-line data integrity |
+| C1 | `status="incomplete"` (exit 0, no journal) sends NO Telegram alert — operator sees nothing after "invoked" notification | `agent_invocation.py:1272` | Root cause of 43 unresolved critical errors about Layer 2 silent failures |
+| C2 | `_journal_ts_before` captured AFTER subprocess spawned — race where fast agent writes before baseline is read | `agent_invocation.py:871 vs 856` | False "incomplete" detection (low probability but trivial fix) |
+| C3 | `reporting.py` macro/market_health/earnings submodules not covered by `_track_module_outcome` — failures silently swallowed | `reporting.py:248-270` | Submodule failures don't surface in `critical_errors.jsonl` |
+| C4 | `process_lock.py:_lock_file` returns without locking when neither msvcrt nor fcntl available — caller thinks lock is held | `process_lock.py:60` | Silent no-op mutual exclusion on exotic platforms |
 
-### HIGH
+### HIGH — Data Integrity & Code Quality
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| H1 | `reporting.py` imports private `_atomic_write_json` from portfolio_mgr | `reporting.py:11` | Fragile alias coupling |
-| H2 | Dead `CORRELATED_PAIRS` for removed tickers | `risk_management.py` | Dead code |
-| H3 | Stale `HORIZON_SIGNAL_WEIGHTS` for disabled signals | `signal_engine.py` | Dead weight |
-| H4 | Swedish holidays missing Whit Monday | `market_timing.py:216` | Warrant trading on closed day |
-| H5 | `claude_invocations.jsonl` never pruned | `claude_gate.py` | Unbounded growth |
-| H6 | `crypto_cross_asset.py` orphan — never registered | `signals/crypto_cross_asset.py` | Dead file |
-| H7 | `_CORE_SIGNALS` + `@register_signal` unused | `signal_registry.py` | Dead API |
-| H8 | `_loading_timestamps` not cleaned on error path | `shared_state.py:113` | Spurious eviction logs |
-| H9 | `_sell_in_may` SELL bias — root cause of calendar 29.3% | `calendar_seasonal.py:160` | Blocks signal re-enable |
-| H10 | 9 unresolved calendar critical_errors from 2026-05-09 | `data/critical_errors.jsonl` | Alert noise |
+| H1 | `signal_db.py:insert_snapshot` no explicit `conn.rollback()` on `ticker_signals` INSERT failure — orphaned snapshot rows inflate accuracy denominators | `signal_db.py` | Analytically incorrect accuracy stats |
+| H2 | `config_validator.py` uses raw `json.load` instead of `file_utils.load_json` — race with concurrent config write | `config_validator.py:59` | Startup crash on concurrent write |
+| H3 | `config_validator.py` doesn't validate Binance keys — missing key causes silent data failure at runtime | `config_validator.py` | BTC/ETH data silently missing |
+| H4 | `health.py:check_staleness` — `datetime.fromisoformat(hb)` crashes on corrupt `health_state.json` | `health.py:152` | Dashboard `/api/health` crash |
+| H5 | `metals_loop.py:_load_json_state` uses raw `json.load(open(...))` violating CLAUDE.md rule 4 | `metals_loop.py:559` | Partial read on concurrent write |
+| H6 | `_CORE_SIGNALS` in signal_registry.py is dead code — no signal registers as "core" type | `signal_registry.py:14` | Confusing dead API |
+| H7 | `subprocess_utils.py:kill_orphaned_by_cmdline` uses deprecated WMIC — removed in some Win11 builds | `subprocess_utils.py:213` | Orphan detection fails silently |
 
-### MEDIUM
+### HIGH — Signal System
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| M1 | ORB predictor DST bug | `orb_predictor.py:32` | Wrong morning window in summer |
-| M2 | `distance_to_stop_pct` wrong denominator | `risk_management.py:373` | Overstated safety margin |
-| M3 | `_write_lock` dead code | `gpu_gate.py:98` | Dead function |
-| M4 | Dead `CORRELATION_PRIORS` for removed tickers | `monte_carlo_risk.py` | Dead data |
+| S1 | Disabled core signals (macd, sentiment, claude_fundamental) not force-HOLD'd at generation time — utility boost can circumvent accuracy gate | `signal_engine.py:2725` | Disabled signals can still influence consensus |
+| S2 | Dead `oscillator_trend` correlation group — oscillators always HOLD, group is permanent no-op | `signal_engine.py:1356` | Misleading config, stale meta-cluster comment |
+| S3 | `fibonacci` in `_SHADOW_SAFE_SIGNALS` wastes ~50ms/cycle computing a signal confirmed dead at 43.6% (17K samples) | `signal_engine.py:339` | Unnecessary CPU cost |
+
+### MEDIUM — Performance & Robustness
+
+| # | Issue | File:Line | Impact |
+|---|-------|-----------|--------|
+| M1 | `signal_db.load_entries()` O(n²) — individual queries per snapshot, degrades over months | `signal_db.py` | Cycle budget blocker after ~2 months |
+| M2 | `kelly_sizing.py` min_samples=5 for per-ticker accuracy — too few for meaningful Kelly sizing | `kelly_sizing.py` | Volatile sizing input |
+| M3 | CF Access JWT not cryptographically verified — presence-only check | `dashboard/auth.py:134` | Auth bypass if port becomes internet-reachable |
 
 ## 2. Implementation Batches
 
-### Batch 1: Critical bugs (6 files)
-1. `portfolio/main.py` — Fix `send_telegram(msg)` → `send_telegram(msg, config)`
-2. `dashboard/auth.py` — Only trust CF header when `dashboard_token` is configured
-3. `portfolio/file_utils.py` — Fix `prune_jsonl` to use `tempfile.mkstemp`
-4. `data/crypto_loop.py` — Add `subprocess` import at module level
-5. `portfolio/forecast_accuracy.py` — Use `file_utils.load_jsonl` for all reads
-6. `portfolio/signals/cot_positioning.py` — Fix deep context path
+### Batch 1: Silent Failure Alerting (2 files)
+**Goal:** Fix the #1 operational issue — Layer 2 silent failures go undetected.
 
-### Batch 2: Signal cleanup (4 files, 1 deletion)
-1. `portfolio/signals/calendar_seasonal.py` — `_sell_in_may` SELL→HOLD
-2. `portfolio/signal_engine.py` — Clean `HORIZON_SIGNAL_WEIGHTS`
-3. `portfolio/signal_registry.py` — Remove `_CORE_SIGNALS` dead code
-4. DELETE `portfolio/signals/crypto_cross_asset.py`
+1. `portfolio/agent_invocation.py`:
+   - Add Telegram alert on `status="incomplete"` (matching "failed" alert pattern)
+   - Move `_journal_ts_before` capture to BEFORE `subprocess.Popen` call
+2. `portfolio/reporting.py`:
+   - Add `_track_module_outcome` calls to macro_context, market_health, earnings_calendar exception handlers
 
-### Batch 3: Infrastructure cleanup (7 files)
-1. `portfolio/reporting.py` — Fix import to `file_utils.atomic_write_json`
-2. `portfolio/risk_management.py` — Remove dead `CORRELATED_PAIRS` + fix stop denominator
-3. `portfolio/monte_carlo_risk.py` — Remove dead `CORRELATION_PRIORS`
-4. `portfolio/market_timing.py` — Add Whit Monday to Swedish holidays
-5. `portfolio/shared_state.py` — Fix `_loading_timestamps` error-path cleanup
-6. `portfolio/gpu_gate.py` — Remove dead `_write_lock`
-7. `portfolio/main.py` — Add `claude_invocations.jsonl` to pruning list
+### Batch 2: Data Integrity Fixes (3 files)
+**Goal:** Prevent data corruption paths.
 
-### Batch 4: Final fixes (3 files)
-1. `portfolio/orb_predictor.py` — DST-aware morning window
-2. `portfolio/tickers.py` — Update calendar comment (root cause fixed)
-3. `data/critical_errors.jsonl` — Resolve 9 calendar entries
+1. `portfolio/signal_db.py`:
+   - Add explicit `conn.rollback()` in except handler for `insert_snapshot`
+   - Wrap ticker_signals INSERT in try/except with proper rollback
+2. `portfolio/health.py`:
+   - Guard `datetime.fromisoformat(hb)` with try/except ValueError
+3. `portfolio/process_lock.py`:
+   - Raise RuntimeError when no locking mechanism available (match main.py pattern)
+
+### Batch 3: Config & Convention Fixes (3 files)
+**Goal:** Fix CLAUDE.md rule violations and startup validation gaps.
+
+1. `portfolio/config_validator.py`:
+   - Use `file_utils.load_json` instead of raw `json.load`
+   - Add Binance API key validation to `REQUIRED_KEYS`
+2. `data/metals_loop.py`:
+   - Replace `_load_json_state` raw `json.load` with `file_utils.load_json`
+3. `portfolio/signal_registry.py`:
+   - Remove dead `_CORE_SIGNALS` dict and all references
+   - Simplify `get_signal_names()` to return enhanced-only
+
+### Batch 4: Infrastructure Hardening (2 files)
+**Goal:** Fix platform-specific issues.
+
+1. `portfolio/subprocess_utils.py`:
+   - Replace WMIC-based orphan detection with PowerShell `Get-CimInstance`
+2. `portfolio/signal_db.py`:
+   - Optimize `load_entries()` to use JOINs instead of per-snapshot queries
+
+## 3. Impact Assessment
+
+| Batch | Risk | Testing Impact | Live System Impact |
+|-------|------|----------------|-------------------|
+| 1 | LOW — adds alerting, doesn't change data flow | Existing agent_invocation tests cover the path | Telegram gets alerts that were previously silent |
+| 2 | LOW — adds guards, doesn't change happy path | Need tests for new rollback + fromisoformat guard | More resilient to corrupt data |
+| 3 | LOW — uses existing atomic I/O instead of raw | Existing config_validator tests need update | Startup validation catches more issues |
+| 4 | MEDIUM — changes query patterns and orphan detection | Need tests for JOIN-based queries | Performance improvement for signal_db |
