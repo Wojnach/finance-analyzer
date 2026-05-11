@@ -157,7 +157,11 @@ def check_staleness(max_age_seconds: int = 300) -> tuple:
     hb = state.get("last_heartbeat")
     if not hb:
         return True, float("inf"), state
-    last = datetime.fromisoformat(hb)
+    try:
+        last = datetime.fromisoformat(hb)
+    except (ValueError, TypeError):
+        logger.warning("check_staleness: corrupt last_heartbeat=%r", hb)
+        return True, float("inf"), state
     age = (datetime.now(UTC) - last).total_seconds()
     return age > max_age_seconds, age, state
 

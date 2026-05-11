@@ -110,47 +110,51 @@ class SignalDB:
 
         snapshot_id = cur.lastrowid
 
-        tickers = entry.get("tickers", {})
-        for ticker, tdata in tickers.items():
-            conn.execute(
-                """INSERT INTO ticker_signals
-                   (snapshot_id, ticker, price_usd, consensus, buy_count, sell_count, total_voters, signals, regime)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    snapshot_id,
-                    ticker,
-                    tdata.get("price_usd"),
-                    tdata.get("consensus"),
-                    tdata.get("buy_count"),
-                    tdata.get("sell_count"),
-                    tdata.get("total_voters"),
-                    json.dumps(tdata.get("signals", {})),
-                    tdata.get("regime", "unknown"),
-                ),
-            )
-
-        outcomes = entry.get("outcomes", {})
-        for ticker, horizons in outcomes.items():
-            if not isinstance(horizons, dict):
-                continue
-            for horizon, odata in horizons.items():
-                if odata is None:
-                    continue
+        try:
+            tickers = entry.get("tickers", {})
+            for ticker, tdata in tickers.items():
                 conn.execute(
-                    """INSERT OR REPLACE INTO outcomes
-                       (snapshot_id, ticker, horizon, price_usd, change_pct, outcome_ts)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO ticker_signals
+                       (snapshot_id, ticker, price_usd, consensus, buy_count, sell_count, total_voters, signals, regime)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         snapshot_id,
                         ticker,
-                        horizon,
-                        odata.get("price_usd"),
-                        odata.get("change_pct"),
-                        odata.get("ts"),
+                        tdata.get("price_usd"),
+                        tdata.get("consensus"),
+                        tdata.get("buy_count"),
+                        tdata.get("sell_count"),
+                        tdata.get("total_voters"),
+                        json.dumps(tdata.get("signals", {})),
+                        tdata.get("regime", "unknown"),
                     ),
                 )
 
-        conn.commit()
+            outcomes = entry.get("outcomes", {})
+            for ticker, horizons in outcomes.items():
+                if not isinstance(horizons, dict):
+                    continue
+                for horizon, odata in horizons.items():
+                    if odata is None:
+                        continue
+                    conn.execute(
+                        """INSERT OR REPLACE INTO outcomes
+                           (snapshot_id, ticker, horizon, price_usd, change_pct, outcome_ts)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (
+                            snapshot_id,
+                            ticker,
+                            horizon,
+                            odata.get("price_usd"),
+                            odata.get("change_pct"),
+                            odata.get("ts"),
+                        ),
+                    )
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def update_outcome(self, ts, ticker, horizon, price_usd, change_pct, outcome_ts):
         """Update a single outcome cell. Used by backfill."""

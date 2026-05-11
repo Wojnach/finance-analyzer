@@ -64,6 +64,11 @@ def _lock_file(fh: IO[str]) -> None:
         return
     if fcntl is not None:  # pragma: no branch - platform-specific
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return
+    raise RuntimeError(
+        "No file locking mechanism available (neither msvcrt nor fcntl). "
+        "Cannot guarantee mutual exclusion."
+    )
 
 
 def _unlock_file(fh: IO[str]) -> None:
