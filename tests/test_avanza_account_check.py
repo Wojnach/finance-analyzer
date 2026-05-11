@@ -31,24 +31,24 @@ def critical_errors_path(tmp_path, monkeypatch):
 
 
 class TestCategoryDisallowed:
-    @pytest.mark.parametrize("label", [
-        "INVESTERINGSSPARKONTO",
-        "Investeringssparkonto",
-        "ISK",
-        "Kapitalförsäkring",
-        "kapitalforsakring",
-        "Tjänstepension",
-        "PENSION",
-    ])
-    def test_disallowed_labels(self, label):
-        assert ac._category_disallowed(label) is True
+    """Default-empty disallowed list (2026-05-11 change): ISK + KF +
+    pension legally trade warrants in Sweden. Verifier now confirms
+    account existence and logs category; operator owns trading-venue
+    decisions. Tests pin the default + exercise the override knob."""
 
     @pytest.mark.parametrize("label", [
-        "AKTIE_DEPÅ", "Aktiedepå", "AF", "Depå",
-        "Equity Account", "",
+        "INVESTERINGSSPARKONTO", "ISK", "Kapitalförsäkring",
+        "Tjänstepension", "PENSION", "AKTIE_DEPÅ", "Aktiedepå",
+        "AF", "Depå", "Equity Account", "",
     ])
-    def test_allowed_labels(self, label):
+    def test_no_label_disallowed_by_default(self, label):
         assert ac._category_disallowed(label) is False
+
+    def test_runtime_added_fragment_disallows(self, monkeypatch):
+        monkeypatch.setattr(ac, "DISALLOWED_CATEGORY_FRAGMENTS",
+                            ("blocked",))
+        assert ac._category_disallowed("BLOCKED_CATEGORY") is True
+        assert ac._category_disallowed("Aktiedepå") is False
 
 
 # ---------------------------------------------------------------------------
@@ -110,10 +110,18 @@ class TestVerifyOk:
 
 
 class TestVerifyDisallowed:
-    def test_isk_category_raises(self, critical_errors_path):
+    """Disallowed-category path is opt-in via DISALLOWED_CATEGORY_FRAGMENTS.
+    Default-empty list means no category raises, even ISK — that's the
+    2026-05-11 change. These tests inject a fragment to exercise the
+    failure branches end-to-end."""
+
+    def test_disallowed_fragment_match_raises(self, critical_errors_path,
+                                               monkeypatch):
+        monkeypatch.setattr(ac, "DISALLOWED_CATEGORY_FRAGMENTS",
+                            ("blocked",))
         response = {
             "categories": [
-                {"name": "INVESTERINGSSPARKONTO", "accounts": [
+                {"name": "BLOCKED_CATEGORY", "accounts": [
                     {"id": "1625505", "type": "ISK"},
                 ]},
             ],
@@ -123,27 +131,35 @@ class TestVerifyDisallowed:
             with patch.object(ac, "_send_telegram"):
                 with pytest.raises(ac.AccountCategoryMismatch, match="1625505"):
                     ac.verify_default_account("1625505")
-        # critical_errors entry was appended
-        assert critical_errors_path.exists()
         entry = json.loads(critical_errors_path.read_text().strip())
         assert entry["category"] == "avanza_account_mismatch"
         assert entry["context"]["account_id"] == "1625505"
-        assert "investerings" in entry["context"]["category_label"].lower()
+        assert "blocked" in entry["context"]["category_label"].lower()
 
-    def test_pension_category_raises(self, critical_errors_path):
+    def test_isk_no_longer_raises_by_default(self, critical_errors_path):
+        # The original premise — ISK forbids warrants — was wrong.
+        # Verify the default-empty disallowed list lets ISK accounts
+        # through.
         response = {
-            "accounts": [{"id": "999", "type": "Tjänstepension"}],
+            "categories": [
+                {"name": "INVESTERINGSSPARKONTO", "accounts": [
+                    {"id": "1625505", "type": "ISK"},
+                ]},
+            ],
         }
         with patch.object(ac, "_api_get_categorized_accounts",
                           return_value=response):
-            with patch.object(ac, "_send_telegram"):
-                with pytest.raises(ac.AccountCategoryMismatch):
-                    ac.verify_default_account("999")
+            result = ac.verify_default_account("1625505")
+        assert result["ok"] is True
+        assert "investerings" in result["category"].lower()
 
-    def test_raise_disabled_returns_dict(self, critical_errors_path):
+    def test_raise_disabled_returns_dict(self, critical_errors_path,
+                                          monkeypatch):
+        monkeypatch.setattr(ac, "DISALLOWED_CATEGORY_FRAGMENTS",
+                            ("blocked",))
         response = {
             "categories": [
-                {"name": "ISK", "accounts": [{"id": "111"}]},
+                {"name": "BLOCKED", "accounts": [{"id": "111"}]},
             ],
         }
         with patch.object(ac, "_api_get_categorized_accounts",
@@ -157,6 +173,8 @@ class TestVerifyDisallowed:
 
     def test_skip_env_var_disables_raise(self, critical_errors_path,
                                          monkeypatch):
+        monkeypatch.setattr(ac, "DISALLOWED_CATEGORY_FRAGMENTS",
+                            ("investerings",))
         monkeypatch.setenv(ac.SKIP_ENV_VAR, "1")
         response = {
             "categories": [

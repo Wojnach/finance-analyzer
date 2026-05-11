@@ -37,20 +37,19 @@ from portfolio.file_utils import atomic_append_jsonl
 logger = logging.getLogger("portfolio.avanza_account_check")
 
 # Category strings that disqualify an account from leveraged-warrant
-# trading. Avanza category labels are inconsistent across endpoints; we
-# do case-insensitive substring matching so a label like
-# ``"INVESTERINGSSPARKONTO"`` or ``"Investeringssparkonto"`` or
-# ``"ISK"`` is all caught by a single rule. Update the list when a new
-# disqualifying category surfaces.
-DISALLOWED_CATEGORY_FRAGMENTS: tuple[str, ...] = (
-    "investeringsspar",  # ISK — Swedish equity savings, warrants disallowed
-    "kapitalfors",        # KF — leveraged certs not allowed in pension wrappers
-    "kapitalförs",
-    "tjanstepens",        # tjänstepension
-    "tjänstepens",
-    "pension",
-    "isk",                # short form, also seen in some responses
-)
+# trading. Empty by default — 2026-05-11 user confirmation made it
+# clear that the original premise ("ISK forbids warrants") was wrong:
+# Swedish ISK accounts legally hold warrants, certificates, and ETPs;
+# the tax treatment differs but the trades are routine. Same for
+# Kapitalförsäkring (insurance wrapper) and Tjänstepension — those
+# can trade leveraged instruments too. The verifier now confirms the
+# account *exists* under the configured ID and logs its category; the
+# operator owns the decision about what to trade where.
+#
+# If a future category genuinely cannot trade warrants (e.g. a
+# restricted minor account), add the fragment here. Substring match
+# is case-insensitive.
+DISALLOWED_CATEGORY_FRAGMENTS: tuple[str, ...] = ()
 
 
 CRITICAL_ERRORS_LOG = "data/critical_errors.jsonl"
