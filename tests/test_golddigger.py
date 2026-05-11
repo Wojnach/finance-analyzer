@@ -550,7 +550,11 @@ class TestGolddiggerBot:
 
     @patch("portfolio.golddigger.bot._now_stockholm")
     def test_flatten_at_session_end(self, mock_now, tmp_path):
-        mock_now.return_value = (21, 55, "2026-03-09")  # at flatten time (EU+US overlap end)
+        # 2026-05-11: session_end_hour moved from 21:55 → 21:30 alongside
+        # the unified 08:30–21:30 window. _in_session is inclusive on both
+        # ends, so at exactly 21:30 the bot is "in session" and the
+        # flatten branch fires.
+        mock_now.return_value = (21, 30, "2026-03-09")
         cfg = self.make_cfg(tmp_path)
         bot = GolddiggerBot(cfg, dry_run=True)
         # Put bot in a position

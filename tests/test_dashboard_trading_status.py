@@ -38,17 +38,32 @@ def _at(local_hh: int, local_mm: int = 0) -> datetime:
 
 
 class TestSessionWindow:
-    def test_open_at_1530(self):
+    """Window unified to 08:30–21:30 Europe/Stockholm in commit f3c48416
+    (2026-05-11). Tests below pin the new boundaries and the
+    pre-08:30 / post-21:30 / weekend rules. Old fixture times that
+    used the 15:30–21:55 GoldDigger window have been remapped."""
+
+    def test_open_at_0830(self):
+        assert ts._in_session(_at(8, 30)) is True
+
+    def test_open_mid_session(self):
+        # 15:30 still inside the window — sanity that the old open is
+        # still considered "in session" after the widening.
         assert ts._in_session(_at(15, 30)) is True
 
-    def test_open_at_2154(self):
-        assert ts._in_session(_at(21, 54)) is True
+    def test_open_at_2129(self):
+        assert ts._in_session(_at(21, 29)) is True
 
-    def test_closed_at_2155(self):
-        assert ts._in_session(_at(21, 55)) is False
+    def test_closed_at_2130(self):
+        assert ts._in_session(_at(21, 30)) is False
 
-    def test_closed_morning(self):
-        assert ts._in_session(_at(9, 0)) is False
+    def test_closed_at_0829(self):
+        assert ts._in_session(_at(8, 29)) is False
+
+    def test_open_at_0900(self):
+        """09:00 used to fall outside the GoldDigger 15:30 window —
+        under the unified 08:30–21:30 window it must be in session."""
+        assert ts._in_session(_at(9, 0)) is True
 
     def test_weekend_closed(self):
         """Codex P1 finding 2026-05-04: Saturday/Sunday at 16:00 must
@@ -67,18 +82,16 @@ class TestSessionWindow:
 
     def test_weekend_hint_rolls_to_monday(self):
         """`_next_open_hint` on Saturday afternoon must point at the
-        next *weekday* open (Monday), not Sunday."""
+        next *weekday* open (Monday 08:30), not Sunday."""
         sat_local = datetime(2026, 5, 2, 16, 0, tzinfo=STO).astimezone(UTC)
         hint = ts._next_open_hint(sat_local)
-        # Saturday 16:00 -> Monday 15:30 = ~47h 30m away.
-        assert "h" in hint
-        # Must NOT be near 24h (which would mean it pointed at Sunday).
-        # Acceptable range: 40h to 50h.
+        # Saturday 16:00 -> Monday 08:30 = ~40h 30m away.
+        # Acceptable range: 32h to 44h (allow DST + tolerance).
         import re
         m = re.search(r"(\d+)h", hint)
         assert m, hint
         hours = int(m.group(1))
-        assert 40 <= hours <= 50, f"hint pointed at wrong day: {hint}"
+        assert 32 <= hours <= 44, f"hint pointed at wrong day: {hint}"
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +123,15 @@ class TestGoldDigger:
         _w(tmp_path / "golddigger_state.json", {
             "halted": False, "halted_reason": "", "position": None,
         })
-        out = ts.compute(data_dir=tmp_path, now_utc=_at(9, 0))
+        # Pre-08:30 — outside the unified window. Old fixture used 09:00
+        # which is now inside the window (commit f3c48416, 2026-05-11).
+        out = ts.compute(data_dir=tmp_path, now_utc=_at(7, 0))
         gd = next(b for b in out["bots"] if b["bot"] == "golddigger")
         assert gd["state"] == "OUTSIDE_HOURS"
         # DST-aware: CEST in summer (the test's 2026-05-04 fixture date)
-        # and CET in winter. The code now uses target.tzname() so both
+        # and CET in winter. The code uses target.tzname() so both
         # are valid suffixes.
-        assert "next 15:30" in gd["reason"]
+        assert "next 08:30" in gd["reason"]
         assert ("CEST" in gd["reason"]) or ("CET" in gd["reason"])
 
     def test_scanning_in_session(self, tmp_path: Path):
@@ -226,5 +241,8 @@ class TestShape:
         assert bot_keys == {"golddigger", "elongir", "metals", "fishing"}
 
     def test_session_open_flag_outside_hours(self, tmp_path: Path):
-        out = ts.compute(data_dir=tmp_path, now_utc=_at(9, 0))
+        # Pre-08:30. 09:00 used to be outside the GoldDigger 15:30 window
+        # but is inside the unified 08:30–21:30 window since commit
+        # f3c48416 (2026-05-11).
+        out = ts.compute(data_dir=tmp_path, now_utc=_at(7, 0))
         assert out["session_open"] is False

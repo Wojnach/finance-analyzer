@@ -290,11 +290,13 @@ def _in_session(now_utc: datetime) -> bool:
 
 
 def _next_open_hint(now_utc: datetime) -> str:
-    """Human-readable 'next 15:30 CEST in 2h 14m'.
+    """Human-readable 'next 08:30 CEST in 2h 14m'.
 
     Rolls forward to the next weekday open and uses the *target* date's
     tzname() so the suffix flips between CET and CEST automatically
-    across the DST boundary.
+    across the DST boundary. The open-time string is read from
+    SESSION_OPEN — bug-fix 2026-05-11: previously hard-coded "15:30"
+    which lied to users once the session moved to 08:30.
     """
     from datetime import timedelta
 
@@ -311,4 +313,7 @@ def _next_open_hint(now_utc: datetime) -> str:
     hours = int(delta.total_seconds() // 3600)
     mins = int((delta.total_seconds() % 3600) // 60)
     zone = target.tzname() or "Stockholm"
-    return f"next 15:30 {zone} in {hours}h {mins:02d}m"
+    return (
+        f"next {SESSION_OPEN.hour:02d}:{SESSION_OPEN.minute:02d} "
+        f"{zone} in {hours}h {mins:02d}m"
+    )
