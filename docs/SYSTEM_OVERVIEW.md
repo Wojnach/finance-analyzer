@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-04
-Branch: improve/auto-session-2026-05-04
+Updated: 2026-05-11
+Branch: improve/auto-session-2026-05-11
 
 ## 1) Architecture Summary
 
@@ -33,8 +33,8 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 - `config_validator.py`: Startup config validation
 
 ### Signal System (52 signals: 12 core + 40 enhanced, 33 active + 19 disabled)
-- `signal_engine.py (~3,621 lines): 52-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
-- `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
+- `signal_engine.py` (~3,800 lines): 52-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
+- `signal_registry.py` (~300 lines): Plugin-based signal discovery via importlib, lazy loading. All signals registered as "enhanced" via `register_enhanced()`. 5-min import-failure cooldown.
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (636 lines): Per-signal hit rate tracking, accuracy cache, activation rates

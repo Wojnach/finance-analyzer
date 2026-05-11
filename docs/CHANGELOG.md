@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-05-11 (reliability hardening)
+
+Three-batch improvement session targeting silent failure detection,
+data integrity, and config validation.
+
+**Silent Failure Alerting (Batch 1):**
+- Layer 2 `status="incomplete"` (exit 0, no journal) now sends Telegram
+  alert. Previously the most common silent failure mode was invisible.
+- Fixed race condition: `_journal_ts_before` now captured before subprocess
+  spawn (was after — could produce false "incomplete" on fast agents).
+- `reporting.py` macro_context, market_health, and earnings_calendar
+  exceptions now routed to `_track_module_outcome` for escalation.
+
+**Data Integrity (Batch 2):**
+- `signal_db.insert_snapshot` now does explicit `conn.rollback()` on
+  failure — prevents orphaned snapshot rows from inflating accuracy stats.
+- `health.check_staleness` guarded against corrupt `health_state.json`
+  (previously crashed dashboard `/api/health`).
+- `process_lock._lock_file` raises RuntimeError when no locking mechanism
+  available (was a silent no-op).
+
+**Config & Convention (Batch 3):**
+- `config_validator` uses `file_utils.load_json` instead of raw `json.load`.
+- Binance API keys added to startup validation (previously silent failure).
+- `metals_loop._load_json_state` now delegates to `file_utils.load_json`.
+- Dead `_CORE_SIGNALS` dict removed from `signal_registry.py`.
+
+**Tests:** 6 test files updated, all passing.
+
 ## 2026-05-04 (system-health-first home)
 
 Dashboard home replaced — was a Patient/Bold simulated-portfolio P&L
