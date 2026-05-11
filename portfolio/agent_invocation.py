@@ -853,6 +853,8 @@ def invoke_agent(reasons, tier=3):
         # conditional turns that into "log the unresolved entries in your
         # journal entry and proceed with the trigger task".
         agent_env["PF_HEADLESS_AGENT"] = "1"
+        _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
+        _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
@@ -867,8 +869,6 @@ def invoke_agent(reasons, tier=3):
         _agent_timeout = timeout
         _agent_tier = tier
         _agent_reasons = list(reasons)
-        _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
-        _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
         # BUG-219: Snapshot transaction counts so check_agent_completion()
         # can detect new trades and call record_trade().
         global _patient_txn_count_before, _bold_txn_count_before
@@ -1268,7 +1268,6 @@ def _check_agent_completion_locked():
         status, exit_code, duration_s, _agent_tier, journal_written, telegram_sent,
     )
 
-    # Telegram alert on any agent failure (not just stack overflow)
     if status == "failed":
         try:
             config = _load_config()
@@ -1279,6 +1278,16 @@ def _check_agent_completion_locked():
             )
         except Exception as e:
             logger.warning("Agent failure alert failed: %s", e)
+    elif status == "incomplete":
+        try:
+            config = _load_config()
+            send_or_store(
+                f"*L2 INCOMPLETE* T{_agent_tier} exit={exit_code} "
+                f"({duration_s:.0f}s) journal={journal_written} tg={telegram_sent}",
+                config, category="error",
+            )
+        except Exception as e:
+            logger.warning("Agent incomplete alert failed: %s", e)
 
     # Track consecutive stack overflow crashes
     global _consecutive_stack_overflows

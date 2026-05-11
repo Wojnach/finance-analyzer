@@ -245,9 +245,11 @@ def write_agent_summary(
 
         if macro:
             summary["macro"] = macro
-    except Exception:
+        _track_module_outcome("macro_context", ok=True)
+    except Exception as e:
         logger.warning("[reporting] macro_context failed", exc_info=True)
         _module_warnings.append("macro_context")
+        _track_module_outcome("macro_context", ok=False, exc=e)
 
     # Market health (distribution days, FTD, breadth score)
     try:
@@ -255,9 +257,11 @@ def write_agent_summary(
         mh = get_market_health()
         if mh:
             summary["market_health"] = mh
-    except Exception:
+        _track_module_outcome("market_health", ok=True)
+    except Exception as e:
         logger.warning("[reporting] market_health failed", exc_info=True)
         _module_warnings.append("market_health")
+        _track_module_outcome("market_health", ok=False, exc=e)
 
     # Earnings proximity for stock tickers
     try:
@@ -265,9 +269,11 @@ def write_agent_summary(
         earnings = get_all_earnings_proximity()
         if earnings:
             summary["earnings_proximity"] = earnings
-    except Exception:
+        _track_module_outcome("earnings_calendar", ok=True)
+    except Exception as e:
         logger.warning("[reporting] earnings_calendar failed", exc_info=True)
         _module_warnings.append("earnings_calendar")
+        _track_module_outcome("earnings_calendar", ok=False, exc=e)
 
     # Exposure recommendation (synthesizes market health + regime)
     try:
