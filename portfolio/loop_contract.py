@@ -417,6 +417,28 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         # subsequent new trigger).
         return []
 
+    # Precondition 5b (2026-05-11): wall-clock cooldown floor against the
+    # observed race where 7 identical violations landed within 410 ms on
+    # 2026-05-10 16:47:48. The trigger-iso dedup above should have caught
+    # them, but either the marker write was racing or another writer
+    # cleared the key between cycles. Defensive belt-and-braces: suppress
+    # any further fire within 30 s of the previous one. Apply
+    # unconditionally — a genuine "new trigger arrives 5 s after the
+    # previous one" sequence is essentially impossible in production (main
+    # loop is 60 s, trigger detection runs once per cycle), so the only
+    # things filtered out by this gate are duplicate fires of the same
+    # incident from races. 30 s ≈ half a loop cycle.
+    LAYER2_VIOLATION_COOLDOWN_S = 30.0
+    last_wall_ts = contract_state.get("layer2_last_violation_wall_ts")
+    if last_wall_ts is not None:
+        try:
+            now_wall = time.time()
+            if (now_wall - float(last_wall_ts)) < LAYER2_VIOLATION_COOLDOWN_S:
+                return []
+        except (TypeError, ValueError):
+            # Corrupt state value — fall through and re-fire.
+            pass
+
     # Violation. Try to enrich the message with whether a recent auth
     # failure was logged — it's the most common root cause, and telling
     # the user "auth_error was already recorded" saves them investigation.
@@ -470,6 +492,9 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     dedup_written = False
     try:
         contract_state["layer2_last_violation_trigger_ts"] = current_trigger_iso
+        # 2026-05-11: wall-clock companion key for precondition 5b
+        # (cooldown floor against race-window duplicate fires).
+        contract_state["layer2_last_violation_wall_ts"] = time.time()
         atomic_write_json(CONTRACT_STATE_FILE, contract_state)
         dedup_written = True
     except Exception as e:

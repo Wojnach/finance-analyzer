@@ -502,10 +502,17 @@ def test_dedup_marker_survives_violation_tracker_save(contract_env):
     assert "consecutive" in final_state
 
 
-def test_new_trigger_after_dedup_fires(contract_env):
+def test_new_trigger_after_dedup_fires(contract_env, monkeypatch):
     """Dedup only applies to the SAME trigger_time. A fresh trigger
     (new timestamp) should fire a new violation even if the prior one
-    was for a similar reason."""
+    was for a similar reason.
+
+    2026-05-11: with the wall-clock cooldown floor (precondition 5b)
+    added, this test must advance the clock past the 30 s cooldown
+    between fires or both checks land in the same wall-clock window
+    and the second is suppressed by the new gate (not by the trigger
+    dedup we're trying to exercise here).
+    """
     tmp_path, p = contract_env
     now = datetime.now(UTC)
     first_trigger_ts = now - timedelta(minutes=40)
@@ -524,8 +531,17 @@ def test_new_trigger_after_dedup_fires(contract_env):
     p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
     p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
 
+    # Fake wall-clock — advance >30 s between fires.
+    import time as time_mod
+    real_t = time_mod.time()
+    wall = [real_t]
+    monkeypatch.setattr(time_mod, "time", lambda: wall[0])
+
     # First fire
     assert len(loop_contract.check_layer2_journal_activity()) == 1
+
+    # Advance wall-clock past cooldown
+    wall[0] = real_t + 31.0
 
     # A fresh trigger arrives
     second_trigger_ts = now - timedelta(minutes=25)
@@ -536,6 +552,101 @@ def test_new_trigger_after_dedup_fires(contract_env):
     })
     # Dedup must NOT suppress — trigger_time changed
     assert len(loop_contract.check_layer2_journal_activity()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Wall-clock cooldown (precondition 5b, 2026-05-11)
+# ---------------------------------------------------------------------------
+
+def test_wall_clock_cooldown_suppresses_rapid_refire(contract_env, monkeypatch):
+    """Two checks within 30 s of each other must only fire one violation,
+    even if the trigger-iso marker disappeared between them. Models the
+    2026-05-10 16:47:48 burst where 7 identical contract_violation rows
+    landed in 410 ms despite the trigger-iso dedup being in place."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "BTC-USD flipped SELL->BUY (sustained)",
+        "last_invocation_tier": 1,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=10)),
+         "status": "auth_error", "tier": 1, "exit_code": 0},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    # Fake wall-clock so the test is hermetic.
+    import time as time_mod
+    real_t = time_mod.time()
+    wall = [real_t]
+    monkeypatch.setattr(time_mod, "time", lambda: wall[0])
+
+    # First call fires the violation and records the wall ts.
+    v1 = loop_contract.check_layer2_journal_activity()
+    assert len(v1) == 1
+
+    # Simulate a competing writer wiping the trigger-iso marker
+    # (the race scenario the cooldown defends against).
+    from portfolio.file_utils import atomic_write_json, load_json
+    state = load_json(p["CONTRACT_STATE_FILE"])
+    state.pop("layer2_last_violation_trigger_ts", None)
+    atomic_write_json(p["CONTRACT_STATE_FILE"], state)
+
+    # Advance only 5 s — well within the 30 s cooldown.
+    wall[0] = real_t + 5.0
+
+    # Second call must be suppressed by the wall-clock floor.
+    v2 = loop_contract.check_layer2_journal_activity()
+    assert v2 == [], "wall-clock cooldown must suppress rapid re-fire"
+
+
+def test_wall_clock_cooldown_clears_after_window(contract_env, monkeypatch):
+    """After the 30 s cooldown elapses, the violation may re-fire if the
+    underlying condition still holds. This is the recovery path —
+    sustained outages should keep alerting, just not at sub-second
+    cadence."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "BTC-USD flipped SELL->BUY (sustained)",
+        "last_invocation_tier": 1,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=10)),
+         "status": "auth_error", "tier": 1, "exit_code": 0},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    import time as time_mod
+    real_t = time_mod.time()
+    wall = [real_t]
+    monkeypatch.setattr(time_mod, "time", lambda: wall[0])
+
+    v1 = loop_contract.check_layer2_journal_activity()
+    assert len(v1) == 1
+
+    # Strip both dedup markers (simulating worst-case state loss).
+    from portfolio.file_utils import atomic_write_json, load_json
+    state = load_json(p["CONTRACT_STATE_FILE"])
+    state.pop("layer2_last_violation_trigger_ts", None)
+    state.pop("layer2_last_violation_wall_ts", None)
+    atomic_write_json(p["CONTRACT_STATE_FILE"], state)
+
+    # Without markers the check should re-fire even if we don't advance
+    # wall-clock. (Corruption-tolerance: cooldown can't keep blocking us
+    # if its own state vanished.)
+    v2 = loop_contract.check_layer2_journal_activity()
+    assert len(v2) == 1, "missing markers must not silence the check"
 
 
 # ---------------------------------------------------------------------------
