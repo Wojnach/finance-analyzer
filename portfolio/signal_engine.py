@@ -661,6 +661,15 @@ _SHADOW_SAFE_SIGNALS = frozenset({
     "hash_ribbons",
     "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
     "calendar",  # 2026-05-09: disabled at 29.3%, shadow-track for recovery
+    # 2026-05-11: Expanded shadow set — all pending-validation OHLCV-only signals.
+    # residual_pair_reversion excluded (uses yfinance).
+    "drift_regime_gate",
+    "vol_ratio_regime",
+    "williams_vix_fix",
+    "intraday_seasonality",
+    "cubic_trend_persistence",
+    "vwap_zscore_mr",
+    "gold_overnight_bias",
 })
 
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for

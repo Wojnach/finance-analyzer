@@ -68,11 +68,40 @@ class TestDxyCrossAssetSignal:
         mock_dxy.assert_not_called()
 
     @patch("portfolio.macro_context.get_dxy_intraday")
-    def test_non_metals_btc_returns_hold(self, mock_dxy):
+    def test_dxy_down_buys_btc(self, mock_dxy):
         from portfolio.signals.dxy_cross_asset import compute_dxy_cross_asset_signal
+        mock_dxy.return_value = {
+            "value": 104.0, "change_1h_pct": -0.30, "change_3h_pct": -0.5,
+            "source": "DX-Y.NYB",
+        }
         result = compute_dxy_cross_asset_signal(_make_df(), ticker="BTC-USD")
-        assert result["action"] == "HOLD"
-        mock_dxy.assert_not_called()
+        assert result["action"] == "BUY"
+        assert result["confidence"] > 0
+        assert result["indicators"]["asset_class"] == "crypto"
+
+    @patch("portfolio.macro_context.get_dxy_intraday")
+    def test_dxy_up_sells_eth(self, mock_dxy):
+        from portfolio.signals.dxy_cross_asset import compute_dxy_cross_asset_signal
+        mock_dxy.return_value = {
+            "value": 104.0, "change_1h_pct": 0.30, "change_3h_pct": 0.5,
+            "source": "DX-Y.NYB",
+        }
+        result = compute_dxy_cross_asset_signal(_make_df(), ticker="ETH-USD")
+        assert result["action"] == "SELL"
+        assert result["indicators"]["asset_class"] == "crypto"
+
+    @patch("portfolio.macro_context.get_dxy_intraday")
+    def test_crypto_wider_threshold(self, mock_dxy):
+        """0.18% move: above metals threshold (0.15%) but below crypto (0.20%)."""
+        from portfolio.signals.dxy_cross_asset import compute_dxy_cross_asset_signal
+        mock_dxy.return_value = {
+            "value": 104.0, "change_1h_pct": -0.18, "change_3h_pct": -0.3,
+            "source": "DX-Y.NYB",
+        }
+        metals_r = compute_dxy_cross_asset_signal(_make_df(), ticker="XAG-USD")
+        crypto_r = compute_dxy_cross_asset_signal(_make_df(), ticker="BTC-USD")
+        assert metals_r["action"] == "BUY"
+        assert crypto_r["action"] == "HOLD"
 
     @patch("portfolio.macro_context.get_dxy_intraday")
     def test_missing_dxy_returns_hold(self, mock_dxy):
