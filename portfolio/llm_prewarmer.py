@@ -101,21 +101,55 @@ def _next_slot(current_counter: int) -> str:
 def _read_last_state() -> dict | None:
     """Return the most recent entry from STATE_FILE, or None.
 
-    Uses a streaming tail rather than load_jsonl because the file may
-    grow unboundedly across a long-running deployment and we only ever
-    need the last record.
+    Fix C 2026-05-11 (codex review): true tail read instead of
+    ``f.readlines()``. The state file is bounded by log_rotation now
+    (Fix B), but even pre-rotation we don't want to grow O(n) with
+    file size — every prewarm pays this. We seek to the end and read
+    a small trailing block, then split on newlines and take the last
+    complete JSON line. If the block doesn't contain a complete line
+    (extremely long single record, unlikely), fall back to a full read
+    once.
     """
+    import json
+
+    TAIL_BLOCK = 8192
+
     try:
         if not STATE_FILE.exists():
             return None
-        # Read the last non-empty line. The file is tiny (one record
-        # per cycle ≈ 1440/day at most), so a full read is fine.
-        with open(STATE_FILE, encoding="utf-8") as f:
-            lines = [ln.strip() for ln in f.readlines() if ln.strip()]
+        size = STATE_FILE.stat().st_size
+        if size == 0:
+            return None
+
+        with open(STATE_FILE, "rb") as f:
+            if size <= TAIL_BLOCK:
+                f.seek(0)
+                block = f.read()
+            else:
+                f.seek(size - TAIL_BLOCK)
+                block = f.read()
+
+        text = block.decode("utf-8", errors="replace")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         if not lines:
             return None
-        import json
-        return json.loads(lines[-1])
+
+        # If we tail-read and the first kept line came from a partial
+        # block (i.e. we started mid-line because there was no newline
+        # at the seek point), it may parse garbage. The LAST line is
+        # always safe because the writer terminates with \n via
+        # atomic_append_jsonl. We try it first.
+        try:
+            return json.loads(lines[-1])
+        except json.JSONDecodeError:
+            # Fallback: pathological case where the tail block does not
+            # contain a complete JSON record. Read the whole file once.
+            if size > TAIL_BLOCK:
+                with open(STATE_FILE, encoding="utf-8") as f:
+                    all_lines = [ln.strip() for ln in f if ln.strip()]
+                if all_lines:
+                    return json.loads(all_lines[-1])
+            return None
     except Exception as e:
         logger.warning("llm_prewarmer state read failed: %s", e)
         return None
@@ -141,18 +175,29 @@ def _write_state(counter: int, prewarmed_slot: str, server_slot: str,
         logger.warning("llm_prewarmer state write failed: %s", e)
 
 
+def _current_loaded_server_slot() -> str | None:
+    """Return the llama_server slot name currently loaded according to the
+    PID file, or None on any error/missing file.
+
+    Used both to short-circuit prewarm when the target is already loaded
+    AND to validate the JSONL idempotency record against ground truth —
+    see Fix A 2026-05-11 in ``prewarm_next_model``.
+    """
+    try:
+        from portfolio.llama_server import _read_pid_model
+        _, current_model = _read_pid_model()
+        return current_model
+    except Exception as e:
+        logger.debug("llm_prewarmer load-check failed: %s", e)
+        return None
+
+
 def _is_slot_already_loaded(server_slot: str) -> bool:
     """Check llama_server's PID file to see if the target slot is already
     the active model. Returns False on any error (safe default — we'd
     rather prewarm an already-loaded model than skip a needed prewarm).
     """
-    try:
-        from portfolio.llama_server import _read_pid_model
-        _, current_model = _read_pid_model()
-        return current_model == server_slot
-    except Exception as e:
-        logger.debug("llm_prewarmer load-check failed: %s", e)
-        return False
+    return _current_loaded_server_slot() == server_slot
 
 
 def prewarm_next_model(current_counter: int) -> bool:
@@ -204,18 +249,29 @@ def prewarm_next_model(current_counter: int) -> bool:
             )
             return False
 
-        # Idempotency: if the last state record was already a prewarm at
-        # this counter for this slot, skip. Stops a restarted process from
-        # doing redundant work if the previous instance already prewarmed.
+        # Fix A 2026-05-11 (codex review): reconcile JSONL idempotency
+        # against the *currently loaded* slot. The rotation counter is
+        # in-memory only and resets to 0 on process restart, which means a
+        # fresh process will re-hit counter=1, counter=2, ... — and the
+        # state JSONL from the previous process lifetime still has a
+        # matching "warmed" line for those counters. Trusting it blindly
+        # would let a restart skip a swap that is actually still needed.
+        #
+        # Rule: skip-by-state only if BOTH the JSONL record matches the
+        # current (counter, slot) AND the llama_server PID file confirms
+        # the expected slot is still loaded. Any mismatch → force prewarm.
+        currently_loaded = _current_loaded_server_slot()
         last = _read_last_state()
         if (
             last is not None
             and int(last.get("counter", -1)) == counter
             and last.get("prewarmed_slot") == next_slot
             and last.get("outcome") == "warmed"
+            and currently_loaded == server_slot
         ):
             logger.debug(
-                "llm_prewarmer skip: counter=%d slot=%s already prewarmed",
+                "llm_prewarmer skip: counter=%d slot=%s already prewarmed "
+                "and still loaded",
                 counter, next_slot,
             )
             return False
@@ -223,7 +279,7 @@ def prewarm_next_model(current_counter: int) -> bool:
         # If the target model is already the active llama-server model
         # (e.g. metals_loop happened to swap to it for an unrelated
         # reason), there is nothing to do.
-        if _is_slot_already_loaded(server_slot):
+        if currently_loaded == server_slot:
             logger.info(
                 "llm_prewarmer noop: slot=%s server=%s already loaded",
                 next_slot, server_slot,

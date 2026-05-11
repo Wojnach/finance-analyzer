@@ -188,6 +188,16 @@ ROTATION_POLICIES = {
         "type": "jsonl",
         "ts_field": "ts",
     },
+    # 2026-05-11 (Fix B, codex review): llm_prewarmer appends one line per
+    # cycle (~1440/day max). Without rotation it grows unbounded; only the
+    # most recent line is consulted on restart, so 7d retention is ample.
+    "llm_rotation_state.jsonl": {
+        "max_age_days": 7,
+        "max_size_mb": 5,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
 }
 
 
