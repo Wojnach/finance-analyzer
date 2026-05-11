@@ -255,6 +255,26 @@ _PERSISTENCE_MAX_TICKERS = 32      # bound on tracked tickers (prod=5, cap guard
 _persistence_state: dict[str, dict[str, dict]] = {}  # {ticker: {signal: {"vote": str, "cycles": int}}}
 _persistence_lock = threading.Lock()
 
+# 2026-05-11: per-asset relaxation. Metals + crypto run intraday; one cycle
+# of confirmation already costs a minute. Stocks keep 2 cycles because
+# market-hours-only and short windows make whipsaw more expensive.
+_PERSISTENCE_CYCLES_BY_ASSET = {
+    "METALS": 1,
+    "CRYPTO": 1,
+    "STOCK": 2,
+}
+def _persistence_cycles_for(ticker: str | None) -> int:
+    """Return how many same-direction cycles a signal must hold to count."""
+    if ticker is None:
+        return _PERSISTENCE_MIN_CYCLES
+    # Local import-style references — these names are defined at module scope
+    # (imported from portfolio.tickers at the top of this file).
+    if ticker in METALS_SYMBOLS:
+        return _PERSISTENCE_CYCLES_BY_ASSET["METALS"]
+    if ticker in CRYPTO_SYMBOLS:
+        return _PERSISTENCE_CYCLES_BY_ASSET["CRYPTO"]
+    return _PERSISTENCE_CYCLES_BY_ASSET["STOCK"]
+
 # Cross-ticker consensus cache: stores the most recent consensus action per
 # ticker so synthetic cross-asset signals can reference other tickers' results.
 # Stale reads (MSTR processing before BTC in the same cycle) are acceptable —
@@ -275,6 +295,11 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
     if not _PERSISTENCE_ENABLED or not ticker:
         return votes
 
+    # 2026-05-11: resolve the per-asset persistence threshold once per call.
+    # _persistence_cycles_for() returns 1 for metals+crypto, 2 for stocks,
+    # 2 fallback for ticker=None.
+    min_cycles = _persistence_cycles_for(ticker)
+
     with _persistence_lock:
         # Cold start: if we have NO history for this ticker, seed state and
         # pass all votes through. The filter only applies from cycle 2 onward.
@@ -284,7 +309,7 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
                 for old_key in list(_persistence_state)[:evict_count]:
                     del _persistence_state[old_key]
             _persistence_state[ticker] = {
-                sig: {"vote": vote, "cycles": _PERSISTENCE_MIN_CYCLES if vote != "HOLD" else 0}
+                sig: {"vote": vote, "cycles": min_cycles if vote != "HOLD" else 0}
                 for sig, vote in votes.items()
             }
             return votes  # first cycle — trust all signals
@@ -301,12 +326,18 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
             elif prev is None or prev["vote"] != vote:
                 # New direction or first appearance — start counting
                 ticker_state[sig] = {"vote": vote, "cycles": 1}
-                # Not yet persistent — force HOLD for consensus
-                filtered[sig] = "HOLD"
+                # 2026-05-11: when min_cycles == 1 (metals/crypto), a freshly
+                # appearing non-HOLD vote already meets the threshold and
+                # should be passed through immediately. Stocks keep the
+                # original 2-cycle confirmation requirement.
+                if 1 >= min_cycles:
+                    filtered[sig] = vote
+                else:
+                    filtered[sig] = "HOLD"
             else:
                 # Same direction as previous cycle — increment
                 prev["cycles"] += 1
-                if prev["cycles"] >= _PERSISTENCE_MIN_CYCLES:
+                if prev["cycles"] >= min_cycles:
                     filtered[sig] = vote  # persistent — let it vote
                 else:
                     filtered[sig] = "HOLD"  # still provisional
@@ -633,6 +664,11 @@ _MACRO_WINDOW_CACHE_TTL_S = 300
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
 MIN_VOTERS_STOCK = 3  # stocks have 24-26 signals (7 core + 17-19 enhanced, GPU-dependent) — need 3
+MIN_VOTERS_METALS = 2  # 2026-05-11: metals run at noisier intraday horizon
+                       # (1m-1h target) where the standard 3-voter floor
+                       # almost never fires after persistence filter.
+                       # Empirical: XAG sees 5 raw voters → 2 post-persistence;
+                       # MIN_VOTERS=3 produced 0 trades in 20 days.
 
 # P2-F (2026-04-17 adversarial review): derived floors used by the
 # circuit-breaker precondition. Placing here (after MIN_VOTERS_*) keeps the
@@ -3405,7 +3441,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if ticker in STOCK_SYMBOLS:
         min_voters = MIN_VOTERS_STOCK
     elif ticker in METALS_SYMBOLS:
-        min_voters = MIN_VOTERS_STOCK  # metals use same threshold
+        # 2026-05-11: metals lowered from MIN_VOTERS_STOCK(3) to
+        # MIN_VOTERS_METALS(2). Intraday horizon + persistence filter
+        # leaves only 2 voters in steady-state on XAG; the old 3-voter
+        # floor produced 0 trades in 20 days.
+        min_voters = MIN_VOTERS_METALS
     else:
         min_voters = MIN_VOTERS_CRYPTO
 
