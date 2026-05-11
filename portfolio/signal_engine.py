@@ -144,6 +144,170 @@ _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
 _LOCAL_MODEL_LOOKBACK_DAYS = 30
 
+# 2026-05-11 — Stage 2 Batch 1: dead-zone HOLD-bias reduction.
+# Investigation found EMA / BB / MACD core voters abstaining 88-94% on
+# metals: _total_applicable=20, _voters=5. User rationale: HOLD is for
+# managing open positions, not for entry decisions — entries should
+# always pick a direction. So when these signals would otherwise HOLD
+# (gap < 0.5% on EMA, price inside the BB band, |MACD hist| below
+# threshold), we now emit a *weak* directional vote based on the
+# secondary derivative (slope of EMA9 vs EMA21, distance from BB mid,
+# slope of MACD histogram). The strong-vote paths are unchanged.
+#
+# The "conf" returned by the helpers is informational — it goes into
+# extra_info so consumers can see the soft confidence. Downstream
+# weighting (accuracy gate, regime mult, horizon mult, correlation
+# group leader) still applies, so a soft vote on a force-HOLD signal
+# is still force-HOLD'd. We are NOT bypassing the accuracy gate.
+#
+# Stays well below the typical strong-vote confidence (0.5-0.8) so
+# the weight ranking continues to prefer real conviction signals.
+EMA_DEAD_ZONE_SOFT_CONF = 0.20
+BB_INSIDE_SOFT_CONF = 0.15
+MACD_DEAD_ZONE_SOFT_CONF = 0.20
+# How many bars to look back when measuring EMA slope and MACD slope
+# inside the dead-zone helpers. 3 bars = enough to filter single-bar
+# noise without lagging the regime.
+_DEAD_ZONE_SLOPE_LOOKBACK = 3
+# Slope tie-break tolerance. EMA slopes within `price * 1e-5` of each
+# other count as "flat" and keep HOLD. MACD histogram slope within
+# `1e-9` (absolute) of zero counts as flat.
+_EMA_FLAT_EPS_REL = 1e-5
+_MACD_FLAT_EPS = 1e-9
+# 2026-05-11 (Codex review Fix A): MACD dead-zone helper must gate on
+# *magnitude* of the current histogram before considering slope. Without
+# this, any non-crossover bar with non-flat slope produces a soft vote —
+# including bars where |hist| is large and the strong-vote path is the
+# correct authority. The strong path handles crossovers (sign flip), so
+# whenever |current_hist| is comfortably above zero but no crossover
+# occurred, the right behaviour is HOLD and let the strong-path own it.
+# 0.05 is a small absolute fraction picked to cover typical noisy zero
+# crossings without bleeding into normal histogram amplitudes.
+MACD_DEAD_ZONE_MAGNITUDE_THRESHOLD = 0.05
+
+
+def _ema_dead_zone_vote(ind, df, lookback=_DEAD_ZONE_SLOPE_LOOKBACK):
+    """Return (vote, conf) when EMA gap is in the dead zone (<0.5%).
+
+    Compares the slope of EMA9 vs EMA21 over the last `lookback` bars.
+    EMA9 rising faster than EMA21 -> soft BUY. EMA9 falling faster
+    -> soft SELL. Slopes within `tiny_eps` of each other -> HOLD.
+
+    Returns ("HOLD", 0.0) if df is missing/short or slopes truly flat.
+
+    2026-05-11: introduced to convert dead-zone HOLDs into weak
+    directional votes. See module-level rationale comment above.
+    """
+    if df is None or "close" not in df or len(df) < lookback + 21:
+        return "HOLD", 0.0
+    try:
+        close = df["close"]
+        ema9_series = close.ewm(span=9, adjust=False).mean()
+        ema21_series = close.ewm(span=21, adjust=False).mean()
+        # Slope = last - value-`lookback`-bars-ago. Linear; sign is what
+        # matters, not magnitude.
+        ema9_slope = float(ema9_series.iloc[-1] - ema9_series.iloc[-1 - lookback])
+        ema21_slope = float(ema21_series.iloc[-1] - ema21_series.iloc[-1 - lookback])
+    except (KeyError, IndexError, ValueError, TypeError):
+        return "HOLD", 0.0
+    price = float(ind.get("close", 0.0)) or float(close.iloc[-1])
+    tiny_eps = abs(price) * _EMA_FLAT_EPS_REL
+    if ema9_slope > ema21_slope + tiny_eps:
+        return "BUY", EMA_DEAD_ZONE_SOFT_CONF
+    if ema9_slope < ema21_slope - tiny_eps:
+        return "SELL", EMA_DEAD_ZONE_SOFT_CONF
+    return "HOLD", 0.0
+
+
+def _bb_inside_band_vote(ind):
+    """Return (vote, conf) when price is inside the Bollinger band.
+
+    Uses normalized band position: (price - mid) / (upper - mid),
+    clamped to [-1, +1]. Position > 0.6 -> soft SELL (near upper),
+    < -0.6 -> soft BUY (near lower), else HOLD (mid-band).
+
+    2026-05-11: introduced to convert dead-zone HOLDs into weak
+    directional votes. See module-level rationale comment above.
+    """
+    try:
+        price = float(ind["close"])
+        mid = float(ind["bb_mid"])
+        upper = float(ind["bb_upper"])
+    except (KeyError, TypeError, ValueError):
+        return "HOLD", 0.0
+    half_width = upper - mid
+    if half_width <= 0:
+        return "HOLD", 0.0
+    band_position = (price - mid) / half_width
+    # Clamp to [-1, +1] so degenerate / wick data can't produce
+    # arbitrarily large positions.
+    band_position = max(-1.0, min(1.0, band_position))
+    if band_position > 0.6:
+        return "SELL", BB_INSIDE_SOFT_CONF
+    if band_position < -0.6:
+        return "BUY", BB_INSIDE_SOFT_CONF
+    return "HOLD", 0.0
+
+
+def _macd_dead_zone_vote(ind, df, lookback=_DEAD_ZONE_SLOPE_LOOKBACK):
+    """Return (vote, conf) when |MACD hist| is in the dead zone.
+
+    Measures histogram slope over the last `lookback` bars. Rising
+    histogram -> soft BUY; falling -> soft SELL. Flat (within
+    `_MACD_FLAT_EPS` absolute) -> HOLD.
+
+    Recomputes the histogram from `df["close"]` because `ind` only
+    carries the last two histogram values.
+
+    2026-05-11: introduced to convert dead-zone HOLDs into weak
+    directional votes. See module-level rationale comment above.
+
+    2026-05-11 (Codex Fix A): added magnitude gate. The strong-vote
+    path owns any bar where the histogram has meaningful amplitude;
+    this helper must only fire when |current_hist| is actually in the
+    dead zone (small absolute value). Without this gate, every non-
+    crossover bar with non-flat slope produced a soft vote — even on
+    large histogram magnitudes where the strong path's "no crossover"
+    decision should win and the answer is genuinely HOLD.
+    """
+    if df is None or "close" not in df or len(df) < lookback + 26:
+        return "HOLD", 0.0
+    # 2026-05-11 Codex Fix A: prefer ind's current histogram (already
+    # computed by the standard pipeline) for the magnitude gate. Falls
+    # through to recomputing if ind didn't carry it.
+    current_hist = None
+    try:
+        current_hist = float(ind.get("macd_hist", 0.0))
+    except (TypeError, ValueError):
+        current_hist = None
+    try:
+        close = df["close"]
+        ema_fast = close.ewm(span=12, adjust=False).mean()
+        ema_slow = close.ewm(span=26, adjust=False).mean()
+        macd = ema_fast - ema_slow
+        macd_signal = macd.ewm(span=9, adjust=False).mean()
+        hist = macd - macd_signal
+        hist_now = float(hist.iloc[-1])
+        hist_prev = float(hist.iloc[-1 - lookback])
+    except (KeyError, IndexError, ValueError, TypeError):
+        return "HOLD", 0.0
+    # If ind lacked a usable current hist, fall back to the recomputed
+    # value so the magnitude gate still applies.
+    if current_hist is None:
+        current_hist = hist_now
+    # Magnitude gate: only fire in the actual dead zone. Outside the
+    # dead zone the strong path is responsible; we return HOLD here
+    # rather than emitting a soft vote that would overlap with (or
+    # contradict) the strong-vote logic.
+    if abs(current_hist) >= MACD_DEAD_ZONE_MAGNITUDE_THRESHOLD:
+        return "HOLD", 0.0
+    delta = hist_now - hist_prev
+    if delta > _MACD_FLAT_EPS:
+        return "BUY", MACD_DEAD_ZONE_SOFT_CONF
+    if delta < -_MACD_FLAT_EPS:
+        return "SELL", MACD_DEAD_ZONE_SOFT_CONF
+    return "HOLD", 0.0
+
 # Accuracy gate: signals with blended accuracy below this threshold are
 # force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
 # 44% is noise, not a reliable contrarian indicator — inverting it just
@@ -1814,7 +1978,8 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
-                        regime_gated_override=None, ticker=None):
+                        regime_gated_override=None, ticker=None,
+                        soft_confidences=None):
     """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
@@ -1840,7 +2005,21 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     Top-N gate: when max_signals is set, only the top max_signals non-HOLD
     signals (ranked by accuracy) participate in the consensus. This focuses
     the vote on the best performers and ignores marginal contributors.
+
+    2026-05-11 (Codex Fix B) — soft-confidence dampening:
+    The Stage 2 dead-zone helpers (EMA / BB / MACD) emit *weak* directional
+    votes when the strong path would HOLD, and stash a small per-vote
+    confidence (0.15-0.20) into extra_info under the keys
+    "_soft_conf_ema" / "_soft_conf_bb" / "_soft_conf_macd". Without
+    propagation, _weighted_consensus treated those soft votes as full-
+    strength votes (just direction × accuracy weight), so an all-soft
+    slate could produce full directional confidence — defeating the
+    "weak weight" contract. We now scale each soft vote's contribution
+    by its soft_conf, so e.g. 3 × 0.18 ≈ 0.54 < 1.0 (a single strong
+    vote). Pass the soft_confidences dict to opt in; strong votes (no
+    key present) keep their original weight × accuracy × regime mult.
     """
+    soft_confidences = soft_confidences or {}
     gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
     buy_weight = 0.0
     sell_weight = 0.0
@@ -2293,6 +2472,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             if vote == bias_direction:
                 penalty = _BIAS_EXTREME_PENALTY if signal_bias > _BIAS_EXTREME_THRESHOLD else _BIAS_PENALTY
                 weight *= penalty
+        # 2026-05-11 (Codex Fix B): apply soft-vote dampening LAST so it
+        # composes with all upstream multipliers (accuracy, IC, regime,
+        # horizon, macro, crisis, activity, correlation, bias). The
+        # soft_conf is small (0.15-0.20) for dead-zone votes — a strong
+        # vote has no soft_conf key and so this branch is skipped,
+        # preserving the existing strong-vote weight contract.
+        soft = soft_confidences.get(f"_soft_conf_{signal_name}")
+        if soft is not None:
+            try:
+                weight *= float(soft)
+            except (TypeError, ValueError):
+                pass
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":
@@ -2757,30 +2948,55 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     else:
         votes["rsi"] = "HOLD"
 
-    # MACD — only votes on crossover
+    # MACD — strong vote on histogram crossover; soft directional vote in
+    # the dead-zone (2026-05-11 Stage 2 Batch 1). The strong-vote path is
+    # unchanged. When |hist| is small and there is no crossover, the
+    # dead-zone helper inspects the histogram slope over the last few
+    # bars and emits a weak BUY/SELL (conf=MACD_DEAD_ZONE_SOFT_CONF) when
+    # there is directional drift, or HOLD when truly flat. Rationale:
+    # entries should pick a direction; HOLD is for managing positions.
     if ind["macd_hist"] > 0 and ind["macd_hist_prev"] <= 0:
         votes["macd"] = "BUY"
     elif ind["macd_hist"] < 0 and ind["macd_hist_prev"] >= 0:
         votes["macd"] = "SELL"
     else:
-        votes["macd"] = "HOLD"
+        macd_vote, macd_soft_conf = _macd_dead_zone_vote(ind, df)
+        votes["macd"] = macd_vote
+        if macd_vote != "HOLD":
+            extra_info["_soft_conf_macd"] = macd_soft_conf
 
-    # EMA trend — votes only when gap is meaningful (>0.5%)
+    # EMA trend — strong vote when gap >= 0.5%; soft directional vote in
+    # the dead-zone (2026-05-11 Stage 2 Batch 1). The strong-vote path is
+    # unchanged. When the gap is small, compare EMA9 slope to EMA21
+    # slope over the last few bars; faster EMA9 -> weak BUY, slower ->
+    # weak SELL, flat -> HOLD. Rationale: entries should pick a
+    # direction; HOLD is for managing positions.
     ema_gap_pct = (
         abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100 if ind["ema21"] != 0 else 0
     )
     if ema_gap_pct >= 0.5:
         votes["ema"] = "BUY" if ind["ema9"] > ind["ema21"] else "SELL"
     else:
-        votes["ema"] = "HOLD"
+        ema_vote, ema_soft_conf = _ema_dead_zone_vote(ind, df)
+        votes["ema"] = ema_vote
+        if ema_vote != "HOLD":
+            extra_info["_soft_conf_ema"] = ema_soft_conf
 
-    # Bollinger Bands — only votes at extremes
+    # Bollinger Bands — strong vote at band touches; soft directional
+    # vote when price is inside the band but biased toward an edge
+    # (2026-05-11 Stage 2 Batch 1). Normalized band position
+    # (price - mid) / (upper - mid) clamped to [-1, +1]:
+    # > 0.6 -> weak SELL, < -0.6 -> weak BUY, else HOLD. Rationale:
+    # entries should pick a direction; HOLD is for managing positions.
     if ind["price_vs_bb"] == "below_lower":
         votes["bb"] = "BUY"
     elif ind["price_vs_bb"] == "above_upper":
         votes["bb"] = "SELL"
     else:
-        votes["bb"] = "HOLD"
+        bb_vote, bb_soft_conf = _bb_inside_band_vote(ind)
+        votes["bb"] = bb_vote
+        if bb_vote != "HOLD":
+            extra_info["_soft_conf_bb"] = bb_soft_conf
 
     # --- Extended signals from tools (optional) ---
 
@@ -3664,6 +3880,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         horizon=horizon,
         regime_gated_override=regime_gated_effective,
         ticker=ticker,
+        # 2026-05-11 (Codex Fix B): pass extra_info so _weighted_consensus
+        # can dampen ema/bb/macd soft votes by their _soft_conf_* values.
+        soft_confidences=extra_info,
     )
 
     if ticker:
