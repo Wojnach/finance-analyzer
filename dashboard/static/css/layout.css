@@ -199,3 +199,35 @@
   }
   .bottom-nav__item .glyph { font-size: 14px; }
 }
+
+/* Opt-in desktop mode — mirrors the ≥1024px rules above so the header
+   toggle promotes the page to the wide layout regardless of viewport
+   width. See js/desktop-mode.js. Mobile remains the default. */
+:root.desktop-mode .app-header { padding-inline: var(--sp-5); }
+:root.desktop-mode .app-main   { padding: var(--sp-4) var(--sp-5); }
+:root.desktop-mode .app { padding-bottom: 0; }
+:root.desktop-mode .bottom-nav {
+  position: static;
+  height: auto;
+  padding: 0 var(--sp-5);
+  border-top: 0;
+  border-bottom: 1px solid var(--bdr);
+  background: var(--bg2);
+}
+:root.desktop-mode .bottom-nav__item {
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  min-height: 44px;
+  border-bottom: 2px solid transparent;
+}
+:root.desktop-mode .bottom-nav__item.active {
+  border-bottom-color: var(--cyn);
+}
+:root.desktop-mode .bottom-nav__item .glyph { font-size: 14px; }
+
+/* Toggle button itself sits in the header icons row. Reuse .icon-btn
+   from the existing header styling; .active marks the toggle as ON. */
+.desktop-mode-toggle .glyph { font-size: 16px; }
+.desktop-mode-toggle.active { color: var(--cyn); }

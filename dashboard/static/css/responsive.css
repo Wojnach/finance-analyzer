@@ -41,6 +41,22 @@
   .desktop-only { display: none !important; }
 }
 
+/* Opt-in desktop mode — promotes the page to wide layout regardless of
+   viewport. Mirrors the tablet + desktop @media rules above. The
+   `:root.desktop-mode .desktop-only` reveal uses `!important` so it
+   overrides the `(max-width: 1023px)` `display: none !important` rule
+   when both apply. See js/desktop-mode.js for the toggle. */
+:root.desktop-mode .home-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+:root.desktop-mode .home-grid > .home-cell--full { grid-column: 1 / -1; }
+:root.desktop-mode .scroll-strip { margin-inline: 0; padding-inline: 0; }
+:root.desktop-mode .heatmap td { height: 28px; min-width: 44px; }
+:root.desktop-mode .desktop-only { display: block !important; }
+
 /* Tap-target floor escapes — dense table rows are allowed to drop to
    --tap-tight (36px) when row spacing is adequate. Apply this opt-in
    only inside .dense-table. */

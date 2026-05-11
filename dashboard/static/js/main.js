@@ -17,6 +17,9 @@ import * as state from "./state.js";
 import * as router from "./router.js";
 import * as polling from "./polling.js";
 import { initTheme, toggleTheme } from "./theme.js";
+import {
+  initDesktopMode, toggleDesktopMode, getDesktopMode, subscribeDesktopMode,
+} from "./desktop-mode.js";
 
 // ---- View imports ---------------------------------------------------------
 // Each view module self-registers with router.register() on import.
@@ -43,6 +46,27 @@ import "./views/portfolio.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
+  initDesktopMode();
+
+  // Wire desktop-mode toggle button (header). Mobile remains the default;
+  // click promotes the page to the wider desktop layout regardless of
+  // viewport width. Choice persists in localStorage.
+  const dmBtn = document.getElementById("desktop-mode-toggle");
+  if (dmBtn) {
+    const syncBtn = (mode) => {
+      const on = mode === "on";
+      dmBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      dmBtn.classList.toggle("active", on);
+      const glyph = dmBtn.querySelector(".glyph");
+      if (glyph) glyph.textContent = on ? "▤" : "⊞";
+      dmBtn.title = on
+        ? "Desktop layout active — click for mobile"
+        : "Toggle desktop layout (mobile is default)";
+    };
+    syncBtn(getDesktopMode());
+    subscribeDesktopMode(syncBtn);
+    dmBtn.addEventListener("click", () => toggleDesktopMode());
+  }
 
   // Wire bottom-nav buttons → hash routes.
   document.querySelectorAll(".bottom-nav__item").forEach((btn) => {
@@ -109,4 +133,6 @@ window.__pi = Object.freeze({
   router,
   polling,
   toggleTheme,
+  toggleDesktopMode,
+  getDesktopMode,
 });
