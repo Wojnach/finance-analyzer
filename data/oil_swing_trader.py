@@ -396,19 +396,30 @@ class OilSwingTrader:
         underlying_pct = sign * (current_underlying / entry_underlying - 1.0) * 100.0
         pos["last_underlying_pct"] = round(underlying_pct, 3)
 
-        # 1. Hard stop
-        if underlying_pct <= -cfg.HARD_STOP_UNDERLYING_PCT:
-            return True, f"HARD_STOP underlying {underlying_pct:.2f}%"
-
-        # 2. Take profit (underlying-based)
-        if underlying_pct >= cfg.TAKE_PROFIT_UNDERLYING_PCT:
-            return True, f"TAKE_PROFIT underlying {underlying_pct:.2f}%"
-
-        # 3. Warrant-side TP
+        # 2026-05-11: TP and SL now anchored on warrant pct change (not
+        # underlying). LONG profit = (bid - entry)/entry; SHORT inverts.
         entry_warrant = pos.get("entry_warrant_bid")
+        warrant_pct_change = 0.0
         if entry_warrant and current_warrant_bid:
-            warrant_pct = (current_warrant_bid / entry_warrant - 1.0) * 100.0
-            pos["last_warrant_pct"] = round(warrant_pct, 3)
+            warrant_pct_change = sign * (current_warrant_bid / entry_warrant - 1.0) * 100.0
+            pos["last_warrant_pct"] = round(warrant_pct_change, 3)
+
+        # 2026-05-11 codex fix C: per-position TP/SL stored at entry —
+        # legacy positions fall back to the deprecated module constants.
+        tp_pct = pos.get("tp_warrant_pct", cfg.TAKE_PROFIT_WARRANT_PCT)
+        sl_pct = pos.get("sl_warrant_pct", cfg.STOP_LOSS_WARRANT_PCT)
+
+        # 1. Hard stop (anchored on warrant pct change)
+        if entry_warrant and current_warrant_bid and warrant_pct_change <= -sl_pct:
+            return True, f"HARD_STOP warrant {warrant_pct_change:.2f}% (sl={sl_pct:.1f}%)"
+
+        # 2. Take profit (anchored on warrant pct change)
+        if entry_warrant and current_warrant_bid and warrant_pct_change >= tp_pct:
+            return True, f"TAKE_PROFIT warrant {warrant_pct_change:.2f}% (tp={tp_pct:.1f}%)"
+
+        # 3. Warrant-side legacy TP (WARRANT_TAKE_PROFIT_PCT)
+        if entry_warrant and current_warrant_bid:
+            warrant_pct = warrant_pct_change
             if warrant_pct >= cfg.WARRANT_TAKE_PROFIT_PCT:
                 return True, f"WARRANT_TP {warrant_pct:.2f}%"
 
@@ -485,8 +496,15 @@ class OilSwingTrader:
     def _place_buy(self, ticker: str, warrant: dict, signal_ctx: dict,
                    underlying_price: float) -> dict:
         # Position sizing
+        # 2026-05-11 low-cash mode: when cash < LOW_CASH_THRESHOLD_SEK, use
+        # MIN_TRADE_SEK as the position size itself so small accounts can
+        # still place at least one trade.
         cash = float(self.state.get("cash_sek") or cfg.INITIAL_BUDGET_SEK)
-        budget = cash * (cfg.POSITION_SIZE_PCT / 100.0)
+        raw_alloc = cash * (cfg.POSITION_SIZE_PCT / 100.0)
+        if cash < cfg.LOW_CASH_THRESHOLD_SEK:
+            budget = min(float(cfg.MIN_TRADE_SEK), cash * 0.95)
+        else:
+            budget = min(max(raw_alloc, float(cfg.MIN_TRADE_SEK)), cash * 0.95)
         if budget < cfg.MIN_TRADE_SEK:
             return {"executed": False, "reason": f"budget {budget:.0f} < min {cfg.MIN_TRADE_SEK}"}
 
@@ -509,13 +527,18 @@ class OilSwingTrader:
             return {"executed": False, "reason": "units=0 after sizing"}
 
         pos_id = f"{ticker}_{int(time.time())}"
+        # 2026-05-11 codex fix C: per-leverage TP/SL — see crypto trader
+        # for full rationale.
+        leverage = float(warrant.get("leverage") or 1.0)
+        tp_warrant_pct = cfg.TP_BASE_UNDERLYING_PCT * leverage
+        sl_warrant_pct = cfg.SL_BASE_UNDERLYING_PCT * leverage
         pos = {
             "pos_id": pos_id,
             "ticker": ticker,
             "warrant_key": warrant.get("name"),
             "ob_id": warrant.get("ob_id"),
             "direction": warrant.get("direction", "LONG"),
-            "leverage": float(warrant.get("leverage") or 1.0),
+            "leverage": leverage,
             "units": units,
             "entry_warrant_bid": warrant_ask,
             "entry_underlying_price": underlying_price,
@@ -523,6 +546,8 @@ class OilSwingTrader:
             "peak_warrant_bid": warrant_ask,
             "entry_ts": _now_iso(),
             "signal_context": signal_ctx,
+            "tp_warrant_pct": tp_warrant_pct,
+            "sl_warrant_pct": sl_warrant_pct,
         }
 
         if cfg.DRY_RUN or self.executor is None:
@@ -559,12 +584,22 @@ class OilSwingTrader:
             pnl_pct = (current_underlying / entry - 1.0) * 100.0 if entry else 0
             sign = 1 if pos.get("direction") == "LONG" else -1
             pnl_pct *= sign
+            # 2026-05-11 codex fix B: consecutive_losses must use the SAME
+            # pnl basis as the exit trigger (warrant P&L). See identical
+            # fix in crypto_swing_trader.py for full rationale.
+            entry_warrant_for_cooldown = pos.get("entry_warrant_bid") or 0
+            warrant_pnl_pct = 0.0
+            if entry_warrant_for_cooldown and current_warrant_bid:
+                warrant_pnl_pct = sign * (
+                    current_warrant_bid / entry_warrant_for_cooldown - 1.0
+                ) * 100.0
             _log_trade({"action": "SELL", "pos_id": pos_id, "reason": reason,
                         "underlying_pct": round(pnl_pct, 3),
+                        "warrant_pct": round(warrant_pnl_pct, 3),
                         "dry_run": True, "exit_underlying": current_underlying,
                         "exit_warrant_bid": current_warrant_bid})
             self.state["positions"].pop(pos_id, None)
-            if pnl_pct < 0:
+            if warrant_pnl_pct < 0:
                 self.state["consecutive_losses"] = self.state.get(
                     "consecutive_losses", 0) + 1
             else:

@@ -122,6 +122,9 @@ MIN_BARRIER_DISTANCE_PCT = 12 # Oil daily wicks ~3-5% — 12% buffer
 MIN_SPREAD_PCT = 1.5          # Tighter than crypto; OLJA MINIs already tight
                               # at ~0.04% per existing scrape data
 MIN_TRADE_SEK = 1000          # Avanza min courtage threshold
+# Below this cash level, MIN_TRADE_SEK acts as the position size instead of
+# being a sizing floor — small accounts otherwise can't place any trade.
+LOW_CASH_THRESHOLD_SEK = 10_000
 
 # ---------------------------------------------------------------------------
 # Entry rules — mirror crypto_swing_config defaults
@@ -131,8 +134,8 @@ MIN_BUY_CONFIDENCE = 0.60     # Per user rule: no sub-60% trades
 MIN_BUY_TF_RATIO = 0.43       # 3/7 timeframes must agree
 RSI_ENTRY_LOW = 35
 RSI_ENTRY_HIGH = 68
-MACD_IMPROVING_CHECKS = 2
-REGIME_CONFIRM_CHECKS = 2
+MACD_IMPROVING_CHECKS = 1     # 2026-05-11: engine-layer persistence already filters single-cycle flips; this swing-layer check is set to 1 to avoid double-counting.
+REGIME_CONFIRM_CHECKS = 1     # 2026-05-11: engine-layer persistence already filters single-cycle flips; this swing-layer check is set to 1 to avoid double-counting.
 
 # Momentum-entry override
 MOMENTUM_ENTRY_ENABLED = True
@@ -142,7 +145,8 @@ MOMENTUM_CANDIDATE_TTL_SEC = 300
 MOMENTUM_STATE_FILE = "data/oil_momentum_state.json"
 
 # Entry-gate hardening
-SIGNAL_PERSISTENCE_CHECKS = 2
+# 2026-05-11: engine-layer persistence already filters single-cycle flips; this swing-layer check is set to 1 to avoid double-counting.
+SIGNAL_PERSISTENCE_CHECKS = 1
 MACD_DECAY_PEAK_LOOKBACK = 20
 MACD_DECAY_MIN_RATIO = 0.30
 RSI_SLOPE_LOOKBACK_CHECKS = 5
@@ -157,12 +161,27 @@ MAX_SIGNAL_AGE_SEC = 900      # 15 min — same tolerance as metals/crypto
 # ---------------------------------------------------------------------------
 # Exit rules — oil-specific (between metals and crypto in volatility)
 # ---------------------------------------------------------------------------
+# DEPRECATED 2026-05-11 — replaced by TAKE_PROFIT_WARRANT_PCT / STOP_LOSS_WARRANT_PCT
 TAKE_PROFIT_UNDERLYING_PCT = 3.0   # Oil intraday rarely > 4% — 3% TP captures
                                     # most one-direction days. ≈ 9% on 3x cert.
 TRAILING_START_PCT = 1.5           # Activate trail after 1.5% gain
 TRAILING_DISTANCE_PCT = 1.0        # Trail 1% behind underlying peak
+# DEPRECATED 2026-05-11 — replaced by TAKE_PROFIT_WARRANT_PCT / STOP_LOSS_WARRANT_PCT
 HARD_STOP_UNDERLYING_PCT = 2.5     # -2.5% underlying = hard exit
                                     # (between metals -2 and crypto -3)
+
+# 2026-05-11: TAKE_PROFIT and STOP_LOSS are now anchored to the leveraged
+# warrant's own % change (not the underlying). On a 5x cert, +5% warrant
+# is reachable intraday; +3% underlying (the old anchor) is ~15% warrant,
+# which silver almost never produces inside one day.
+#
+# Codex fix C 2026-05-11: per-leverage TP/SL. See crypto_swing_config for
+# full rationale. Constants below are DEPRECATED fallbacks for legacy
+# positions; per-position values are computed at entry from BASE × leverage.
+TP_BASE_UNDERLYING_PCT = 1.0   # 5x cert → 5% warrant TP, 1x → 1%, 10x → 10%
+SL_BASE_UNDERLYING_PCT = 6.0   # 5x cert → 30% warrant SL, 1x → 6%, 10x → 60%
+TAKE_PROFIT_WARRANT_PCT = 5.0  # DEPRECATED: legacy fallback when position lacks tp_warrant_pct
+STOP_LOSS_WARRANT_PCT = 30.0   # DEPRECATED: legacy fallback when position lacks sl_warrant_pct
 SIGNAL_REVERSAL_EXIT = True
 
 # Warrant-side exit rules

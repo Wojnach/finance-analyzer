@@ -76,6 +76,7 @@ from metals_swing_config import (
     HARD_STOP_UNDERLYING_PCT,
     INITIAL_BUDGET_SEK,
     LOSS_ESCALATION,
+    LOW_CASH_THRESHOLD_SEK,
     MACD_DECAY_MIN_RATIO,
     MACD_DECAY_PEAK_LOOKBACK,
     MACD_IMPROVING_CHECKS,
@@ -109,7 +110,11 @@ from metals_swing_config import (
     STATE_FILE,
     STOP_LOSS_UNDERLYING_PCT,
     STOP_LOSS_VALID_DAYS,
+    SL_BASE_UNDERLYING_PCT,
+    STOP_LOSS_WARRANT_PCT,
     TAKE_PROFIT_UNDERLYING_PCT,
+    TAKE_PROFIT_WARRANT_PCT,
+    TP_BASE_UNDERLYING_PCT,
     TARGET_LEVERAGE,
     TELEGRAM_SUMMARY_INTERVAL,
     TRADES_LOG,
@@ -1048,6 +1053,10 @@ class SwingTrader:
             f"dir: {direction}, lev: {meta['leverage']:.1f}x)"
         )
 
+        # 2026-05-11 codex fix C: per-leverage TP/SL on orphan-ingest too.
+        ingest_lev = abs(float(meta["leverage"]))
+        ingest_tp_warrant_pct = TP_BASE_UNDERLYING_PCT * ingest_lev
+        ingest_sl_warrant_pct = SL_BASE_UNDERLYING_PCT * ingest_lev
         self.state["positions"][pos_id] = {
             "warrant_key": meta["key"],
             "warrant_name": meta["name"],
@@ -1063,7 +1072,9 @@ class SwingTrader:
             "trough_underlying": float(underlying_price),
             "trailing_active": False,
             "stop_order_id": None,
-            "leverage": abs(meta["leverage"]),
+            "leverage": ingest_lev,
+            "tp_warrant_pct": ingest_tp_warrant_pct,
+            "sl_warrant_pct": ingest_sl_warrant_pct,
             # Position already lives on Avanza — fill verification is moot.
             "fill_verified": True,
             "buy_order_id": None,
@@ -2019,10 +2030,15 @@ class SwingTrader:
 
             if kelly_rec and kelly_rec.get("position_sek", 0) > 0:
                 kelly_alloc = float(kelly_rec["position_sek"])
-                # Floor at MIN_TRADE_SEK (Avanza min courtage threshold).
-                alloc = max(kelly_alloc, float(MIN_TRADE_SEK))
-                # Cap at 95% of cash — leave a buffer for courtage / slippage.
-                alloc = min(alloc, cash * 0.95)
+                # 2026-05-11 low-cash mode: when total cash is below
+                # LOW_CASH_THRESHOLD_SEK, MIN_TRADE_SEK acts as the position
+                # size itself (not a floor) so small accounts can still place
+                # at least one trade. Otherwise: floor at MIN_TRADE_SEK and
+                # cap at 95% cash to leave a courtage/slippage buffer.
+                if cash < LOW_CASH_THRESHOLD_SEK:
+                    alloc = min(float(MIN_TRADE_SEK), cash * 0.95)
+                else:
+                    alloc = min(max(kelly_alloc, float(MIN_TRADE_SEK)), cash * 0.95)
                 _log(
                     f"Kelly sizing {underlying_ticker}: "
                     f"cash={cash:.0f} lev={kelly_leverage:.2f}x "
@@ -2062,8 +2078,14 @@ class SwingTrader:
                 # floors at line 1805; this mirrors that behaviour on the
                 # fallback leg so both paths are size-consistent. Capped at
                 # 95% cash to preserve the courtage buffer.
-                alloc = max(raw_alloc, float(MIN_TRADE_SEK))
-                alloc = min(alloc, cash * 0.95)
+                #
+                # 2026-05-11 low-cash mode: when cash < LOW_CASH_THRESHOLD_SEK,
+                # use MIN_TRADE_SEK as the position size itself so small
+                # accounts can still place at least one trade.
+                if cash < LOW_CASH_THRESHOLD_SEK:
+                    alloc = min(float(MIN_TRADE_SEK), cash * 0.95)
+                else:
+                    alloc = min(max(raw_alloc, float(MIN_TRADE_SEK)), cash * 0.95)
                 _log(
                     f"Kelly FALLBACK for {underlying_ticker}: "
                     f"reason=({fallback_reason or 'unknown'}) "
@@ -2620,6 +2642,13 @@ class SwingTrader:
         buy_order_id = None
         if isinstance(result, dict):
             buy_order_id = result.get("order_id") or result.get("parsed", {}).get("orderId")
+        # 2026-05-11 codex fix C: per-leverage TP/SL stored on the position
+        # dict at entry. BASE × leverage so a 5x cert → 5%/30%, a 1x → 1%/6%,
+        # a 10x → 10%/60%. Pinned at fill time so a mid-flight config edit
+        # doesn't move the goalposts on already-open positions.
+        live_lev = abs(float(warrant["live_leverage"]))
+        tp_warrant_pct = TP_BASE_UNDERLYING_PCT * live_lev
+        sl_warrant_pct = SL_BASE_UNDERLYING_PCT * live_lev
         self.state["positions"][pos_id] = {
             "warrant_key": warrant["key"],
             "warrant_name": warrant["name"],
@@ -2635,7 +2664,9 @@ class SwingTrader:
             "trough_underlying": underlying_price,    # SHORT: tracks min
             "trailing_active": False,
             "stop_order_id": None,
-            "leverage": abs(warrant["live_leverage"]),  # always magnitude
+            "leverage": live_lev,  # always magnitude
+            "tp_warrant_pct": tp_warrant_pct,
+            "sl_warrant_pct": sl_warrant_pct,
             "fill_verified": DRY_RUN,  # DRY_RUN positions count as verified
             "buy_order_id": buy_order_id,
         }
@@ -2663,7 +2694,7 @@ class SwingTrader:
                f"`{units}u @ {ask_price} = {total_cost:.0f} SEK`\n"
                f"`Lev: {warrant['live_leverage']:.1f}x | Underlying: {underlying_price:.2f}`\n"
                f"`Signals: {sig.get('buy_count', 0)}B/{sig.get('sell_count', 0)}S | RSI {sig.get('rsi', 0):.0f}`\n"
-               f"_TP: +{TAKE_PROFIT_UNDERLYING_PCT}% und | Stop: -{HARD_STOP_UNDERLYING_PCT}% und_")
+               f"_TP: +{TAKE_PROFIT_WARRANT_PCT}% warrant | Stop: -{STOP_LOSS_WARRANT_PCT}% warrant_")
         _send_telegram(msg)
 
         decision = {
@@ -2715,9 +2746,16 @@ class SwingTrader:
             stop_anchor = entry_price
             anchor_label = "entry"
 
-        # Stop at -STOP_LOSS_UNDERLYING_PCT% on underlying, translated to warrant price
-        und_drop_pct = STOP_LOSS_UNDERLYING_PCT / 100
-        warrant_drop_pct = und_drop_pct * leverage
+        # 2026-05-11: stop is now anchored to the warrant's own % change
+        # rather than underlying * leverage. On a 5x cert, 30% warrant stop
+        # directly survives intraday wicks without being computed from an
+        # underlying×leverage product.
+        #
+        # 2026-05-11 codex fix C: per-position SL — read sl_warrant_pct
+        # off the position dict (BASE × leverage at entry). Legacy positions
+        # without sl_warrant_pct stored fall back to the module constant.
+        sl_pct = pos.get("sl_warrant_pct", STOP_LOSS_WARRANT_PCT)
+        warrant_drop_pct = sl_pct / 100
         trigger_price = round(stop_anchor * (1 - warrant_drop_pct), 2)
         sell_price = round(trigger_price * 0.99, 2)  # sell 1% below trigger for fill
 
@@ -2726,7 +2764,7 @@ class SwingTrader:
             return
 
         _log(f"  Setting stop-loss: trigger={trigger_price} sell={sell_price} "
-             f"(und -{STOP_LOSS_UNDERLYING_PCT}% * {leverage:.1f}x lev, "
+             f"(warrant -{sl_pct:.1f}%, "
              f"anchor={anchor_label} {stop_anchor})")
 
         if DRY_RUN:
@@ -2924,9 +2962,27 @@ class SwingTrader:
                     exc_info=True,
                 )
 
-            # 1. Take profit
-            if not exit_reason and und_change_pct >= TAKE_PROFIT_UNDERLYING_PCT:
-                exit_reason = f"TAKE_PROFIT: underlying +{und_change_pct:.2f}% >= +{TAKE_PROFIT_UNDERLYING_PCT}%"
+            # 2026-05-11: TP and SL are now anchored to the warrant's own % change
+            # (TAKE_PROFIT_WARRANT_PCT / STOP_LOSS_WARRANT_PCT) rather than the
+            # underlying. On a 5x cert, +5% warrant is reachable intraday, +3%
+            # underlying (the old anchor) was ~15% warrant which silver almost
+            # never produces inside one day. warrant_pct_change is computed
+            # against entry_price (warrant ask at entry).
+            entry_warrant_for_tp = pos.get("entry_price", 0)
+            warrant_pct_change = 0.0
+            if entry_warrant_for_tp > 0 and current_bid > 0:
+                if direction == "LONG":
+                    warrant_pct_change = (current_bid - entry_warrant_for_tp) / entry_warrant_for_tp * 100
+                else:
+                    warrant_pct_change = (entry_warrant_for_tp - current_bid) / entry_warrant_for_tp * 100
+
+            # 1. Take profit (anchored on warrant pct change, 2026-05-11)
+            # Codex fix C 2026-05-11: read per-position tp_warrant_pct
+            # (BASE × leverage at entry). Legacy positions fall back to
+            # the module constant.
+            pos_tp_pct = pos.get("tp_warrant_pct", TAKE_PROFIT_WARRANT_PCT)
+            if not exit_reason and warrant_pct_change >= pos_tp_pct:
+                exit_reason = f"TAKE_PROFIT: warrant +{warrant_pct_change:.2f}% >= +{pos_tp_pct:.1f}%"
 
             # 2. Trailing stop
             if not exit_reason and und_change_pct >= TRAILING_START_PCT:
@@ -2984,9 +3040,12 @@ class SwingTrader:
                         f"from warrant peak (trail={WARRANT_TRAILING_DISTANCE_PCT}%)"
                     )
 
-            # 3. Hard stop
-            if not exit_reason and und_change_pct <= -HARD_STOP_UNDERLYING_PCT:
-                exit_reason = f"HARD_STOP: underlying {und_change_pct:.2f}% <= -{HARD_STOP_UNDERLYING_PCT}%"
+            # 3. Hard stop (anchored on warrant pct change, 2026-05-11)
+            # Codex fix C 2026-05-11: read per-position sl_warrant_pct
+            # (BASE × leverage at entry). Legacy fallback to module const.
+            pos_sl_pct = pos.get("sl_warrant_pct", STOP_LOSS_WARRANT_PCT)
+            if not exit_reason and warrant_pct_change <= -pos_sl_pct:
+                exit_reason = f"HARD_STOP: warrant {warrant_pct_change:.2f}% <= -{pos_sl_pct:.1f}%"
 
             # 4. Signal reversal (direction-aware, Fix 8 2026-04-09).
             # LONG exits on SELL consensus; SHORT exits on BUY consensus.

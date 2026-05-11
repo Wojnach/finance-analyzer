@@ -204,9 +204,41 @@ def _query_ministral_server(context):
 def _start_chronos_server():
     """Launch Chronos in persistent server mode. Returns Popen or None.
 
-    Checks VRAM before loading (Codex finding #6). Chronos uses ~673MB
-    which coexists with llama-server, but we verify before loading.
+    GPU gating (2026-05-11): we acquire ``gpu_gate("chronos-startup")``
+    before the VRAM-floor check so concurrent ministral/qwen3 inferences
+    release their VRAM first. Previously the startup probe ran while the
+    other LLMs were resident → ``free_mb < 1000`` → bail. Now we wait up
+    to 30 s for them to release, re-check VRAM, then load. The gate is
+    released as soon as the model is in memory because the persistent
+    server holds only ~673 MB and is allowed to coexist with llama-server;
+    per-query gating in ``_query_chronos_server`` keeps the inference
+    path mutually exclusive with the 8B models.
+
+    Falls open if gpu_gate is unimportable (test envs without portfolio
+    on the path) so the existing VRAM-only check still runs.
     """
+    global _chronos_proc, _chronos_job
+
+    try:
+        from portfolio.gpu_gate import gpu_gate
+    except ImportError:
+        gpu_gate = None  # type: ignore[assignment]
+
+    if gpu_gate is not None:
+        # 30 s timeout: ministral/qwen3 calls typically take 5-15 s; if a
+        # call is wedged longer we'd rather skip this cycle than block the
+        # 60 s metals loop. On timeout we emit a single warning and return
+        # None — caller treats this as a HOLD for the cycle.
+        with gpu_gate("chronos-startup", timeout=30) as acquired:
+            if not acquired:
+                _log("Chronos startup: gpu_gate timeout (30s) — skipping cycle")
+                return None
+            return _start_chronos_server_inner()
+    return _start_chronos_server_inner()
+
+
+def _start_chronos_server_inner():
+    """Actual server-launch — runs inside gpu_gate when available."""
     global _chronos_proc, _chronos_job
     try:
         from portfolio.gpu_gate import get_vram_usage
@@ -292,13 +324,58 @@ def _readline_with_timeout(stream, timeout_s=60):
     return result[0]
 
 
+# 2026-05-11 codex fix A: distinguish gate-timeout from "server unavailable".
+# Returning bare None on gate timeout caused the caller (_run_chronos_metals)
+# to fall through to its subprocess fallback, which loads Chronos on CUDA via
+# forecast_chronos() — defeating the entire purpose of the gate. The sentinel
+# below is checked by identity in the caller; any None return now strictly
+# means "server unavailable, OK to try subprocess".
+_CHRONOS_GATE_TIMEOUT = object()
+
+
 def _query_chronos_server(close_prices, horizons=(1, 3)):
-    """Send a request to the persistent Chronos server. Returns result dict or None."""
+    """Send a request to the persistent Chronos server.
+
+    Returns:
+        dict — successful forecast result
+        None — server unavailable / pipe error / json parse failure
+               (caller MAY fall back to subprocess)
+        _CHRONOS_GATE_TIMEOUT — gpu_gate timed out; GPU is busy
+               (caller MUST NOT spawn another GPU process)
+
+    GPU gating (2026-05-11): inference acquires ``gpu_gate("chronos")``
+    so we don't race ministral/qwen3 forward passes through the GPU.
+    Held only for the duration of the request (typically <1 s on Chronos-2).
+    Releases on both success and exception paths via the context manager.
+    """
+    try:
+        from portfolio.gpu_gate import gpu_gate
+    except ImportError:
+        gpu_gate = None  # type: ignore[assignment]
+
+    if gpu_gate is not None:
+        with gpu_gate("chronos", timeout=30) as acquired:
+            if not acquired:
+                _log("Chronos query: gpu_gate timeout (30s) — skipping")
+                return _CHRONOS_GATE_TIMEOUT
+            return _query_chronos_server_inner(close_prices, horizons)
+    return _query_chronos_server_inner(close_prices, horizons)
+
+
+def _query_chronos_server_inner(close_prices, horizons=(1, 3)):
+    """Actual query path — runs inside gpu_gate when available.
+
+    Calls ``_start_chronos_server_inner`` (not ``_start_chronos_server``)
+    on cold-start because we already hold ``gpu_gate("chronos")`` and
+    threading.Lock is non-reentrant — a nested acquire would self-deadlock
+    until the 30 s timeout. The inner variant runs the same VRAM-floor
+    check + popen pipeline minus the gate.
+    """
     global _chronos_proc
     with _chronos_lock:
         if _chronos_proc is None or _chronos_proc.poll() is not None:
             _chronos_proc = None
-            _start_chronos_server()
+            _start_chronos_server_inner()
         if _chronos_proc is None:
             return None
         try:
@@ -481,6 +558,14 @@ def _run_chronos_metals(ticker, close_prices, horizons=(1, 3)):
     try:
         # Persistent server (fast, ~0.3s per query, minimal VRAM)
         result = _query_chronos_server(close_prices, horizons)
+        # 2026-05-11 codex fix A: gate-timeout sentinel means GPU is busy.
+        # Do NOT fall through to the subprocess fallback below — that path
+        # calls forecast_chronos() which loads Chronos on CUDA and would
+        # race the very ministral/qwen3 forward passes the gate was
+        # protecting. Return None → treated as HOLD by the metals loop.
+        if result is _CHRONOS_GATE_TIMEOUT:
+            _log(f"Chronos for {ticker}: gpu_gate timeout — HOLD (no fallback)")
+            return None
         if result is not None:
             if "error" in result:
                 _log(f"Chronos error for {ticker}: {result['error']}")

@@ -88,25 +88,30 @@ def _compute_shadow_cert_price(bundle: MstrBundle, direction: str) -> float:
 
 
 def _notional_for_entry(state: BotState) -> float:
-    """Return the target SEK notional for a new entry, phase-aware."""
+    """Return the target SEK notional for a new entry, phase-aware.
+
+    Low-cash mode (2026-05-11): when cash < LOW_CASH_THRESHOLD_SEK the
+    MIN_TRADE_SEK floor becomes the *target* position size rather than a
+    lower bound applied on top of POSITION_SIZE_PCT × cash. This mirrors
+    metals/crypto/oil swing-trader sizing so small-ISK runs (e.g. after a
+    cash drawdown) don't underbuy and burn the courtage minimum on a
+    sub-floor allocation. The 95% cash cap still applies so we always
+    leave room for Avanza courtage.
+    """
     if config.PHASE == "shadow":
         return float(config.SHADOW_NOTIONAL_SEK)
-    if config.PHASE == "paper":
-        cash = state.cash_sek
-        raw = cash * (config.POSITION_SIZE_PCT / 100.0)
-        alloc = max(raw, float(config.MIN_TRADE_SEK))
-        alloc = min(alloc, cash * 0.95)
-        if alloc < config.MIN_TRADE_SEK:
-            return 0.0  # infeasible — caller should skip
-        return alloc
-    # live
+    # paper + live share the same sizing math; only the downstream
+    # cash-deduct / broker-call differs.
     cash = state.cash_sek
-    raw = cash * (config.POSITION_SIZE_PCT / 100.0)
-    alloc = max(raw, float(config.MIN_TRADE_SEK))
-    alloc = min(alloc, cash * 0.95)
-    if alloc < config.MIN_TRADE_SEK:
-        return 0.0
-    return alloc
+    if cash < config.LOW_CASH_THRESHOLD_SEK:
+        # Low-cash mode: aim for MIN_TRADE_SEK, cap at 95% of cash.
+        size_sek = min(float(config.MIN_TRADE_SEK), cash * 0.95)
+    else:
+        raw_alloc = cash * (config.POSITION_SIZE_PCT / 100.0)
+        size_sek = min(max(raw_alloc, float(config.MIN_TRADE_SEK)), cash * 0.95)
+    if size_sek < config.MIN_TRADE_SEK:
+        return 0.0  # infeasible — caller should skip
+    return size_sek
 
 
 def execute(decision: Decision, bundle: MstrBundle, state: BotState) -> bool:
