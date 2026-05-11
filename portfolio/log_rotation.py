@@ -66,7 +66,18 @@ ROTATION_POLICIES = {
         "type": "text",
     },
     "loop_out.txt": {
+        # 2026-05-11: bumped keep_rotations 3 -> 5. Loop is verbose
+        # (~15MB/day) — 5MB rotates every ~8h so keeping 5 backups
+        # buys ~40h of recoverable history before gzip-compaction kicks in.
         "max_size_mb": 5,
+        "keep_rotations": 5,
+        "compress": True,
+        "type": "text",
+    },
+    "golddigger_out.txt": {
+        # 2026-05-11: golddigger.bat uses `>>` (append). 18MB observed
+        # after ~30 days uptime. Rotate at 10MB, keep 3.
+        "max_size_mb": 10,
         "keep_rotations": 3,
         "compress": True,
         "type": "text",

@@ -9,6 +9,7 @@ Supports: main loop, metals loop, GoldDigger, Elongir.
 
 import hashlib
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -417,6 +418,38 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         # subsequent new trigger).
         return []
 
+    # Precondition 5b (2026-05-11): wall-clock cooldown floor against the
+    # observed race where 7 identical violations landed within 410 ms on
+    # 2026-05-10 16:47:48. The trigger-iso dedup above should have caught
+    # them, but either the marker write was racing or another writer
+    # cleared the key between cycles. Defensive belt-and-braces: suppress
+    # any further fire within 30 s of the previous one. Apply
+    # unconditionally — a genuine "new trigger arrives 5 s after the
+    # previous one" sequence is essentially impossible in production (main
+    # loop is 60 s, trigger detection runs once per cycle), so the only
+    # things filtered out by this gate are duplicate fires of the same
+    # incident from races. 30 s ≈ half a loop cycle.
+    LAYER2_VIOLATION_COOLDOWN_S = 30.0
+    last_wall_ts = contract_state.get("layer2_last_violation_wall_ts")
+    if last_wall_ts is not None:
+        try:
+            now_wall = time.time()
+            last_wall_f = float(last_wall_ts)
+        except (TypeError, ValueError):
+            # Corrupt state value — fall through and re-fire.
+            last_wall_f = None
+        else:
+            # Codex P1 2026-05-11: guard against non-finite values. JSON
+            # accepts Infinity/NaN by default, and `float("Infinity")`
+            # parses successfully — without this check a corrupted state
+            # row with +inf would make the diff < 30 always true and
+            # permanently silence the contract.
+            if not math.isfinite(last_wall_f):
+                last_wall_f = None
+        if last_wall_f is not None:
+            if (now_wall - last_wall_f) < LAYER2_VIOLATION_COOLDOWN_S:
+                return []
+
     # Violation. Try to enrich the message with whether a recent auth
     # failure was logged — it's the most common root cause, and telling
     # the user "auth_error was already recorded" saves them investigation.
@@ -470,6 +503,9 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     dedup_written = False
     try:
         contract_state["layer2_last_violation_trigger_ts"] = current_trigger_iso
+        # 2026-05-11: wall-clock companion key for precondition 5b
+        # (cooldown floor against race-window duplicate fires).
+        contract_state["layer2_last_violation_wall_ts"] = time.time()
         atomic_write_json(CONTRACT_STATE_FILE, contract_state)
         dedup_written = True
     except Exception as e:
