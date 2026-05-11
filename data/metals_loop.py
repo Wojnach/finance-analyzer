@@ -6995,8 +6995,28 @@ def main():
         # instruments (BULL/BEAR x SILVER/GOLD/OLJAB) and uses the REST
         # avanza_session API directly — no Playwright page needed.
         # Failure here is non-fatal: the rest of the loop keeps running.
+        # Before constructing the fisher, verify the configured Avanza
+        # account is a trading-class account, not ISK/pension. Memory
+        # entry project_avanza_account_mismatch_20260511 noted that
+        # DEFAULT_ACCOUNT_ID=1625505 has been holding Beammwave/NextEra/
+        # Vertiv (ISK-style holdings), so we fail closed before any
+        # live order routes to the wrong account. PF_SKIP_ACCOUNT_CHECK=1
+        # overrides for known-bad windows.
         grid_fisher = None
         try:
+            from portfolio.avanza_account_check import (
+                AccountCategoryMismatch,
+                verify_default_account,
+            )
+            try:
+                _acct = verify_default_account()
+                log(f"Avanza account verified: id={_acct['account_id']} "
+                    f"category={_acct.get('category')}")
+            except AccountCategoryMismatch as _amc:
+                log(f"Avanza account verification FAILED — grid fisher "
+                    f"DISABLED this session: {_amc}")
+                raise
+
             from portfolio import avanza_session as _avanza_rest
             from portfolio.grid_fisher import GridFisher as _GridFisher
             from data.fin_fish_config import WARRANT_CATALOG as _GRID_CATALOG
