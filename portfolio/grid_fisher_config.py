@@ -16,18 +16,17 @@ asymmetric; see memory ``feedback_fishing_hold_time.md``).
 # ---------------------------------------------------------------------------
 # Master switch
 # ---------------------------------------------------------------------------
-# 2026-05-11: forced to PROBE_ONLY pending Avanza account verification.
-# Memory project_avanza_account_mismatch_20260511.md flagged that
-# DEFAULT_ACCOUNT_ID="1625505" likely points to the ISK (long-term
-# holdings: Beammwave/NextEra/Vertiv), not the warrant-trading account.
-# Until the user confirms the correct trading-account ID, the fisher
-# logs intended placements without sending orders. Flip
-# GRID_FISHER_PROBE_ONLY=False AFTER account verification.
+# 2026-05-11 PM: User confirmed account 1625505
+# (INVESTERINGSSPARKONTO/ISK) is the intended warrant trading account.
+# Swedish ISK accounts legally trade leveraged certs. The
+# avanza_account_check verifier no longer disallows ISK by default
+# (DISALLOWED_CATEGORY_FRAGMENTS is empty). Flipping PROBE_ONLY back
+# to False so real placements route to the configured account.
 GRID_FISHER_ENABLED = True
 
 # Probe mode: when True, the tick computes intended placements and writes
 # them to the decision log without calling Avanza.
-GRID_FISHER_PROBE_ONLY = True
+GRID_FISHER_PROBE_ONLY = False
 
 # ---------------------------------------------------------------------------
 # Tier construction
