@@ -82,6 +82,18 @@ def reset_signal_engine():
         if hasattr(se, "_macro_window_cache"):
             with se._macro_window_cache_lock:
                 se._macro_window_cache.update({"value": False, "ts": 0.0})
+        # 2026-05-11: persistence filter state. Each test for non-cold-start
+        # behaviour expects the dict empty at entry; previous tests calling
+        # generate_signal()/_apply_persistence_filter() leak state across the
+        # xdist worker otherwise. The new per-asset-voters tests (added with
+        # MIN_VOTERS_METALS) populate MSTR entries that then make
+        # test_consensus.TestStockConsensus's 3-voter tests skip cold-start.
+        if hasattr(se, "_persistence_state"):
+            with se._persistence_lock:
+                se._persistence_state.clear()
+        if hasattr(se, "_cross_ticker_consensus"):
+            with se._cross_ticker_lock:
+                se._cross_ticker_consensus.clear()
     except ImportError:
         pass
 
