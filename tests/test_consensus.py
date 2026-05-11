@@ -164,7 +164,17 @@ class TestCryptoConsensus:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_hold_with_2_voters(self, _mock):
-        """2 BUY voters → HOLD for crypto (needs 3)."""
+        """2 BUY voters → HOLD for crypto (needs 3).
+
+        2026-05-11 (Stage 2 Batch 1): the BB voter was previously
+        force-HOLD when `price_vs_bb == "inside"`. After the dead-zone
+        retrofit, BB emits a soft directional vote based on normalized
+        band position. Earlier this test relied on `_STOCK_DEFAULTS`
+        leaking through (bb_upper=135 vs close=69000 -> clamped
+        position=+1.0 -> SELL), which masked a third voter. Pinning
+        bb_mid at the BTC band centerline keeps BB neutral so this
+        test continues to exercise the 2-voter HOLD path.
+        """
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
             macd_hist=1.0,
@@ -173,6 +183,11 @@ class TestCryptoConsensus:
             ema21=69000.0,  # no gap → abstains
             price_vs_bb="inside",
             close=69000.0,
+            # Realign BB band around BTC's close so band_position == 0
+            # (otherwise BB would emit a soft SELL via the new dead-zone path)
+            bb_mid=69000.0,
+            bb_upper=70000.0,
+            bb_lower=68000.0,
         )
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
         # Without external signals, only 2 technical voters
