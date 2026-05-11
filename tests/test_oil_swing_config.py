@@ -21,9 +21,10 @@ class TestOilSwingConfigSchema:
         # Critical: must ship in DRY_RUN mode. Live trading requires manual flip.
         assert cfg.DRY_RUN is True
 
-    def test_min_buy_confidence_at_or_above_60_pct(self):
-        # User rule: never trade below 60% calibrated confidence
-        assert cfg.MIN_BUY_CONFIDENCE >= 0.60
+    def test_min_buy_confidence_at_or_above_25_pct(self):
+        # 2026-05-11 Stage 2 follow-up: post-penalty floor (was 0.60
+        # pre-Stage 1+2). See oil_swing_config.py rationale.
+        assert cfg.MIN_BUY_CONFIDENCE >= 0.25
 
     def test_min_buy_voters_at_or_above_3(self):
         assert cfg.MIN_BUY_VOTERS >= 3

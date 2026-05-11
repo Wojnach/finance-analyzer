@@ -130,7 +130,7 @@ LOW_CASH_THRESHOLD_SEK = 10_000
 # Entry rules — mirror crypto_swing_config defaults
 # ---------------------------------------------------------------------------
 MIN_BUY_VOTERS = 3
-MIN_BUY_CONFIDENCE = 0.60     # Per user rule: no sub-60% trades
+MIN_BUY_CONFIDENCE = 0.30     # 2026-05-11 Stage 2 follow-up — see metals_swing_config rationale
 MIN_BUY_TF_RATIO = 0.43       # 3/7 timeframes must agree
 RSI_ENTRY_LOW = 35
 RSI_ENTRY_HIGH = 68
@@ -139,7 +139,7 @@ REGIME_CONFIRM_CHECKS = 1     # 2026-05-11: engine-layer persistence already fil
 
 # Momentum-entry override
 MOMENTUM_ENTRY_ENABLED = True
-MOMENTUM_MIN_BUY_CONFIDENCE = 0.50
+MOMENTUM_MIN_BUY_CONFIDENCE = 0.20  # 2026-05-11: 0.10 gap below MIN_BUY_CONFIDENCE=0.30
 MOMENTUM_MIN_BUY_VOTERS = 2
 MOMENTUM_CANDIDATE_TTL_SEC = 300
 MOMENTUM_STATE_FILE = "data/oil_momentum_state.json"
