@@ -174,6 +174,16 @@ _DEAD_ZONE_SLOPE_LOOKBACK = 3
 # `1e-9` (absolute) of zero counts as flat.
 _EMA_FLAT_EPS_REL = 1e-5
 _MACD_FLAT_EPS = 1e-9
+# 2026-05-11 (Codex review Fix A): MACD dead-zone helper must gate on
+# *magnitude* of the current histogram before considering slope. Without
+# this, any non-crossover bar with non-flat slope produces a soft vote —
+# including bars where |hist| is large and the strong-vote path is the
+# correct authority. The strong path handles crossovers (sign flip), so
+# whenever |current_hist| is comfortably above zero but no crossover
+# occurred, the right behaviour is HOLD and let the strong-path own it.
+# 0.05 is a small absolute fraction picked to cover typical noisy zero
+# crossings without bleeding into normal histogram amplitudes.
+MACD_DEAD_ZONE_MAGNITUDE_THRESHOLD = 0.05
 
 
 def _ema_dead_zone_vote(ind, df, lookback=_DEAD_ZONE_SLOPE_LOOKBACK):
@@ -251,9 +261,25 @@ def _macd_dead_zone_vote(ind, df, lookback=_DEAD_ZONE_SLOPE_LOOKBACK):
 
     2026-05-11: introduced to convert dead-zone HOLDs into weak
     directional votes. See module-level rationale comment above.
+
+    2026-05-11 (Codex Fix A): added magnitude gate. The strong-vote
+    path owns any bar where the histogram has meaningful amplitude;
+    this helper must only fire when |current_hist| is actually in the
+    dead zone (small absolute value). Without this gate, every non-
+    crossover bar with non-flat slope produced a soft vote — even on
+    large histogram magnitudes where the strong path's "no crossover"
+    decision should win and the answer is genuinely HOLD.
     """
     if df is None or "close" not in df or len(df) < lookback + 26:
         return "HOLD", 0.0
+    # 2026-05-11 Codex Fix A: prefer ind's current histogram (already
+    # computed by the standard pipeline) for the magnitude gate. Falls
+    # through to recomputing if ind didn't carry it.
+    current_hist = None
+    try:
+        current_hist = float(ind.get("macd_hist", 0.0))
+    except (TypeError, ValueError):
+        current_hist = None
     try:
         close = df["close"]
         ema_fast = close.ewm(span=12, adjust=False).mean()
@@ -264,6 +290,16 @@ def _macd_dead_zone_vote(ind, df, lookback=_DEAD_ZONE_SLOPE_LOOKBACK):
         hist_now = float(hist.iloc[-1])
         hist_prev = float(hist.iloc[-1 - lookback])
     except (KeyError, IndexError, ValueError, TypeError):
+        return "HOLD", 0.0
+    # If ind lacked a usable current hist, fall back to the recomputed
+    # value so the magnitude gate still applies.
+    if current_hist is None:
+        current_hist = hist_now
+    # Magnitude gate: only fire in the actual dead zone. Outside the
+    # dead zone the strong path is responsible; we return HOLD here
+    # rather than emitting a soft vote that would overlap with (or
+    # contradict) the strong-vote logic.
+    if abs(current_hist) >= MACD_DEAD_ZONE_MAGNITUDE_THRESHOLD:
         return "HOLD", 0.0
     delta = hist_now - hist_prev
     if delta > _MACD_FLAT_EPS:
@@ -1942,7 +1978,8 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
-                        regime_gated_override=None, ticker=None):
+                        regime_gated_override=None, ticker=None,
+                        soft_confidences=None):
     """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
@@ -1968,7 +2005,21 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     Top-N gate: when max_signals is set, only the top max_signals non-HOLD
     signals (ranked by accuracy) participate in the consensus. This focuses
     the vote on the best performers and ignores marginal contributors.
+
+    2026-05-11 (Codex Fix B) — soft-confidence dampening:
+    The Stage 2 dead-zone helpers (EMA / BB / MACD) emit *weak* directional
+    votes when the strong path would HOLD, and stash a small per-vote
+    confidence (0.15-0.20) into extra_info under the keys
+    "_soft_conf_ema" / "_soft_conf_bb" / "_soft_conf_macd". Without
+    propagation, _weighted_consensus treated those soft votes as full-
+    strength votes (just direction × accuracy weight), so an all-soft
+    slate could produce full directional confidence — defeating the
+    "weak weight" contract. We now scale each soft vote's contribution
+    by its soft_conf, so e.g. 3 × 0.18 ≈ 0.54 < 1.0 (a single strong
+    vote). Pass the soft_confidences dict to opt in; strong votes (no
+    key present) keep their original weight × accuracy × regime mult.
     """
+    soft_confidences = soft_confidences or {}
     gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
     buy_weight = 0.0
     sell_weight = 0.0
@@ -2421,6 +2472,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             if vote == bias_direction:
                 penalty = _BIAS_EXTREME_PENALTY if signal_bias > _BIAS_EXTREME_THRESHOLD else _BIAS_PENALTY
                 weight *= penalty
+        # 2026-05-11 (Codex Fix B): apply soft-vote dampening LAST so it
+        # composes with all upstream multipliers (accuracy, IC, regime,
+        # horizon, macro, crisis, activity, correlation, bias). The
+        # soft_conf is small (0.15-0.20) for dead-zone votes — a strong
+        # vote has no soft_conf key and so this branch is skipped,
+        # preserving the existing strong-vote weight contract.
+        soft = soft_confidences.get(f"_soft_conf_{signal_name}")
+        if soft is not None:
+            try:
+                weight *= float(soft)
+            except (TypeError, ValueError):
+                pass
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":
@@ -3817,6 +3880,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         horizon=horizon,
         regime_gated_override=regime_gated_effective,
         ticker=ticker,
+        # 2026-05-11 (Codex Fix B): pass extra_info so _weighted_consensus
+        # can dampen ema/bb/macd soft votes by their _soft_conf_* values.
+        soft_confidences=extra_info,
     )
 
     if ticker:

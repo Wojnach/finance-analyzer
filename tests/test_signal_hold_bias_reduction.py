@@ -20,10 +20,12 @@ import pytest
 from portfolio.signal_engine import (
     BB_INSIDE_SOFT_CONF,
     EMA_DEAD_ZONE_SOFT_CONF,
+    MACD_DEAD_ZONE_MAGNITUDE_THRESHOLD,
     MACD_DEAD_ZONE_SOFT_CONF,
     _bb_inside_band_vote,
     _ema_dead_zone_vote,
     _macd_dead_zone_vote,
+    _weighted_consensus,
 )
 
 
@@ -217,3 +219,158 @@ class TestSoftConfRanges:
 
     def test_macd_soft_conf_is_weak(self):
         assert 0.10 <= MACD_DEAD_ZONE_SOFT_CONF <= 0.30
+
+
+# ---------------------------------------------------------------------------
+# Codex Fix A: MACD magnitude gate
+# ---------------------------------------------------------------------------
+
+
+class TestMacdMagnitudeGate:
+    """The MACD dead-zone helper must NOT fire when |current_hist| is
+    well above the dead-zone threshold. The strong-vote path owns
+    bars with meaningful histogram amplitude — emitting a soft vote
+    there would overlap with (or contradict) the strong-vote logic.
+
+    2026-05-11 Codex review Fix A. Prior to this fix the helper only
+    inspected slope, so any non-crossover bar with a non-flat slope
+    produced a soft vote regardless of histogram magnitude.
+    """
+
+    def test_macd_outside_dead_zone_returns_hold(self):
+        """|hist| >> threshold + positive slope -> HOLD (strong path owns it)."""
+        # Strong uptrend close series produces |hist| well above 0.05
+        # under standard MACD(12, 26, 9). But we also pass macd_hist=0.5
+        # in `ind` to make the magnitude gate explicit — the helper
+        # should prefer the value carried in `ind` (Fix A behaviour).
+        closes = [100.0 + i * 0.5 for i in range(60)]
+        df = _make_df(closes)
+        ind = {"close": float(closes[-1]), "macd_hist": 0.5}
+        vote, conf = _macd_dead_zone_vote(ind, df)
+        assert vote == "HOLD"
+        assert conf == 0.0
+
+    def test_macd_inside_dead_zone_emits_directional(self):
+        """|hist| tiny (below threshold) + positive slope -> soft BUY."""
+        # Same fixture as test_rising_histogram_emits_soft_buy: flat
+        # then small uptick. The recomputed hist sits at ~0.028 which
+        # is in the dead zone. With macd_hist=0.001 in ind we make the
+        # gate explicitly pass without relying on the recomputed value.
+        closes = [100.0] * 30 + [100.05, 100.10, 100.18, 100.30]
+        df = _make_df(closes)
+        ind = {"close": float(closes[-1]), "macd_hist": 0.001}
+        vote, conf = _macd_dead_zone_vote(ind, df)
+        assert vote == "BUY"
+        assert conf == MACD_DEAD_ZONE_SOFT_CONF
+
+    def test_macd_magnitude_threshold_constant_is_small(self):
+        """Threshold sits comfortably below typical strong-vote amplitudes
+        but above noise so the dead-zone branch can still find bars."""
+        assert 0.0 < MACD_DEAD_ZONE_MAGNITUDE_THRESHOLD <= 0.10
+
+
+# ---------------------------------------------------------------------------
+# Codex Fix B: soft confs dampen weighted consensus
+# ---------------------------------------------------------------------------
+
+
+class TestSoftConsensusDampening:
+    """An all-soft slate (ema/bb/macd dead-zone votes) must NOT produce
+    full directional confidence — the soft_conf must dampen each vote's
+    contribution. A single strong vote (e.g. RSI=25 oversold) at full
+    weight should out-weight three soft votes combined.
+
+    2026-05-11 Codex review Fix B. Prior to this fix _weighted_consensus
+    treated soft votes as full-strength votes, so an all-soft slate
+    produced full directional confidence — defeating the "weak weight"
+    contract that the soft_conf values (0.15-0.20) were supposed to encode.
+    """
+
+    def test_all_soft_slate_has_lower_weighted_conf_than_one_strong(self):
+        """3 soft BUYs (ema+bb+macd) should weigh less than 1 strong BUY."""
+        # Accuracy data with consistent 60% for each signal so weight is
+        # entirely driven by direction × soft_conf composition.
+        accuracy_data = {
+            "ema": {"accuracy": 0.60, "total": 1000,
+                    "buy_accuracy": 0.60, "total_buy": 500,
+                    "sell_accuracy": 0.60, "total_sell": 500},
+            "bb": {"accuracy": 0.60, "total": 1000,
+                   "buy_accuracy": 0.60, "total_buy": 500,
+                   "sell_accuracy": 0.60, "total_sell": 500},
+            "macd": {"accuracy": 0.60, "total": 1000,
+                     "buy_accuracy": 0.60, "total_buy": 500,
+                     "sell_accuracy": 0.60, "total_sell": 500},
+            "rsi": {"accuracy": 0.60, "total": 1000,
+                    "buy_accuracy": 0.60, "total_buy": 500,
+                    "sell_accuracy": 0.60, "total_sell": 500},
+        }
+        # Scenario A: all-soft slate (ema/bb/macd BUY with soft_conf)
+        soft_votes = {"ema": "BUY", "bb": "BUY", "macd": "BUY"}
+        soft_confs = {
+            "_soft_conf_ema": EMA_DEAD_ZONE_SOFT_CONF,
+            "_soft_conf_bb": BB_INSIDE_SOFT_CONF,
+            "_soft_conf_macd": MACD_DEAD_ZONE_SOFT_CONF,
+        }
+        action_soft, conf_soft = _weighted_consensus(
+            soft_votes, accuracy_data, regime="ranging",
+            soft_confidences=soft_confs,
+        )
+        # Scenario B: one strong BUY vote (RSI), no soft confs
+        strong_votes = {"rsi": "BUY"}
+        action_strong, conf_strong = _weighted_consensus(
+            strong_votes, accuracy_data, regime="ranging",
+            soft_confidences={},
+        )
+        # Both should pick BUY but the soft slate should not dominate.
+        # The critical contract: 3 soft votes (each scaled by 0.15-0.20)
+        # have combined weight ~3 * 0.18 * accuracy = ~0.54 * accuracy,
+        # less than a single strong vote (~1.0 * accuracy). Since
+        # _weighted_consensus normalises by total weight (buy/(buy+sell))
+        # both unanimous-BUY scenarios may report similar normalised
+        # confidence — so we assert on RAW buy_weight by directly
+        # comparing aggregate weights. Use a SELL counterweight so the
+        # normaliser sees both directions.
+        mixed_soft = {**soft_votes, "rsi": "SELL"}
+        action_mixed_soft, _ = _weighted_consensus(
+            mixed_soft, accuracy_data, regime="ranging",
+            soft_confidences=soft_confs,
+        )
+        # With 3 soft BUYs (~0.54x weight) vs 1 strong SELL (~1.0x),
+        # SELL should win — confirming soft votes don't dominate.
+        assert action_mixed_soft == "SELL", (
+            f"All-soft slate of 3 BUYs incorrectly out-weighed 1 strong "
+            f"SELL: got action={action_mixed_soft}. Soft votes must be "
+            f"dampened by their soft_conf in _weighted_consensus."
+        )
+
+    def test_strong_vote_unaffected_when_no_soft_conf(self):
+        """Strong votes (no _soft_conf_* key) keep full weight."""
+        accuracy_data = {
+            "rsi": {"accuracy": 0.60, "total": 1000,
+                    "buy_accuracy": 0.60, "total_buy": 500,
+                    "sell_accuracy": 0.60, "total_sell": 500},
+        }
+        # No soft_confidences -> full weight path
+        action, conf = _weighted_consensus(
+            {"rsi": "BUY"}, accuracy_data, regime="ranging",
+            soft_confidences={},
+        )
+        assert action == "BUY"
+        # Confidence should be 1.0 (only voter, BUY direction)
+        assert conf >= 0.99
+
+    def test_unknown_soft_conf_key_does_not_affect_strong_vote(self):
+        """Vote whose _soft_conf_* key isn't present uses full weight."""
+        accuracy_data = {
+            "rsi": {"accuracy": 0.60, "total": 1000,
+                    "buy_accuracy": 0.60, "total_buy": 500,
+                    "sell_accuracy": 0.60, "total_sell": 500},
+        }
+        # soft_confidences carries entries for other signals — rsi
+        # must not be affected.
+        action, conf = _weighted_consensus(
+            {"rsi": "BUY"}, accuracy_data, regime="ranging",
+            soft_confidences={"_soft_conf_ema": 0.20},
+        )
+        assert action == "BUY"
+        assert conf >= 0.99
