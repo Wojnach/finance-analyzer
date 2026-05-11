@@ -1,4 +1,5 @@
-"""Tests for portfolio.avanza_account_check.verify_default_account."""
+"""Tests for portfolio.avanza_account_check.verify_default_account
+plus the related ALLOWED_ACCOUNT_IDS / DEFAULT_ACCOUNT_ID invariant."""
 
 from __future__ import annotations
 
@@ -211,18 +212,23 @@ class TestVerifyNotFound:
 
 
 class TestFetchFailure:
-    def test_api_raises_propagates_as_mismatch(self, critical_errors_path):
+    def test_fetch_failure_does_not_raise(self, critical_errors_path):
+        # Codex P2 fix 2026-05-11: transient categorizedAccounts outage
+        # downgrades to a warning instead of permanently bricking the
+        # caller. Positive mismatches still raise.
         with patch.object(ac, "_api_get_categorized_accounts",
                           side_effect=RuntimeError("dns down")):
             with patch.object(ac, "_send_telegram"):
-                with pytest.raises(ac.AccountCategoryMismatch,
-                                    match="Could not verify"):
-                    ac.verify_default_account("1625505")
+                result = ac.verify_default_account("1625505")
+        assert result["ok"] is False
+        assert result["reason"].startswith("fetch_failed")
+        # critical_errors entry still gets appended so the outage is surfaced.
         entry = json.loads(critical_errors_path.read_text().strip())
         assert entry["context"]["reason"].startswith("fetch_failed")
 
-    def test_api_failure_with_skip_env(self, critical_errors_path,
-                                       monkeypatch):
+    def test_fetch_failure_with_skip_env(self, critical_errors_path,
+                                          monkeypatch):
+        # Even with skip env, fetch_failed returns a non-OK dict — no raise.
         monkeypatch.setenv(ac.SKIP_ENV_VAR, "1")
         with patch.object(ac, "_api_get_categorized_accounts",
                           side_effect=RuntimeError("dns down")):
@@ -231,10 +237,44 @@ class TestFetchFailure:
         assert result["ok"] is False
         assert result["reason"].startswith("fetch_failed")
 
+    def test_fetch_failure_not_cached(self, critical_errors_path):
+        # A transient failure must not poison the process cache — the
+        # next call should retry the API rather than return the stale
+        # failure.
+        call_count = {"n": 0}
+
+        def maybe_fail(*_a, **_kw):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("dns down")
+            return {"accounts": [{"id": "1625505", "type": "Aktiedepå"}]}
+
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          side_effect=maybe_fail):
+            with patch.object(ac, "_send_telegram"):
+                r1 = ac.verify_default_account("1625505")
+                r2 = ac.verify_default_account("1625505")
+        assert r1["ok"] is False
+        assert r2["ok"] is True
+        assert call_count["n"] == 2
+
 
 # ---------------------------------------------------------------------------
 # Defensive shape handling
 # ---------------------------------------------------------------------------
+
+
+class TestAllowedAccountIdsInvariant:
+    """Codex P1 fix 2026-05-11: ALLOWED_ACCOUNT_IDS must derive from
+    DEFAULT_ACCOUNT_ID so an operator changing the default to fix the
+    ISK-mismatch issue does not also have to remember to update the H7
+    order-placement whitelist."""
+
+    def test_default_id_is_in_whitelist(self):
+        from portfolio import avanza_session
+        assert avanza_session.DEFAULT_ACCOUNT_ID in (
+            avanza_session.ALLOWED_ACCOUNT_IDS
+        )
 
 
 class TestShapeHandling:

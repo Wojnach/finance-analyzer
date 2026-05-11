@@ -34,8 +34,13 @@ EXPIRY_BUFFER_MINUTES = 30
 # Default trading account
 DEFAULT_ACCOUNT_ID = "1625505"
 
-# Whitelist of permitted account IDs — never trade outside these
-ALLOWED_ACCOUNT_IDS = {"1625505"}
+# Whitelist of permitted account IDs — never trade outside these.
+# Derived from DEFAULT_ACCOUNT_ID so a single config change updates both
+# the default routing target and the H7 order-placement guard. If we
+# ever need to permit additional accounts (multi-strategy, sub-accounts),
+# add them here explicitly — but keep DEFAULT_ACCOUNT_ID as the single
+# source of truth for "where do orders go by default."
+ALLOWED_ACCOUNT_IDS = {DEFAULT_ACCOUNT_ID}
 
 # Module-level Playwright context (lazy-initialized, reused across calls)
 # BUG-129: Protected by _pw_lock to prevent concurrent access corruption

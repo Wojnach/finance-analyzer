@@ -7010,9 +7010,20 @@ def main():
             )
             try:
                 _acct = verify_default_account()
-                log(f"Avanza account verified: id={_acct['account_id']} "
-                    f"category={_acct.get('category')}")
+                if _acct.get("ok"):
+                    log(f"Avanza account verified: id={_acct['account_id']} "
+                        f"category={_acct.get('category')}")
+                else:
+                    # Non-OK without raise means fetch_failed (transient
+                    # outage path). Log and proceed — order-placement
+                    # guards (whitelist + per-instrument cap) still apply
+                    # and a re-verification attempt happens lazily on the
+                    # next process restart.
+                    log(f"Avanza account verification degraded — proceeding: "
+                        f"reason={_acct.get('reason')}")
             except AccountCategoryMismatch as _amc:
+                # Positive mismatch (disallowed_category / account_not_found).
+                # Fail closed.
                 log(f"Avanza account verification FAILED — grid fisher "
                     f"DISABLED this session: {_amc}")
                 raise

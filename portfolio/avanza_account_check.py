@@ -206,6 +206,16 @@ def verify_default_account(
     try:
         data = _api_get_categorized_accounts()
     except Exception as exc:  # noqa: BLE001
+        # Codex P2 fix (2026-05-11): a transient categorizedAccounts
+        # outage (DNS flap, 5xx, auth blip) must NOT permanently brick
+        # the grid fisher for the rest of the process. Only positive
+        # mismatches (disallowed_category / account_not_found) fail
+        # closed. fetch_failed downgrades to a logged warning + a
+        # critical_errors entry so the operator can still see the
+        # outage. Callers can retry verification before the first
+        # order placement; if Avanza is genuinely unreachable, the
+        # actual order placement will fail too and the order-side
+        # guards still apply.
         result = {
             "ok": False,
             "account_id": account_id,
@@ -213,14 +223,11 @@ def verify_default_account(
             "reason": f"fetch_failed:{exc!s}",
         }
         logger.warning(
-            "verify_default_account: fetch failed account=%s err=%r",
+            "verify_default_account: fetch failed account=%s err=%r — "
+            "downgraded to warning, NOT raising (transient outage path)",
             account_id, exc,
         )
         _record_critical_error(account_id, "", result["reason"])
-        if effective_raise:
-            raise AccountCategoryMismatch(
-                f"Could not verify account {account_id}: {exc}"
-            ) from exc
         return result
 
     found_label: Optional[str] = None
