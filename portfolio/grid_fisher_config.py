@@ -16,14 +16,18 @@ asymmetric; see memory ``feedback_fishing_hold_time.md``).
 # ---------------------------------------------------------------------------
 # Master switch
 # ---------------------------------------------------------------------------
-# Production default is ENABLED. The risk control is per-leg size, not a
-# DRY_RUN gate — user explicitly rejected a dry-run phase.
+# 2026-05-11: forced to PROBE_ONLY pending Avanza account verification.
+# Memory project_avanza_account_mismatch_20260511.md flagged that
+# DEFAULT_ACCOUNT_ID="1625505" likely points to the ISK (long-term
+# holdings: Beammwave/NextEra/Vertiv), not the warrant-trading account.
+# Until the user confirms the correct trading-account ID, the fisher
+# logs intended placements without sending orders. Flip
+# GRID_FISHER_PROBE_ONLY=False AFTER account verification.
 GRID_FISHER_ENABLED = True
 
 # Probe mode: when True, the tick computes intended placements and writes
-# them to the decision log without calling Avanza. Useful for one-off
-# verification after merge; not a long-term mode.
-GRID_FISHER_PROBE_ONLY = False
+# them to the decision log without calling Avanza.
+GRID_FISHER_PROBE_ONLY = True
 
 # ---------------------------------------------------------------------------
 # Tier construction
