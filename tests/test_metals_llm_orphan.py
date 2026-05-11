@@ -90,7 +90,21 @@ class TestJobObjectIntegration:
         # (llama-server was loaded during a parallel test), the
         # "insufficient VRAM" early-return fires and popen_in_job is never
         # called. Caused the xdist isolation flake in full-suite runs.
-        with patch("portfolio.gpu_gate.get_vram_usage", return_value={"free_mb": 5000}), \
+        # 2026-05-11: _start_chronos_server now wraps the inner launch in
+        # gpu_gate("chronos-startup"). Stub the gate to a pass-through no-op
+        # context manager so this test stays scoped to popen_in_job and
+        # doesn't touch the real cross-process file lock at Q:/models/.gpu_lock
+        # (which would persist across tests if any assertion raised between
+        # acquire and release).
+        import contextlib
+
+        @contextlib.contextmanager
+        def _noop_gate(name, timeout=60):
+            yield True
+
+        full_vram = {"used_mb": 5000, "free_mb": 5000, "total_mb": 10000, "gpu_util_pct": 10}
+        with patch("portfolio.gpu_gate.gpu_gate", _noop_gate), \
+             patch("portfolio.gpu_gate.get_vram_usage", return_value=full_vram), \
              patch("portfolio.subprocess_utils.popen_in_job", return_value=(mock_proc, 42)) as mock_pij:
             result = mlm._start_chronos_server()
             assert result is mock_proc

@@ -92,6 +92,12 @@ ACCOUNT_ID = "1625505"           # Avanza ISK (shared with metals swing)
 INITIAL_PAPER_CASH_SEK = 100_000  # Phase C starting capital
 SHADOW_NOTIONAL_SEK = 30_000      # Phase B hypothetical position size
 MIN_TRADE_SEK = 1000              # Avanza min courtage floor
+LOW_CASH_THRESHOLD_SEK = 10_000   # below this, MIN_TRADE_SEK becomes the position size
+                                  # instead of being a sizing floor.
+                                  # 2026-05-11: small ISK starts (single-cert plays after
+                                  # cash drawdown) need the floor to act as the *target*
+                                  # so POSITION_SIZE_PCT × tiny_cash doesn't underbuy.
+                                  # Mirrors the metals/crypto/oil swing-trader pattern.
 POSITION_SIZE_PCT = 30            # fallback when Kelly unavailable
 MAX_CONCURRENT_POSITIONS = 1      # one per strategy in v1
 
