@@ -165,6 +165,30 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 EMA_DEAD_ZONE_SOFT_CONF = 0.20
 BB_INSIDE_SOFT_CONF = 0.15
 MACD_DEAD_ZONE_SOFT_CONF = 0.20
+# 2026-05-11 — Stage 2 Batch 2: extend soft-directional pattern to two
+# more high-HOLD enhanced voters. Candlestick abstained 87.6% on metals
+# (HOLD when no recognised pattern); forecast abstained 87.0% (HOLD when
+# Chronos low-conf or gated). Soft confs deliberately LOWER than Batch 1
+# (0.12-0.15) because the secondary derivative we read (raw body
+# direction / price+EMA slope) is even weaker than EMA9/EMA21 slope
+# divergence — i.e. less of a "true regime hint", more of a tiebreaker.
+# Strong-vote paths are unchanged; soft branches only fire when the
+# enhanced compute_fn returned HOLD AND the secondary derivative has a
+# clear direction. Mixed/ambiguous secondary signals keep HOLD.
+CANDLESTICK_DEAD_ZONE_SOFT_CONF = 0.15
+FORECAST_DEAD_ZONE_SOFT_CONF = 0.12
+# How many of the last N candle bodies must agree (close vs open sign)
+# before the candlestick soft branch emits a directional vote. 3/3 is a
+# clean unanimity; 2/3 keeps HOLD because that's a coinflip+1, well
+# within candle noise — the soft branch is not supposed to fight a
+# 2-vs-1 split.
+_CANDLE_BODY_LOOKBACK = 3
+# How many bars the forecast soft branch reads to estimate the
+# price+EMA21 slope alignment. 5 bars is the minimum that filters
+# single-bar noise without lagging the regime — same rationale as
+# _DEAD_ZONE_SLOPE_LOOKBACK but a touch longer because we want a
+# slower, "actually still rising / falling" read, not a tick.
+_FORECAST_SLOPE_LOOKBACK = 5
 # How many bars to look back when measuring EMA slope and MACD slope
 # inside the dead-zone helpers. 3 bars = enough to filter single-bar
 # noise without lagging the regime.
@@ -307,6 +331,98 @@ def _macd_dead_zone_vote(ind, df, lookback=_DEAD_ZONE_SLOPE_LOOKBACK):
     if delta < -_MACD_FLAT_EPS:
         return "SELL", MACD_DEAD_ZONE_SOFT_CONF
     return "HOLD", 0.0
+
+
+def _candlestick_dead_zone_vote(df, lookback=_CANDLE_BODY_LOOKBACK):
+    """Return (vote, conf) when no candlestick pattern matched.
+
+    Fallback secondary derivative: count bullish (close>open) vs bearish
+    (close<open) bodies over the last `lookback` bars. Unanimous bullish
+    -> soft BUY at CANDLESTICK_DEAD_ZONE_SOFT_CONF. Unanimous bearish ->
+    soft SELL. Anything mixed (incl. doji-style equality) stays HOLD.
+
+    2026-05-11 (Stage 2 Batch 2): introduced because the
+    `compute_candlestick_signal` strong path abstains ~87% of the time
+    when none of hammer / engulfing / doji / star matches. A 3-of-3
+    body-direction agreement is a *weak* tie-breaker, not a pattern
+    claim — hence the 0.15 soft conf and the 3/3 unanimity gate (no
+    2/1 splits). df is the same OHLCV frame the strong path consumed.
+    """
+    if df is None or "close" not in df or "open" not in df:
+        return "HOLD", 0.0
+    try:
+        if len(df) < lookback:
+            return "HOLD", 0.0
+        tail = df[["open", "close"]].iloc[-lookback:]
+        closes = tail["close"].astype(float).to_numpy()
+        opens = tail["open"].astype(float).to_numpy()
+    except (KeyError, IndexError, ValueError, TypeError):
+        return "HOLD", 0.0
+    bull = int((closes > opens).sum())
+    bear = int((closes < opens).sum())
+    if bull == lookback:
+        return "BUY", CANDLESTICK_DEAD_ZONE_SOFT_CONF
+    if bear == lookback:
+        return "SELL", CANDLESTICK_DEAD_ZONE_SOFT_CONF
+    return "HOLD", 0.0
+
+
+def _forecast_dead_zone_vote(df, forecast_indicators,
+                             lookback=_FORECAST_SLOPE_LOOKBACK):
+    """Return (vote, conf) when forecast voted HOLD but price+EMA align.
+
+    Fallback secondary derivative: compare the slope of close prices to
+    the slope of EMA21 over the last `lookback` bars. Both rising ->
+    soft BUY; both falling -> soft SELL; mixed slopes -> HOLD.
+
+    Critical guard: this branch ONLY fires when the forecast pipeline
+    actually produced data. If `forecast_indicators` is empty / lacks
+    Chronos output / has `models_disabled` or `error` keys, the soft
+    branch is skipped entirely so we don't substitute slope-following
+    for an unrun forecast. The user-visible contract: HOLD when the
+    forecast model couldn't run, soft vote only when it ran but
+    couldn't muster enough confidence.
+
+    2026-05-11 (Stage 2 Batch 2): introduced because Chronos
+    + accuracy gating force ~87% HOLD on metals (low confidence, vol
+    gate, accuracy gate). When the forecast ran but didn't commit, a
+    price+EMA21 slope-alignment read is a defensible weak tiebreaker.
+    """
+    if df is None or "close" not in df:
+        return "HOLD", 0.0
+    indicators = forecast_indicators or {}
+    # Skip when the forecast pipeline didn't run at all. Any of these
+    # markers indicates "no Chronos data" — we must not substitute.
+    if indicators.get("models_disabled"):
+        return "HOLD", 0.0
+    if indicators.get("error"):
+        return "HOLD", 0.0
+    # Chronos is the live composite voter (Kronos is shadow per current
+    # config). Require its 1h output to be present — that's the cheap
+    # "did Chronos produce a forecast this cycle?" check.
+    if indicators.get("chronos_1h_pct") is None:
+        # Belt-and-suspenders: also accept chronos_ok flag if present.
+        if not indicators.get("chronos_ok"):
+            return "HOLD", 0.0
+    try:
+        if len(df) < lookback + 21:
+            return "HOLD", 0.0
+        close = df["close"].astype(float)
+        ema21_series = close.ewm(span=21, adjust=False).mean()
+        # Linear: last - value-`lookback`-bars-ago. Sign is what
+        # matters, magnitude is informational.
+        price_slope = float(close.iloc[-1] - close.iloc[-1 - lookback])
+        ema21_slope = float(
+            ema21_series.iloc[-1] - ema21_series.iloc[-1 - lookback]
+        )
+    except (KeyError, IndexError, ValueError, TypeError):
+        return "HOLD", 0.0
+    if price_slope > 0 and ema21_slope > 0:
+        return "BUY", FORECAST_DEAD_ZONE_SOFT_CONF
+    if price_slope < 0 and ema21_slope < 0:
+        return "SELL", FORECAST_DEAD_ZONE_SOFT_CONF
+    return "HOLD", 0.0
+
 
 # Accuracy gate: signals with blended accuracy below this threshold are
 # force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
@@ -3455,6 +3571,32 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             update_signal_health_batch(health_results)
         except Exception:
             logger.debug("Signal health tracking failed", exc_info=True)
+
+        # 2026-05-11 Stage 2 Batch 2: candlestick + forecast dead-zone
+        # soft directional votes. Same pattern as Batch 1 (EMA / BB /
+        # MACD) but on enhanced signals — the helper only fires when
+        # the strong path returned HOLD AND a secondary derivative
+        # (candle body direction / price+EMA slope alignment) points
+        # cleanly one way. Strong votes are untouched. The soft conf is
+        # written into extra_info so `_weighted_consensus` dampens the
+        # vote's weight via the existing soft_confidences path.
+        if "candlestick" in votes and votes["candlestick"] == "HOLD" \
+                and "candlestick" not in DISABLED_SIGNALS \
+                and "candlestick" not in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
+            cs_vote, cs_soft_conf = _candlestick_dead_zone_vote(df)
+            if cs_vote != "HOLD":
+                votes["candlestick"] = cs_vote
+                extra_info["_soft_conf_candlestick"] = cs_soft_conf
+                extra_info["candlestick_action"] = cs_vote
+        if "forecast" in votes and votes["forecast"] == "HOLD" \
+                and "forecast" not in DISABLED_SIGNALS \
+                and "forecast" not in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
+            fc_indicators = extra_info.get("forecast_indicators") or {}
+            fc_vote, fc_soft_conf = _forecast_dead_zone_vote(df, fc_indicators)
+            if fc_vote != "HOLD":
+                votes["forecast"] = fc_vote
+                extra_info["_soft_conf_forecast"] = fc_soft_conf
+                extra_info["forecast_action"] = fc_vote
     else:
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
