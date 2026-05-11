@@ -1,5 +1,127 @@
 # Session Progress
 
+## Grid Market-Maker (2026-05-11 afternoon)
+
+**Status:** SHIPPED — merged to main, pushed, PF-MetalsLoop restarted with new code
+
+**What:** Marja Folcke-style multi-tier limit ladder applied to leveraged warrants.
+Runs inside `data/metals_loop.py` alongside the swing trader. Places 2-tier buy
+ladders below the bid on the with-signal direction of BULL/BEAR certs for
+XAG-USD, XAU-USD, OIL-USD. Rotates each buy fill into a paired sell-limit at
++1.2 % and a stop-loss at -3.5 % sized to current inventory. Cancels the
+opposite-direction instrument's armed buys on signal flip. Sweeps unfilled
+buys 10 min before close and force-flats inventory 5 min before close.
+
+**Risk control:** 1 200 SEK per leg, 3 000 SEK per-instrument cap, 6 500 SEK
+global cap (fits inside the user's ~7 000 SEK trading budget with 500 SEK
+margin reserve). Per-instrument session loss limit 500 SEK; global halt when
+sum of per-instrument session_pnl drops below 500 × N_instruments.
+
+**Files added:**
+- `portfolio/grid_fisher.py` (orchestrator + state machine + tick)
+- `portfolio/grid_fisher_config.py` (knobs)
+- `portfolio/grid_tiers.py` (pure tier math)
+- `tests/test_grid_tiers.py` / `test_grid_fisher_state.py` /
+  `test_grid_fisher_reconcile.py` (91 tests, all pass)
+- `docs/GRID_FISHER.md` (operator runbook)
+- New endpoint `/api/grid-fisher`
+
+**Files modified:** `data/metals_loop.py` (init + tick), `data/fin_fish_config.py`
+(BULL/BEAR_OLJAB_X5_AVA_2 oil entries), `dashboard/app.py`, `CLAUDE.md`.
+
+**Open follow-ups:**
+- OIL-USD instruments are seeded but idle until oil signals start landing in
+  `agent_summary.json` (currently only XAG/XAU/BTC/ETH/MSTR). Each tick logs
+  `no_direction` for the two oil orderbooks and moves on.
+- The instrument-level cooldown only triggers via `flip_direction()` helper
+  which `tick()` no longer calls (per-instrument direction is fixed by cert).
+  Cooldown remains in the schema for manual `arm_direction()` callers.
+
+**Codex review:** ran adversarial review post-Batch-5. Four findings fixed in
+follow-up commit `75287924`: stop-loss API mismatch (cancel_order vs
+cancel_stop_loss; orderRequestStatus vs status/stoplossOrderId), cancel result
+silently ignored, partial fill misclassified, global P&L never accumulated.
+
+**Live-deploy fix (commit `696d10b4`):** first live tick after merge logged
+"Playwright Sync API inside the asyncio loop" — metals_loop runs an asyncio
+context (LLM worker / Playwright swing-trader page) and avanza_session's
+sync_playwright client can't init from that thread. Added
+`GridFisher._safe_session_call()` that submits every Avanza call to a
+single-worker ThreadPoolExecutor (clean thread with no asyncio loop). Tick
+now distinguishes "fetch returned None" (degraded — skip placement) from
+"fetch returned []" (clean empty book — proceed). Rotation, EOD sweep,
+cancel-armed-buys, place-buy, place-sell, place-stop, and get_quote paths
+all routed through the helper.
+
+## Auto-Improve Session (2026-05-11 morning)
+
+**Session start:** 2026-05-11 ~08:00 UTC
+**Status:** COMPLETE — merged to main, pushed, loops restarted
+**Branch:** `improve/auto-session-2026-05-11` (merged, deleted)
+**Commits:** 5 (1 plan + 3 batches + 1 docs), 14 files changed
+
+### What changed
+
+Autonomous improvement session: 4 exploration agents → plan (4C, 5H, 3S, 3M) → 3 batch implementation.
+
+**Batch 1 — Silent failure alerting (2 files):**
+- C1: `agent_invocation.py` — Layer 2 `status="incomplete"` never sent Telegram alert. 43 silent failures in critical_errors.jsonl. Added `*L2 INCOMPLETE*` alert matching existing "failed" pattern.
+- C2: `agent_invocation.py` — `_journal_ts_before` captured AFTER `subprocess.Popen` (race). Swapped order so baseline is read before spawn.
+
+**Batch 2 — Data integrity (3 files):**
+- C3: `signal_db.py` — Missing rollback on INSERT failure left orphaned snapshot rows, inflating accuracy denominators. Wrapped ticker_signals+outcomes INSERTs in try/except/rollback.
+- C4: `health.py` — `check_staleness` crashed on corrupt `last_heartbeat` string. Added ValueError/TypeError guard, returns stale=True on corrupt.
+- H1: `process_lock.py` — `_lock_file` silently returned without locking when neither msvcrt nor fcntl available. Now raises RuntimeError.
+
+**Batch 3 — Config & convention fixes (4 files):**
+- H2: `config_validator.py` — Raw `json.load` → `load_json` (atomic I/O). Added Binance key/secret validation (was unchecked).
+- H3: `metals_loop.py` — `_load_json_state` raw `json.load(open(...))` → delegates to `load_json` with corrupt-file logging.
+- H4: `reporting.py` — 3 submodules (macro_context, market_health, earnings_calendar) missing `_track_module_outcome` escalation. Added success/failure tracking.
+- H5: `signal_registry.py` — Dead `_CORE_SIGNALS` dict removed (no signal ever registered as core). Simplified to single `_ENHANCED_SIGNALS` path.
+
+**Tests updated:** `test_config_validator.py`, `test_signal_registry.py`, `test_metals_loop_functions.py` — all adapted to match new behavior.
+
+**Test results:** 9321 passed, 27 failed (all pre-existing), 3 skipped. Zero new failures.
+
+### Deferred for future session
+- S1: `signal_db.load_entries()` O(n²) string concatenation
+- S2: `subprocess_utils` WMIC → CimInstance (deprecated API)
+- S3: Disabled signals bypassing accuracy gate via utility boost
+
+### What's next
+- CPI Monday May 12 — monitor metals/crypto impact
+- IC-based signal weighting (plan ready in quant_research_priorities)
+- Dynamic correlation fix (agreement rate instead of dead Pearson)
+
+---
+
+## After-Hours Research Session (2026-05-10 evening)
+
+**Session start:** 2026-05-10 ~22:00 UTC
+**Status:** COMPLETE — pushed to main
+**Commit:** `4be5057c` on main
+
+### What changed
+
+After-hours research agent session. Full 8-phase protocol.
+
+**Implementation (signal_engine.py + test):**
+- 3d/5d horizon blacklists populated (ministral, credit_spread_risk, ema at 3d; +funding, news_event, heikin_ashi at 5d)
+- High-sample gate threshold 10K → 7K (catches forecast 47.1%, 6921 sam)
+- MSTR blacklist +4 crashed signals post-regime-change (sentiment, volume_flow, heikin_ashi, momentum_factors)
+
+**Key findings:**
+- MSTR collapse: corporate policy shift May 5 invalidated 5 signal models (40-58pp drops)
+- Ministral horizon sensitivity: 58.3% at 1d, 37.2% at 3d — horizon blacklist critical
+- Accuracy-weighted voting already exists — no reimplementation needed
+
+### What's next
+- CPI Monday May 12 — monitor metals/crypto impact
+- Walk-forward IC reweighting (deferred)
+- Gold-silver ratio velocity signal (deferred)
+
+---
+
 ## Auto-Improve Session (2026-05-10 morning)
 
 **Session start:** 2026-05-10 ~08:00 UTC
@@ -3032,3 +3154,191 @@ docs/SESSION_PROGRESS.md
 portfolio/accuracy_degradation.py
 portfolio/golddigger/runner.py
 portfolio/loop_contract.py
+
+### 2026-05-10 21:56 UTC | main
+ecc25226 fix(test): isolate accuracy-dispatcher tests from unrelated invariants
+tests/test_loop_contract_accuracy_dispatcher.py
+
+### 2026-05-10 22:17 UTC | main
+97e83a49 fix(test): address codex review C1+M1 — count drift + sync invariant
+tests/test_consensus.py
+tests/test_meta_learner.py
+tests/test_metals.py
+tests/test_signal_improvements.py
+tests/test_signal_pipeline.py
+
+### 2026-05-11 08:30 UTC | fix/loop-audit-2026-05-11
+5cde2117 docs: plan for loop audit fixes (rotation + dedup cooldown + bulk-resolve)
+docs/PLAN.md
+
+### 2026-05-11 08:32 UTC | fix/loop-audit-2026-05-11
+58c2168c feat(log-rotate): add PF-LogRotate task + policies for loop_out/golddigger_out
+portfolio/log_rotation.py
+scripts/win/install-log-rotate-task.ps1
+
+### 2026-05-11 08:36 UTC | fix/loop-audit-2026-05-11
+760d3321 fix(loop-contract): add wall-clock cooldown floor to layer2_journal_activity dedup
+portfolio/loop_contract.py
+tests/test_loop_contract_grace.py
+
+### 2026-05-11 08:39 UTC | fix/loop-audit-2026-05-11
+e1461a53 feat(audit): one-shot resolver for 2026-05-11 loop audit critical_errors
+scripts/resolve_loop_audit_errors.py
+
+### 2026-05-11 08:55 UTC | fix/loop-audit-2026-05-11
+3f3d4f26 fix(audit): address Codex review — non-finite cooldown guard + resolver scope cap
+data/accuracy_snapshot_state.json
+data/contract_violations.jsonl
+data/cot_history.jsonl
+data/degradation_alert_state.json
+data/elongir_log.jsonl
+data/fear_greed_streak.json
+data/fin_evolve_state.json
+data/fin_snipe_fills.jsonl
+data/fish_trades.jsonl
+data/gold_deep_context.json
+data/headlines_latest.json
+data/ic_cache.json
+data/llm_probability_log.jsonl
+data/local_llm_report_export_state.json
+data/local_llm_report_history.jsonl
+
+### 2026-05-11 08:56 UTC | fix/loop-audit-2026-05-11
+b703dddf fix(audit): address Codex review — non-finite cooldown guard + resolver scope cap
+portfolio/loop_contract.py
+scripts/resolve_loop_audit_errors.py
+tests/test_loop_contract_grace.py
+
+### 2026-05-11 08:57 UTC | 
+b113745a docs: plan for loop audit fixes (rotation + dedup cooldown + bulk-resolve)
+docs/PLAN.md
+
+### 2026-05-11 08:57 UTC | 
+3ab475bc feat(log-rotate): add PF-LogRotate task + policies for loop_out/golddigger_out
+portfolio/log_rotation.py
+scripts/win/install-log-rotate-task.ps1
+
+### 2026-05-11 08:57 UTC | 
+1e2c2cf3 fix(loop-contract): add wall-clock cooldown floor to layer2_journal_activity dedup
+portfolio/loop_contract.py
+tests/test_loop_contract_grace.py
+
+### 2026-05-11 08:57 UTC | 
+035808b6 feat(audit): one-shot resolver for 2026-05-11 loop audit critical_errors
+scripts/resolve_loop_audit_errors.py
+
+### 2026-05-11 08:57 UTC | 
+67dd9e8f fix(audit): address Codex review — non-finite cooldown guard + resolver scope cap
+portfolio/loop_contract.py
+scripts/resolve_loop_audit_errors.py
+tests/test_loop_contract_grace.py
+
+### 2026-05-11 09:19 UTC | main
+d105ccc5 fix(config-validator): require exchange.key/secret, not binance.key/secret
+portfolio/config_validator.py
+tests/test_config_validator.py
+
+### 2026-05-11 11:20 UTC | feat/loops-trade-2026-05-11
+59c2f841 feat(signal-engine): per-asset MIN_VOTERS + persistence cycle counts
+portfolio/signal_engine.py
+tests/test_signal_engine_per_asset_voters.py
+
+### 2026-05-11 11:26 UTC | feat/loops-trade-2026-05-11
+8392693a feat(mstr+chronos): low-cash sizing + Chronos via gpu_gate
+data/metals_llm.py
+portfolio/mstr_loop/config.py
+portfolio/mstr_loop/execution.py
+tests/test_chronos_gpu_gate.py
+tests/test_metals_llm_orphan.py
+tests/test_mstr_loop_low_cash_mode.py
+
+### 2026-05-11 11:35 UTC | feat/loops-trade-2026-05-11
+cca4fd50 feat(swing-traders): low-cash mode + TP/SL on warrant + persistence dedup (metals/crypto/oil)
+data/crypto_swing_config.py
+data/crypto_swing_trader.py
+data/metals_swing_config.py
+data/metals_swing_trader.py
+data/oil_swing_config.py
+data/oil_swing_trader.py
+data/test_metals_swing_trader.py
+tests/test_crypto_swing_trader.py
+tests/test_metals_swing_entry_gates.py
+tests/test_metals_swing_p1_followups.py
+tests/test_metals_swing_sizing.py
+tests/test_swing_low_cash_mode.py
+tests/test_swing_persistence_dedup.py
+tests/test_swing_tp_sl_on_warrant.py
+
+### 2026-05-11 11:35 UTC | main
+0dd251c6 docs: plan for grid market-maker (silver/gold/oil warrants)
+docs/PLAN.md
+
+### 2026-05-11 11:40 UTC | feat/grid-fisher-2026-05-11
+f2f21bae feat(grid-fisher): config, tier math, oil warrants
+data/fin_fish_config.py
+portfolio/grid_fisher_config.py
+portfolio/grid_tiers.py
+tests/test_grid_tiers.py
+
+### 2026-05-11 11:42 UTC | feat/loops-trade-2026-05-11
+c3363d7d test(state-reset): clear _persistence_state + _cross_ticker_consensus per test
+tests/_state_reset.py
+
+### 2026-05-11 11:43 UTC | feat/grid-fisher-2026-05-11
+0ead7d03 feat(grid-fisher): state machine and persistence
+portfolio/grid_fisher.py
+tests/test_grid_fisher_state.py
+
+### 2026-05-11 11:46 UTC | feat/grid-fisher-2026-05-11
+392d9d7a feat(grid-fisher): order lifecycle and rotation
+portfolio/grid_fisher.py
+tests/test_grid_fisher_reconcile.py
+
+### 2026-05-11 11:53 UTC | feat/grid-fisher-2026-05-11
+a14ed9d0 feat(grid-fisher): loop integration, eod sweep, dashboard
+dashboard/app.py
+data/metals_loop.py
+portfolio/grid_fisher.py
+tests/test_grid_fisher_reconcile.py
+
+### 2026-05-11 11:55 UTC | feat/grid-fisher-2026-05-11
+846ec2e7 docs(grid-fisher): runbook and CLAUDE.md update
+CLAUDE.md
+docs/GRID_FISHER.md
+
+### 2026-05-11 11:59 UTC | feat/grid-fisher-2026-05-11
+b2438476 fix(grid-fisher): tighten sizing to fit 7000 SEK trading budget
+docs/GRID_FISHER.md
+portfolio/grid_fisher.py
+portfolio/grid_fisher_config.py
+tests/test_grid_fisher_reconcile.py
+
+### 2026-05-11 12:02 UTC | feat/loops-trade-2026-05-11
+2f06f0e8 fix(codex): per-leverage TP/SL + Chronos gate timeout + cooldown basis
+data/crypto_swing_config.py
+data/crypto_swing_trader.py
+data/metals_llm.py
+data/metals_swing_config.py
+data/metals_swing_trader.py
+data/oil_swing_config.py
+data/oil_swing_trader.py
+tests/test_chronos_gpu_gate.py
+tests/test_swing_low_cash_mode.py
+tests/test_swing_tp_sl_on_warrant.py
+
+### 2026-05-11 12:10 UTC | feat/grid-fisher-2026-05-11
+75287924 fix(grid-fisher): codex review P1/P2 findings
+portfolio/grid_fisher.py
+tests/test_grid_fisher_reconcile.py
+
+### 2026-05-11 12:10 UTC | main
+c03a4e51 docs(grid-fisher): correct tier count in CLAUDE.md after sizing tighten
+CLAUDE.md
+
+### 2026-05-11 12:14 UTC | main
+0a8e804d fix(grid-fisher): correct catalog import name in metals_loop
+data/metals_loop.py
+
+### 2026-05-11 12:22 UTC | main
+696d10b4 fix(grid-fisher): isolate avanza_session calls in worker thread
+portfolio/grid_fisher.py

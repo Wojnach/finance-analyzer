@@ -766,43 +766,60 @@ class GridFisher:
         return True
 
     def _safe_session_call(self, fn, *args, default=None, **kwargs):
-        """Invoke an Avanza session method from a worker thread.
+        """Invoke an Avanza session method from a persistent worker thread.
 
         The metals loop runs Playwright async context for its swing-trader
         page; the REST avanza_session module that grid_fisher uses internally
         spins up its own sync_playwright client. Calling sync Playwright APIs
         from a thread that has a running asyncio event loop raises
-        "Playwright Sync API inside the asyncio loop". Running the call in a
-        worker thread sidesteps that — sync_playwright runs in a clean
-        thread with no asyncio loop, returns its result, the worker exits.
+        "Playwright Sync API inside the asyncio loop". Spawning a fresh
+        worker per call (e.g. with a per-call ThreadPoolExecutor) fixes
+        that but breaks the *next* call: the avanza_session module caches
+        its Playwright context to the FIRST thread that initialised it, so
+        when a later call lands in a different worker thread it raises
+        "cannot switch to a different thread (which happens to have exited)".
+        Solution: one long-lived worker thread for the lifetime of this
+        GridFisher — all session calls land on the same thread and the
+        cached Playwright context stays bound to it.
 
-        On any exception, ``default`` is returned and the failure is logged
-        once per cycle via the journal.
+        On timeout or worker exception, ``default`` is returned and the
+        failure is logged via the journal.
         """
         import concurrent.futures
 
-        result_holder: dict[str, Any] = {}
+        # Lazily create the persistent single-worker executor. Held on
+        # the instance so process shutdown cleans it up via __del__.
+        if getattr(self, "_session_executor", None) is None:
+            self._session_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="grid-fisher-session",
+            )
 
         def _runner():
-            try:
-                result_holder["value"] = fn(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
-                result_holder["error"] = exc
+            return fn(*args, **kwargs)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_runner)
-            try:
-                future.result(timeout=30)
-            except concurrent.futures.TimeoutError:
-                self._log("session_call_timeout",
-                          method=getattr(fn, "__name__", repr(fn)))
-                return default
-        if "error" in result_holder:
+        future = self._session_executor.submit(_runner)
+        try:
+            return future.result(timeout=30)
+        except concurrent.futures.TimeoutError:
+            self._log("session_call_timeout",
+                      method=getattr(fn, "__name__", repr(fn)))
+            return default
+        except Exception as exc:  # noqa: BLE001
             self._log("session_call_error",
                       method=getattr(fn, "__name__", repr(fn)),
-                      error=str(result_holder["error"]))
+                      error=str(exc))
             return default
-        return result_holder.get("value", default)
+
+    def __del__(self):
+        # Best-effort shutdown of the worker thread on GC. The metals
+        # loop holds the GridFisher for its lifetime so this only runs
+        # at process exit.
+        executor = getattr(self, "_session_executor", None)
+        if executor is not None:
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _catalog_for(self, ob_id: str) -> Optional[dict[str, Any]]:
         for cert_name, meta in self.catalog.items():
