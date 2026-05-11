@@ -76,6 +76,7 @@ from metals_swing_config import (
     HARD_STOP_UNDERLYING_PCT,
     INITIAL_BUDGET_SEK,
     LOSS_ESCALATION,
+    LOW_CASH_THRESHOLD_SEK,
     MACD_DECAY_MIN_RATIO,
     MACD_DECAY_PEAK_LOOKBACK,
     MACD_IMPROVING_CHECKS,
@@ -109,7 +110,9 @@ from metals_swing_config import (
     STATE_FILE,
     STOP_LOSS_UNDERLYING_PCT,
     STOP_LOSS_VALID_DAYS,
+    STOP_LOSS_WARRANT_PCT,
     TAKE_PROFIT_UNDERLYING_PCT,
+    TAKE_PROFIT_WARRANT_PCT,
     TARGET_LEVERAGE,
     TELEGRAM_SUMMARY_INTERVAL,
     TRADES_LOG,
@@ -2019,10 +2022,15 @@ class SwingTrader:
 
             if kelly_rec and kelly_rec.get("position_sek", 0) > 0:
                 kelly_alloc = float(kelly_rec["position_sek"])
-                # Floor at MIN_TRADE_SEK (Avanza min courtage threshold).
-                alloc = max(kelly_alloc, float(MIN_TRADE_SEK))
-                # Cap at 95% of cash — leave a buffer for courtage / slippage.
-                alloc = min(alloc, cash * 0.95)
+                # 2026-05-11 low-cash mode: when total cash is below
+                # LOW_CASH_THRESHOLD_SEK, MIN_TRADE_SEK acts as the position
+                # size itself (not a floor) so small accounts can still place
+                # at least one trade. Otherwise: floor at MIN_TRADE_SEK and
+                # cap at 95% cash to leave a courtage/slippage buffer.
+                if cash < LOW_CASH_THRESHOLD_SEK:
+                    alloc = min(float(MIN_TRADE_SEK), cash * 0.95)
+                else:
+                    alloc = min(max(kelly_alloc, float(MIN_TRADE_SEK)), cash * 0.95)
                 _log(
                     f"Kelly sizing {underlying_ticker}: "
                     f"cash={cash:.0f} lev={kelly_leverage:.2f}x "
@@ -2062,8 +2070,14 @@ class SwingTrader:
                 # floors at line 1805; this mirrors that behaviour on the
                 # fallback leg so both paths are size-consistent. Capped at
                 # 95% cash to preserve the courtage buffer.
-                alloc = max(raw_alloc, float(MIN_TRADE_SEK))
-                alloc = min(alloc, cash * 0.95)
+                #
+                # 2026-05-11 low-cash mode: when cash < LOW_CASH_THRESHOLD_SEK,
+                # use MIN_TRADE_SEK as the position size itself so small
+                # accounts can still place at least one trade.
+                if cash < LOW_CASH_THRESHOLD_SEK:
+                    alloc = min(float(MIN_TRADE_SEK), cash * 0.95)
+                else:
+                    alloc = min(max(raw_alloc, float(MIN_TRADE_SEK)), cash * 0.95)
                 _log(
                     f"Kelly FALLBACK for {underlying_ticker}: "
                     f"reason=({fallback_reason or 'unknown'}) "
@@ -2663,7 +2677,7 @@ class SwingTrader:
                f"`{units}u @ {ask_price} = {total_cost:.0f} SEK`\n"
                f"`Lev: {warrant['live_leverage']:.1f}x | Underlying: {underlying_price:.2f}`\n"
                f"`Signals: {sig.get('buy_count', 0)}B/{sig.get('sell_count', 0)}S | RSI {sig.get('rsi', 0):.0f}`\n"
-               f"_TP: +{TAKE_PROFIT_UNDERLYING_PCT}% und | Stop: -{HARD_STOP_UNDERLYING_PCT}% und_")
+               f"_TP: +{TAKE_PROFIT_WARRANT_PCT}% warrant | Stop: -{STOP_LOSS_WARRANT_PCT}% warrant_")
         _send_telegram(msg)
 
         decision = {
@@ -2715,9 +2729,12 @@ class SwingTrader:
             stop_anchor = entry_price
             anchor_label = "entry"
 
-        # Stop at -STOP_LOSS_UNDERLYING_PCT% on underlying, translated to warrant price
-        und_drop_pct = STOP_LOSS_UNDERLYING_PCT / 100
-        warrant_drop_pct = und_drop_pct * leverage
+        # 2026-05-11: stop is now anchored to the warrant's own % change
+        # (STOP_LOSS_WARRANT_PCT) rather than underlying * leverage. On a 5x
+        # cert, STOP_LOSS_WARRANT_PCT=30 gives a 30% warrant stop directly —
+        # survives intraday wicks on leveraged certs without being computed
+        # from an underlying×leverage product.
+        warrant_drop_pct = STOP_LOSS_WARRANT_PCT / 100
         trigger_price = round(stop_anchor * (1 - warrant_drop_pct), 2)
         sell_price = round(trigger_price * 0.99, 2)  # sell 1% below trigger for fill
 
@@ -2726,7 +2743,7 @@ class SwingTrader:
             return
 
         _log(f"  Setting stop-loss: trigger={trigger_price} sell={sell_price} "
-             f"(und -{STOP_LOSS_UNDERLYING_PCT}% * {leverage:.1f}x lev, "
+             f"(warrant -{STOP_LOSS_WARRANT_PCT}%, "
              f"anchor={anchor_label} {stop_anchor})")
 
         if DRY_RUN:
@@ -2924,9 +2941,23 @@ class SwingTrader:
                     exc_info=True,
                 )
 
-            # 1. Take profit
-            if not exit_reason and und_change_pct >= TAKE_PROFIT_UNDERLYING_PCT:
-                exit_reason = f"TAKE_PROFIT: underlying +{und_change_pct:.2f}% >= +{TAKE_PROFIT_UNDERLYING_PCT}%"
+            # 2026-05-11: TP and SL are now anchored to the warrant's own % change
+            # (TAKE_PROFIT_WARRANT_PCT / STOP_LOSS_WARRANT_PCT) rather than the
+            # underlying. On a 5x cert, +5% warrant is reachable intraday, +3%
+            # underlying (the old anchor) was ~15% warrant which silver almost
+            # never produces inside one day. warrant_pct_change is computed
+            # against entry_price (warrant ask at entry).
+            entry_warrant_for_tp = pos.get("entry_price", 0)
+            warrant_pct_change = 0.0
+            if entry_warrant_for_tp > 0 and current_bid > 0:
+                if direction == "LONG":
+                    warrant_pct_change = (current_bid - entry_warrant_for_tp) / entry_warrant_for_tp * 100
+                else:
+                    warrant_pct_change = (entry_warrant_for_tp - current_bid) / entry_warrant_for_tp * 100
+
+            # 1. Take profit (anchored on warrant pct change, 2026-05-11)
+            if not exit_reason and warrant_pct_change >= TAKE_PROFIT_WARRANT_PCT:
+                exit_reason = f"TAKE_PROFIT: warrant +{warrant_pct_change:.2f}% >= +{TAKE_PROFIT_WARRANT_PCT}%"
 
             # 2. Trailing stop
             if not exit_reason and und_change_pct >= TRAILING_START_PCT:
@@ -2984,9 +3015,9 @@ class SwingTrader:
                         f"from warrant peak (trail={WARRANT_TRAILING_DISTANCE_PCT}%)"
                     )
 
-            # 3. Hard stop
-            if not exit_reason and und_change_pct <= -HARD_STOP_UNDERLYING_PCT:
-                exit_reason = f"HARD_STOP: underlying {und_change_pct:.2f}% <= -{HARD_STOP_UNDERLYING_PCT}%"
+            # 3. Hard stop (anchored on warrant pct change, 2026-05-11)
+            if not exit_reason and warrant_pct_change <= -STOP_LOSS_WARRANT_PCT:
+                exit_reason = f"HARD_STOP: warrant {warrant_pct_change:.2f}% <= -{STOP_LOSS_WARRANT_PCT}%"
 
             # 4. Signal reversal (direction-aware, Fix 8 2026-04-09).
             # LONG exits on SELL consensus; SHORT exits on BUY consensus.

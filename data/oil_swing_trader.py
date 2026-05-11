@@ -396,19 +396,25 @@ class OilSwingTrader:
         underlying_pct = sign * (current_underlying / entry_underlying - 1.0) * 100.0
         pos["last_underlying_pct"] = round(underlying_pct, 3)
 
-        # 1. Hard stop
-        if underlying_pct <= -cfg.HARD_STOP_UNDERLYING_PCT:
-            return True, f"HARD_STOP underlying {underlying_pct:.2f}%"
-
-        # 2. Take profit (underlying-based)
-        if underlying_pct >= cfg.TAKE_PROFIT_UNDERLYING_PCT:
-            return True, f"TAKE_PROFIT underlying {underlying_pct:.2f}%"
-
-        # 3. Warrant-side TP
+        # 2026-05-11: TP and SL now anchored on warrant pct change (not
+        # underlying). LONG profit = (bid - entry)/entry; SHORT inverts.
         entry_warrant = pos.get("entry_warrant_bid")
+        warrant_pct_change = 0.0
         if entry_warrant and current_warrant_bid:
-            warrant_pct = (current_warrant_bid / entry_warrant - 1.0) * 100.0
-            pos["last_warrant_pct"] = round(warrant_pct, 3)
+            warrant_pct_change = sign * (current_warrant_bid / entry_warrant - 1.0) * 100.0
+            pos["last_warrant_pct"] = round(warrant_pct_change, 3)
+
+        # 1. Hard stop (anchored on warrant pct change)
+        if entry_warrant and current_warrant_bid and warrant_pct_change <= -cfg.STOP_LOSS_WARRANT_PCT:
+            return True, f"HARD_STOP warrant {warrant_pct_change:.2f}%"
+
+        # 2. Take profit (anchored on warrant pct change)
+        if entry_warrant and current_warrant_bid and warrant_pct_change >= cfg.TAKE_PROFIT_WARRANT_PCT:
+            return True, f"TAKE_PROFIT warrant {warrant_pct_change:.2f}%"
+
+        # 3. Warrant-side legacy TP (WARRANT_TAKE_PROFIT_PCT)
+        if entry_warrant and current_warrant_bid:
+            warrant_pct = warrant_pct_change
             if warrant_pct >= cfg.WARRANT_TAKE_PROFIT_PCT:
                 return True, f"WARRANT_TP {warrant_pct:.2f}%"
 
@@ -485,8 +491,15 @@ class OilSwingTrader:
     def _place_buy(self, ticker: str, warrant: dict, signal_ctx: dict,
                    underlying_price: float) -> dict:
         # Position sizing
+        # 2026-05-11 low-cash mode: when cash < LOW_CASH_THRESHOLD_SEK, use
+        # MIN_TRADE_SEK as the position size itself so small accounts can
+        # still place at least one trade.
         cash = float(self.state.get("cash_sek") or cfg.INITIAL_BUDGET_SEK)
-        budget = cash * (cfg.POSITION_SIZE_PCT / 100.0)
+        raw_alloc = cash * (cfg.POSITION_SIZE_PCT / 100.0)
+        if cash < cfg.LOW_CASH_THRESHOLD_SEK:
+            budget = min(float(cfg.MIN_TRADE_SEK), cash * 0.95)
+        else:
+            budget = min(max(raw_alloc, float(cfg.MIN_TRADE_SEK)), cash * 0.95)
         if budget < cfg.MIN_TRADE_SEK:
             return {"executed": False, "reason": f"budget {budget:.0f} < min {cfg.MIN_TRADE_SEK}"}
 

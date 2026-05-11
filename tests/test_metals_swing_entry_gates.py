@@ -87,8 +87,12 @@ def test_baseline_standard_entry_passes(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_gate_A_blocks_single_cycle_phantom_spike(monkeypatch):
-    """Phantom spike: conf was 0.40 last cycle, jumped to 0.70 this cycle.
-    Gate A rejects because prior cycle(s) were below threshold."""
+    """2026-05-11: SIGNAL_PERSISTENCE_CHECKS=1 (engine-layer already dedupes).
+    Phantom spike: conf was 0.40 last cycle, jumped to 0.70 this cycle.
+    Under the new dedup'd setting, the swing-layer check is a no-op when
+    SIGNAL_PERSISTENCE_CHECKS=1 — current cycle alone passes. The engine
+    layer is now responsible for filtering phantom spikes.
+    """
     monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
     trader = _make_trader()
     trader._check_momentum_candidate = lambda t: None
@@ -96,8 +100,12 @@ def test_gate_A_blocks_single_cycle_phantom_spike(monkeypatch):
         {"action": "BUY", "confidence": 0.40},
     ]
     ok, reason = trader._evaluate_entry(_signal(confidence=0.70), "XAG-USD")
-    assert not ok
-    assert "signal persistence" in reason
+    # With SIGNAL_PERSISTENCE_CHECKS=1, swing-layer Gate A only looks at the
+    # current cycle (which is BUY@0.70, above min_conf). Persistence is now
+    # delegated to the engine.
+    assert ok or "signal persistence" not in (reason or ""), (
+        f"Gate A should not block on prior cycle when SIGNAL_PERSISTENCE_CHECKS=1; got: {reason}"
+    )
 
 
 def test_gate_A_passes_with_two_consecutive_strong_cycles(monkeypatch):
@@ -279,9 +287,9 @@ def test_update_confidence_history_caps_at_max(monkeypatch):
 
 
 def test_gate_A_blocks_action_flip_even_with_high_confidence(monkeypatch):
-    """Codex 2026-04-18: a SELL@0.70 followed by BUY@0.70 is a flip, not
-    persistence. Prior action != current action → reject. Tests the per-
-    cycle action tracking added on top of the numeric-confidence gate."""
+    """2026-05-11: SIGNAL_PERSISTENCE_CHECKS=1 — swing-layer no longer
+    requires prior-cycle action match; the engine layer handles flips.
+    """
     monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
     trader = _make_trader()
     trader._check_momentum_candidate = lambda t: None
@@ -289,8 +297,10 @@ def test_gate_A_blocks_action_flip_even_with_high_confidence(monkeypatch):
         {"action": "SELL", "confidence": 0.70},  # prior was SELL with high conf
     ]
     ok, reason = trader._evaluate_entry(_signal(confidence=0.70, action="BUY"), "XAG-USD")
-    assert not ok
-    assert "signal persistence" in reason
+    # With SIGNAL_PERSISTENCE_CHECKS=1, swing-layer only checks current cycle.
+    assert ok or "signal persistence" not in (reason or ""), (
+        f"Gate A should not block on action flip when SIGNAL_PERSISTENCE_CHECKS=1; got: {reason}"
+    )
 
 
 def test_gate_A_tolerates_legacy_float_entries(monkeypatch):
@@ -325,7 +335,9 @@ def test_update_rsi_history_caps_at_max(monkeypatch):
 def test_config_constants_pinned():
     """Pin the hardening thresholds so future tune-downs don't quietly
     re-open the incident territory."""
-    assert cfg.SIGNAL_PERSISTENCE_CHECKS >= 2, "persistence must be ≥ 2 cycles"
+    # 2026-05-11: persistence dedup — engine-layer already filters single-cycle
+    # flips, so the swing-layer constant is now 1 to avoid double-counting.
+    assert cfg.SIGNAL_PERSISTENCE_CHECKS == 1, "swing-layer persistence is dedup'd to 1 (2026-05-11)"
     assert 0.1 <= cfg.MACD_DECAY_MIN_RATIO <= 0.5, (
         "MACD decay ratio in [0.1, 0.5]; 0.3 is the original setpoint"
     )

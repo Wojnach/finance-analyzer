@@ -314,18 +314,22 @@ class TestExitLogic:
         }
 
     def test_take_profit(self):
-        """Exit when underlying moves +2%."""
-        pos = self._make_position(und_entry=85.0)
+        """Exit when WARRANT moves +5% (2026-05-11 warrant-anchored TP).
+
+        MockPage returns bid=15.0 for ob_id 2334960. Set entry_price low
+        enough that warrant_change_pct >= TAKE_PROFIT_WARRANT_PCT=5.
+        """
+        pos = self._make_position(und_entry=85.0, entry_price=14.0)  # bid 15 / entry 14 = +7.14%
         trader = make_trader(cash=5000, positions={"pos_1": pos})
-        # Set underlying to 87.0 (+2.35%)
-        # The mock returns underlying=87.0 from fetch_price
         trader._check_exits({}, {"XAG-USD": make_signal()})
         # Position should be removed (sold)
         assert len(trader.state["positions"]) == 0
 
     def test_hard_stop(self):
-        """Exit when underlying drops -2%."""
-        pos = self._make_position(und_entry=89.0)  # entry at 89, current at 87 = -2.25%
+        """Exit when WARRANT drops -30% (2026-05-11 warrant-anchored hard stop)."""
+        # MockPage bid=15.0; set entry_price high enough that warrant_change_pct <= -30%.
+        # 15.0 / 25.0 - 1 = -40% → triggers HARD_STOP (-30%).
+        pos = self._make_position(und_entry=89.0, entry_price=25.0)
         trader = make_trader(cash=5000, positions={"pos_1": pos})
         trader._check_exits({}, {"XAG-USD": make_signal()})
         assert len(trader.state["positions"]) == 0
@@ -374,8 +378,13 @@ class TestExitLogic:
         assert len(trader.state["positions"]) == 0
 
     def test_consecutive_losses_tracking(self):
-        """Losses should increment consecutive_losses counter."""
-        pos = self._make_position(und_entry=89.0, entry_price=16.5)  # losing: entry=16.5, bid=15.0
+        """Losses should increment consecutive_losses counter.
+
+        2026-05-11: HARD_STOP is warrant-anchored at STOP_LOSS_WARRANT_PCT=30.
+        Set entry_price=25.0 so bid=15.0 gives warrant_pct_change=-40% which
+        breaches -30%, fires HARD_STOP, and books a loss.
+        """
+        pos = self._make_position(und_entry=89.0, entry_price=25.0)
         trader = make_trader(cash=5000, positions={"pos_1": pos})
         trader.state["consecutive_losses"] = 0
         trader._check_exits({}, {"XAG-USD": make_signal()})
@@ -792,48 +801,56 @@ class TestReliabilityFixes:
             mst.SHORT_CANARY_WARRANTS = original_allowlist
 
     def test_short_exit_take_profit_direction_aware(self):
-        """Fix 8: SHORT position with underlying DOWN 2% → TAKE_PROFIT fires."""
-        from metals_swing_config import TAKE_PROFIT_UNDERLYING_PCT
+        """Fix 8 + 2026-05-11 warrant-pct: SHORT position with WARRANT bid
+        DOWN past TAKE_PROFIT_WARRANT_PCT → TAKE_PROFIT fires.
+
+        For SHORTs, warrant_pct_change = (entry - bid) / entry — i.e. bid
+        going down is a profit. Test sets entry=10.0, bid=9.0 → +10% SHORT
+        profit which exceeds TAKE_PROFIT_WARRANT_PCT=5.
+        """
+        from metals_swing_config import TAKE_PROFIT_WARRANT_PCT
         trader = make_trader(cash=10000)
-        # Entry at XAG 87.0; now at 87.0 * (1 - (TP+0.5)/100) → past TP
-        # threshold. For a SHORT, that's a PROFIT (underlying fell).
         entry_und = 87.0
-        current_und = entry_und * (1 - (TAKE_PROFIT_UNDERLYING_PCT + 0.5) / 100)
+        # MockPage prices for ob_id 2043157 return bid=10.0 — but for SHORT
+        # profit we want bid below entry_price. So set entry_price=11.0 so
+        # (11 - 10)/11 = +9.09% > 5%.
         trader.state["positions"]["short_test"] = {
             "warrant_key": "X", "warrant_name": "SHORT TEST", "ob_id": "2043157",
             "api_type": "certificate", "underlying": "XAG-USD", "direction": "SHORT",
-            "units": 10, "entry_price": 10.0, "entry_underlying": entry_und,
+            "units": 10, "entry_price": 11.0, "entry_underlying": entry_und,
             "entry_ts": _now_utc().isoformat(), "peak_underlying": entry_und,
-            "trough_underlying": current_und, "trailing_active": False,
+            "trough_underlying": entry_und, "trailing_active": False,
             "stop_order_id": None, "leverage": 5.0, "fill_verified": True,
         }
         _save_state(trader.state)
-        # _get_underlying_price keys on "silver"/"gold" in the prices dict key,
-        # not on ob_id. Use a silver-keyed entry so it picks up the test value.
-        prices = {"silver_fake": {"bid": 10.0, "underlying": current_und}}
+        prices = {"silver_fake": {"bid": 10.0, "underlying": entry_und}}
         trader._check_exits(prices, {})
         assert "short_test" not in trader.state["positions"], \
-            f"SHORT TAKE_PROFIT should fire when underlying drops past -{TAKE_PROFIT_UNDERLYING_PCT}%"
+            f"SHORT TAKE_PROFIT should fire when warrant profit exceeds +{TAKE_PROFIT_WARRANT_PCT}%"
 
     def test_long_exit_take_profit_still_works(self):
-        """Regression: LONG TAKE_PROFIT still works after Fix 8 refactor."""
-        from metals_swing_config import TAKE_PROFIT_UNDERLYING_PCT
+        """Regression: LONG TAKE_PROFIT still works after Fix 8 + 2026-05-11.
+
+        warrant_pct_change for LONG = (bid - entry)/entry. MockPage 2043157
+        returns bid=10.0; set entry_price=9.0 → +11.1% which exceeds
+        TAKE_PROFIT_WARRANT_PCT=5.
+        """
+        from metals_swing_config import TAKE_PROFIT_WARRANT_PCT
         trader = make_trader(cash=10000)
         entry_und = 87.0
-        current_und = entry_und * (1 + (TAKE_PROFIT_UNDERLYING_PCT + 0.5) / 100)
         trader.state["positions"]["long_test"] = {
             "warrant_key": "X", "warrant_name": "LONG TEST", "ob_id": "2043157",
             "api_type": "certificate", "underlying": "XAG-USD", "direction": "LONG",
-            "units": 10, "entry_price": 10.0, "entry_underlying": entry_und,
-            "entry_ts": _now_utc().isoformat(), "peak_underlying": current_und,
+            "units": 10, "entry_price": 9.0, "entry_underlying": entry_und,
+            "entry_ts": _now_utc().isoformat(), "peak_underlying": entry_und,
             "trailing_active": False, "stop_order_id": None, "leverage": 5.0,
             "fill_verified": True,
         }
         _save_state(trader.state)
-        prices = {"silver_fake": {"bid": 12.0, "underlying": current_und}}
+        prices = {"silver_fake": {"bid": 10.0, "underlying": entry_und}}
         trader._check_exits(prices, {})
         assert "long_test" not in trader.state["positions"], \
-            "LONG TAKE_PROFIT regression — should still fire"
+            f"LONG TAKE_PROFIT (warrant >= {TAKE_PROFIT_WARRANT_PCT}%) should still fire"
 
 
 class TestStaleSignalGuards:

@@ -59,6 +59,9 @@ MIN_BARRIER_DISTANCE_PCT = 10 # minimum distance to barrier (was 15, but that ex
                               # all high-lev AVA MINIs and forced fallbacks to trackers)
 MIN_SPREAD_PCT = 1.5          # max acceptable bid-ask spread %
 MIN_TRADE_SEK = 1000          # minimum trade size (Avanza min courtage threshold)
+# Below this cash level, MIN_TRADE_SEK acts as the position size instead of
+# being a sizing floor — small accounts otherwise can't place any trade.
+LOW_CASH_THRESHOLD_SEK = 10_000
 
 # ---------------------------------------------------------------------------
 # Entry rules
@@ -91,9 +94,8 @@ MIN_BUY_CONFIDENCE = 0.56     # data-supported, see comment above + plan doc
 MIN_BUY_TF_RATIO = 0.43       # 3/7 timeframes must agree
 RSI_ENTRY_LOW = 35            # RSI buy zone lower bound
 RSI_ENTRY_HIGH = 68           # RSI buy zone upper bound (avoid overbought)
-MACD_IMPROVING_CHECKS = 2     # MACD must be improving for N consecutive checks
-REGIME_CONFIRM_CHECKS = 2     # require N consecutive BUY checks in same regime
-                              # (rejects single-check flips from trending-down → ranging BUY)
+MACD_IMPROVING_CHECKS = 1     # 2026-05-11: engine-layer persistence already filters single-cycle flips; this swing-layer check is set to 1 to avoid double-counting.
+REGIME_CONFIRM_CHECKS = 1     # 2026-05-11: engine-layer persistence already filters single-cycle flips; this swing-layer check is set to 1 to avoid double-counting.
 
 # ---------------------------------------------------------------------------
 # Momentum-entry override (2026-04-17)
@@ -139,7 +141,8 @@ MOMENTUM_STATE_FILE = "data/metals_momentum_state.json"
 # 0.40 -> 0.80 -> 0.66 -> 0.00 across 70 minutes; a 2-cycle requirement
 # blocks any single-cycle phantom spike while costing at most ~2 min of
 # entry lag.
-SIGNAL_PERSISTENCE_CHECKS = 2
+# 2026-05-11: engine-layer persistence already filters single-cycle flips; this swing-layer check is set to 1 to avoid double-counting.
+SIGNAL_PERSISTENCE_CHECKS = 1
 
 # Gate B — MACD decay. Reject entries where current MACD is less than
 # MACD_DECAY_MIN_RATIO of the max |MACD| over the last
@@ -190,11 +193,19 @@ MAX_SIGNAL_AGE_SEC = 900
 # ---------------------------------------------------------------------------
 # Exit rules
 # ---------------------------------------------------------------------------
+# DEPRECATED 2026-05-11 — replaced by TAKE_PROFIT_WARRANT_PCT / STOP_LOSS_WARRANT_PCT
 TAKE_PROFIT_UNDERLYING_PCT = 3.0   # 2026-04-14 raised from 2.0 — was exiting too early on
                                    # intraday noise during strong trends. 3.0% underlying =
                                    # ~+15% warrant on 5x / ~+14% on 4.75x. If user wants
                                    # even more room, raise further; user's note: "we can
                                    # always buy in again" — rebuy on pullback after exit.
+
+# 2026-05-11: TAKE_PROFIT and STOP_LOSS are now anchored to the leveraged
+# warrant's own % change (not the underlying). On a 5x cert, +5% warrant
+# is reachable intraday; +3% underlying (the old anchor) is ~15% warrant,
+# which silver almost never produces inside one day.
+TAKE_PROFIT_WARRANT_PCT = 5.0
+STOP_LOSS_WARRANT_PCT = 30.0
 TRAILING_START_PCT = 1.5           # start trailing after 1.5% underlying gain
 TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 # P1-8 (2026-05-02): widened from 2.0 → 3.0. The previous 2.0% underlying
@@ -211,6 +222,7 @@ TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 # absolute worst-case loss per trade is bounded. Revert to 2.0 +
 # STOP_LOSS_UNDERLYING_PCT=2.5 if intraday wicks are not the dominant
 # loss mode.
+# DEPRECATED 2026-05-11 — replaced by TAKE_PROFIT_WARRANT_PCT / STOP_LOSS_WARRANT_PCT
 HARD_STOP_UNDERLYING_PCT = 3.0     # -3% underlying = hard exit (15% on 5x cert)
 SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTERS
 

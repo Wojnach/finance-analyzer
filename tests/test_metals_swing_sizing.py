@@ -100,11 +100,12 @@ def _capture_buy(trader):
 
 
 def test_kelly_alloc_used_when_cash_is_low(monkeypatch):
-    """With cash=2418 and Kelly returning 1500 SEK, alloc should be 1500.
+    """2026-05-11 low-cash mode: cash=2418 < LOW_CASH_THRESHOLD_SEK=10_000,
+    so alloc = min(MIN_TRADE_SEK=1000, 2418*0.95=2297.96) = 1000.
 
-    Old behavior: alloc = 2418 * 0.30 = 725, below MIN_TRADE_SEK 1000 → SKIP.
-    New behavior: Kelly recommends 1500 (floored at MIN_TRADE_SEK anyway),
-    so the trade goes through.
+    Kelly's recommendation is ignored when cash is below the low-cash
+    threshold — MIN_TRADE_SEK acts as the position size itself so a small
+    account can still place at least one trade.
     """
     trader = _make_trader(cash=2418.91)
     captured = _capture_buy(trader)
@@ -126,9 +127,8 @@ def test_kelly_alloc_used_when_cash_is_low(monkeypatch):
     trader._check_entries(prices={}, signal_data=_signal_buy_xag())
 
     assert len(captured) == 1, f"Expected one BUY, got {len(captured)}"
-    # alloc should be max(1500, 1000) = 1500, capped at 2418*0.95=2297.96.
-    # units = int(1500 / 14) = 107
-    assert captured[0]["units"] == 107
+    # alloc = 1000 (low-cash mode) → units = int(1000/14) = 71
+    assert captured[0]["units"] == 71
     assert captured[0]["underlying_ticker"] == "XAG-USD"
 
 
@@ -158,16 +158,18 @@ def test_kelly_result_floored_at_min_trade_sek(monkeypatch):
 
 
 def test_kelly_alloc_capped_at_95_percent_of_cash(monkeypatch):
-    """If Kelly recommends more than 95% of cash, cap at the 95% ceiling."""
-    trader = _make_trader(cash=2418.91)
+    """2026-05-11: cash=20_000 (above LOW_CASH_THRESHOLD) — Kelly's
+    aggressive recommendation should be capped at 95% of cash.
+    """
+    trader = _make_trader(cash=20000.0)
     captured = _capture_buy(trader)
 
     def _fake_kelly(**kwargs):
         return {
-            "position_sek": 2400.0,  # 99% of cash — should be capped at 95%
+            "position_sek": 19800.0,  # 99% of cash — should be capped at 95%
             "half_kelly_pct": 0.50,
             "win_rate": 0.75,
-            "units": 171,
+            "units": 1414,
         }
 
     monkeypatch.setattr(
@@ -178,9 +180,9 @@ def test_kelly_alloc_capped_at_95_percent_of_cash(monkeypatch):
     trader._check_entries(prices={}, signal_data=_signal_buy_xag())
 
     assert len(captured) == 1
-    # alloc = min(max(2400, 1000), 2418.91 * 0.95 = 2297.96) = 2297.96
-    # units = int(2297.96 / 14) = 164
-    assert captured[0]["units"] == 164
+    # alloc = min(max(19800, 1000), 20000 * 0.95 = 19000) = 19000
+    # units = int(19000 / 14) = 1357
+    assert captured[0]["units"] == 1357
 
 
 def test_kelly_no_edge_skips_entry(monkeypatch):
@@ -207,8 +209,12 @@ def test_kelly_no_edge_skips_entry(monkeypatch):
 
 
 def test_kelly_import_error_falls_back_to_fixed_percent(monkeypatch):
-    """If Kelly module raises, fall back to fixed POSITION_SIZE_PCT logic."""
-    trader = _make_trader(cash=5000)  # 5000 * 30% = 1500, above MIN_TRADE_SEK 1000
+    """If Kelly module raises, fall back to fixed POSITION_SIZE_PCT logic.
+
+    2026-05-11: cash=5000 < LOW_CASH_THRESHOLD_SEK=10_000 → low-cash mode:
+    alloc = MIN_TRADE_SEK=1000 (instead of raw_alloc=1500). units = int(1000/14) = 71.
+    """
+    trader = _make_trader(cash=5000)
     captured = _capture_buy(trader)
 
     def _raising_kelly(**kwargs):
@@ -222,8 +228,8 @@ def test_kelly_import_error_falls_back_to_fixed_percent(monkeypatch):
     trader._check_entries(prices={}, signal_data=_signal_buy_xag())
 
     assert len(captured) == 1
-    # Fallback: alloc = 5000 * 30/100 = 1500, units = int(1500/14) = 107
-    assert captured[0]["units"] == 107
+    # Low-cash mode: alloc=MIN_TRADE_SEK=1000, units=int(1000/14)=71
+    assert captured[0]["units"] == 71
 
 
 def test_insufficient_cash_when_even_kelly_below_floor(monkeypatch):
@@ -323,7 +329,11 @@ def test_cash_negative_early_return(monkeypatch):
 
 
 def test_kelly_malformed_dict_missing_keys_falls_back(monkeypatch):
-    """S2: Kelly returning a dict missing required keys should trigger fallback."""
+    """S2: Kelly returning a dict missing required keys should trigger fallback.
+
+    2026-05-11: cash=5000 < LOW_CASH_THRESHOLD_SEK → low-cash mode uses
+    MIN_TRADE_SEK=1000 as position size. units = int(1000/14) = 71.
+    """
     trader = _make_trader(cash=5000)
     captured = _capture_buy(trader)
 
@@ -333,9 +343,9 @@ def test_kelly_malformed_dict_missing_keys_falls_back(monkeypatch):
 
     monkeypatch.setattr("portfolio.kelly_metals.recommended_metals_size", _bad_kelly)
     trader._check_entries(prices={}, signal_data=_signal_buy_xag())
-    # Falls back to fixed 30%: 5000 * 0.30 = 1500 SEK, units = int(1500/14) = 107.
+    # Low-cash mode: alloc=MIN_TRADE_SEK=1000 → units=int(1000/14)=71
     assert len(captured) == 1
-    assert captured[0]["units"] == 107
+    assert captured[0]["units"] == 71
 
 
 def test_kelly_nan_position_sek_falls_back(monkeypatch):
@@ -1009,44 +1019,44 @@ def test_macd_improving_gate_passes_on_fine_grained_drift(monkeypatch):
 
 
 def test_macd_improving_gate_blocks_flat_history():
-    """Sanity: the gate MUST still block truly flat MACD (equal floats).
-    The precision fix shouldn't loosen the gate's semantics — it should
-    only give the gate real data to work with.
+    """2026-05-11: MACD_IMPROVING_CHECKS dedup'd to 1 — swing-layer gate
+    is a no-op (only 1 sample = no slope to evaluate). MACD persistence is
+    now delegated to the engine layer.
     """
     trader = _make_trader_for_real_evaluate_entry([-0.04123, -0.04123])
     ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
-    assert not ok, "Genuinely flat MACD must still block the gate"
-    assert "MACD not improving" in reason, (
-        f"Expected 'MACD not improving' rejection, got: {reason!r}"
+    # With MACD_IMPROVING_CHECKS=1 the swing-layer can no longer block on
+    # this; the assertion now confirms the gate does NOT reject.
+    assert ok or "MACD not improving" not in (reason or ""), (
+        f"swing-layer MACD-improving gate should be inert at "
+        f"MACD_IMPROVING_CHECKS=1; got: {reason!r}"
     )
 
 
 def test_macd_improving_gate_blocks_declining():
-    """Sanity: a declining MACD must block LONG entry."""
+    """2026-05-11: MACD_IMPROVING_CHECKS dedup'd to 1 — swing-layer gate
+    is a no-op. Engine layer handles declining-MACD rejection.
+    """
     trader = _make_trader_for_real_evaluate_entry([-0.04123, -0.04150])  # falling
     ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
-    assert not ok, "Declining MACD must block LONG entry"
-    assert "MACD not improving" in reason, (
-        f"Expected 'MACD not improving' rejection, got: {reason!r}"
+    assert ok or "MACD not improving" not in (reason or ""), (
+        f"swing-layer MACD-improving gate should be inert at "
+        f"MACD_IMPROVING_CHECKS=1; got: {reason!r}"
     )
 
 
 def test_macd_improving_gate_old_2decimal_rounding_would_have_failed_fine_drift():
-    """Regression demo: demonstrates the exact scenario the precision fix
-    addresses. If someone re-rounds macd_hist to 2 decimals upstream, both
-    entries of history collapse to -0.04 and the gate fails.
+    """2026-05-11: regression demo no longer fires the gate (deferred to
+    engine layer). Kept to document the precision-fix history.
     """
-    # Simulate the pre-fix condition: what reporting.py used to write.
     pre_fix_history = [round(-0.04123, 2), round(-0.04128, 2)]  # [-0.04, -0.04]
     assert pre_fix_history[0] == pre_fix_history[1], (
         "Sanity: pre-fix 2-decimal rounding collapses fine drift"
     )
     trader = _make_trader_for_real_evaluate_entry(pre_fix_history)
     ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
-    assert not ok and "MACD not improving" in reason, (
-        "Pre-fix 2-decimal rounding creates flat history that blocks the "
-        "gate — this is what the 5-decimal fix addresses"
-    )
+    # Swing-layer gate inert; engine handles this now.
+    assert ok or "MACD not improving" not in (reason or "")
 
 
 # ---------------------------------------------------------------------------

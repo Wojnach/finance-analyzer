@@ -199,17 +199,22 @@ def test_zero_price_sell_aborted_on_missing_bid_field(monkeypatch):
 
 
 def test_normal_sell_proceeds_when_bid_positive(monkeypatch):
-    """Sanity check: when bid is positive, the SELL path runs as before."""
+    """Sanity check: when bid is positive, the SELL path runs as before.
+
+    2026-05-11: HARD_STOP is now anchored on warrant pct change
+    (STOP_LOSS_WARRANT_PCT=30). entry_price=10.0 → bid must be <= 7.0 to
+    breach. Set bid=6.5 (-35% warrant), underlying=28.0 (irrelevant now).
+    """
     trader = _make_trader()
     _silence_io(monkeypatch, trader)
     monkeypatch.setattr(mst, "DRY_RUN", False)
 
     _build_long_position(trader)
-    prices = {"silver301": {"underlying": 28.0}}  # below HARD_STOP
+    prices = {"silver301": {"underlying": 28.0}}
 
     monkeypatch.setattr(
         mst, "fetch_price",
-        lambda *a, **k: {"underlying": 28.0, "bid": 8.50},
+        lambda *a, **k: {"underlying": 28.0, "bid": 6.50},  # -35% warrant
     )
 
     sell_calls = []
@@ -227,7 +232,7 @@ def test_normal_sell_proceeds_when_bid_positive(monkeypatch):
     # Verify the bid passed to _execute_sell is positive
     args, _ = sell_calls[0]
     # _execute_sell(pos_id, pos, current_bid, underlying_price, reason)
-    assert args[2] == 8.50
+    assert args[2] == 6.50
 
 
 # ---------------------------------------------------------------------------
@@ -427,9 +432,10 @@ def test_set_stop_loss_uses_anchor_when_provided(monkeypatch):
     # Anchor at current bid 80 (20% below entry).
     trader._set_stop_loss("pos1", anchor_price=80.0)
 
-    # Expected: trigger = 80 * (1 - STOP_LOSS_UNDERLYING_PCT/100 * 5)
-    # (post P1-8 STOP_LOSS_UNDERLYING_PCT=3.5 → 80 * (1-0.175) = 66.0)
-    expected_drop = mst.STOP_LOSS_UNDERLYING_PCT / 100 * 5.0
+    # 2026-05-11: stop now anchored to warrant pct change (STOP_LOSS_WARRANT_PCT),
+    # not underlying × leverage. trigger = anchor × (1 - STOP_LOSS_WARRANT_PCT/100)
+    # For STOP_LOSS_WARRANT_PCT=30: 80 × 0.70 = 56.0
+    expected_drop = mst.STOP_LOSS_WARRANT_PCT / 100
     expected_trigger = real_round(80.0 * (1 - expected_drop), 2)
     assert captured.get("trigger") == expected_trigger, (
         f"With anchor=80 expected trigger={expected_trigger}; "
@@ -602,6 +608,8 @@ def test_set_stop_loss_default_path_unchanged(monkeypatch):
 
     trader._set_stop_loss("pos1")  # no anchor
 
-    expected_drop = mst.STOP_LOSS_UNDERLYING_PCT / 100 * 5.0
+    # 2026-05-11: stop anchored to warrant pct change (STOP_LOSS_WARRANT_PCT).
+    # entry=100, STOP_LOSS_WARRANT_PCT=30 → 100 × 0.70 = 70.0
+    expected_drop = mst.STOP_LOSS_WARRANT_PCT / 100
     expected_trigger = round(100.0 * (1 - expected_drop), 2)
     assert captured["trigger"] == expected_trigger

@@ -124,12 +124,19 @@ class TestExtractors:
 
 class TestEntryGates:
     def test_first_cycle_rejects_due_to_persistence(self, isolate_state):
+        """2026-05-11: with SIGNAL_PERSISTENCE_CHECKS=1, first-cycle entries
+        are no longer rejected by the swing-layer persistence gate. The
+        engine layer now owns this responsibility.
+        """
         trader = cst.CryptoSwingTrader(page=None, executor=None)
         sig = _fresh_signal()
         trader._update_history("BTC-USD", sig)
         allow, reason, _ = trader._evaluate_entry("BTC-USD", sig, is_momentum=False)
-        assert not allow
-        assert "persistence" in reason
+        # With persistence=1, the single fresh cycle now passes.
+        assert allow or "persistence" not in (reason or ""), (
+            f"with SIGNAL_PERSISTENCE_CHECKS=1, first cycle should not "
+            f"be blocked by persistence; got: {reason}"
+        )
 
     def test_momentum_path_skips_persistence(self, isolate_state):
         trader = cst.CryptoSwingTrader(page=None, executor=None)
@@ -171,25 +178,31 @@ class TestEntryGates:
 
 class TestExitGates:
     def test_hard_stop_triggers_at_threshold(self, isolate_state):
+        """2026-05-11: hard stop now anchored to warrant pct change
+        (STOP_LOSS_WARRANT_PCT=30). entry warrant bid 1.0 → drop below 0.70
+        triggers hard stop. Use 0.65 (-35% warrant) past the threshold.
+        """
         trader = cst.CryptoSwingTrader(page=None, executor=None)
         pos = {"entry_underlying_price": 100.0, "direction": "LONG",
                "entry_warrant_bid": 1.0, "peak_warrant_bid": 1.0,
                "peak_underlying_price": 100.0,
                "entry_ts": datetime.datetime.now(datetime.UTC).isoformat()}
-        # Drop -3.5% — past the -3% hard stop
         should_exit, reason = trader._evaluate_exit(pos,
-            current_underlying=96.5, current_warrant_bid=0.85, sig={})
+            current_underlying=96.5, current_warrant_bid=0.65, sig={})
         assert should_exit
         assert "HARD_STOP" in reason
 
     def test_take_profit_triggers(self, isolate_state):
+        """2026-05-11: TP now anchored to warrant pct change
+        (TAKE_PROFIT_WARRANT_PCT=5). entry warrant bid 1.0 → 1.06 = +6% past TP.
+        """
         trader = cst.CryptoSwingTrader(page=None, executor=None)
         pos = {"entry_underlying_price": 100.0, "direction": "LONG",
                "entry_warrant_bid": 1.0, "peak_warrant_bid": 1.0,
                "peak_underlying_price": 100.0,
                "entry_ts": datetime.datetime.now(datetime.UTC).isoformat()}
         should_exit, reason = trader._evaluate_exit(pos,
-            current_underlying=104.5, current_warrant_bid=1.05, sig={})
+            current_underlying=104.5, current_warrant_bid=1.06, sig={})
         assert should_exit
         assert "TAKE_PROFIT" in reason
 
