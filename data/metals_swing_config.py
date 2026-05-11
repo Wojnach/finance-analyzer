@@ -204,8 +204,18 @@ TAKE_PROFIT_UNDERLYING_PCT = 3.0   # 2026-04-14 raised from 2.0 — was exiting 
 # warrant's own % change (not the underlying). On a 5x cert, +5% warrant
 # is reachable intraday; +3% underlying (the old anchor) is ~15% warrant,
 # which silver almost never produces inside one day.
-TAKE_PROFIT_WARRANT_PCT = 5.0
-STOP_LOSS_WARRANT_PCT = 30.0
+#
+# Codex fix C 2026-05-11: per-leverage TP/SL. 5%/30% are BASE values
+# for a 5x cert. Metals warrants almost always run at 5x but per-position
+# computation future-proofs against catalog drift to e.g. 4.5x or 7.5x.
+# tp_warrant_pct = TP_BASE_UNDERLYING_PCT * position.leverage
+# sl_warrant_pct = SL_BASE_UNDERLYING_PCT * position.leverage
+# stored on the position dict at entry. Constants below are DEPRECATED
+# fallbacks for legacy positions that didn't store the per-position values.
+TP_BASE_UNDERLYING_PCT = 1.0   # 5x cert → 5% warrant TP
+SL_BASE_UNDERLYING_PCT = 6.0   # 5x cert → 30% warrant SL
+TAKE_PROFIT_WARRANT_PCT = 5.0  # DEPRECATED: legacy fallback
+STOP_LOSS_WARRANT_PCT = 30.0   # DEPRECATED: legacy fallback
 TRAILING_START_PCT = 1.5           # start trailing after 1.5% underlying gain
 TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 # P1-8 (2026-05-02): widened from 2.0 → 3.0. The previous 2.0% underlying

@@ -171,8 +171,16 @@ class TestQueryPathGating:
         assert gate_calls[0] == ("chronos", 30, "enter")
         assert gate_calls[-1] == ("chronos", 30, "exit")
 
-    def test_query_returns_none_on_gate_timeout(self):
-        """Gate timeout → return None (caller treats as HOLD), never query the server."""
+    def test_query_returns_sentinel_on_gate_timeout(self):
+        """Gate timeout → return the _CHRONOS_GATE_TIMEOUT sentinel
+        (distinguishable from bare-None "server unavailable") so the
+        caller can refuse to fall back to a GPU-loading subprocess.
+
+        Codex fix A 2026-05-11: previously returned bare None which the
+        _run_chronos_metals caller treated as "server unavailable" and
+        spawned a subprocess that loaded Chronos on CUDA — defeating
+        the entire purpose of the gate.
+        """
         from data import metals_llm
 
         fake_gate, gate_calls = _make_gate(acquired=False)
@@ -181,7 +189,10 @@ class TestQueryPathGating:
             with patch("portfolio.gpu_gate.gpu_gate", fake_gate):
                 result = metals_llm._query_chronos_server([100.0] * 50)
 
-        assert result is None
+        assert result is metals_llm._CHRONOS_GATE_TIMEOUT, (
+            f"expected _CHRONOS_GATE_TIMEOUT sentinel, got {result!r}"
+        )
+        assert result is not None, "must not be bare None — caller would fall back"
         assert inner.call_count == 0
         assert ("chronos", 30, "enter") in gate_calls
         assert ("chronos", 30, "exit") in gate_calls
@@ -225,6 +236,61 @@ class TestQueryPathGating:
 # ---------------------------------------------------------------------------
 # Re-entrancy guard
 # ---------------------------------------------------------------------------
+
+
+class TestNoFallbackOnGateTimeout:
+    """Regression for codex fix A 2026-05-11: when the gate times out,
+    _run_chronos_metals MUST return None (HOLD) without spawning the
+    one-shot subprocess fallback. The subprocess path imports
+    portfolio.forecast_signal.forecast_chronos which loads Chronos on
+    CUDA — exactly the race the gate was protecting against.
+    """
+
+    def test_run_chronos_metals_no_subprocess_on_gate_timeout(self):
+        from data import metals_llm
+
+        # Force the inner query to return the gate-timeout sentinel.
+        with patch.object(
+            metals_llm,
+            "_query_chronos_server",
+            return_value=metals_llm._CHRONOS_GATE_TIMEOUT,
+        ):
+            with patch.object(metals_llm.subprocess, "run") as run_mock:
+                with patch.object(metals_llm.subprocess, "Popen", create=True) as popen_mock:
+                    result = metals_llm._run_chronos_metals(
+                        "XAG-USD", [1.0] * 50, horizons=(1, 3),
+                    )
+
+        assert result is None, "gate timeout must produce HOLD (None)"
+        assert run_mock.call_count == 0, (
+            f"subprocess.run must NOT be called on gate timeout — "
+            f"got {run_mock.call_count} calls (would load Chronos on CUDA)"
+        )
+        assert popen_mock.call_count == 0, (
+            "subprocess.Popen must NOT be called on gate timeout"
+        )
+
+    def test_run_chronos_metals_falls_through_on_bare_none(self):
+        """Sanity: bare-None (server-unavailable) still allows the
+        subprocess fallback — the sentinel only blocks the gate-timeout
+        case. Without this, every cold-start would HOLD until the
+        persistent server came up."""
+        from data import metals_llm
+
+        # Bare None = server unavailable, not gate timeout
+        with patch.object(metals_llm, "_query_chronos_server", return_value=None):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout = '{"1h": {"direction": "up"}}'
+            mock_proc.stderr = ""
+            with patch.object(metals_llm.subprocess, "run", return_value=mock_proc) as run_mock:
+                result = metals_llm._run_chronos_metals(
+                    "XAG-USD", [1.0] * 50, horizons=(1, 3),
+                )
+
+        # Fallback subprocess WAS invoked
+        assert run_mock.call_count == 1, "bare-None must allow subprocess fallback"
+        assert result == {"1h": {"direction": "up"}}
 
 
 class TestReentrancySafety:

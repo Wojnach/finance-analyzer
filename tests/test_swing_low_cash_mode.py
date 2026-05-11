@@ -125,3 +125,97 @@ def test_oil_normal_cash_uses_pct_sizing(oil_isolate):
     pos = trader.state["positions"][res["pos_id"]]
     # 20000 * 25% = 5000 → units = int(5000/20) = 250
     assert pos["units"] == 250
+
+
+# --- Codex fix B 2026-05-11: warrant-side loss increments cooldown -------
+#
+# Exit triggers fire on warrant P&L (HARD_STOP at warrant_pct_change <=
+# -SL_PCT). The cooldown counter must use the SAME basis — otherwise a
+# warrant-side stop-out where the underlying is up RESETS consecutive_losses
+# to 0 instead of escalating cooldown, which is exactly what we don't want
+# after the warrant blew through its stop.
+
+def test_crypto_warrant_stop_increments_consecutive_losses(crypto_isolate):
+    """A warrant-side stop-loss (warrant -30% while underlying flat or +1%)
+    must increment consecutive_losses by exactly 1.
+
+    Codex fix B 2026-05-11: before the fix, the counter used underlying
+    P&L — a warrant SL with the underlying up would RESET the counter."""
+    trader = cst.CryptoSwingTrader(page=None, executor=None)
+    trader.state["cash_sek"] = 50000.0
+    trader.state["consecutive_losses"] = 0
+
+    # Place a 5x position. underlying=70000, warrant=10.0.
+    warrant_5x = {**_warrant(ask=10.0), "leverage": 5.0}
+    res = trader._place_buy("BTC-USD", warrant_5x, {}, 70000.0)
+    assert res["executed"]
+    pos_id = res["pos_id"]
+    pos = trader.state["positions"][pos_id]
+
+    # Simulate a warrant-side stop-out: warrant 10.0 → 7.0 (-30%) while
+    # underlying is roughly unchanged (slight up, even).
+    sell_res = trader._place_sell(
+        pos_id, pos,
+        current_underlying=70700.0,    # +1% on underlying (NOT a loss)
+        current_warrant_bid=7.0,        # -30% on warrant (HARD STOP)
+        reason="HARD_STOP warrant -30.00%",
+    )
+    assert sell_res["executed"]
+    # consecutive_losses MUST advance to 1 — basis is warrant P&L,
+    # which is -30% (loss).
+    assert trader.state["consecutive_losses"] == 1, (
+        f"warrant SL must increment consecutive_losses by 1; "
+        f"got {trader.state['consecutive_losses']} "
+        f"(underlying +1% but warrant -30% — counter must use warrant basis)"
+    )
+
+
+def test_oil_warrant_stop_increments_consecutive_losses(oil_isolate):
+    """Mirror of crypto test for oil swing trader."""
+    trader = ost.OilSwingTrader(page=None, executor=None)
+    trader.state["cash_sek"] = 50000.0
+    trader.state["consecutive_losses"] = 0
+
+    warrant_5x = {**_oil_warrant(ask=20.0), "leverage": 5.0}
+    res = trader._place_buy("OIL-USD", warrant_5x, {}, 70.0)
+    assert res["executed"]
+    pos_id = res["pos_id"]
+    pos = trader.state["positions"][pos_id]
+
+    sell_res = trader._place_sell(
+        pos_id, pos,
+        current_underlying=70.7,    # +1% underlying
+        current_warrant_bid=14.0,    # -30% warrant
+        reason="HARD_STOP warrant -30.00%",
+    )
+    assert sell_res["executed"]
+    assert trader.state["consecutive_losses"] == 1, (
+        f"oil warrant SL must increment consecutive_losses by 1; "
+        f"got {trader.state['consecutive_losses']}"
+    )
+
+
+def test_crypto_warrant_profit_resets_consecutive_losses(crypto_isolate):
+    """Inverse: a warrant-side profit (warrant +5%) resets the counter to 0
+    even if underlying happened to be flat or down."""
+    trader = cst.CryptoSwingTrader(page=None, executor=None)
+    trader.state["cash_sek"] = 50000.0
+    trader.state["consecutive_losses"] = 2  # prior loss streak
+
+    warrant_5x = {**_warrant(ask=10.0), "leverage": 5.0}
+    res = trader._place_buy("BTC-USD", warrant_5x, {}, 70000.0)
+    assert res["executed"]
+    pos_id = res["pos_id"]
+    pos = trader.state["positions"][pos_id]
+
+    sell_res = trader._place_sell(
+        pos_id, pos,
+        current_underlying=69930.0,   # -0.1% underlying
+        current_warrant_bid=10.5,      # +5% warrant (TP)
+        reason="TAKE_PROFIT warrant +5.00%",
+    )
+    assert sell_res["executed"]
+    assert trader.state["consecutive_losses"] == 0, (
+        f"warrant profit must reset cooldown counter; got "
+        f"{trader.state['consecutive_losses']}"
+    )

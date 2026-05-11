@@ -174,8 +174,14 @@ HARD_STOP_UNDERLYING_PCT = 2.5     # -2.5% underlying = hard exit
 # warrant's own % change (not the underlying). On a 5x cert, +5% warrant
 # is reachable intraday; +3% underlying (the old anchor) is ~15% warrant,
 # which silver almost never produces inside one day.
-TAKE_PROFIT_WARRANT_PCT = 5.0
-STOP_LOSS_WARRANT_PCT = 30.0
+#
+# Codex fix C 2026-05-11: per-leverage TP/SL. See crypto_swing_config for
+# full rationale. Constants below are DEPRECATED fallbacks for legacy
+# positions; per-position values are computed at entry from BASE × leverage.
+TP_BASE_UNDERLYING_PCT = 1.0   # 5x cert → 5% warrant TP, 1x → 1%, 10x → 10%
+SL_BASE_UNDERLYING_PCT = 6.0   # 5x cert → 30% warrant SL, 1x → 6%, 10x → 60%
+TAKE_PROFIT_WARRANT_PCT = 5.0  # DEPRECATED: legacy fallback when position lacks tp_warrant_pct
+STOP_LOSS_WARRANT_PCT = 30.0   # DEPRECATED: legacy fallback when position lacks sl_warrant_pct
 SIGNAL_REVERSAL_EXIT = True
 
 # Warrant-side exit rules

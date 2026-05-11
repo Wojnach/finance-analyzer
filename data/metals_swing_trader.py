@@ -110,9 +110,11 @@ from metals_swing_config import (
     STATE_FILE,
     STOP_LOSS_UNDERLYING_PCT,
     STOP_LOSS_VALID_DAYS,
+    SL_BASE_UNDERLYING_PCT,
     STOP_LOSS_WARRANT_PCT,
     TAKE_PROFIT_UNDERLYING_PCT,
     TAKE_PROFIT_WARRANT_PCT,
+    TP_BASE_UNDERLYING_PCT,
     TARGET_LEVERAGE,
     TELEGRAM_SUMMARY_INTERVAL,
     TRADES_LOG,
@@ -1051,6 +1053,10 @@ class SwingTrader:
             f"dir: {direction}, lev: {meta['leverage']:.1f}x)"
         )
 
+        # 2026-05-11 codex fix C: per-leverage TP/SL on orphan-ingest too.
+        ingest_lev = abs(float(meta["leverage"]))
+        ingest_tp_warrant_pct = TP_BASE_UNDERLYING_PCT * ingest_lev
+        ingest_sl_warrant_pct = SL_BASE_UNDERLYING_PCT * ingest_lev
         self.state["positions"][pos_id] = {
             "warrant_key": meta["key"],
             "warrant_name": meta["name"],
@@ -1066,7 +1072,9 @@ class SwingTrader:
             "trough_underlying": float(underlying_price),
             "trailing_active": False,
             "stop_order_id": None,
-            "leverage": abs(meta["leverage"]),
+            "leverage": ingest_lev,
+            "tp_warrant_pct": ingest_tp_warrant_pct,
+            "sl_warrant_pct": ingest_sl_warrant_pct,
             # Position already lives on Avanza — fill verification is moot.
             "fill_verified": True,
             "buy_order_id": None,
@@ -2634,6 +2642,13 @@ class SwingTrader:
         buy_order_id = None
         if isinstance(result, dict):
             buy_order_id = result.get("order_id") or result.get("parsed", {}).get("orderId")
+        # 2026-05-11 codex fix C: per-leverage TP/SL stored on the position
+        # dict at entry. BASE × leverage so a 5x cert → 5%/30%, a 1x → 1%/6%,
+        # a 10x → 10%/60%. Pinned at fill time so a mid-flight config edit
+        # doesn't move the goalposts on already-open positions.
+        live_lev = abs(float(warrant["live_leverage"]))
+        tp_warrant_pct = TP_BASE_UNDERLYING_PCT * live_lev
+        sl_warrant_pct = SL_BASE_UNDERLYING_PCT * live_lev
         self.state["positions"][pos_id] = {
             "warrant_key": warrant["key"],
             "warrant_name": warrant["name"],
@@ -2649,7 +2664,9 @@ class SwingTrader:
             "trough_underlying": underlying_price,    # SHORT: tracks min
             "trailing_active": False,
             "stop_order_id": None,
-            "leverage": abs(warrant["live_leverage"]),  # always magnitude
+            "leverage": live_lev,  # always magnitude
+            "tp_warrant_pct": tp_warrant_pct,
+            "sl_warrant_pct": sl_warrant_pct,
             "fill_verified": DRY_RUN,  # DRY_RUN positions count as verified
             "buy_order_id": buy_order_id,
         }
@@ -2730,11 +2747,15 @@ class SwingTrader:
             anchor_label = "entry"
 
         # 2026-05-11: stop is now anchored to the warrant's own % change
-        # (STOP_LOSS_WARRANT_PCT) rather than underlying * leverage. On a 5x
-        # cert, STOP_LOSS_WARRANT_PCT=30 gives a 30% warrant stop directly —
-        # survives intraday wicks on leveraged certs without being computed
-        # from an underlying×leverage product.
-        warrant_drop_pct = STOP_LOSS_WARRANT_PCT / 100
+        # rather than underlying * leverage. On a 5x cert, 30% warrant stop
+        # directly survives intraday wicks without being computed from an
+        # underlying×leverage product.
+        #
+        # 2026-05-11 codex fix C: per-position SL — read sl_warrant_pct
+        # off the position dict (BASE × leverage at entry). Legacy positions
+        # without sl_warrant_pct stored fall back to the module constant.
+        sl_pct = pos.get("sl_warrant_pct", STOP_LOSS_WARRANT_PCT)
+        warrant_drop_pct = sl_pct / 100
         trigger_price = round(stop_anchor * (1 - warrant_drop_pct), 2)
         sell_price = round(trigger_price * 0.99, 2)  # sell 1% below trigger for fill
 
@@ -2743,7 +2764,7 @@ class SwingTrader:
             return
 
         _log(f"  Setting stop-loss: trigger={trigger_price} sell={sell_price} "
-             f"(warrant -{STOP_LOSS_WARRANT_PCT}%, "
+             f"(warrant -{sl_pct:.1f}%, "
              f"anchor={anchor_label} {stop_anchor})")
 
         if DRY_RUN:
@@ -2956,8 +2977,12 @@ class SwingTrader:
                     warrant_pct_change = (entry_warrant_for_tp - current_bid) / entry_warrant_for_tp * 100
 
             # 1. Take profit (anchored on warrant pct change, 2026-05-11)
-            if not exit_reason and warrant_pct_change >= TAKE_PROFIT_WARRANT_PCT:
-                exit_reason = f"TAKE_PROFIT: warrant +{warrant_pct_change:.2f}% >= +{TAKE_PROFIT_WARRANT_PCT}%"
+            # Codex fix C 2026-05-11: read per-position tp_warrant_pct
+            # (BASE × leverage at entry). Legacy positions fall back to
+            # the module constant.
+            pos_tp_pct = pos.get("tp_warrant_pct", TAKE_PROFIT_WARRANT_PCT)
+            if not exit_reason and warrant_pct_change >= pos_tp_pct:
+                exit_reason = f"TAKE_PROFIT: warrant +{warrant_pct_change:.2f}% >= +{pos_tp_pct:.1f}%"
 
             # 2. Trailing stop
             if not exit_reason and und_change_pct >= TRAILING_START_PCT:
@@ -3016,8 +3041,11 @@ class SwingTrader:
                     )
 
             # 3. Hard stop (anchored on warrant pct change, 2026-05-11)
-            if not exit_reason and warrant_pct_change <= -STOP_LOSS_WARRANT_PCT:
-                exit_reason = f"HARD_STOP: warrant {warrant_pct_change:.2f}% <= -{STOP_LOSS_WARRANT_PCT}%"
+            # Codex fix C 2026-05-11: read per-position sl_warrant_pct
+            # (BASE × leverage at entry). Legacy fallback to module const.
+            pos_sl_pct = pos.get("sl_warrant_pct", STOP_LOSS_WARRANT_PCT)
+            if not exit_reason and warrant_pct_change <= -pos_sl_pct:
+                exit_reason = f"HARD_STOP: warrant {warrant_pct_change:.2f}% <= -{pos_sl_pct:.1f}%"
 
             # 4. Signal reversal (direction-aware, Fix 8 2026-04-09).
             # LONG exits on SELL consensus; SHORT exits on BUY consensus.
