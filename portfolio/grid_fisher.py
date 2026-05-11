@@ -765,6 +765,45 @@ class GridFisher:
         self._recent_places.append(now)
         return True
 
+    def _safe_session_call(self, fn, *args, default=None, **kwargs):
+        """Invoke an Avanza session method from a worker thread.
+
+        The metals loop runs Playwright async context for its swing-trader
+        page; the REST avanza_session module that grid_fisher uses internally
+        spins up its own sync_playwright client. Calling sync Playwright APIs
+        from a thread that has a running asyncio event loop raises
+        "Playwright Sync API inside the asyncio loop". Running the call in a
+        worker thread sidesteps that — sync_playwright runs in a clean
+        thread with no asyncio loop, returns its result, the worker exits.
+
+        On any exception, ``default`` is returned and the failure is logged
+        once per cycle via the journal.
+        """
+        import concurrent.futures
+
+        result_holder: dict[str, Any] = {}
+
+        def _runner():
+            try:
+                result_holder["value"] = fn(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                result_holder["error"] = exc
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_runner)
+            try:
+                future.result(timeout=30)
+            except concurrent.futures.TimeoutError:
+                self._log("session_call_timeout",
+                          method=getattr(fn, "__name__", repr(fn)))
+                return default
+        if "error" in result_holder:
+            self._log("session_call_error",
+                      method=getattr(fn, "__name__", repr(fn)),
+                      error=str(result_holder["error"]))
+            return default
+        return result_holder.get("value", default)
+
     def _catalog_for(self, ob_id: str) -> Optional[dict[str, Any]]:
         for cert_name, meta in self.catalog.items():
             if str(meta.get("ob_id") or "") == str(ob_id):
@@ -792,17 +831,16 @@ class GridFisher:
                 cancel_buy_tier(inst, tier.tier)
                 n += 1
                 continue
-            try:
-                result = self.session.cancel_order(tier.order_id) or {}
-            except Exception as exc:  # noqa: BLE001 — session errors vary
-                logger.warning(
-                    "grid_fisher: cancel_order raised for %s tier %d: %s",
-                    inst.ob_id, tier.tier, exc,
-                )
+            result = self._safe_session_call(
+                self.session.cancel_order, tier.order_id, default=None,
+            )
+            if result is None:
                 self._log("cancel_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker, tier=tier.tier,
-                          order_id=tier.order_id, error=str(exc))
+                          order_id=tier.order_id,
+                          error="session_call returned None")
                 continue
+            result = result or {}
             status = result.get("orderRequestStatus")
             if status != "SUCCESS":
                 self._log("cancel_rejected", ob_id=inst.ob_id,
@@ -905,14 +943,16 @@ class GridFisher:
                 placed += 1
                 continue
 
-            try:
-                result = self.session.place_buy_order(
-                    inst.ob_id, tier.price, tier.qty,
-                )
-            except Exception as exc:  # noqa: BLE001
+            result = self._safe_session_call(
+                self.session.place_buy_order,
+                inst.ob_id, tier.price, tier.qty,
+                default=None,
+            )
+            if result is None:
                 self._log("place_buy_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker, tier=tier.index,
-                          price=tier.price, qty=tier.qty, error=str(exc))
+                          price=tier.price, qty=tier.qty,
+                          error="session_call returned None")
                 continue
             status = (result or {}).get("orderRequestStatus", "UNKNOWN")
             order_id = (result or {}).get("orderId")
@@ -966,16 +1006,18 @@ class GridFisher:
                       ticker=inst.ticker, linked_buy_tier=filled_tier,
                       price=sell_price, qty=filled.qty)
         else:
-            try:
-                result = self.session.place_sell_order(
-                    inst.ob_id, sell_price, filled.qty,
-                )
-                if (result or {}).get("orderRequestStatus") == "SUCCESS":
-                    sell_order_id = str((result or {}).get("orderId"))
-            except Exception as exc:  # noqa: BLE001
+            result = self._safe_session_call(
+                self.session.place_sell_order,
+                inst.ob_id, sell_price, filled.qty,
+                default=None,
+            )
+            if result is None:
                 self._log("place_sell_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker, linked_buy_tier=filled_tier,
-                          price=sell_price, qty=filled.qty, error=str(exc))
+                          price=sell_price, qty=filled.qty,
+                          error="session_call returned None")
+            elif (result or {}).get("orderRequestStatus") == "SUCCESS":
+                sell_order_id = str((result or {}).get("orderId"))
 
         # Assign a sell-side tier index that mirrors the buy tier so the
         # ladders stay paired even after pruning.
@@ -997,25 +1039,28 @@ class GridFisher:
         # docstring). place_stop_loss returns {status, stoplossOrderId},
         # not {orderRequestStatus, orderId}.
         if inst.stop_loss_id and not self._probe_only:
-            try:
-                cancel_fn = getattr(self.session, "cancel_stop_loss", None)
-                if cancel_fn is None:
-                    logger.debug(
-                        "session has no cancel_stop_loss; skipping stop cancel"
-                    )
-                else:
-                    cancel_fn(inst.stop_loss_id)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("stop cancel failed: %s", exc)
+            cancel_fn = getattr(self.session, "cancel_stop_loss", None)
+            if cancel_fn is not None:
+                self._safe_session_call(
+                    cancel_fn, inst.stop_loss_id, default=None,
+                )
 
         new_stop_id: Optional[str] = None
         if not self._probe_only and inst.inventory_units > 0:
             stop_sell_price = round(stop_price * 0.995, 2)
-            try:
-                result = self.session.place_stop_loss(
-                    inst.ob_id, stop_price, stop_sell_price,
-                    inst.inventory_units,
-                ) or {}
+            result = self._safe_session_call(
+                self.session.place_stop_loss,
+                inst.ob_id, stop_price, stop_sell_price,
+                inst.inventory_units,
+                default=None,
+            )
+            if result is None:
+                self._log("place_stop_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker, price=stop_price,
+                          qty=inst.inventory_units,
+                          error="session_call returned None")
+            else:
+                result = result or {}
                 if result.get("status") == "SUCCESS":
                     new_stop_id = str(result.get("stoplossOrderId") or "") or None
                 else:
@@ -1024,10 +1069,6 @@ class GridFisher:
                               qty=inst.inventory_units,
                               avanza_status=result.get("status"),
                               message=result.get("message"))
-            except Exception as exc:  # noqa: BLE001
-                self._log("place_stop_failed", ob_id=inst.ob_id,
-                          ticker=inst.ticker, price=stop_price,
-                          qty=inst.inventory_units, error=str(exc))
         inst.stop_loss_id = new_stop_id
         inst.stop_loss_price = stop_price
 
@@ -1085,14 +1126,24 @@ class GridFisher:
             self._log("session_roll", session_id=self.state.session_id)
 
         # Reconcile state with live Avanza before deciding new actions.
+        # Wrapping the read calls in _safe_session_call moves the sync
+        # Playwright work onto a worker thread so it doesn't collide with
+        # the metals_loop's main asyncio event loop. On failure we get None
+        # (NOT []), which is distinguishable from "empty book" so a degraded
+        # cycle skips placement instead of falsely concluding everything
+        # cancelled.
         signal_data = signal_data or {}
         prices = prices or {}
-        try:
-            open_orders_raw = self.session.get_open_orders() or []
-            positions_raw = self.session.get_positions() or []
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("grid_fisher.tick: reconcile fetch failed: %s", exc)
-            self._log("tick_fetch_failed", error=str(exc))
+        open_orders_raw = self._safe_session_call(
+            self.session.get_open_orders, default=None,
+        )
+        positions_raw = self._safe_session_call(
+            self.session.get_positions, default=None,
+        )
+        if open_orders_raw is None or positions_raw is None:
+            self._log("tick_fetch_degraded",
+                      open_orders_ok=open_orders_raw is not None,
+                      positions_ok=positions_raw is not None)
             self._persist()
             return {**report, "error": "reconcile_fetch_failed"}
 
@@ -1223,13 +1274,16 @@ class GridFisher:
             ob_prices = prices.get(ob_id) or prices.get(ticker) or {}
             bid = ob_prices.get("bid")
             if not bid or bid <= 0:
-                try:
-                    quote = self.session.get_quote(ob_id) or {}
-                    bid = float(quote.get("buy") or 0)
-                except Exception as exc:  # noqa: BLE001
+                quote = self._safe_session_call(
+                    self.session.get_quote, ob_id, default=None,
+                )
+                if quote is None:
                     self._log("quote_fetch_failed", ob_id=ob_id,
-                              ticker=ticker, error=str(exc))
+                              ticker=ticker,
+                              error="session_call returned None")
                     bid = 0
+                else:
+                    bid = float((quote or {}).get("buy") or 0)
             if not bid or bid <= 0:
                 instr_report["skip"] = "no_bid"
                 report["instruments"][ob_id] = instr_report
@@ -1293,42 +1347,47 @@ class GridFisher:
             # Cancel any armed sell tiers (don't double-up volume).
             for tier in list(inst.sell_ladder):
                 if tier.status == ORDER_ARMED and tier.order_id:
-                    try:
-                        self.session.cancel_order(tier.order_id)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("eod sell cancel failed: %s", exc)
+                    self._safe_session_call(
+                        self.session.cancel_order, tier.order_id,
+                        default=None,
+                    )
                     tier.status = ORDER_CANCELLED
-            # Cancel stop.
+            # Cancel stop via the stop-loss-specific endpoint when present.
             if inst.stop_loss_id:
-                try:
-                    self.session.cancel_order(inst.stop_loss_id)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("eod stop cancel failed: %s", exc)
+                cancel_stop_fn = getattr(
+                    self.session, "cancel_stop_loss", None,
+                )
+                if cancel_stop_fn is not None:
+                    self._safe_session_call(
+                        cancel_stop_fn, inst.stop_loss_id, default=None,
+                    )
                 inst.stop_loss_id = None
             # Place aggressive limit at last seen price - 1% as a market-
             # equivalent (Avanza warrants can't post true market orders).
-            # Caller is expected to have refreshed quotes before tick.
-            try:
-                quote = self.session.get_quote(inst.ob_id)
-                bid = float((quote or {}).get("buy") or 0)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("eod quote fetch failed for %s: %s",
-                               inst.ob_id, exc)
+            quote = self._safe_session_call(
+                self.session.get_quote, inst.ob_id, default=None,
+            )
+            if quote is None:
                 bid = inst.avg_entry_price
+            else:
+                bid = float((quote or {}).get("buy") or 0)
             if bid <= 0:
                 bid = inst.avg_entry_price
             aggressive = round(max(bid * 0.99, 0.01), 2)
-            try:
-                self.session.place_sell_order(
-                    inst.ob_id, aggressive, inst.inventory_units,
-                )
+            result = self._safe_session_call(
+                self.session.place_sell_order,
+                inst.ob_id, aggressive, inst.inventory_units,
+                default=None,
+            )
+            if result is None:
+                self._log("eod_market_sell_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker,
+                          error="session_call returned None")
+            else:
                 self._log("eod_market_sell", ob_id=inst.ob_id,
                           ticker=inst.ticker, qty=inst.inventory_units,
                           price=aggressive)
                 n += 1
-            except Exception as exc:  # noqa: BLE001
-                self._log("eod_market_sell_failed", ob_id=inst.ob_id,
-                          ticker=inst.ticker, error=str(exc))
         return n
 
     # ---- direction handling -----------------------------------------------
