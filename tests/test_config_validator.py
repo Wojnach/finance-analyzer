@@ -15,7 +15,7 @@ def _valid_config():
     return {
         "telegram": {"token": "123:ABC", "chat_id": "456"},
         "alpaca": {"key": "ak_test", "secret": "sk_test"},
-        "binance": {"key": "bk_test", "secret": "bs_test"},
+        "exchange": {"key": "bk_test", "secret": "bs_test", "name": "binance"},
         "mistral_api_key": "mk_test",
         "iskbets": {"min_bigbet_conditions": 2},
         # Optional keys — required for no-warn test

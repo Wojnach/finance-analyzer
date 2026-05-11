@@ -12,14 +12,21 @@ logger = logging.getLogger("portfolio.config_validator")
 
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
-# Required: missing any of these is a fatal error
+# Required: missing any of these is a fatal error.
+# 2026-05-11 fix: Binance creds actually live under ``exchange.key`` /
+# ``exchange.secret`` (freqtrade-style config layout, with
+# ``exchange.name = "binance"``) — they have never been under a
+# ``binance`` top-level section. The original list referencing
+# ``binance.key`` / ``binance.secret`` was blocking main-loop startup on
+# fresh restarts because validation always failed against the real
+# config shape.
 REQUIRED_KEYS = [
     ("telegram", "token"),
     ("telegram", "chat_id"),
     ("alpaca", "key"),
     ("alpaca", "secret"),
-    ("binance", "key"),
-    ("binance", "secret"),
+    ("exchange", "key"),
+    ("exchange", "secret"),
 ]
 
 # Optional: missing these produces a warning but isn't fatal
