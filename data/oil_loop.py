@@ -247,20 +247,23 @@ def fast_tick_check(reference_prices: dict[str, dict[str, float]],
 # ---------------------------------------------------------------------------
 def run_one_cycle(trader: OilSwingTrader,
                   notify: Any = None) -> dict[str, Any]:
+    # Refresh the oil signal feed that downstream consumers
+    # (grid fisher in metals_loop) read each tick. Runs FIRST and
+    # unconditionally so a fetch_live_prices() outage cannot leave a
+    # stale BUY/SELL record on disk that the grid would treat as fresh
+    # for up to 300s. compute_signal() returns a safe HOLD record on
+    # its own fetch failures, so the file always reflects current
+    # reality.
+    with contextlib.suppress(Exception):
+        from portfolio.oil_grid_signal import write_signal
+        write_signal()
+
     prices = fetch_live_prices()
     signal_data = load_signal_snapshot()
     if not prices:
         return {"ok": False, "reason": "no live prices"}
 
     summary = trader.evaluate_and_execute(prices, signal_data)
-
-    # Refresh the oil signal feed that downstream consumers
-    # (grid fisher in metals_loop) read each tick. BZ=F is not yet
-    # part of portfolio/main.py SYMBOLS, so this is the canonical
-    # OIL-USD signal source until that gap closes.
-    with contextlib.suppress(Exception):
-        from portfolio.oil_grid_signal import write_signal
-        write_signal()
 
     # Track value history for the dashboard
     with contextlib.suppress(Exception):

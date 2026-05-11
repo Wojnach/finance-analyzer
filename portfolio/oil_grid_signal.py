@@ -46,9 +46,13 @@ def _utcnow_iso() -> str:
 
 
 def _vote_rsi(rsi: float) -> str:
-    if rsi <= 30:
+    # Match portfolio/indicators.py technical_signal: strict <30 / >70 so
+    # an exact 30.0 or 70.0 reading is neutral, not a vote. Prevents the
+    # boundary-poisoning case where a non-actionable 2/4 split becomes
+    # an actionable 3/4 BUY because RSI happened to land exactly on 30.
+    if rsi < 30:
         return "BUY"
-    if rsi >= 70:
+    if rsi > 70:
         return "SELL"
     return "HOLD"
 
@@ -62,17 +66,26 @@ def _vote_macd(macd_hist: float) -> str:
 
 
 def _vote_ema(ema9: float, ema21: float) -> str:
-    if ema9 > ema21 * 1.005:  # 0.5% deadband matches main loop convention
+    # 0.5% deadband. Use >= / <= on the gap percentage (not strict >) to
+    # match the main loop's ema_gap_pct >= 0.5 convention. A gap of
+    # exactly 0.5% counts as a directional vote, not HOLD.
+    if ema21 <= 0:
+        return "HOLD"
+    gap_pct = (ema9 - ema21) / ema21 * 100.0
+    if gap_pct >= 0.5:
         return "BUY"
-    if ema9 < ema21 * 0.995:
+    if gap_pct <= -0.5:
         return "SELL"
     return "HOLD"
 
 
 def _vote_bb(close: float, bb_lower: float, bb_upper: float) -> str:
-    if close <= bb_lower:
+    # Strict comparison to match indicator-side convention: a close
+    # exactly on the band is at the boundary, not over it. Prevents the
+    # same boundary-poisoning that hits RSI.
+    if close < bb_lower:
         return "BUY"
-    if close >= bb_upper:
+    if close > bb_upper:
         return "SELL"
     return "HOLD"
 

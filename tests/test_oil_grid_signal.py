@@ -26,6 +26,13 @@ class TestVoteRsi:
     def test_neutral_holds(self):
         assert feed._vote_rsi(50) == "HOLD"
 
+    def test_exact_30_is_hold(self):
+        # Boundary alignment with main contract: 30.0 is neutral.
+        assert feed._vote_rsi(30) == "HOLD"
+
+    def test_exact_70_is_hold(self):
+        assert feed._vote_rsi(70) == "HOLD"
+
 
 class TestVoteMacd:
     def test_positive_hist_buys(self):
@@ -40,22 +47,42 @@ class TestVoteMacd:
 
 class TestVoteEma:
     def test_fast_above_slow_buys(self):
-        # 0.5% deadband — needs ema9 > ema21*1.005
+        # gap_pct = (106-100)/100*100 = 6 -> BUY
         assert feed._vote_ema(106, 100) == "BUY"
 
     def test_fast_below_slow_sells(self):
+        # gap_pct = (94-100)/100*100 = -6 -> SELL
         assert feed._vote_ema(94, 100) == "SELL"
 
     def test_within_deadband_holds(self):
+        # gap_pct = 0.3 -> HOLD
         assert feed._vote_ema(100.3, 100) == "HOLD"
+
+    def test_exact_half_pct_gap_votes_buy(self):
+        # gap_pct = 0.5 exactly -> BUY (matches main loop convention).
+        assert feed._vote_ema(100.5, 100) == "BUY"
+
+    def test_exact_half_pct_gap_negative_votes_sell(self):
+        assert feed._vote_ema(99.5, 100) == "SELL"
+
+    def test_zero_slow_ema_holds(self):
+        # Defensive: ema21=0 (cold start) must not divide by zero.
+        assert feed._vote_ema(106, 0) == "HOLD"
 
 
 class TestVoteBb:
-    def test_close_at_lower_band_buys(self):
-        assert feed._vote_bb(close=98, bb_lower=98, bb_upper=102) == "BUY"
+    def test_close_at_lower_band_holds(self):
+        # Boundary alignment: exactly on the band is neutral.
+        assert feed._vote_bb(close=98, bb_lower=98, bb_upper=102) == "HOLD"
 
-    def test_close_at_upper_band_sells(self):
-        assert feed._vote_bb(close=102, bb_lower=98, bb_upper=102) == "SELL"
+    def test_close_below_lower_band_buys(self):
+        assert feed._vote_bb(close=97.99, bb_lower=98, bb_upper=102) == "BUY"
+
+    def test_close_at_upper_band_holds(self):
+        assert feed._vote_bb(close=102, bb_lower=98, bb_upper=102) == "HOLD"
+
+    def test_close_above_upper_band_sells(self):
+        assert feed._vote_bb(close=102.01, bb_lower=98, bb_upper=102) == "SELL"
 
     def test_close_mid_holds(self):
         assert feed._vote_bb(close=100, bb_lower=98, bb_upper=102) == "HOLD"
@@ -145,12 +172,14 @@ class TestComputeSignal:
         from portfolio import indicators as ind_mod
         from portfolio import price_source as ps_mod
         df = _make_synthetic_df(close=70.0)
-        # 2 BUY, 2 SELL — tie -> HOLD
+        # 2 BUY, 2 SELL — tie -> HOLD.
+        # bb close must be strictly above the upper band to vote SELL after
+        # the 2026-05-11 boundary alignment.
         synthetic_ind = {
             "rsi": 25,  # BUY
             "macd_hist": 0.5,  # BUY
-            "ema9": 90, "ema21": 100,  # SELL
-            "close": 102, "bb_lower": 98, "bb_upper": 102,  # SELL
+            "ema9": 90, "ema21": 100,  # SELL (-10% gap)
+            "close": 102.1, "bb_lower": 98, "bb_upper": 102,  # SELL (>upper)
         }
         with patch.object(ps_mod, "fetch_klines", return_value=df), \
              patch.object(ind_mod, "compute_indicators",
