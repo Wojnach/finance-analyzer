@@ -151,6 +151,39 @@ WARRANT_CATALOG = {
         "commission_sek": 0,
     },
     # -----------------------------------------------------------------------
+    # Oil LONG / SHORT — Brent-tracking X5 certificates (constant leverage).
+    # Sourced 2026-05-11 from data/avanza_search_all.json (cache). OLJAB
+    # variants have tighter spreads (0.08-0.11%) than the GSCI-indexed
+    # BULL/BEAR OLJA equivalents. Used by the grid market-maker; see
+    # portfolio/grid_fisher_config.GRID_ACTIVE_INSTRUMENTS.
+    # -----------------------------------------------------------------------
+    "BULL_OLJAB_X5_AVA_2": {
+        "ob_id": "2367797",
+        "api_type": "certificate",
+        "underlying": "OIL-USD",
+        "direction": "LONG",
+        "leverage": 5.0,
+        "barrier": 0,
+        "parity": 1,
+        "name": "BULL OLJAB X5 AVA 2",
+        "issuer": "AVA",
+        "spread_pct": 0.08,
+        "commission_sek": 0,
+    },
+    "BEAR_OLJAB_X5_AVA_2": {
+        "ob_id": "2367803",
+        "api_type": "certificate",
+        "underlying": "OIL-USD",
+        "direction": "SHORT",
+        "leverage": 5.0,
+        "barrier": 0,
+        "parity": 1,
+        "name": "BEAR OLJAB X5 AVA 2",
+        "issuer": "AVA",
+        "spread_pct": 0.11,
+        "commission_sek": 0,
+    },
+    # -----------------------------------------------------------------------
     # MINI S Silver — overnight-holdable SHORT warrants (no daily reset)
     # Barrier = knockout level. Higher barrier = safer but lower leverage.
     # -----------------------------------------------------------------------
@@ -528,6 +561,8 @@ PREFERRED_INSTRUMENTS = {
     ("XAG-USD", "SHORT"): "BEAR_SILVER_X5_AVA_12",
     ("XAU-USD", "LONG"): "BULL_GULD_X5_AVA",
     ("XAU-USD", "SHORT"): "BEAR_GULD_X5_VON4",
+    ("OIL-USD", "LONG"): "BULL_OLJAB_X5_AVA_2",   # 0.08% spread, Brent-tracking
+    ("OIL-USD", "SHORT"): "BEAR_OLJAB_X5_AVA_2",  # 0.11% spread, Brent-tracking
 }
 
 # Overnight instruments — MINI warrants (no daily reset, can hold overnight)
