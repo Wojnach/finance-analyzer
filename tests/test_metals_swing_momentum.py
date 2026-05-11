@@ -114,16 +114,20 @@ def test_evaluate_entry_uses_relaxed_gates_with_momentum(monkeypatch):
 
 
 def test_evaluate_entry_rejects_below_momentum_relaxed_gates(monkeypatch):
-    """confidence=0.45 is below MOMENTUM_MIN_BUY_CONFIDENCE=0.50 → still REJECT."""
+    """confidence=0.15 is below MOMENTUM_MIN_BUY_CONFIDENCE=0.20 → still REJECT.
+
+    2026-05-11 Stage 2 follow-up: rebased from 0.45 vs 0.50 to 0.15 vs 0.20
+    after the post-penalty conf-floor reanchor (see metals_swing_config.py).
+    """
     _write_candidate(mst.MOMENTUM_STATE_FILE, age_sec=30)
     trader = _make_trader()
-    sig = _signal(confidence=0.45, buy_count=2, sell_count=1, rsi=50.0)
+    sig = _signal(confidence=0.15, buy_count=2, sell_count=1, rsi=50.0)
 
     ok, reason = trader._evaluate_entry(sig, "XAG-USD")
 
     assert not ok
-    assert "confidence 0.45" in reason
-    assert "0.5" in reason, f"Expected relaxed 0.5 threshold in reason: {reason!r}"
+    assert "confidence 0.15" in reason
+    assert "0.2" in reason, f"Expected relaxed 0.2 threshold in reason: {reason!r}"
 
 
 def test_evaluate_entry_voter_gate_also_relaxed_with_momentum(monkeypatch):

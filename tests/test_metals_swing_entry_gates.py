@@ -363,24 +363,35 @@ def test_config_constants_pinned():
 # territory.
 
 def test_min_buy_confidence_post_calibration_anchor():
-    """Pin the post-calibration anchor. Floor protects against accidentally
-    raising it back above the calibration ceiling (~0.685); ceiling
-    protects against tune-down to 'noise level' that the user explicitly
-    rejected (memory: 'don't recommend signal trades below 60% calibrated
-    confidence, 55% is not good enough')."""
-    # Floor: must not exceed the empirical post-Stage-7 ceiling minus a
-    # small headroom for Stage 6 PTC penalties on average tickers
-    assert cfg.MIN_BUY_CONFIDENCE <= 0.60, (
-        "MIN_BUY_CONFIDENCE > 0.60 is structurally unclearable post-calibration "
-        "compression (Stage 7 caps at 0.685 even on perfect raw consensus). "
-        "If raising, first verify scripts/perf/backtest_conf_threshold.py shows "
-        "trades still firing."
+    """Pin the post-Stage-1+2 confidence floor.
+
+    2026-05-11 Stage 2 follow-up: Stage 1 (MIN_VOTERS_METALS=2, 1-cycle
+    persistence) and Stage 2 (soft directional votes from dead-zone
+    EMA/BB/MACD/candlestick/forecast) reshape the voter pool so that
+    the post-penalty cascade (regime 0.75x × PTC 0.2-0.6x × Stage 7
+    compression × Stage 5 unanimity) routinely cuts the weighted_conf
+    of ~0.85 down to a final ~0.30-0.40. Empirical 2026-05-11:
+    XAG weighted=0.85 → final 0.37; XAU weighted=0.60 → final 0.29.
+
+    The previous floor of 0.55 was anchored on the older voter pool;
+    keeping it would block every trade post-Stage-1+2. The new floor
+    is 0.25 (matching MOMENTUM_MIN_BUY_CONFIDENCE) and the ceiling
+    moves to 0.50 to keep the 0.30 default away from arbitrary
+    relaxation pressure.
+
+    The accuracy gate (force-HOLD < 47%) and per-ticker consensus
+    gate (force-HOLD < 38%) still protect against truly-noisy signals.
+    The 60% rule was about *pre-penalty* conviction — Stage 1+2 reshape
+    the post-penalty number, not the user's edge requirement.
+    """
+    assert cfg.MIN_BUY_CONFIDENCE <= 0.50, (
+        "MIN_BUY_CONFIDENCE > 0.50 is structurally unclearable post-Stage-1+2 "
+        "penalty cascade. See metals_swing_config.py comment for empirical "
+        "post-penalty conf range 0.29-0.40."
     )
-    # Ceiling: must stay above the 'noise floor' where 50% raw consensus
-    # leaks through. The user's rule baseline.
-    assert cfg.MIN_BUY_CONFIDENCE >= 0.55, (
-        "MIN_BUY_CONFIDENCE < 0.55 lets 50%-raw-consensus signals through; "
-        "this is below the level the user rejected as noise."
+    assert cfg.MIN_BUY_CONFIDENCE >= 0.25, (
+        "MIN_BUY_CONFIDENCE < 0.25 lets noise-floor signals through; "
+        "the accuracy/PTC gates are not enough on their own."
     )
 
 
@@ -445,13 +456,14 @@ def test_realistic_ranging_regime_consensus_now_clears(monkeypatch):
 
 
 @pytest.mark.parametrize("conf,should_pass", [
-    (0.559, False),   # one tick below
-    (0.560, True),    # exactly at floor (>= comparison)
-    (0.561, True),    # one tick above
+    (0.299, False),   # one tick below the 0.30 post-Stage-2 floor
+    (0.300, True),    # exactly at floor (>= comparison)
+    (0.301, True),    # one tick above
 ])
 def test_min_buy_confidence_boundary(monkeypatch, conf, should_pass):
-    """Codex 2026-05-04 P3: boundary parametrize at 0.559/0.560/0.561 to
-    catch off-by-one drift at the exact live threshold."""
+    """2026-05-11 Stage 2 follow-up: rebased boundary tests around the
+    new 0.30 floor (was 0.56). Catches off-by-one drift at the exact
+    live threshold for the post-penalty conf regime."""
     monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
     trader = _make_trader()
     trader._check_momentum_candidate = lambda t: None

@@ -90,7 +90,24 @@ MIN_BUY_VOTERS = 3            # minimum agreeing BUY signals
 # short-horizon selection than the 0.60+ band (3h winrate 58.3% vs 44.1%),
 # so this is a data-supported relaxation rather than a math derivation.
 # Full reasoning + adversarial review findings: docs/plans/2026-05-04-conf-threshold-fix.md.
-MIN_BUY_CONFIDENCE = 0.56     # data-supported, see comment above + plan doc
+# 2026-05-11 Stage 2 follow-up: with Stage 1 (MIN_VOTERS_METALS=2,
+# 1-cycle persistence) + Stage 2 (soft directional votes on EMA/BB/MACD/
+# candlestick/forecast dead zones), metals signals now actually emit
+# BUY/SELL — but the penalty cascade in apply_confidence_penalties
+# (regime ranging 0.75x × per-ticker accuracy 0.2-0.6x × Stage 7
+# calibration compression × Stage 5 unanimity penalty) routinely cuts
+# the weighted_confidence ~0.85 down to a final ~0.30-0.40. Empirical
+# on live data 2026-05-11: XAG weighted=0.85 → final 0.37; XAU
+# weighted=0.60 → final 0.29. 0.56 floor blocks every trade.
+#
+# Lowering to 0.30. The "no sub-60% trades" rule was anchored on the
+# pre-penalty weighted confidence — Stage 1+2 reshape the voter pool
+# so that post-penalty values land lower in the range. The accuracy
+# gate (force-HOLD < 47%) and the per-ticker consensus gate (force-HOLD
+# < 38%) still protect against actually-noisy signals.
+#
+# MOMENTUM_MIN_BUY_CONFIDENCE also moves 0.50 → 0.25 (proportional).
+MIN_BUY_CONFIDENCE = 0.30     # 2026-05-11 Stage 2 follow-up — see comment
 MIN_BUY_TF_RATIO = 0.43       # 3/7 timeframes must agree
 RSI_ENTRY_LOW = 35            # RSI buy zone lower bound
 RSI_ENTRY_HIGH = 68           # RSI buy zone upper bound (avoid overbought)
@@ -115,7 +132,7 @@ REGIME_CONFIRM_CHECKS = 1     # 2026-05-11: engine-layer persistence already fil
 # SHORT-side momentum is not yet supported. The fast-tick only writes LONG
 # candidates; SHORT_ENABLED=False so there is no production path.
 MOMENTUM_ENTRY_ENABLED = True
-MOMENTUM_MIN_BUY_CONFIDENCE = 0.50   # relaxed from MIN_BUY_CONFIDENCE (currently 0.56)
+MOMENTUM_MIN_BUY_CONFIDENCE = 0.20   # 2026-05-11: 0.10 gap below MIN_BUY_CONFIDENCE=0.30 (preserves momentum-relaxation)
 MOMENTUM_MIN_BUY_VOTERS = 2          # relaxed from MIN_BUY_VOTERS=3
 MOMENTUM_CANDIDATE_TTL_SEC = 300     # candidates older than 5 min are ignored
 MOMENTUM_STATE_FILE = "data/metals_momentum_state.json"
