@@ -46,6 +46,7 @@
    `:root.desktop-mode .desktop-only` reveal uses `!important` so it
    overrides the `(max-width: 1023px)` `display: none !important` rule
    when both apply. See js/desktop-mode.js for the toggle. */
+:root.desktop-mode .app-main { padding: var(--sp-5) var(--sp-6); }
 :root.desktop-mode .home-grid {
   display: grid;
   grid-template-columns: 2fr 1fr;

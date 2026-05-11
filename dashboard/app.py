@@ -206,8 +206,13 @@ def _stockholm_now():
     return datetime.now(UTC).astimezone(STOCKHOLM_TZ)
 
 
-def _hours_until_stockholm_close(now=None, close_hour=21, close_minute=55):
-    """Return hours remaining until the Stockholm warrant close."""
+def _hours_until_stockholm_close(now=None, close_hour=21, close_minute=30):
+    """Return hours remaining until the Stockholm warrant close.
+
+    Defaults updated 2026-05-11 to match the unified 08:30–21:30
+    trading window (previously 21:55, tracked GoldDigger's old US-overlap
+    end). Callers that need the legacy 21:55 must pass it explicitly.
+    """
     now = (now or _stockholm_now()).astimezone(STOCKHOLM_TZ)
     close_dt = now.replace(hour=close_hour, minute=close_minute, second=0, microsecond=0)
     if now >= close_dt:
@@ -613,7 +618,7 @@ def _build_metals_context_fallback(decisions):
             or latest_decision.get("trigger")
         ),
         "tier": latest_decision.get("tier"),
-        "market_close_cet": "21:55",
+        "market_close_cet": "21:30",
         "hours_remaining": _hours_until_stockholm_close(now_sthlm),
         "positions": positions,
         "underlying": {
