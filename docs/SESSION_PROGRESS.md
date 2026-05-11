@@ -53,6 +53,28 @@ now distinguishes "fetch returned None" (degraded — skip placement) from
 cancel-armed-buys, place-buy, place-sell, place-stop, and get_quote paths
 all routed through the helper.
 
+**Persistent worker (commit `ddddf186`):** per-call executor broke
+Playwright context affinity ("cannot switch to a different thread which
+happens to have exited"). Replaced with a single long-lived executor held
+on the GridFisher instance.
+
+**Probe script (commit `04c1bf3d`):** `scripts/grid_fisher_probe.py`
+forces a synthetic signal at threshold and runs one tick in PROBE_ONLY
+mode against the live session.
+
+**Oil signal source (commit `4a32bcb4`):** `portfolio/oil_grid_signal.py`
+pulls Brent (BZ=F) klines via portfolio.price_source.fetch_klines, computes
+RSI(14) + EMA(9,21) momentum, packs into (direction, confidence).
+TTL-cached at 5 min in `data/oil_grid_signal.json`. metals_loop's grid
+adapter reads it each cycle and injects OIL-USD into the signal dict.
+
+**Security fix (commit `274e1db3`):** cookies/auth headers were leaking
+into decision-log entries when Avanza Playwright errors included the
+full request cookie header (AZAPERSISTENCE, csid, cstoken, AZACSRF).
+Added `_scrub_for_log()` that strips sensitive headers and caps free-form
+string fields at 400 chars. One-shot scrub of 17 historical entries
+applied. `/api/grid-fisher` endpoint is now safe to expose.
+
 ## Auto-Improve Session (2026-05-11 morning)
 
 **Session start:** 2026-05-11 ~08:00 UTC
@@ -3341,4 +3363,57 @@ data/metals_loop.py
 
 ### 2026-05-11 12:22 UTC | main
 696d10b4 fix(grid-fisher): isolate avanza_session calls in worker thread
+portfolio/grid_fisher.py
+
+### 2026-05-11 12:26 UTC | main
+ddddf186 fix(grid-fisher): persistent worker thread for avanza_session calls
+docs/SESSION_PROGRESS.md
+portfolio/grid_fisher.py
+
+### 2026-05-11 12:32 UTC | feat/dashboard-hours-desktop-2026-05-11
+f3c48416 feat(dashboard): unify Avanza trading hours to 08:30-21:30 Sthlm
+dashboard/trading_status.py
+docs/plans/2026-05-11-dashboard-hours-desktop.md
+portfolio/golddigger/config.py
+
+### 2026-05-11 12:32 UTC | main
+04c1bf3d feat(grid-fisher): add probe script for dry-test against live session
+scripts/grid_fisher_probe.py
+
+### 2026-05-11 12:37 UTC | feat/dashboard-hours-desktop-2026-05-11
+d2b49c5d feat(dashboard): add desktop-mode toggle button in header
+dashboard/static/css/layout.css
+dashboard/static/css/responsive.css
+dashboard/static/index.html
+dashboard/static/js/desktop-mode.js
+dashboard/static/js/main.js
+
+### 2026-05-11 12:42 UTC | feat/dashboard-hours-desktop-2026-05-11
+ab2370bb test(dashboard): update fixtures for 08:30-21:30 window + fix hint format
+dashboard/trading_status.py
+tests/test_dashboard_trading_status.py
+tests/test_golddigger.py
+
+### 2026-05-11 12:45 UTC | feat/hold-bias-reduction-2026-05-11
+3e823013 feat(signals): Stage 2 — soft directional vote on EMA/BB/MACD dead zones
+portfolio/signal_engine.py
+tests/test_consensus.py
+tests/test_signal_hold_bias_reduction.py
+
+### 2026-05-11 12:47 UTC | main
+4a32bcb4 feat(grid-fisher): standalone OIL-USD signal source
+CLAUDE.md
+data/metals_loop.py
+docs/GRID_FISHER.md
+portfolio/oil_grid_signal.py
+
+### 2026-05-11 12:50 UTC | feat/grid-fisher-followup-2026-05-11
+c513eb1e feat(grid-fisher): OIL-USD signal feed for grid market-maker
+data/metals_loop.py
+data/oil_loop.py
+portfolio/oil_grid_signal.py
+tests/test_oil_grid_signal.py
+
+### 2026-05-11 12:52 UTC | main
+274e1db3 security(grid-fisher): scrub cookies + auth headers from decision log
 portfolio/grid_fisher.py
