@@ -1,0 +1,60 @@
+You are doing an ADVERSARIAL code review of the infrastructure subsystem (atomic I/O, locking, subprocess utils, dashboard, scheduled-task scripts) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files:
+- portfolio/file_utils.py
+- portfolio/shared_state.py
+- portfolio/process_lock.py
+- portfolio/subprocess_utils.py
+- portfolio/config_validator.py
+- portfolio/notification_text.py
+- portfolio/message_store.py
+- portfolio/shadow_registry.py
+- portfolio/vector_memory.py
+- portfolio/backtester.py
+- dashboard/app.py
+- dashboard/auth.py
+- dashboard/export_static.py
+- dashboard/house_blueprint.py
+- dashboard/system_status.py
+- dashboard/trading_status.py
+- scripts/check_critical_errors.py
+- scripts/fix_agent_dispatcher.py
+- scripts/win/*.bat
+- scripts/win/*.ps1
+- conftest.py
+
+Project rules:
+- file_utils is the canonical atomic I/O layer. Raw json.loads(open(...).read()) is a defect anywhere in the codebase.
+- atomic_append_jsonl must be safe against concurrent appenders + log rotation (the rotation race was just fixed in commit 3b623129).
+- Dashboard auth: ?token=<dashboard_token> once, then 1-year rolling cookie. Bearer header for CLI clients. Cloudflare Access header bypasses local auth. NEVER expose API keys.
+- PF-FixAgentDispatcher: per-category cooldown + exponential backoff (30m → 2h → 12h → effectively disabled). Tool allow-list = Read,Edit,Bash (no commit/push). `data/fix_agent.disabled` flag-file disables it entirely.
+- Scheduled tasks must `set CLAUDECODE=` (the CLAUDECODE inheritance bug caused a 34h outage Feb 18-19).
+- Singleton process lock: bat wrapper exits if schtasks restart hits the lock — kill orphans first.
+
+Adversarial focus:
+1. file_utils.atomic_write_json: race when two processes write the same path; tmp file leak on crash; encoding mismatch.
+2. atomic_append_jsonl + log rotation race repeat (was just patched).
+3. process_lock: stale lockfile (PID reused after reboot), non-cleanup on SIGKILL.
+4. config_validator: schema drift; loading config.json (symlink to external file with API keys) — never log it.
+5. Dashboard auth: token reuse / replay; cookie set with secure/HttpOnly flags; Cloudflare header trust chain.
+6. Dashboard endpoints (33 of them): any that mutate state via GET; any that don't atomic-read.
+7. subprocess_utils: shell-injection from user-derived args; missing universal_newlines / encoding=utf-8; orphan child on parent SIGTERM.
+8. message_store: PII / secret persistence (Telegram tokens, BankID).
+9. fix_agent_dispatcher: backoff state corruption; spawns even when fix_agent.disabled present; tool-allowlist drift.
+10. check_critical_errors: TZ comparison bug on rolling 7d window.
+11. PowerShell scripts: ExecutionPolicy bypass, hardcoded paths, missing -ErrorAction.
+12. BAT scripts: CLAUDECODE not cleared before claude -p call.
+13. conftest.py: fixtures that mutate global state without yield/cleanup.
+14. vector_memory: embedding vector dim mismatch; unbounded growth.
+15. shadow_registry: registry write race when multiple producers.
+
+Output format — strict markdown:
+# Codex adversarial review: infrastructure
+## Summary
+## P0 — Blockers
+## P1 — High
+## P2 — Medium
+## P3 — Low
+## Tests missing
+
+Be concrete. Cite line numbers. No false-positive padding.

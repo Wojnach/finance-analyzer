@@ -1,0 +1,62 @@
+You are doing an ADVERSARIAL code review of the metals-core subsystem (metals/oil/crypto swing loops, grid-fisher market-maker, fishing tools) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files (read these and ONLY these):
+- data/metals_loop.py
+- data/crypto_loop.py
+- data/oil_loop.py
+- portfolio/grid_fisher.py
+- portfolio/grid_fisher_config.py
+- portfolio/grid_tiers.py
+- portfolio/oil_grid_signal.py
+- portfolio/fin_fish.py
+- portfolio/fin_fish_manager.py
+- portfolio/fin_snipe.py
+- portfolio/fin_snipe_manager.py
+- portfolio/fish_instrument_finder.py
+- portfolio/fish_monitor_smart.py
+- portfolio/gold_precompute.py
+- portfolio/silver_precompute.py
+- portfolio/oil_precompute.py
+- portfolio/crypto_precompute.py
+- portfolio/iskbets.py
+- portfolio/price_targets.py
+- portfolio/orb_predictor.py
+- portfolio/orb_backtest.py
+- portfolio/orb_postmortem.py
+- portfolio/mstr_loop/  (recurse)
+- portfolio/elongir/   (recurse)
+- portfolio/golddigger/ (recurse)
+
+Project rules:
+- Metals loop is a SEPARATE process from main Layer 1 loop. 60s cycle with embedded 10s silver fast-tick.
+- Avanza commodity warrants trade 08:15-21:55 CET (NOT 17:25). Regular Swedish equities 09:00-17:25 CET.
+- Grid fisher: 2-tier buy ladders (1200 SEK/leg, 6500 SEK global cap), with-signal direction only, EOD-flat.
+- Use forward slashes in paths. Atomic I/O via file_utils.
+- Stop-loss via /_api/trading/stoploss/new only.
+- Local LLM (Ministral-8B / Chronos-2 / Qwen3-8B) runs through GPU lock.
+- Live prices first — silver warrants are volatile, never trade on stale data.
+- Never re-enter same warrant on signal flip without bounce confirmation (per memory rules).
+
+Adversarial focus:
+1. Trading-hours mismatch — commodity warrants vs equities (DST-aware).
+2. Order races between metals loop and grid fisher (both trading XAG/XAU).
+3. EOD-flat logic: cutoff time wrong, partial-fill leg not closed.
+4. Stop-loss API misuse (Mar 3 instant-fill incident repeat).
+5. MINI warrant barrier proximity check before placing stops.
+6. Order lock / process lock contention with main loop and golddigger.
+7. Silent failure on Avanza session expiry (BankID 24h re-auth) — silent retry vs surface.
+8. Grid sizing: cap not enforced on cumulative open exposure, only per-leg.
+9. Precompute staleness: data fetched once at boot then reused all day.
+10. fin_snipe/fin_fish: hardcoded paths, missing tz, wrong rounding for Swedish krona vs USD.
+11. ORB predictor look-ahead bias.
+
+Output format — strict markdown:
+# Codex adversarial review: metals-core
+## Summary
+## P0 — Blockers
+## P1 — High
+## P2 — Medium
+## P3 — Low
+## Tests missing
+
+Be concrete. Cite line numbers. No false-positive padding.

@@ -1,0 +1,44 @@
+You are doing an ADVERSARIAL code review of the signals-modules subsystem (all 50 detector modules in portfolio/signals/) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files:
+- portfolio/signals/*.py — the 50 detector modules. 33 active + 19 disabled-pending-validation.
+
+Active detectors include: trend, momentum, volume_flow, volatility, candlestick, structure, fibonacci, smart_money, heikin_ashi, mean_reversion, calendar_seasonal, macro_regime, momentum_factors, news_event, econ_calendar, forecast, claude_fundamental, futures_flow, metals_cross_asset, dxy_cross_asset, cot_positioning, credit_spread.
+
+Disabled-pending: ml_classifier_disabled (force-HOLD), oscillators, orderbook_flow, smart_money (disabled globally 2026-04-24), mahalanobis_turbulence, crypto_evrp, futures_basis, hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio, statistical_jump_regime, network_momentum, ovx_metals_spillover, xtrend_equity_spillover, complexity_gap_regime, realized_skewness.
+
+Project rules:
+- Every detector must return a verdict + confidence in a consistent shape (read portfolio/signal_utils.py to confirm).
+- Force-HOLD via DISABLED_SIGNALS list in signal_engine.py — modules can still register but their vote is ignored.
+- Each detector must be horizon-aware (some signals work at 3h but fail at 1d) — single global verdict is a bug.
+- Live prices only; no precomputed signal data shall sneak in.
+- Detectors must handle empty/short OHLCV gracefully (early-data startup).
+- Look-ahead bias is the #1 silent failure: signals computed using future bars.
+
+Adversarial focus per detector:
+1. Look-ahead bias: indexing df.iloc[-1] but referencing future close; using talib funcs that need full-bar; using pandas .shift incorrectly.
+2. NaN handling: ta libs leak NaN at warm-up; detector returns BUY/SELL when underlying value is NaN.
+3. Division-by-zero / log of non-positive.
+4. Hardcoded thresholds that don't match documented values (RSI<30, MACD cross, etc).
+5. Tz-naive timestamps mixed with tz-aware.
+6. Signature drift: missing or extra args vs registry expectation.
+7. Detectors that silently swallow ImportError when an optional dep is missing — produce silent HOLD with no log.
+8. Disabled detectors that still side-effect global state on import.
+9. Inconsistent return for empty input (some return HOLD, others return None, others raise).
+10. Module-level network calls / file reads at import time — bad for tests.
+11. Per-ticker gating missing: signal works for crypto but is applied to metals.
+12. Cache pollution: shared dicts not keyed by ticker.
+
+Output format — strict markdown:
+# Codex adversarial review: signals-modules
+## Summary
+(call out the worst 3-5 detectors by name)
+
+## P0 — Blockers
+- path:line — Why it bites: ... Fix: ...
+## P1 — High
+## P2 — Medium
+## P3 — Low
+## Tests missing
+
+Be concrete. Cite file/line/detector. No false-positive padding. 50 files is a lot — don't pad with style nits.

@@ -3650,3 +3650,76 @@ data/metals_loop.py
 portfolio/avanza_account_check.py
 portfolio/avanza_session.py
 tests/test_avanza_account_check.py
+
+### 2026-05-11 14:40 UTC | main
+0caa73eb fix(avanza-account): run verify call on worker thread to dodge asyncio
+docs/SESSION_PROGRESS.md
+portfolio/avanza_account_check.py
+
+### 2026-05-11 14:48 UTC | main
+0d457368 fix(avanza-account): ISK + KF + pension legally trade warrants
+portfolio/avanza_account_check.py
+tests/test_avanza_account_check.py
+
+### 2026-05-11 14:49 UTC | main
+95aa9fe2 feat(grid-fisher): re-enable live placement after account confirmed
+portfolio/grid_fisher_config.py
+
+### 2026-05-11 14:55 UTC | feat/llm-prewarmer-2026-05-11
+25a80b76 feat(llm): Stage 3 Phase 1 — in-process pre-warm of next-slot model after flush
+portfolio/llm_batch.py
+portfolio/llm_prewarmer.py
+tests/test_llm_prewarmer.py
+
+### 2026-05-11 15:05 UTC | feat/llm-prewarmer-2026-05-11
+4099b9d0 fix(stage3): codex review — restart-stale guard, log rotation, tail-read state
+portfolio/llm_prewarmer.py
+portfolio/log_rotation.py
+tests/test_llm_prewarmer.py
+
+### 2026-05-11 17:00 UTC | main (no code changes — docs only)
+Adversarial review session via /fgl. Partitioned the codebase into 8 disjoint subsystems
+(signals-core, orchestration, portfolio-risk, metals-core, avanza-api, signals-modules,
+data-external, infrastructure). Spawned 8 codex `exec` background tasks in parallel against
+worktree `Q:/fa-adv-2026-05-11` with named baseline branches `review/baseline-{1..8}-<sub>`;
+spawned 8 Claude `general-purpose` subagents on identical prompts. Both reviews are read-only.
+
+**Meta-finding:** codex hit Windows PowerShell sandbox-policy friction and fell back to
+js_repl, exhausting its turn budget before emitting the final P0/P1/P2 report. Claude
+subagents produced structured output on all 8 subsystems. Codex's mid-pass prose was
+extracted into `*-codex-prose.md` and used as a complementary signal layer.
+
+Outputs:
+- `docs/adversarial-review-2026-05-11/00-PARTITION.md`
+- `docs/adversarial-review-2026-05-11/{1..8}-<sub>-claude.md`
+- `docs/adversarial-review-2026-05-11/{1..8}-<sub>-codex-prose.md`
+- `docs/adversarial-review-2026-05-11/{1..8}-<sub>-codex.md` (raw transcripts kept for audit)
+- `docs/adversarial-review-2026-05-11/99-SYNTHESIS.md` — cross-critique + 20-item P0/P1 punch list
+
+**Top P0 themes** (synthesized from both reviews):
+1. `claude_gate` bypass in `bigbet.py` direct subprocess + `pf-agent.bat` fallback (silent
+   exit-0 failure class that motivated the gate after the Mar–Apr 2026 outage).
+2. Stop-loss + MINI barrier proximity: `compute_stop_levels` has no barrier check;
+   `grid_fisher.cancel_order` fallback if `cancel_stop_loss` missing; barrier check fires
+   only on opening buys, not on stops against existing inventory (Mar-3 regression class).
+3. Min order size: 500 SEK default in `trade_validation`, `kelly_sizing`, `kelly_metals`
+   vs the documented 1000 SEK floor and what `avanza/trading.py` enforces.
+4. `signal_db` shares one sqlite3 connection across 8 threads; `try/except Exception` masks
+   the resulting `ProgrammingError` → silent dual-write divergence with JSONL.
+5. `dashboard/app.py:/api/iskbets` returns unfiltered config dict; in-memory config caches
+   in `dashboard/app.py:_cache` and `dashboard/auth.py:_CFG_VALUE` keep secrets resident.
+6. `MSTR_LOOP_PHASE=live` gated only by env var — no approval token, violates shadow-only rule.
+7. `mahalanobis_turbulence._cached(...)` arg-order signature drift → TypeError on first
+   call after re-enable (currently in DISABLED_SIGNALS so latent).
+8. `claude_fundamental._cache[tier]["ts"]` is bumped BEFORE bg refresh thread runs;
+   silent permanent HOLD if the refresh fails.
+9. Avanza `_with_browser_recovery` holds `_pw_lock` across 15-30 s relaunch; cross-process
+   2 s `OrderLockBusyError` drops orders during the gap.
+10. `http_retry.fetch_json` calls `raise_for_status()` AFTER the retry loop; 4xx/401/403
+    swallowed by bare-except and returned as `None`, indistinguishable from transient outage.
+
+Also resolved two stale critical-errors entries (avanza_account_mismatch 14:39 and 14:41)
+that were already fixed by commits 0caa73eb + 0d457368 but had no resolution journal entry.
+
+**Cleanup:** worktree `Q:/fa-adv-2026-05-11` and the eight `review/baseline-*` branches
+removed after the synthesis was committed and pushed.
