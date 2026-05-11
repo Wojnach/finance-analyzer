@@ -443,3 +443,116 @@ class TestCancelArmedBuys:
         assert n == 3
         assert len(fake_session.cancelled) == 3
         assert all(t.status == ORDER_CANCELLED for t in inst.buy_ladder)
+
+
+# ---------------------------------------------------------------------------
+# tick() — main entry
+# ---------------------------------------------------------------------------
+
+
+class TestTick:
+    def test_skips_when_disabled(self, fisher, fake_session):
+        fisher._enabled = False
+        report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
+                                                       "confidence": 0.7}})
+        assert report.get("skipped_reason") == "disabled"
+        assert fake_session.placed_buys == []
+
+    def test_skips_instrument_without_signal(self, fisher, fake_session):
+        # XAU-USD direction missing entirely
+        report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
+                                                       "confidence": 0.7}})
+        # XAG placed; the others skipped
+        assert report["placements"] == 3
+        # Check the instrument reports include no_direction for XAU-USD
+        # (and OIL-USD when in catalog).
+        all_skips = [v.get("skip") for v in report["instruments"].values()
+                     if v.get("ticker") != "XAG-USD"]
+        assert any(s == "no_direction" for s in all_skips)
+
+    def test_below_min_confidence_skipped(self, fisher, fake_session):
+        report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
+                                                       "confidence": 0.3}})
+        assert report["placements"] == 0
+        skip = next(v["skip"] for v in report["instruments"].values()
+                    if v.get("ticker") == "XAG-USD")
+        assert "low_conf" in skip
+
+    def test_signal_long_arms_bull_only(self, fisher, fake_session):
+        # LONG signal → BULL_SILVER armed; BEAR_SILVER skipped
+        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
+                                              "confidence": 0.7}})
+        bull = fisher.state.by_instrument["1650161"]
+        bear = fisher.state.by_instrument["2286417"]
+        assert bull.active_direction == "LONG"
+        assert bear.active_direction == "SHORT"
+        assert len(bull.armed_buy_tiers()) > 0
+        assert len(bear.armed_buy_tiers()) == 0
+
+    def test_signal_flip_cancels_old_side(self, fisher, fake_session):
+        # First tick: LONG → BULL fills its ladder
+        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
+                                              "confidence": 0.7}})
+        bull = fisher.state.by_instrument["1650161"]
+        assert len(bull.armed_buy_tiers()) == 3
+        n_cancels_before = len(fake_session.cancelled)
+        # Second tick: signal flips SHORT → BULL's armed buys cancelled,
+        # BEAR starts placing.
+        fisher.tick(signal_data={"XAG-USD": {"direction": "SHORT",
+                                              "confidence": 0.7}})
+        # BULL's buys cancelled — 3 new cancellations against Avanza.
+        assert len(fake_session.cancelled) >= n_cancels_before + 3
+        # BEAR is now placing.
+        bear = fisher.state.by_instrument["2286417"]
+        assert len(bear.armed_buy_tiers()) == 3
+
+    def test_global_halt_persists(self, fisher, fake_session, monkeypatch):
+        # Make halt trigger on tiny loss
+        monkeypatch.setattr(gf, "GRID_PER_SESSION_LOSS_LIMIT_SEK", 1)
+        fisher.state.global_session_pnl_sek = -100
+        report = fisher.tick(signal_data={})
+        assert report.get("halted")
+        assert fisher.state.halted
+
+    def test_eod_sweep_cancels_buys_close_to_close(self, fisher, fake_session):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        fisher.place_buy_ladder(inst, bid=42.50)
+        # Sweep window: 8 minutes before close
+        fisher.tick(signal_data={}, eod_minutes_remaining=8.0)
+        # Buys all cancelled via session
+        assert len(fake_session.cancelled) == 3
+
+    def test_eod_market_flat_at_zero_minutes(self, fisher, fake_session):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        inst.inventory_units = 24
+        inst.avg_entry_price = 42.50
+        fisher.tick(signal_data={}, eod_minutes_remaining=2.0)
+        # Aggressive sell placed for inventory
+        sell_calls = [s for s in fake_session.placed_sells
+                      if s["ob_id"] == "1650161"]
+        assert len(sell_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# minutes_until_eod
+# ---------------------------------------------------------------------------
+
+
+class TestMinutesUntilEod:
+    def test_returns_finite_minutes(self):
+        import datetime as _dt
+        now = _dt.datetime(2026, 5, 11, 12, 0, 0, tzinfo=_dt.timezone.utc)
+        mins = gf.minutes_until_eod(now)
+        # 14:00 Stockholm in May (DST = CEST = UTC+2), cutoff at 21:55.
+        # Expected window ~ 7h55m (475 min) on a CEST day.
+        assert 400 < mins < 600
+
+    def test_after_cutoff_rolls_to_next_day(self):
+        import datetime as _dt
+        # 22:00 Stockholm CEST = 20:00 UTC. Cutoff already passed.
+        now = _dt.datetime(2026, 5, 11, 20, 30, 0, tzinfo=_dt.timezone.utc)
+        mins = gf.minutes_until_eod(now)
+        # > 23 hours away
+        assert mins > 60 * 23

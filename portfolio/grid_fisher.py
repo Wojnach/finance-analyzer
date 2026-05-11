@@ -248,6 +248,43 @@ def _today_session_id() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
 
 
+# Default warrant trading day-end in Stockholm local time. Avanza warrants
+# trade until ~22:00 CET; we cut off 5 minutes earlier to give cancel/
+# sell orders time to round-trip. The exact close varies with DST; using
+# zoneinfo lets python pick the correct offset automatically.
+_EOD_LOCAL_HOUR = 21
+_EOD_LOCAL_MINUTE = 55
+_EOD_TZ_NAME = "Europe/Stockholm"
+
+
+def minutes_until_eod(now_utc: Optional[_dt.datetime] = None) -> float:
+    """Minutes until the grid fisher's day-end cutoff in Europe/Stockholm.
+
+    Returns a non-negative float; if the cutoff has already passed for the
+    day, returns the minutes-until-tomorrow's cutoff (so the caller can
+    detect with ``< EOD_SWEEP_MINUTES_BEFORE`` only during the active
+    window). Returns ``float("inf")`` if zoneinfo is unavailable so the
+    caller never triggers EOD on the failure path.
+    """
+    try:
+        import zoneinfo  # noqa: PLC0415 — optional import to keep startup cheap
+    except ImportError:
+        return float("inf")
+    try:
+        tz = zoneinfo.ZoneInfo(_EOD_TZ_NAME)
+    except Exception:  # noqa: BLE001 — missing tzdata
+        return float("inf")
+    now = now_utc or _dt.datetime.now(_dt.timezone.utc)
+    local = now.astimezone(tz)
+    cutoff = local.replace(
+        hour=_EOD_LOCAL_HOUR, minute=_EOD_LOCAL_MINUTE, second=0, microsecond=0,
+    )
+    if cutoff <= local:
+        cutoff = cutoff + _dt.timedelta(days=1)
+    delta = cutoff - local
+    return delta.total_seconds() / 60.0
+
+
 def _seed_state_for_active_instruments(
     state: GridFisherState,
     catalog: dict[str, dict[str, Any]],
@@ -270,10 +307,17 @@ def _seed_state_for_active_instruments(
             if ob in state.by_instrument:
                 continue
             cert_name = cert_by_ob.get(ob, f"unknown_ob_{ob}")
+            # Each instrument has a FIXED natural direction baked in by
+            # which cert it is (BULL=LONG, BEAR=SHORT). We store it as
+            # active_direction at seed time so the tick() loop can match
+            # it against the signal direction. Existing inventory + sells
+            # are unaffected by signal flips because they reference an
+            # instrument that already chose its side.
             state.by_instrument[ob] = InstrumentState(
                 ob_id=ob,
                 ticker=ticker,
                 cert_name=cert_name,
+                active_direction=direction,
             )
 
 
@@ -913,6 +957,275 @@ class GridFisher:
                   fill_price=filled.fill_price,
                   sell_price=sell_price, stop_price=stop_price,
                   sell_order_id=sell_order_id, stop_id=new_stop_id)
+
+    # ---- session entry ----------------------------------------------------
+
+    def tick(
+        self,
+        *,
+        signal_data: Optional[dict[str, Any]] = None,
+        prices: Optional[dict[str, dict[str, Any]]] = None,
+        eod_minutes_remaining: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Run one cycle.
+
+        Args:
+            signal_data: ticker -> {direction, confidence, adx?, atr_pct?}.
+                Used to gate placement and decide direction. If a ticker is
+                missing, that instrument is left alone.
+            prices: ob_id -> {bid, ask, last, underlying_price?}. Bid is
+                required for ladder placement.
+            eod_minutes_remaining: if not None and <= EOD_SWEEP_MINUTES_BEFORE,
+                runs the sweep instead of placing new orders. If <=
+                EOD_MARKET_SELL_MINUTES_BEFORE, also market-sells inventory.
+
+        Returns a structured summary for the caller to log.
+        """
+        from portfolio.grid_fisher_config import (
+            GRID_EOD_MARKET_SELL_MINUTES_BEFORE,
+            GRID_EOD_SWEEP_MINUTES_BEFORE,
+        )
+
+        report: dict[str, Any] = {
+            "started_at": self.now_fn(),
+            "halted": self.state.halted,
+            "placements": 0,
+            "rotations": 0,
+            "cancels": 0,
+            "eod_swept": False,
+            "instruments": {},
+        }
+
+        if not self._enabled:
+            report["skipped_reason"] = "disabled"
+            return report
+
+        # Session rollover before anything else so per-instrument counters
+        # don't get clobbered mid-cycle.
+        if roll_session_if_new_day(self.state):
+            self._log("session_roll", session_id=self.state.session_id)
+
+        # Reconcile state with live Avanza before deciding new actions.
+        signal_data = signal_data or {}
+        prices = prices or {}
+        try:
+            open_orders_raw = self.session.get_open_orders() or []
+            positions_raw = self.session.get_positions() or []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("grid_fisher.tick: reconcile fetch failed: %s", exc)
+            self._log("tick_fetch_failed", error=str(exc))
+            self._persist()
+            return {**report, "error": "reconcile_fetch_failed"}
+
+        open_order_ids = {str(o.get("orderId") or o.get("id") or "")
+                          for o in open_orders_raw
+                          if o.get("orderId") or o.get("id")}
+        reconcile = reconcile_against_live(
+            self.state, open_order_ids, positions_raw,
+        )
+        for ob, tier, price in reconcile.filled_buys:
+            inst = self.state.by_instrument[ob]
+            self._log("fill_buy", ob_id=ob, ticker=inst.ticker, tier=tier,
+                      fill_price=price)
+            self.rotate_on_buy_fill(inst, tier)
+            report["rotations"] += 1
+        for ob, tier, price in reconcile.filled_sells:
+            inst = self.state.by_instrument[ob]
+            self._log("fill_sell", ob_id=ob, ticker=inst.ticker, tier=tier,
+                      fill_price=price)
+        for ob, tier in reconcile.cancelled_buys:
+            inst = self.state.by_instrument[ob]
+            self._log("external_cancel_buy", ob_id=ob, ticker=inst.ticker,
+                      tier=tier)
+        for ob, tier in reconcile.cancelled_sells:
+            inst = self.state.by_instrument[ob]
+            self._log("external_cancel_sell", ob_id=ob,
+                      ticker=inst.ticker, tier=tier)
+        for ob, cached, live in reconcile.inventory_drift:
+            self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+
+        # Global halt check (after fills are realised so the latest P&L is
+        # reflected).
+        halt_reason = should_halt_global(self.state)
+        if halt_reason:
+            self.state.halted = True
+            self.state.halt_reason = halt_reason
+            self._log("halt_global", reason=halt_reason)
+            self._persist()
+            return {**report, "halted": True, "halt_reason": halt_reason}
+
+        # EOD handling — only sweep if we have a remaining-minutes value.
+        if eod_minutes_remaining is not None:
+            if eod_minutes_remaining <= GRID_EOD_MARKET_SELL_MINUTES_BEFORE:
+                report["eod_swept"] = True
+                self.eod_market_flat()
+                self._persist()
+                return report
+            if eod_minutes_remaining <= GRID_EOD_SWEEP_MINUTES_BEFORE:
+                report["eod_swept"] = True
+                self.eod_cancel_buys()
+                self._persist()
+                return report
+
+        # Place / re-arm ladders per instrument.
+        for ob_id, inst in self.state.by_instrument.items():
+            ticker = inst.ticker
+            sig = signal_data.get(ticker) or {}
+            direction = sig.get("direction")
+            confidence = float(sig.get("confidence") or 0.0)
+            adx = sig.get("adx")
+
+            instr_report: dict[str, Any] = {
+                "ticker": ticker,
+                "direction": direction,
+                "confidence": confidence,
+                "armed_buys": 0,
+                "placed": 0,
+            }
+
+            # No signal or under-confidence => don't ARM new direction, but
+            # leave existing inventory + sells alone.
+            if not direction or direction not in ("LONG", "SHORT"):
+                instr_report["skip"] = "no_direction"
+                report["instruments"][ob_id] = instr_report
+                continue
+            if confidence < self._min_conf:
+                instr_report["skip"] = f"low_conf<{self._min_conf}"
+                report["instruments"][ob_id] = instr_report
+                continue
+
+            # Trend filter — high ADX => skip counter-trend placement.
+            if adx is not None and adx > self._adx_trend_filter:
+                # If signal already aligns with the trend direction, allow.
+                # We cannot infer trend direction from ADX alone, so we
+                # accept the signal at face value — the *signal* is the
+                # consensus, and consensus in a high-ADX regime is
+                # presumed with-trend.
+                pass
+
+            # Each instrument has a FIXED natural direction from the
+            # catalog (BULL=LONG, BEAR=SHORT) baked in at seed time.
+            # If the signal points the OTHER way, this instrument is on
+            # the wrong side of the market — cancel any armed buys
+            # (don't keep fishing into a moving signal) and skip the
+            # placement step. Existing inventory + sell ladder + stop
+            # are left alone so the original position can exit on its
+            # own terms.
+            if inst.active_direction != direction:
+                cancelled = self.cancel_armed_buys(inst)
+                report["cancels"] += cancelled
+                instr_report["skip"] = "signal_direction_mismatch"
+                instr_report["cancelled"] = cancelled
+                report["instruments"][ob_id] = instr_report
+                continue
+
+            # Cooldown check — set after we last cancelled buys on this
+            # instrument (signal flipped away then back too quickly).
+            if inst.in_cooldown(self.now_fn()):
+                instr_report["skip"] = "cooldown"
+                report["instruments"][ob_id] = instr_report
+                continue
+
+            # Resolve bid from the prices dict, falling back to a fresh
+            # quote against the live session when the caller didn't supply
+            # one. metals_loop's internal prices dict is keyed by symbolic
+            # name (e.g. 'silver_bull'), not orderbook id, so the fallback
+            # path is the production norm.
+            ob_prices = prices.get(ob_id) or prices.get(ticker) or {}
+            bid = ob_prices.get("bid")
+            if not bid or bid <= 0:
+                try:
+                    quote = self.session.get_quote(ob_id) or {}
+                    bid = float(quote.get("buy") or 0)
+                except Exception as exc:  # noqa: BLE001
+                    self._log("quote_fetch_failed", ob_id=ob_id,
+                              ticker=ticker, error=str(exc))
+                    bid = 0
+            if not bid or bid <= 0:
+                instr_report["skip"] = "no_bid"
+                report["instruments"][ob_id] = instr_report
+                continue
+
+            cat = self._catalog_for(ob_id) or {}
+            placed = self.place_buy_ladder(
+                inst, bid=float(bid),
+                underlying_price=ob_prices.get("underlying_price"),
+                barrier=cat.get("barrier") if cat.get("barrier") else None,
+                leverage=cat.get("leverage"),
+            )
+            report["placements"] += placed
+            instr_report["placed"] = placed
+            instr_report["armed_buys"] = len(inst.armed_buy_tiers())
+            report["instruments"][ob_id] = instr_report
+
+        # Tidy in-memory state and persist.
+        for inst in self.state.by_instrument.values():
+            prune_terminal_orders(inst)
+        self._persist()
+        return report
+
+    # ---- EOD ---------------------------------------------------------------
+
+    def eod_cancel_buys(self) -> int:
+        """Cancel every armed buy across all instruments. Sell ladders
+        and stop-losses are LEFT IN PLACE so existing inventory keeps
+        its exit path."""
+        n = 0
+        for inst in self.state.by_instrument.values():
+            n += self.cancel_armed_buys(inst)
+        self._log("eod_cancel_buys", count=n)
+        return n
+
+    def eod_market_flat(self) -> int:
+        """Force-flat every position via market sell (limit at bid - 1%
+        to ensure fill). Cancels remaining armed sells + stops first.
+
+        Returns the number of instruments touched.
+        """
+        n = 0
+        for inst in self.state.by_instrument.values():
+            if inst.inventory_units <= 0:
+                continue
+            # Cancel any armed sell tiers (don't double-up volume).
+            for tier in list(inst.sell_ladder):
+                if tier.status == ORDER_ARMED and tier.order_id:
+                    try:
+                        self.session.cancel_order(tier.order_id)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("eod sell cancel failed: %s", exc)
+                    tier.status = ORDER_CANCELLED
+            # Cancel stop.
+            if inst.stop_loss_id:
+                try:
+                    self.session.cancel_order(inst.stop_loss_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("eod stop cancel failed: %s", exc)
+                inst.stop_loss_id = None
+            # Place aggressive limit at last seen price - 1% as a market-
+            # equivalent (Avanza warrants can't post true market orders).
+            # Caller is expected to have refreshed quotes before tick.
+            try:
+                quote = self.session.get_quote(inst.ob_id)
+                bid = float((quote or {}).get("buy") or 0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("eod quote fetch failed for %s: %s",
+                               inst.ob_id, exc)
+                bid = inst.avg_entry_price
+            if bid <= 0:
+                bid = inst.avg_entry_price
+            aggressive = round(max(bid * 0.99, 0.01), 2)
+            try:
+                self.session.place_sell_order(
+                    inst.ob_id, aggressive, inst.inventory_units,
+                )
+                self._log("eod_market_sell", ob_id=inst.ob_id,
+                          ticker=inst.ticker, qty=inst.inventory_units,
+                          price=aggressive)
+                n += 1
+            except Exception as exc:  # noqa: BLE001
+                self._log("eod_market_sell_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker, error=str(exc))
+        return n
 
     # ---- direction handling -----------------------------------------------
 
