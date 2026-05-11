@@ -299,6 +299,20 @@ def flush_llm_batch():
     # arbitrary large counters.
     _ss._full_llm_cycle_count += 1
 
+    # 2026-05-11 (feat/llm-prewarmer Stage 3 Phase 1): pre-warm the NEXT
+    # LLM in rotation right now, while we still hold no Chronos/gpu_gate.
+    # Goal: by the time the *next* loop cycle hits (~60 s away), the
+    # required model is already resident — Chronos's gpu_gate("chronos",
+    # timeout=30) no longer races a mid-flight cold swap. The prewarmer
+    # contract is exception-safe (NEVER raises), but we wrap it in an
+    # outer try/except as a second backstop because a broken prewarmer
+    # must not cascade into the flush path.
+    try:
+        from portfolio.llm_prewarmer import prewarm_next_model
+        prewarm_next_model(_ss._full_llm_cycle_count)
+    except Exception as e:
+        logger.warning("llm prewarmer dispatch failed (non-fatal): %s", e)
+
     return results
 
 
