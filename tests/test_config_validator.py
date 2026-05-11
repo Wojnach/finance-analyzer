@@ -15,6 +15,7 @@ def _valid_config():
     return {
         "telegram": {"token": "123:ABC", "chat_id": "456"},
         "alpaca": {"key": "ak_test", "secret": "sk_test"},
+        "binance": {"key": "bk_test", "secret": "bs_test"},
         "mistral_api_key": "mk_test",
         "iskbets": {"min_bigbet_conditions": 2},
         # Optional keys — required for no-warn test
@@ -82,7 +83,7 @@ def test_empty_alpaca_key():
 
 def test_multiple_missing_keys():
     errors = validate_config({})
-    assert len(errors) == 4  # all 4 required keys missing
+    assert len(errors) == 6  # all 6 required keys missing (telegram, alpaca, binance)
 
 
 # --- validate_config_file ---

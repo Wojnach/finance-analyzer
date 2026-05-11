@@ -1,6 +1,6 @@
 """Signal registry — plugin system for modular signal management.
 
-Signals register themselves via @register_signal decorator. signal_engine.py
+Enhanced signals register via register_enhanced(). signal_engine.py
 discovers all signals from the registry instead of hardcoded lists.
 """
 import importlib
@@ -10,8 +10,6 @@ from collections.abc import Callable
 
 logger = logging.getLogger("portfolio.signal_registry")
 
-# Registry storage
-_CORE_SIGNALS: dict[str, dict] = {}
 _ENHANCED_SIGNALS: dict[str, dict] = {}
 
 
@@ -22,13 +20,6 @@ def register_signal(name: str, signal_type: str = "enhanced",
 
     Can be used as a decorator on compute functions, or called directly
     to register signals programmatically.
-
-    Args:
-        name: Signal name (e.g., "trend", "rsi")
-        signal_type: "core" or "enhanced"
-        module_path: Full module path (e.g., "portfolio.signals.trend")
-        func_name: Function name to call (e.g., "compute_trend_signal")
-        requires_macro: Whether this signal needs macro context (only macro_regime)
     """
     def decorator(func):
         entry = {
@@ -39,10 +30,7 @@ def register_signal(name: str, signal_type: str = "enhanced",
             "requires_macro": requires_macro,
             "func": func,
         }
-        if signal_type == "core":
-            _CORE_SIGNALS[name] = entry
-        else:
-            _ENHANCED_SIGNALS[name] = entry
+        _ENHANCED_SIGNALS[name] = entry
         return func
     return decorator
 
@@ -70,10 +58,8 @@ def get_enhanced_signals() -> dict[str, dict]:
 
 
 def get_signal_names() -> list:
-    """Return all signal names (core + enhanced) in order."""
-    core = list(_CORE_SIGNALS.keys())
-    enhanced = list(_ENHANCED_SIGNALS.keys())
-    return core + enhanced
+    """Return all registered signal names."""
+    return list(_ENHANCED_SIGNALS.keys())
 
 
 _FAILED_IMPORT_SENTINEL = object()

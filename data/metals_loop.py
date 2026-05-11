@@ -561,18 +561,10 @@ def _load_json_state(path, default, label):
     import copy
 
     fallback = copy.deepcopy(default)
-    if not os.path.exists(path):
+    result = load_json(path, default=fallback)
+    if result is None:
         return fallback
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError, ValueError) as e:
-        message = f"{label} load failed: {e}"
-        if "log" in globals():
-            log(message)
-        else:
-            print(message, flush=True)
-        return fallback
+    return result
 
 
 def _default_trade_queue():

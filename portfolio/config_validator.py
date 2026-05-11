@@ -3,9 +3,10 @@
 Validates config.json has all required keys before the main loop starts.
 """
 
-import json
 import logging
 from pathlib import Path
+
+from portfolio.file_utils import load_json
 
 logger = logging.getLogger("portfolio.config_validator")
 
@@ -17,6 +18,8 @@ REQUIRED_KEYS = [
     ("telegram", "chat_id"),
     ("alpaca", "key"),
     ("alpaca", "secret"),
+    ("binance", "key"),
+    ("binance", "secret"),
 ]
 
 # Optional: missing these produces a warning but isn't fatal
@@ -53,11 +56,9 @@ def validate_config_file() -> dict:
     Logs warnings for missing optional keys.
     Raises ValueError if required keys are missing.
     """
-    if not CONFIG_FILE.exists():
-        raise ValueError(f"config.json not found at {CONFIG_FILE}")
-
-    with open(CONFIG_FILE, encoding="utf-8") as f:
-        config = json.load(f)
+    config = load_json(CONFIG_FILE)
+    if config is None:
+        raise ValueError(f"config.json not found or unreadable at {CONFIG_FILE}")
 
     # Check optional keys and warn
     for key_path in OPTIONAL_KEYS:

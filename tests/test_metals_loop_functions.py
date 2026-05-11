@@ -79,10 +79,6 @@ class TestPositionLoadSave:
             pass
 
     def test_load_positions_bad_json_logs_and_falls_back(self, tmp_path, caplog):
-        # 2026-04-09 Stage 1 log migration: log() → logger.info, so the
-        # assertion uses caplog (not capsys). metals_loop.py is import-clean
-        # wrt handlers — caplog.at_level attaches its capture to the
-        # metals_loop logger specifically.
         import logging
 
         import metals_loop as mod
@@ -90,13 +86,13 @@ class TestPositionLoadSave:
         with open(mod.POSITIONS_STATE_FILE, "w", encoding="utf-8") as f:
             f.write("{bad json")
 
-        with caplog.at_level(logging.INFO, logger="metals_loop"):
+        with caplog.at_level(logging.WARNING, logger="portfolio.file_utils"):
             positions = mod._load_positions()
 
         assert isinstance(positions, dict)
         assert positions
         assert any(
-            "Position state load failed" in rec.getMessage() for rec in caplog.records
+            "corrupt JSON" in rec.getMessage() for rec in caplog.records
         )
 
     def test_save_preserves_sell_metadata(self, tmp_path):
@@ -286,19 +282,19 @@ class TestTradeQueue:
         loaded = mod._load_trade_queue()
         assert len(loaded.get("orders", [])) == 1
 
-    def test_load_trade_queue_bad_json_logs_and_falls_back(self, tmp_path, monkeypatch):
-        import metals_loop as mod
+    def test_load_trade_queue_bad_json_logs_and_falls_back(self, tmp_path, caplog):
+        import logging
 
-        messages = []
-        monkeypatch.setattr(mod, "log", messages.append)
+        import metals_loop as mod
 
         with open(mod.TRADE_QUEUE_FILE, "w", encoding="utf-8") as f:
             f.write("{bad json")
 
-        queue = mod._load_trade_queue()
+        with caplog.at_level(logging.WARNING, logger="portfolio.file_utils"):
+            queue = mod._load_trade_queue()
 
         assert queue == {"version": 1, "orders": []}
-        assert any("Trade queue load failed" in msg for msg in messages)
+        assert any("corrupt JSON" in rec.getMessage() for rec in caplog.records)
 
     def test_save_trade_queue_uses_atomic_write_json(self, monkeypatch):
         import metals_loop as mod

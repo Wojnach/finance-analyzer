@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from portfolio.signal_registry import (
-    _CORE_SIGNALS,
     _ENHANCED_SIGNALS,
     _FAILED_IMPORT_COOLDOWN,
     _FAILED_IMPORT_SENTINEL,
@@ -26,15 +25,10 @@ def _isolate_registries():
     the cleanup is skipped and the entry leaks into subsequent tests (TEST-15).
     """
     enhanced_snapshot = dict(_ENHANCED_SIGNALS)
-    core_snapshot = dict(_CORE_SIGNALS)
     yield
-    # Restore: remove any keys that were added during the test
     for key in list(_ENHANCED_SIGNALS):
         if key not in enhanced_snapshot:
             del _ENHANCED_SIGNALS[key]
-    for key in list(_CORE_SIGNALS):
-        if key not in core_snapshot:
-            del _CORE_SIGNALS[key]
 
 
 class TestRegisterSignal:
@@ -51,13 +45,13 @@ class TestRegisterSignal:
         assert entry["type"] == "enhanced"
         assert entry["func"] is compute_test
 
-    def test_register_core_via_decorator(self):
+    def test_register_core_via_decorator_routes_to_enhanced(self):
         @register_signal("test_core_dec", signal_type="core")
         def compute_core(df, **kw):
             return "BUY"
 
-        assert "test_core_dec" in _CORE_SIGNALS
-        entry = _CORE_SIGNALS["test_core_dec"]
+        assert "test_core_dec" in _ENHANCED_SIGNALS
+        entry = _ENHANCED_SIGNALS["test_core_dec"]
         assert entry["type"] == "core"
         assert entry["func"] is compute_core
 
