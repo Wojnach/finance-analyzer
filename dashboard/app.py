@@ -844,6 +844,29 @@ def api_portfolio_bold():
     return jsonify(data)
 
 
+@app.route("/api/grid-fisher")
+@require_auth
+def api_grid_fisher():
+    """Grid market-maker state + recent decisions.
+
+    Returns:
+        {
+          "state": <data/grid_fisher_state.json>,
+          "recent_decisions": [last 50 entries from grid_fisher_decisions.jsonl]
+        }
+    """
+    state = _read_json(DATA_DIR / "grid_fisher_state.json") or {}
+    decisions: list[dict] = []
+    decisions_path = DATA_DIR / "grid_fisher_decisions.jsonl"
+    try:
+        if decisions_path.exists():
+            from portfolio.file_utils import load_jsonl_tail
+            decisions = load_jsonl_tail(decisions_path, max_entries=50)
+    except Exception:
+        decisions = []
+    return jsonify({"state": state, "recent_decisions": decisions})
+
+
 @app.route("/api/mstr_loop")
 @require_auth
 def api_mstr_loop():

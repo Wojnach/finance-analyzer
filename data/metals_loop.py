@@ -6991,6 +6991,25 @@ def main():
         else:
             log("Swing trader: NOT available (import failed)")
 
+        # Initialize grid market-maker. Operates on a separate set of
+        # instruments (BULL/BEAR x SILVER/GOLD/OLJAB) and uses the REST
+        # avanza_session API directly — no Playwright page needed.
+        # Failure here is non-fatal: the rest of the loop keeps running.
+        grid_fisher = None
+        try:
+            from portfolio import avanza_session as _avanza_rest
+            from portfolio.grid_fisher import GridFisher as _GridFisher
+            from data.fin_fish_config import FULL_CATALOG as _FULL_CATALOG
+            grid_fisher = _GridFisher(
+                session=_avanza_rest,
+                catalog=_FULL_CATALOG,
+            )
+            log(f"Grid fisher: ACTIVE ({len(grid_fisher.state.by_instrument)} instruments, "
+                f"enabled={grid_fisher._enabled})")
+        except Exception:
+            logger.exception("main_loop: GridFisher init failed — grid market-maker disabled this session")
+            grid_fisher = None
+
         # Initialize strategy orchestrator (GoldDigger + Elongir as plugins)
         _strategy_orchestrator = None
         _strategy_shared_data = None
@@ -7436,6 +7455,55 @@ Positions: {pos_summary}{prob_summary}""")
                         # active positions. Continues main loop so the
                         # next cycle can retry.
                         logger.exception("main_loop: swing_trader.evaluate_and_execute raised — this cycle's trade decisions skipped")
+
+                # Grid market-maker tick: places multi-tier limit ladders
+                # per (instrument, direction) and rotates fills into
+                # opposite-side sells + stops. Operates only on
+                # instruments listed in GRID_ACTIVE_INSTRUMENTS (currently
+                # XAG/XAU silver + gold certs, OIL-USD warrants). Oil
+                # remains idle until the signal pipeline produces OIL-USD
+                # entries in agent_summary.json — the tick logs a
+                # "no_direction" decision and moves on without placing.
+                if grid_fisher is not None:
+                    try:
+                        # Adapt last_signal_data (action/confidence schema)
+                        # into the grid fisher's (direction/confidence) shape.
+                        _grid_sigs = {}
+                        for _t, _row in (last_signal_data or {}).items():
+                            if not isinstance(_row, dict):
+                                continue
+                            _action = (_row.get("action") or "").upper()
+                            _direction = (
+                                "LONG" if _action == "BUY"
+                                else "SHORT" if _action == "SELL"
+                                else None
+                            )
+                            _grid_sigs[_t] = {
+                                "direction": _direction,
+                                "confidence": float(_row.get("confidence") or 0.0),
+                                "atr_pct": _row.get("atr_pct"),
+                            }
+                        # Build ob_id -> {bid, ask} from the running prices
+                        # dict. metals_loop's prices uses internal keys like
+                        # 'silver_bull' so we re-key by the underlying ticker
+                        # and look up bid/ask off the swing trader's
+                        # WARRANT_CATALOG when available. For now, only the
+                        # per-ticker spot is reliably populated; the grid
+                        # fisher pulls a live quote per orderbook from the
+                        # Avanza REST session inside place_buy_ladder.
+                        _grid_prices: dict[str, dict] = {}
+                        # Compute minutes-until-EOD so the grid sweeps near
+                        # session close. minutes_until_eod() returns inf if
+                        # zoneinfo data is unavailable on the host.
+                        from portfolio.grid_fisher import minutes_until_eod
+                        _eod_min = minutes_until_eod()
+                        grid_fisher.tick(
+                            signal_data=_grid_sigs,
+                            prices=_grid_prices,
+                            eod_minutes_remaining=_eod_min,
+                        )
+                    except Exception:
+                        logger.exception("main_loop: grid_fisher.tick raised — this cycle's grid actions skipped")
 
                 # Check triggers
                 triggered, reasons = check_triggers(prices)
