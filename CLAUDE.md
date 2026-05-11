@@ -100,12 +100,18 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - 60s cycle with embedded 10s silver fast-tick monitor
 - Local LLM inference (Ministral-8B, Chronos-2, Qwen3-8B)
 - Entry: `scripts/win/metals-loop.bat`
+- **Grid market-maker** (`portfolio/grid_fisher.py`, added 2026-05-11):
+  Marja Folcke-style limit ladder running inside the metals loop.
+  Places 3-tier buy ladders on the with-signal direction of BULL/BEAR
+  certs for XAG, XAU, OIL-USD (oil seeded but idle until oil signal
+  pipeline lights up). Rotates fills into sell+stop, EOD-flat. Runbook:
+  `docs/GRID_FISHER.md`. Endpoint: `/api/grid-fisher`.
 
 ### Dashboard (`dashboard/app.py`)
 - Flask REST API on port 5055, dual-stack IPv4+IPv6 bind (token-cookie auth)
 - Auth: `?token=<dashboard_token>` once, then 1-year rolling cookie. Bearer
   header for CLI clients. Cloudflare Access header bypasses local auth.
-- 32 endpoints. Last reconciled with code 2026-05-04 — re-grep
+- 33 endpoints. Last reconciled with code 2026-05-11 — re-grep
   `@app.route('/api/...` if this list looks stale.
 
   **Health & ops:** `/api/health`, `/api/loop_health`, `/api/lora-status`,
@@ -114,7 +120,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
   **Portfolio & trading:** `/api/portfolio`, `/api/portfolio-bold`,
   `/api/trades`, `/api/decisions`, `/api/invocations`, `/api/risk`,
   `/api/triggers`, `/api/equity-curve`, `/api/warrants`,
-  `/api/validate-portfolio` (POST)
+  `/api/validate-portfolio` (POST), `/api/grid-fisher`
 
   **Per-instrument:** `/api/btc`, `/api/eth`, `/api/mstr`,
   `/api/mstr_loop`, `/api/oil`, `/api/metals`, `/api/crypto`,
