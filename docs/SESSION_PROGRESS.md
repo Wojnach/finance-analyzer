@@ -1,5 +1,62 @@
 # Session Progress
 
+## Rotation race + Avanza account verify (2026-05-11 late evening)
+
+**Status:** SHIPPED — `49d45f3e` merged + pushed. Loop restarted.
+
+**Two unrelated production-reliability fixes** on one branch
+(`feat/cleanup-rotation-account-2026-05-11`):
+
+### (A) signal_log rotation race
+`portfolio/log_rotation.rotate_jsonl` previously read all lines, wrote
+a `.tmp`, then `os.replace`'d — without holding the sidecar lock that
+`atomic_append_jsonl` uses. Any append between read and replace was
+silently discarded while the SQLite dual-write kept the record,
+driving the `signal_log_reconciliation` contract invariant into
+22 consecutive ESCALATED states (~400 entries lost per pass).
+
+Fix:
+- Extract `portfolio.file_utils.jsonl_sidecar_lock` context manager.
+- Refactor `atomic_append_jsonl` to use it (no behaviour change for
+  appenders).
+- Wrap `rotate_jsonl`'s full read → archive-write → tmp-write →
+  fsync → `os.replace` sequence inside the same lock.
+- Add the missing `fsync` before `replace` (P3 from earlier review).
+
+Regression test (`tests/test_file_utils_jsonl_lock.py`): 8 appender
+threads × 25 appends each while rotation runs. All 200 race appends
+survive plus the 5 fresh seed entries; all 50 old entries archived.
+Without the fix this test loses appends.
+
+### (B) Avanza account verification
+User reported on 2026-05-11 that `DEFAULT_ACCOUNT_ID=1625505` shows
+Beammwave/NextEra/Vertiv (ISK holdings), not warrant trading. Grid
+fisher just shipped to live trading — needed a fail-closed guard.
+
+Fix:
+- New `portfolio/avanza_account_check.verify_default_account()` hits
+  `/_api/account-overview/overview/categorizedAccounts`, walks all
+  three response shapes, fails closed via `AccountCategoryMismatch`
+  when the account category contains ISK / pension / insurance
+  fragments.
+- Wired into `data/metals_loop.py` immediately before `GridFisher`
+  init.
+- `PF_SKIP_ACCOUNT_CHECK=1` env override for known-bad windows.
+
+Codex review applied (P1+P2):
+- **P1:** `ALLOWED_ACCOUNT_IDS` now derives from `DEFAULT_ACCOUNT_ID`
+  so single config change updates both routing default and the H7
+  whitelist guard.
+- **P2:** Transient API outages (DNS, 5xx) no longer permanently
+  brick the grid fisher for the rest of the process. Only positive
+  mismatches (`disallowed_category` / `account_not_found`) raise;
+  `fetch_failed` downgrades to a logged warning + critical_errors
+  entry. Failed verifications are NOT cached so a recovered network
+  re-checks on the next caller.
+
+37 new tests (account check 28 + lock/rotation 9). Full grid +
+account suite 65/65 pass on main.
+
 ## Oil signal test coverage (2026-05-11 evening)
 
 **Status:** SHIPPED — `bf14d63a` merged direct to main, pushed.
@@ -3547,3 +3604,49 @@ tests/test_oil_grid_signal.py
 
 ### 2026-05-11 13:09 UTC | main
 bf14d63a test(oil-grid-signal): add coverage for standalone Brent signal source
+
+### 2026-05-11 13:12 UTC | main
+e9fa52a7 docs: log oil signal coverage + grid follow-up session notes
+docs/SESSION_PROGRESS.md
+
+### 2026-05-11 13:13 UTC | feat/hold-bias-batch2-2026-05-11
+66133b3b feat(signals): Stage 2 Batch 2 — soft directional on candlestick + forecast dead zones
+portfolio/signal_engine.py
+tests/test_signal_hold_bias_batch2.py
+
+### 2026-05-11 14:20 UTC | feat/cleanup-rotation-account-2026-05-11
+78965eed docs: plan for log_rotation race + Avanza account verify
+docs/PLAN.md
+
+### 2026-05-11 14:21 UTC | main
+620f83b5 safety(grid-fisher): force PROBE_ONLY until trading account verified
+portfolio/grid_fisher_config.py
+
+### 2026-05-11 14:24 UTC | fix/metals-conf-floor-2026-05-11
+2a69b01d fix(swing-conf-floor): lower MIN_BUY_CONFIDENCE 0.60->0.30 post Stage 1+2
+data/crypto_swing_config.py
+data/metals_swing_config.py
+data/oil_swing_config.py
+tests/test_crypto_swing_config.py
+tests/test_metals_swing_entry_gates.py
+tests/test_metals_swing_momentum.py
+tests/test_oil_swing_config.py
+
+### 2026-05-11 14:24 UTC | feat/cleanup-rotation-account-2026-05-11
+3b623129 fix(log-rotation): close JSONL rotation race against atomic_append_jsonl
+portfolio/file_utils.py
+portfolio/log_rotation.py
+tests/test_file_utils_jsonl_lock.py
+
+### 2026-05-11 14:27 UTC | feat/cleanup-rotation-account-2026-05-11
+d867d199 feat(avanza): startup verify DEFAULT_ACCOUNT_ID is trading-class
+data/metals_loop.py
+portfolio/avanza_account_check.py
+tests/test_avanza_account_check.py
+
+### 2026-05-11 14:36 UTC | feat/cleanup-rotation-account-2026-05-11
+66532751 fix(avanza-account): codex P1/P2 findings on account verify
+data/metals_loop.py
+portfolio/avanza_account_check.py
+portfolio/avanza_session.py
+tests/test_avanza_account_check.py
