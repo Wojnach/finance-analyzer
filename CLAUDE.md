@@ -103,10 +103,11 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **Grid market-maker** (`portfolio/grid_fisher.py`, added 2026-05-11):
   Marja Folcke-style limit ladder running inside the metals loop.
   Places 2-tier buy ladders (1200 SEK/leg, 6500 SEK global cap) on the
-  with-signal direction of BULL/BEAR certs for XAG, XAU, OIL-USD (oil
-  seeded but idle until oil signal pipeline lights up). Rotates fills
-  into sell+stop, EOD-flat. Runbook: `docs/GRID_FISHER.md`. Endpoint:
-  `/api/grid-fisher`.
+  with-signal direction of BULL/BEAR certs for XAG, XAU, OIL-USD. Oil
+  signal comes from `portfolio/oil_grid_signal.py` (Brent BZ=F RSI+EMA,
+  5-min cache). Rotates fills into sell+stop, EOD-flat. Runbook:
+  `docs/GRID_FISHER.md`. Endpoint: `/api/grid-fisher`. Probe script:
+  `scripts/grid_fisher_probe.py`.
 
 ### Dashboard (`dashboard/app.py`)
 - Flask REST API on port 5055, dual-stack IPv4+IPv6 bind (token-cookie auth)

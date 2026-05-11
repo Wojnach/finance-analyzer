@@ -7458,12 +7458,9 @@ Positions: {pos_summary}{prob_summary}""")
 
                 # Grid market-maker tick: places multi-tier limit ladders
                 # per (instrument, direction) and rotates fills into
-                # opposite-side sells + stops. Operates only on
-                # instruments listed in GRID_ACTIVE_INSTRUMENTS (currently
-                # XAG/XAU silver + gold certs, OIL-USD warrants). Oil
-                # remains idle until the signal pipeline produces OIL-USD
-                # entries in agent_summary.json — the tick logs a
-                # "no_direction" decision and moves on without placing.
+                # opposite-side sells + stops. Operates on instruments in
+                # GRID_ACTIVE_INSTRUMENTS (XAG/XAU silver+gold certs +
+                # OIL-USD via OLJAB Brent certs).
                 if grid_fisher is not None:
                     try:
                         # Adapt last_signal_data (action/confidence schema)
@@ -7483,6 +7480,27 @@ Positions: {pos_summary}{prob_summary}""")
                                 "confidence": float(_row.get("confidence") or 0.0),
                                 "atr_pct": _row.get("atr_pct"),
                             }
+                        # OIL-USD doesn't appear in agent_summary.json (Layer 1
+                        # SYMBOLS only covers BTC/ETH/XAG/XAU/MSTR). Pull a
+                        # standalone Brent signal from BZ=F klines so the
+                        # grid fisher can arm oil instruments. Cached with
+                        # 5-minute TTL in data/oil_grid_signal.json so we
+                        # don't hammer the kline fetch every cycle.
+                        try:
+                            from portfolio.oil_grid_signal import get_cached_or_refresh
+                            _oil_sig = get_cached_or_refresh()
+                            if _oil_sig and _oil_sig.get("direction"):
+                                _grid_sigs["OIL-USD"] = {
+                                    "direction": _oil_sig.get("direction"),
+                                    "confidence": float(
+                                        _oil_sig.get("confidence") or 0.0
+                                    ),
+                                }
+                        except Exception:
+                            logger.debug(
+                                "oil_grid_signal fetch failed — skipping oil this cycle",
+                                exc_info=True,
+                            )
                         # Build ob_id -> {bid, ask} from the running prices
                         # dict. metals_loop's prices uses internal keys like
                         # 'silver_bull' so we re-key by the underlying ticker

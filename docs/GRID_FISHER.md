@@ -59,11 +59,12 @@ underlying move.
 | XAU-USD    | BULL_GULD_X5_AVA         | BEAR_GULD_X5_VON4         |
 | OIL-USD    | BULL_OLJAB_X5_AVA_2      | BEAR_OLJAB_X5_AVA_2       |
 
-OIL-USD is **seeded but idle** — agent_summary.json does not currently
-publish OIL-USD signals, so each tick logs `no_direction` for both
-oil orderbooks and moves on without placing orders. Bring oil online
-by adding OIL-USD to the metals/oil signal pipeline; no changes are
-needed in the grid fisher itself.
+OIL-USD signal is sourced from `portfolio/oil_grid_signal.py` (Brent
+BZ=F klines → RSI(14) + EMA(9,21) → direction + confidence), cached at
+`data/oil_grid_signal.json` with a 5-minute TTL. The metals loop calls
+`get_cached_or_refresh()` each cycle before invoking the grid tick.
+When the fetch fails or indicators are ambiguous, oil stays idle for
+that cycle.
 
 ## How to disable in a hurry
 
