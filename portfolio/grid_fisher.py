@@ -498,6 +498,441 @@ def should_halt_global(state: GridFisherState) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Reconciliation
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReconcileResult:
+    """Diff summary returned by reconcile_against_live."""
+
+    filled_buys: list[tuple[str, int, float]] = field(default_factory=list)
+    filled_sells: list[tuple[str, int, float]] = field(default_factory=list)
+    cancelled_buys: list[tuple[str, int]] = field(default_factory=list)
+    cancelled_sells: list[tuple[str, int]] = field(default_factory=list)
+    inventory_drift: list[tuple[str, int, int]] = field(default_factory=list)
+
+
+def _position_volume_for(positions: list[dict[str, Any]], ob_id: str) -> int:
+    """Return current unit volume held for *ob_id*, or 0."""
+    for p in positions or []:
+        if str(p.get("orderbook_id") or p.get("orderbookId") or "") == str(ob_id):
+            v = p.get("volume", 0) or 0
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def reconcile_against_live(
+    state: GridFisherState,
+    open_order_ids: set[str],
+    positions: list[dict[str, Any]],
+) -> ReconcileResult:
+    """Diff in-memory state against live Avanza state.
+
+    For each ARMED tier whose order_id is missing from ``open_order_ids``:
+      * if the live position covers the expected delta -> mark FILLED at
+        the tier's limit price (best estimate; actual fill price may be
+        slightly better)
+      * else -> mark CANCELLED (likely cancelled externally)
+
+    Also reports inventory drift where the live volume disagrees with
+    the cached ``inventory_units`` for the instrument; the caller may
+    use this to align state without erroneously double-counting fills.
+
+    Returns a ``ReconcileResult`` listing every transition for logging.
+    """
+    res = ReconcileResult()
+    for ob_id, inst in state.by_instrument.items():
+        live_vol = _position_volume_for(positions, ob_id)
+
+        for tier in list(inst.buy_ladder):
+            if tier.status != ORDER_ARMED:
+                continue
+            if tier.order_id and tier.order_id in open_order_ids:
+                continue
+            # Order is missing from live. Decide fill vs cancel.
+            expected_after_fill = inst.inventory_units + tier.qty
+            if live_vol >= expected_after_fill:
+                record_fill(inst, tier.tier, tier.price, side="buy")
+                res.filled_buys.append((ob_id, tier.tier, tier.price))
+            else:
+                cancel_buy_tier(inst, tier.tier)
+                res.cancelled_buys.append((ob_id, tier.tier))
+
+        for tier in list(inst.sell_ladder):
+            if tier.status != ORDER_ARMED:
+                continue
+            if tier.order_id and tier.order_id in open_order_ids:
+                continue
+            expected_after_fill = max(inst.inventory_units - tier.qty, 0)
+            if live_vol <= expected_after_fill:
+                record_fill(inst, tier.tier, tier.price, side="sell")
+                res.filled_sells.append((ob_id, tier.tier, tier.price))
+            else:
+                # Mark sell tier as cancelled in-place — there is no
+                # dedicated helper because sells are cleared via rotation.
+                tier.status = ORDER_CANCELLED
+                res.cancelled_sells.append((ob_id, tier.tier))
+
+        # Final drift check — only used for logging; the caller decides
+        # whether to forcibly align (we do not auto-rewrite inventory).
+        if live_vol != inst.inventory_units:
+            res.inventory_drift.append(
+                (ob_id, inst.inventory_units, live_vol)
+            )
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+
+class GridFisher:
+    """High-level driver — owns state + session + signal/quote callables.
+
+    Constructor takes callables instead of importing the live session
+    module directly. That keeps the class unit-testable with a fake
+    session that records calls instead of hitting Avanza.
+
+    Required callables:
+
+      ``session.place_buy_order(orderbook_id, price, volume)``
+      ``session.place_sell_order(orderbook_id, price, volume)``
+      ``session.place_stop_loss(orderbook_id, trigger_price, sell_price, volume)``
+      ``session.cancel_order(order_id)``
+      ``session.get_open_orders()``
+      ``session.get_positions()``
+      ``session.get_quote(orderbook_id)``  -> dict with at least 'buy' (bid)
+
+    Signal callables (injected so unit tests can provide deterministic data):
+
+      ``signal_fn(ticker)`` -> ``(direction, confidence)`` with direction in
+          ``{"LONG", "SHORT", None}`` and confidence in [0, 1].
+      ``atr_fn(ticker)`` -> ``float`` ATR % (annualised, optional; can be None).
+      ``adx_fn(ticker)`` -> ``float`` ADX(14) (optional; can be None).
+      ``underlying_price_fn(ticker)`` -> ``float`` underlying spot.
+    """
+
+    def __init__(
+        self,
+        session: Any,
+        catalog: dict[str, dict[str, Any]],
+        *,
+        signal_fn: Optional[callable] = None,
+        atr_fn: Optional[callable] = None,
+        adx_fn: Optional[callable] = None,
+        underlying_price_fn: Optional[callable] = None,
+        state_path: str | Path = GRID_STATE_FILE,
+        decisions_path: str | Path = GRID_DECISIONS_LOG,
+        now_fn: Optional[callable] = None,
+    ) -> None:
+        from portfolio.grid_fisher_config import (
+            GRID_FISHER_ENABLED,
+            GRID_MAX_ORDERS_PER_MIN,
+            GRID_MIN_SIGNAL_CONFIDENCE,
+            GRID_ORDER_PLACE_DELAY_S,
+            GRID_STOP_PCT,
+            GRID_TARGET_PCT,
+            GRID_TIERS,
+            GRID_TIER_SPACING_PCT,
+            GRID_ADX_TREND_FILTER,
+            GRID_FISHER_PROBE_ONLY,
+        )
+
+        self.session = session
+        self.catalog = catalog
+        self.signal_fn = signal_fn
+        self.atr_fn = atr_fn
+        self.adx_fn = adx_fn
+        self.underlying_price_fn = underlying_price_fn
+        self.state_path = Path(state_path)
+        self.decisions_path = Path(decisions_path)
+        self.now_fn = now_fn or _utcnow_iso
+
+        # Snapshot config at construction time so monkeypatched test
+        # values are picked up before instances are reused across tests.
+        self._enabled = GRID_FISHER_ENABLED
+        self._probe_only = GRID_FISHER_PROBE_ONLY
+        self._min_conf = GRID_MIN_SIGNAL_CONFIDENCE
+        self._n_tiers = GRID_TIERS
+        self._spacing = tuple(GRID_TIER_SPACING_PCT)
+        self._target_pct = GRID_TARGET_PCT
+        self._stop_pct = GRID_STOP_PCT
+        self._order_delay_s = GRID_ORDER_PLACE_DELAY_S
+        self._max_orders_per_min = GRID_MAX_ORDERS_PER_MIN
+        self._adx_trend_filter = GRID_ADX_TREND_FILTER
+
+        # Rate-limit state — sliding window of last placement timestamps.
+        self._recent_places: list[float] = []
+
+        self.state = load_state(self.state_path)
+        _seed_state_for_active_instruments(self.state, self.catalog)
+
+    # ---- low-level helpers ------------------------------------------------
+
+    def _log(self, category: str, **fields: Any) -> None:
+        log_decision(category, decisions_path=self.decisions_path, **fields)
+
+    def _persist(self) -> None:
+        save_state(self.state, self.state_path)
+
+    def _rate_limit_ok(self) -> bool:
+        """Sliding-window rate limiter — drop placements over the per-minute cap."""
+        now = time.time()
+        cutoff = now - 60.0
+        self._recent_places = [t for t in self._recent_places if t >= cutoff]
+        if len(self._recent_places) >= self._max_orders_per_min:
+            return False
+        self._recent_places.append(now)
+        return True
+
+    def _catalog_for(self, ob_id: str) -> Optional[dict[str, Any]]:
+        for cert_name, meta in self.catalog.items():
+            if str(meta.get("ob_id") or "") == str(ob_id):
+                return {**meta, "name_key": cert_name}
+        return None
+
+    # ---- placement --------------------------------------------------------
+
+    def cancel_armed_buys(self, inst: InstrumentState) -> int:
+        """Cancel every ARMED buy tier on *inst*. Returns count cancelled."""
+        n = 0
+        for tier in list(inst.buy_ladder):
+            if tier.status != ORDER_ARMED:
+                continue
+            if not tier.order_id:
+                # Never accepted by Avanza in the first place — just drop.
+                cancel_buy_tier(inst, tier.tier)
+                n += 1
+                continue
+            try:
+                self.session.cancel_order(tier.order_id)
+                cancel_buy_tier(inst, tier.tier)
+                self._log("cancel_buy", ob_id=inst.ob_id, ticker=inst.ticker,
+                          tier=tier.tier, order_id=tier.order_id,
+                          price=tier.price, qty=tier.qty)
+                n += 1
+            except Exception as exc:  # noqa: BLE001 — session errors vary
+                logger.warning(
+                    "grid_fisher: cancel_order failed for %s tier %d: %s",
+                    inst.ob_id, tier.tier, exc,
+                )
+                self._log("cancel_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.tier,
+                          order_id=tier.order_id, error=str(exc))
+        return n
+
+    def place_buy_ladder(
+        self,
+        inst: InstrumentState,
+        bid: float,
+        *,
+        underlying_price: Optional[float] = None,
+        barrier: Optional[float] = None,
+        leverage: Optional[float] = None,
+    ) -> int:
+        """Place any missing buy tiers, respecting per-instrument cap and
+        rate limit. Returns the number of orders placed.
+
+        Existing ARMED tiers are kept as-is. If a tier index is missing
+        from the buy_ladder, a fresh order is placed and recorded.
+        """
+        from portfolio.grid_fisher_config import GRID_LEG_SEK
+        from portfolio.grid_tiers import build_buy_ladder
+
+        if not self._enabled:
+            return 0
+        if inst.hit_per_instrument_cap():
+            self._log("skip_cap", ob_id=inst.ob_id, ticker=inst.ticker,
+                      notional_sek=inst.planned_notional_sek())
+            return 0
+        if inst.session_loss_breached():
+            self._log("skip_loss_limit", ob_id=inst.ob_id,
+                      ticker=inst.ticker, session_pnl=inst.session_pnl_sek)
+            return 0
+        if inst.in_cooldown(self.now_fn()):
+            self._log("skip_cooldown", ob_id=inst.ob_id,
+                      ticker=inst.ticker, cooldown_until=inst.cooldown_until)
+            return 0
+
+        existing_tiers = {t.tier for t in inst.buy_ladder
+                          if t.status == ORDER_ARMED}
+        tiers = build_buy_ladder(
+            bid=bid,
+            leg_sek=GRID_LEG_SEK,
+            n_tiers=self._n_tiers,
+            spacing_pct=self._spacing,
+            direction=inst.active_direction or "LONG",
+            underlying_price=underlying_price,
+            barrier=barrier,
+            leverage=leverage,
+        )
+        placed = 0
+        for tier in tiers:
+            if tier.index in existing_tiers:
+                continue
+            if not tier.is_active:
+                self._log("skip_tier", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.index,
+                          reason=tier.skip_reason, price=tier.price,
+                          qty=tier.qty)
+                continue
+            if not self._rate_limit_ok():
+                self._log("rate_limited", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.index)
+                break
+
+            if self._probe_only:
+                self._log("probe_placement", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.index,
+                          price=tier.price, qty=tier.qty,
+                          side="BUY")
+                inst.buy_ladder.append(TierOrder(
+                    tier=tier.index, order_id=None, price=tier.price,
+                    qty=tier.qty, placed_ts=self.now_fn(),
+                ))
+                placed += 1
+                continue
+
+            try:
+                result = self.session.place_buy_order(
+                    inst.ob_id, tier.price, tier.qty,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._log("place_buy_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.index,
+                          price=tier.price, qty=tier.qty, error=str(exc))
+                continue
+            status = (result or {}).get("orderRequestStatus", "UNKNOWN")
+            order_id = (result or {}).get("orderId")
+            if status != "SUCCESS" or not order_id:
+                self._log("place_buy_rejected", ob_id=inst.ob_id,
+                          ticker=inst.ticker, tier=tier.index,
+                          price=tier.price, qty=tier.qty,
+                          avanza_status=status,
+                          message=(result or {}).get("message"))
+                continue
+            inst.buy_ladder.append(TierOrder(
+                tier=tier.index,
+                order_id=str(order_id),
+                price=tier.price,
+                qty=tier.qty,
+                placed_ts=self.now_fn(),
+            ))
+            self._log("place_buy", ob_id=inst.ob_id, ticker=inst.ticker,
+                      tier=tier.index, order_id=str(order_id),
+                      price=tier.price, qty=tier.qty)
+            placed += 1
+            if self._order_delay_s > 0:
+                time.sleep(self._order_delay_s)
+        return placed
+
+    def rotate_on_buy_fill(self, inst: InstrumentState,
+                           filled_tier: int) -> None:
+        """After a buy fills, place a matching sell limit + stop loss.
+
+        Stop is rearmed for the *full* current inventory (Avanza coexists
+        stop + sell on full volume per memory ``reference_avanza_stops_orders_coexist.md``).
+        """
+        from portfolio.grid_tiers import build_exit_levels
+
+        filled: Optional[TierOrder] = None
+        for o in inst.buy_ladder:
+            if o.tier == filled_tier and o.status == ORDER_FILLED:
+                filled = o
+                break
+        if filled is None or filled.fill_price is None:
+            return
+
+        sell_price, stop_price = build_exit_levels(
+            filled.fill_price, self._target_pct, self._stop_pct,
+        )
+
+        # Place opposite-side sell limit.
+        sell_order_id: Optional[str] = None
+        if self._probe_only:
+            self._log("probe_rotate_sell", ob_id=inst.ob_id,
+                      ticker=inst.ticker, linked_buy_tier=filled_tier,
+                      price=sell_price, qty=filled.qty)
+        else:
+            try:
+                result = self.session.place_sell_order(
+                    inst.ob_id, sell_price, filled.qty,
+                )
+                if (result or {}).get("orderRequestStatus") == "SUCCESS":
+                    sell_order_id = str((result or {}).get("orderId"))
+            except Exception as exc:  # noqa: BLE001
+                self._log("place_sell_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker, linked_buy_tier=filled_tier,
+                          price=sell_price, qty=filled.qty, error=str(exc))
+
+        # Assign a sell-side tier index that mirrors the buy tier so the
+        # ladders stay paired even after pruning.
+        inst.sell_ladder.append(TierOrder(
+            tier=filled_tier,
+            order_id=sell_order_id,
+            price=sell_price,
+            qty=filled.qty,
+            placed_ts=self.now_fn(),
+            linked_buy_tier=filled_tier,
+        ))
+
+        # Cancel old stop, place a new one sized to the full current
+        # inventory. Stop sells use trigger_price as the activation
+        # level and sell_price as the limit (set just below for fast fill).
+        if inst.stop_loss_id and not self._probe_only:
+            try:
+                self.session.cancel_order(inst.stop_loss_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("stop cancel failed: %s", exc)
+
+        new_stop_id: Optional[str] = None
+        if not self._probe_only and inst.inventory_units > 0:
+            stop_sell_price = round(stop_price * 0.995, 2)
+            try:
+                result = self.session.place_stop_loss(
+                    inst.ob_id, stop_price, stop_sell_price,
+                    inst.inventory_units,
+                )
+                if (result or {}).get("orderRequestStatus") == "SUCCESS":
+                    new_stop_id = str((result or {}).get("orderId"))
+            except Exception as exc:  # noqa: BLE001
+                self._log("place_stop_failed", ob_id=inst.ob_id,
+                          ticker=inst.ticker, price=stop_price,
+                          qty=inst.inventory_units, error=str(exc))
+        inst.stop_loss_id = new_stop_id
+        inst.stop_loss_price = stop_price
+
+        self._log("rotate", ob_id=inst.ob_id, ticker=inst.ticker,
+                  linked_buy_tier=filled_tier,
+                  fill_price=filled.fill_price,
+                  sell_price=sell_price, stop_price=stop_price,
+                  sell_order_id=sell_order_id, stop_id=new_stop_id)
+
+    # ---- direction handling -----------------------------------------------
+
+    def arm_direction(self, inst: InstrumentState, target_direction: str) -> None:
+        """Set or flip the instrument's active direction with cooldown.
+
+        Existing live buys on the old direction are cancelled. Existing
+        inventory + sells are preserved — they exit via the rotated
+        ladder.
+        """
+        if inst.active_direction == target_direction:
+            return
+        if inst.active_direction is not None:
+            self.cancel_armed_buys(inst)
+        flip_direction(inst, target_direction)
+        self._log("flip_direction", ob_id=inst.ob_id, ticker=inst.ticker,
+                  new_direction=target_direction,
+                  cooldown_until=inst.cooldown_until)
+
+
 def summarise(state: GridFisherState) -> dict[str, Any]:
     """Compact dict for dashboard / Telegram. Excludes raw ladders."""
     return {
