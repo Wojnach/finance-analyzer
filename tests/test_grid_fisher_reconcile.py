@@ -147,6 +147,11 @@ def fisher(fake_session, tmp_path, monkeypatch):
         decisions_path=tmp_path / "decisions.jsonl",
     )
     f._order_delay_s = 0.0
+    # Standardise on 3 tiers + wide spacing for ladder-shape tests so the
+    # tests don't churn when the production config tier count changes.
+    # Separate tests assert on the production defaults explicitly.
+    f._n_tiers = 3
+    f._spacing = (0.3, 0.8, 1.5)
     return f
 
 
@@ -462,8 +467,8 @@ class TestTick:
         # XAU-USD direction missing entirely
         report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
                                                        "confidence": 0.7}})
-        # XAG placed; the others skipped
-        assert report["placements"] == 3
+        # XAG BULL placed (default tier count); others skipped
+        assert report["placements"] == fisher._n_tiers
         # Check the instrument reports include no_direction for XAU-USD
         # (and OIL-USD when in catalog).
         all_skips = [v.get("skip") for v in report["instruments"].values()
@@ -522,6 +527,19 @@ class TestTick:
         fisher.tick(signal_data={}, eod_minutes_remaining=8.0)
         # Buys all cancelled via session
         assert len(fake_session.cancelled) == 3
+
+    def test_global_cap_blocks_placement_after_threshold(self, fisher,
+                                                          fake_session,
+                                                          monkeypatch):
+        # Shrink global cap so the first instrument's first ladder
+        # already pushes us over.
+        monkeypatch.setattr(gf, "GRID_GLOBAL_MAX_SEK", 100)
+        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
+                                              "confidence": 0.7}})
+        # Either zero placements (cap hit instantly) or placements
+        # halted mid-loop — either way, far fewer than the 3 tiers
+        # the default would allow.
+        assert len(fake_session.placed_buys) <= 1
 
     def test_eod_market_flat_at_zero_minutes(self, fisher, fake_session):
         inst = fisher.state.by_instrument["1650161"]

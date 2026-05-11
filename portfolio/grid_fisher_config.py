@@ -28,10 +28,14 @@ GRID_FISHER_PROBE_ONLY = False
 # ---------------------------------------------------------------------------
 # Tier construction
 # ---------------------------------------------------------------------------
-GRID_TIERS = 3
+GRID_TIERS = 2
 # Each tier sits this far below the prevailing bid. Index 0 is closest to
 # market (highest fill probability); higher indices are deeper dips.
-GRID_TIER_SPACING_PCT = (0.3, 0.8, 1.5)
+# Two tiers (vs the original three) keep total deployed notional inside
+# the user's 7 000 SEK budget: 2 tiers × 1 200 SEK × 3 instruments
+# worst-case = 7 200 SEK. The global cap below enforces 6 500 SEK so we
+# always have headroom for one rotation cycle without breaching budget.
+GRID_TIER_SPACING_PCT = (0.4, 1.2)
 # When a buy fills at price P:
 #   sell limit = P * (1 + GRID_TARGET_PCT/100)
 #   stop loss  = P * (1 - GRID_STOP_PCT/100)
@@ -48,10 +52,17 @@ GRID_STOP_PCT = 3.5
 # Per-leg order size in SEK. 1200 stays just above Avanza's 1000 SEK
 # minimum-courtage threshold. User's stated cap.
 GRID_LEG_SEK = 1200
-# Hard cap on resting + filled inventory per instrument. With 3 tiers,
-# placement totals 3600 SEK; cap leaves headroom for one rotation cycle
-# without breaching budget.
-GRID_PER_INSTRUMENT_MAX_SEK = 6000
+# Hard cap on resting + filled inventory per instrument. With 2 tiers,
+# placement totals 2 400 SEK; cap leaves headroom for one rotation cycle
+# (one tier still resting plus newly-filled inventory waiting on exit)
+# without breaching the global budget.
+GRID_PER_INSTRUMENT_MAX_SEK = 3000
+# Global cap across all instruments. Enforced inside tick() before any
+# new placement — if planned-notional summed across all active
+# instruments would exceed this, the cycle skips with a logged
+# `skip_global_cap` decision. Sized to fit inside a 7 000 SEK trading
+# budget with headroom for rotation legs and Avanza margin reserve.
+GRID_GLOBAL_MAX_SEK = 6500
 # Session loss budget per instrument. Breaching this freezes new
 # placements until the next session.
 GRID_PER_SESSION_LOSS_LIMIT_SEK = 500

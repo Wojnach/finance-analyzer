@@ -37,6 +37,7 @@ from portfolio.grid_fisher_config import (
     GRID_ACTIVE_INSTRUMENTS,
     GRID_DECISIONS_LOG,
     GRID_DIRECTION_FLIP_COOLDOWN_MIN,
+    GRID_GLOBAL_MAX_SEK,
     GRID_PER_INSTRUMENT_MAX_SEK,
     GRID_PER_SESSION_LOSS_LIMIT_SEK,
     GRID_STATE_FILE,
@@ -526,6 +527,13 @@ def prune_terminal_orders(inst: InstrumentState) -> None:
 # ---------------------------------------------------------------------------
 
 
+def global_planned_notional(state: GridFisherState) -> float:
+    """Sum planned notional across every instrument (armed buys +
+    inventory at avg entry). Used by the global-cap gate."""
+    return sum(inst.planned_notional_sek()
+               for inst in state.by_instrument.values())
+
+
 def should_halt_global(state: GridFisherState) -> Optional[str]:
     """Return a halt reason string if the global drawdown breaks a limit,
     else None. Caller flips ``state.halted = True`` and logs.
@@ -779,12 +787,18 @@ class GridFisher:
         underlying_price: Optional[float] = None,
         barrier: Optional[float] = None,
         leverage: Optional[float] = None,
+        global_cap_sek: Optional[float] = None,
     ) -> int:
         """Place any missing buy tiers, respecting per-instrument cap and
         rate limit. Returns the number of orders placed.
 
         Existing ARMED tiers are kept as-is. If a tier index is missing
         from the buy_ladder, a fresh order is placed and recorded.
+
+        If ``global_cap_sek`` is provided, each tier checks whether
+        placing it would push *aggregate* planned notional across every
+        instrument in ``self.state`` above the cap; if so the remaining
+        tiers are skipped with a logged ``skip_global_cap`` decision.
         """
         from portfolio.grid_fisher_config import GRID_LEG_SEK
         from portfolio.grid_tiers import build_buy_ladder
@@ -826,6 +840,15 @@ class GridFisher:
                           reason=tier.skip_reason, price=tier.price,
                           qty=tier.qty)
                 continue
+            if global_cap_sek is not None:
+                projected = (global_planned_notional(self.state)
+                             + tier.notional_sek)
+                if projected > global_cap_sek:
+                    self._log("skip_global_cap", ob_id=inst.ob_id,
+                              ticker=inst.ticker, tier=tier.index,
+                              projected=round(projected, 0),
+                              cap=global_cap_sek)
+                    break
             if not self._rate_limit_ok():
                 self._log("rate_limited", ob_id=inst.ob_id,
                           ticker=inst.ticker, tier=tier.index)
@@ -1146,12 +1169,27 @@ class GridFisher:
                 report["instruments"][ob_id] = instr_report
                 continue
 
+            # Global cap gate — sum planned notional across every
+            # instrument before placing on this one. If the new ladder
+            # would breach GRID_GLOBAL_MAX_SEK, skip placement entirely
+            # to keep total deployed capital inside the user's budget.
+            global_notional = global_planned_notional(self.state)
+            if global_notional >= GRID_GLOBAL_MAX_SEK:
+                self._log("skip_global_cap", ob_id=ob_id,
+                          ticker=ticker,
+                          global_notional=round(global_notional, 0),
+                          cap=GRID_GLOBAL_MAX_SEK)
+                instr_report["skip"] = "global_cap"
+                report["instruments"][ob_id] = instr_report
+                continue
+
             cat = self._catalog_for(ob_id) or {}
             placed = self.place_buy_ladder(
                 inst, bid=float(bid),
                 underlying_price=ob_prices.get("underlying_price"),
                 barrier=cat.get("barrier") if cat.get("barrier") else None,
                 leverage=cat.get("leverage"),
+                global_cap_sek=GRID_GLOBAL_MAX_SEK,
             )
             report["placements"] += placed
             instr_report["placed"] = placed

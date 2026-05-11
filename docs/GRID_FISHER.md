@@ -37,12 +37,13 @@ underlying move.
 | Knob                                  | Value      | Notes                              |
 |---------------------------------------|------------|------------------------------------|
 | `GRID_FISHER_ENABLED`                 | `True`     | Master switch                      |
-| `GRID_TIERS`                          | 3          | Number of buy-side rungs per side  |
-| `GRID_TIER_SPACING_PCT`               | (0.3,0.8,1.5) | Tier offsets below bid          |
+| `GRID_TIERS`                          | 2          | Number of buy-side rungs per side  |
+| `GRID_TIER_SPACING_PCT`               | (0.4, 1.2) | Tier offsets below bid             |
 | `GRID_TARGET_PCT`                     | 1.2        | Sell limit above fill              |
 | `GRID_STOP_PCT`                       | 3.5        | Stop-loss below fill               |
 | `GRID_LEG_SEK`                        | 1200       | Per-leg SEK notional               |
-| `GRID_PER_INSTRUMENT_MAX_SEK`         | 6000       | Inventory cap per instrument       |
+| `GRID_PER_INSTRUMENT_MAX_SEK`         | 3000       | Inventory cap per instrument       |
+| `GRID_GLOBAL_MAX_SEK`                 | 6500       | Aggregate cap across all instruments (fits 7K budget) |
 | `GRID_PER_SESSION_LOSS_LIMIT_SEK`     | 500        | Per-instrument session loss floor  |
 | `GRID_MIN_SIGNAL_CONFIDENCE`          | 0.56       | Matches metals swing trader floor  |
 | `GRID_DIRECTION_FLIP_COOLDOWN_MIN`    | 30         | Min minutes between direction flips |
