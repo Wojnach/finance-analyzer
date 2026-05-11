@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 from collections import deque
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 # Cross-platform file-locking primitives for `atomic_append_jsonl`.
@@ -199,37 +199,35 @@ def load_jsonl_tail(path, max_entries=500, tail_bytes=512_000):
     return entries
 
 
-def atomic_append_jsonl(path, entry):
-    """Append a single JSON entry to a JSONL file with atomic semantics
-    across threads and processes.
+@contextmanager
+def jsonl_sidecar_lock(path):
+    """Yield while holding an exclusive sidecar lock keyed off *path*.
 
-    Implementation: binary-append (``"ab"``) to the target + an
-    exclusive lock on a *sidecar* lockfile held for the duration of
-    the ``write + flush + fsync`` sequence. Windows CRT does not
-    guarantee ``O_APPEND`` atomicity (unlike POSIX), so without a lock
-    heavy thread contention can produce torn lines (head bytes lost,
-    tail bytes survive).
+    Same locking primitive that ``atomic_append_jsonl`` uses, exposed as
+    a context manager so other code (notably
+    ``portfolio.log_rotation.rotate_jsonl``) can serialize against
+    in-flight appends. Lock file is ``<path.parent>/.<path.name>.lock``;
+    a single-byte range is locked exclusively.
 
-    Sidecar-lockfile pattern (``<path>.lock``) — not the target file
-    itself — guarantees a non-empty, lockable byte-range exists even
-    when the target file is brand-new / size 0. This closes the race
-    window Codex flagged on 2026-04-17: two first-writers opening
-    the freshly-created target simultaneously could both have
-    failed the empty-file ``msvcrt.locking(fd, LK_LOCK, 1)`` call and
-    interleaved their writes.
+    Pattern rationale:
 
-    This primitive is used by ~20 JSONL writers across the codebase
-    (signal_log, claude_invocations, critical_errors, telegram_messages,
-    accuracy_snapshots, etc.) so the fix eliminates torn-line risk
-    system-wide. Unxfails
-    ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``.
+    * **Sidecar (not target):** locking the target file itself is racy
+      when it is brand-new / size 0 — two first-writers can both hit
+      the empty-file ``msvcrt.locking(fd, LK_LOCK, 1)`` failure path
+      and interleave. A pre-seeded sidecar guarantees a lockable byte
+      always exists.
+    * **Windows + POSIX:** ``msvcrt.locking`` blocks on contention on
+      Windows; ``fcntl.flock`` blocks on POSIX. Both release on close.
+
+    Callers MUST keep *all* mutations of the target file inside the
+    ``with`` block — read, write, fsync, rename. Appends that arrive
+    between rotation's "read all lines" and ``os.replace`` would
+    otherwise be silently discarded (the divergence behind the
+    ``signal_log_reconciliation`` contract invariant escalations of
+    2026-05-11).
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
-
-    # Sidecar lockfile — always non-empty so locking never fails on
-    # size-0 targets. Pre-create if missing; single byte is enough.
     lock_path = path.parent / f".{path.name}.lock"
     if not lock_path.exists():
         try:
@@ -249,10 +247,7 @@ def atomic_append_jsonl(path, entry):
                 win_locked = True
             elif _fcntl is not None:
                 _fcntl.flock(lfd, _fcntl.LOCK_EX)
-            with open(path, "ab") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
+            yield
         finally:
             if win_locked and _msvcrt is not None:
                 try:
@@ -261,6 +256,32 @@ def atomic_append_jsonl(path, entry):
                 except OSError:
                     pass
             # fcntl.flock releases automatically on close.
+
+
+def atomic_append_jsonl(path, entry):
+    """Append a single JSON entry to a JSONL file with atomic semantics
+    across threads and processes.
+
+    Now built on :func:`jsonl_sidecar_lock` so the lock contract is
+    shared with ``log_rotation.rotate_jsonl``. Without that contract,
+    rotation's read → write-tmp → ``os.replace`` could discard any
+    append that landed between read and replace — exactly the
+    divergence the ``signal_log_reconciliation`` contract invariant
+    detects.
+
+    This primitive is used by ~20 JSONL writers across the codebase
+    (signal_log, claude_invocations, critical_errors, telegram_messages,
+    accuracy_snapshots, etc.) so the fix eliminates torn-line risk
+    system-wide. Unxfails
+    ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``.
+    """
+    path = Path(path)
+    data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+    with jsonl_sidecar_lock(path):
+        with open(path, "ab") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def atomic_write_jsonl(path, entries):

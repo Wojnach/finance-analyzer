@@ -231,10 +231,23 @@ def rotate_jsonl(filename, policy, dry_run=False):
     """Rotate a JSONL file by age: archive old entries, keep recent ones.
 
     Old entries are grouped by year-month and written to
-    data/archive/FILENAME.YYYY-MM.jsonl.gz
+    ``data/archive/FILENAME.YYYY-MM.jsonl.gz``.
+
+    The full read → write-tmp → ``os.replace`` sequence runs under the
+    same sidecar lock that ``atomic_append_jsonl`` holds. Without that
+    contract, an append that landed between rotation's read step and
+    the replace would be silently discarded — the divergence the
+    ``signal_log_reconciliation`` contract invariant escalated on
+    2026-05-11 (~400 entries lost per pass while the SQLite dual-write
+    kept them). Cost: concurrent appends block for the hundreds of ms
+    rotation needs; correct trade vs data loss.
 
     Returns dict with rotation stats.
     """
+    # Local import to avoid surfacing portfolio.file_utils from the
+    # module-import path; log_rotation is loaded early in some entrypoints.
+    from portfolio.file_utils import jsonl_sidecar_lock
+
     filepath = DATA_DIR / filename
     if not filepath.exists():
         return {"file": filename, "status": "not_found"}
@@ -244,101 +257,104 @@ def rotate_jsonl(filename, policy, dry_run=False):
     max_age_days = policy.get("max_age_days", 30)
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=max_age_days)
 
-    # Read all lines and classify as keep vs archive
-    keep_lines = []
-    archive_buckets = {}  # "YYYY-MM" -> list of raw lines
-    parse_failures = 0
-    total_lines = 0
+    with jsonl_sidecar_lock(filepath):
+        # Read all lines and classify as keep vs archive
+        keep_lines = []
+        archive_buckets = {}  # "YYYY-MM" -> list of raw lines
+        parse_failures = 0
+        total_lines = 0
 
-    with open(filepath, encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if not line.strip():
-                continue
-            total_lines += 1
-            try:
-                entry = json.loads(line)
-                ts = _parse_ts(entry.get(ts_field))
-                if ts is None:
-                    # Can't determine age -- keep the entry to be safe
+        with open(filepath, encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                total_lines += 1
+                try:
+                    entry = json.loads(line)
+                    ts = _parse_ts(entry.get(ts_field))
+                    if ts is None:
+                        # Can't determine age -- keep the entry to be safe
+                        keep_lines.append(line)
+                        parse_failures += 1
+                    elif ts >= cutoff:
+                        keep_lines.append(line)
+                    else:
+                        # Archive this entry, grouped by month
+                        month_key = ts.strftime("%Y-%m")
+                        archive_buckets.setdefault(month_key, []).append(line)
+                except json.JSONDecodeError:
+                    # Malformed line -- keep it to avoid data loss
                     keep_lines.append(line)
                     parse_failures += 1
-                elif ts >= cutoff:
-                    keep_lines.append(line)
-                else:
-                    # Archive this entry, grouped by month
-                    month_key = ts.strftime("%Y-%m")
-                    archive_buckets.setdefault(month_key, []).append(line)
-            except json.JSONDecodeError:
-                # Malformed line -- keep it to avoid data loss
-                keep_lines.append(line)
-                parse_failures += 1
 
-    archived_count = sum(len(v) for v in archive_buckets.values())
-    result = {
-        "file": filename,
-        "size_mb": round(size_mb, 2),
-        "total_lines": total_lines,
-        "kept": len(keep_lines),
-        "archived": archived_count,
-        "archive_months": sorted(archive_buckets.keys()),
-        "parse_failures": parse_failures,
-    }
+        archived_count = sum(len(v) for v in archive_buckets.values())
+        result = {
+            "file": filename,
+            "size_mb": round(size_mb, 2),
+            "total_lines": total_lines,
+            "kept": len(keep_lines),
+            "archived": archived_count,
+            "archive_months": sorted(archive_buckets.keys()),
+            "parse_failures": parse_failures,
+        }
 
-    if archived_count == 0:
-        result["status"] = "nothing_to_archive"
+        if archived_count == 0:
+            result["status"] = "nothing_to_archive"
+            return result
+
+        if dry_run:
+            result["status"] = "dry_run"
+            return result
+
+        _ensure_archive_dir()
+
+        # Write archived entries to monthly files
+        stem = pathlib.Path(filename).stem  # e.g. "signal_log"
+        suffix = pathlib.Path(filename).suffix  # e.g. ".jsonl"
+
+        for month_key, lines in sorted(archive_buckets.items()):
+            archive_name = f"{stem}.{month_key}{suffix}"
+            archive_path = ARCHIVE_DIR / archive_name
+            gz_path = ARCHIVE_DIR / f"{archive_name}.gz"
+
+            # Append to existing archive for this month (may already
+            # have entries from a previous rotation)
+            if gz_path.exists() and policy.get("compress", True):
+                # Decompress existing, append, re-compress
+                existing_lines = []
+                with gzip.open(gz_path, "rt", encoding="utf-8") as gf:
+                    for existing_line in gf:
+                        existing_line = existing_line.rstrip("\n")
+                        if existing_line.strip():
+                            existing_lines.append(existing_line)
+                all_lines = existing_lines + lines
+                with gzip.open(gz_path, "wt", encoding="utf-8") as gf:
+                    for line in all_lines:
+                        gf.write(line + "\n")
+            elif policy.get("compress", True):
+                with gzip.open(gz_path, "wt", encoding="utf-8") as gf:
+                    for line in lines:
+                        gf.write(line + "\n")
+            else:
+                with open(archive_path, "a", encoding="utf-8") as af:
+                    for line in lines:
+                        af.write(line + "\n")
+
+        # Rewrite the original file with only kept lines. fsync before
+        # replace so a power loss between the rename and the kernel
+        # flush cannot leave the new file truncated. os.replace is
+        # atomic within the same volume on Windows + POSIX.
+        tmp_path = filepath.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for line in keep_lines:
+                f.write(line + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, filepath)
+
+        result["status"] = "rotated"
         return result
-
-    if dry_run:
-        result["status"] = "dry_run"
-        return result
-
-    _ensure_archive_dir()
-
-    # Write archived entries to monthly files
-    stem = pathlib.Path(filename).stem  # e.g. "signal_log"
-    suffix = pathlib.Path(filename).suffix  # e.g. ".jsonl"
-
-    for month_key, lines in sorted(archive_buckets.items()):
-        archive_name = f"{stem}.{month_key}{suffix}"
-        archive_path = ARCHIVE_DIR / archive_name
-        gz_path = ARCHIVE_DIR / f"{archive_name}.gz"
-
-        # Append to existing archive for this month (may already have entries
-        # from a previous rotation)
-        if gz_path.exists() and policy.get("compress", True):
-            # Decompress existing, append, re-compress
-            existing_lines = []
-            with gzip.open(gz_path, "rt", encoding="utf-8") as gf:
-                for existing_line in gf:
-                    existing_line = existing_line.rstrip("\n")
-                    if existing_line.strip():
-                        existing_lines.append(existing_line)
-            all_lines = existing_lines + lines
-            with gzip.open(gz_path, "wt", encoding="utf-8") as gf:
-                for line in all_lines:
-                    gf.write(line + "\n")
-        elif policy.get("compress", True):
-            with gzip.open(gz_path, "wt", encoding="utf-8") as gf:
-                for line in lines:
-                    gf.write(line + "\n")
-        else:
-            with open(archive_path, "a", encoding="utf-8") as af:
-                for line in lines:
-                    af.write(line + "\n")
-
-    # Rewrite the original file with only kept lines
-    tmp_path = filepath.with_suffix(".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        for line in keep_lines:
-            f.write(line + "\n")
-
-    # Atomic-ish replace: remove original, rename tmp
-    # On Windows, os.replace is atomic within the same volume
-    os.replace(tmp_path, filepath)
-
-    result["status"] = "rotated"
-    return result
 
 
 def rotate_text(filename, policy, dry_run=False):
