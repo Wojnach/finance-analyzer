@@ -74,11 +74,30 @@ def main() -> int:
     parser.add_argument("--file", type=Path, default=DEFAULT_ERRORS_FILE,
                         help="Path to critical_errors.jsonl "
                              "(default: repo data/critical_errors.jsonl).")
+    # Codex P2 2026-05-11: hard upper bound to prevent the script from
+    # auto-clearing degradation alerts that arrive AFTER the audit. The
+    # generic-accuracy bucket has no per-entry evidence tying it to the
+    # calendar root cause; resolving entries newer than the audit time
+    # would silently mask unrelated fresh regressions. Default is
+    # 2026-05-11T11:00:00Z — the moment this audit started, before any
+    # of the four commits landed.
+    parser.add_argument("--audit-start", type=str,
+                        default="2026-05-11T11:00:00+00:00",
+                        help="Only resolve entries with ts <= this "
+                             "ISO-8601 instant. Default freezes the script "
+                             "to the 2026-05-11 audit scope; do NOT change "
+                             "without re-evaluating the resolution rationale.")
     args = parser.parse_args()
 
     errors_file = args.file
     if not errors_file.exists():
         print(f"ERROR: {errors_file} not found", file=sys.stderr)
+        return 2
+
+    try:
+        audit_start = datetime.fromisoformat(args.audit_start)
+    except ValueError:
+        print(f"ERROR: bad --audit-start: {args.audit_start}", file=sys.stderr)
         return 2
 
     cutoff = datetime.now(UTC) - timedelta(days=args.days)
@@ -113,6 +132,10 @@ def main() -> int:
         except ValueError:
             continue
         if ts < cutoff:
+            continue
+        if ts > audit_start:
+            # Newer than the audit window — leave for manual triage so
+            # fresh regressions aren't masked by this one-shot.
             continue
         if ts_str in resolved_ts:
             continue

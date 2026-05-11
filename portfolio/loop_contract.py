@@ -9,6 +9,7 @@ Supports: main loop, metals loop, GoldDigger, Elongir.
 
 import hashlib
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -433,11 +434,21 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     if last_wall_ts is not None:
         try:
             now_wall = time.time()
-            if (now_wall - float(last_wall_ts)) < LAYER2_VIOLATION_COOLDOWN_S:
-                return []
+            last_wall_f = float(last_wall_ts)
         except (TypeError, ValueError):
             # Corrupt state value — fall through and re-fire.
-            pass
+            last_wall_f = None
+        else:
+            # Codex P1 2026-05-11: guard against non-finite values. JSON
+            # accepts Infinity/NaN by default, and `float("Infinity")`
+            # parses successfully — without this check a corrupted state
+            # row with +inf would make the diff < 30 always true and
+            # permanently silence the contract.
+            if not math.isfinite(last_wall_f):
+                last_wall_f = None
+        if last_wall_f is not None:
+            if (now_wall - last_wall_f) < LAYER2_VIOLATION_COOLDOWN_S:
+                return []
 
     # Violation. Try to enrich the message with whether a recent auth
     # failure was logged — it's the most common root cause, and telling

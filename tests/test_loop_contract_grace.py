@@ -605,6 +605,40 @@ def test_wall_clock_cooldown_suppresses_rapid_refire(contract_env, monkeypatch):
     assert v2 == [], "wall-clock cooldown must suppress rapid re-fire"
 
 
+def test_wall_clock_cooldown_rejects_non_finite_stored_ts(contract_env, monkeypatch):
+    """Codex P1 2026-05-11: if contract_state.json contains a corrupted
+    layer2_last_violation_wall_ts (e.g. Infinity/NaN), the cooldown gate
+    must NOT silently suppress forever. JSON accepts Infinity by default,
+    and float('Infinity') parses fine — without an isfinite() check, a
+    single corrupted write would permanently silence the contract."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "BTC-USD flipped SELL->BUY (sustained)",
+        "last_invocation_tier": 1,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=10)),
+         "status": "auth_error", "tier": 1, "exit_code": 0},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    # Seed contract_state with a corrupted Infinity wall_ts.
+    from portfolio.file_utils import atomic_write_json
+    atomic_write_json(p["CONTRACT_STATE_FILE"], {
+        "layer2_last_violation_wall_ts": float("inf"),
+    })
+
+    # Must still fire — the corrupted value must not silence the check.
+    v = loop_contract.check_layer2_journal_activity()
+    assert len(v) == 1, "non-finite cooldown ts must not suppress violations"
+
+
 def test_wall_clock_cooldown_clears_after_window(contract_env, monkeypatch):
     """After the 30 s cooldown elapses, the violation may re-fire if the
     underlying condition still holds. This is the recovery path —
