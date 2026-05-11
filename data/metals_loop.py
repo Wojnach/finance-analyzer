@@ -6999,10 +6999,10 @@ def main():
         try:
             from portfolio import avanza_session as _avanza_rest
             from portfolio.grid_fisher import GridFisher as _GridFisher
-            from data.fin_fish_config import FULL_CATALOG as _FULL_CATALOG
+            from data.fin_fish_config import WARRANT_CATALOG as _GRID_CATALOG
             grid_fisher = _GridFisher(
                 session=_avanza_rest,
-                catalog=_FULL_CATALOG,
+                catalog=_GRID_CATALOG,
             )
             log(f"Grid fisher: ACTIVE ({len(grid_fisher.state.by_instrument)} instruments, "
                 f"enabled={grid_fisher._enabled})")
