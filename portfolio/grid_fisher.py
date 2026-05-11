@@ -367,6 +367,34 @@ def save_state(
         atomic_write_json(state_path, state.to_dict())
 
 
+# Pattern matching cookie headers / API auth in Playwright error
+# tracebacks. Avanza errors include the full request cookie which
+# carries AZAPERSISTENCE, csid, cstoken, AZACSRF — session-authoritative
+# values that must NEVER leave the host. Scrub at log time so the
+# dashboard /api/grid-fisher endpoint and any downstream reader stays
+# clean.
+import re as _re
+
+_SENSITIVE_HEADER_PATTERN = _re.compile(
+    r"(?im)^\s*-\s*(?:cookie|authorization|set-cookie|x-aza-csrf-token)\s*:.*$",
+)
+_INLINE_COOKIE_PATTERN = _re.compile(
+    r"(?i)(?:cookie|authorization)\s*[:=]\s*[^\s\n]+",
+)
+_MAX_ERROR_FIELD_CHARS = 400
+
+
+def _scrub_for_log(value: Any) -> Any:
+    """Strip auth/cookie material and cap length on user-supplied strings."""
+    if not isinstance(value, str):
+        return value
+    cleaned = _SENSITIVE_HEADER_PATTERN.sub("    - <redacted>", value)
+    cleaned = _INLINE_COOKIE_PATTERN.sub("<redacted>", cleaned)
+    if len(cleaned) > _MAX_ERROR_FIELD_CHARS:
+        cleaned = cleaned[:_MAX_ERROR_FIELD_CHARS] + "…<truncated>"
+    return cleaned
+
+
 def log_decision(
     category: str,
     *,
@@ -378,7 +406,9 @@ def log_decision(
     """Append a decision entry to the grid-fisher journal.
 
     ``category`` is a short tag (e.g. ``"placement"``, ``"fill"``,
-    ``"rotate"``, ``"cancel"``, ``"halt"``, ``"flip"``).
+    ``"rotate"``, ``"cancel"``, ``"halt"``, ``"flip"``). Free-form
+    string fields are scrubbed of cookies/auth headers before write
+    so the journal is safe to expose via the dashboard endpoint.
     """
     entry: dict[str, Any] = {
         "ts": _utcnow_iso(),
@@ -388,7 +418,8 @@ def log_decision(
         entry["ob_id"] = ob_id
     if ticker is not None:
         entry["ticker"] = ticker
-    entry.update(fields)
+    for key, val in fields.items():
+        entry[key] = _scrub_for_log(val)
     atomic_append_jsonl(decisions_path, entry)
 
 
