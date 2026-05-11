@@ -1,5 +1,87 @@
 # Session Progress
 
+## Oil signal test coverage (2026-05-11 evening)
+
+**Status:** SHIPPED — `bf14d63a` merged direct to main, pushed.
+
+**Why:** `portfolio/oil_grid_signal.py` landed earlier (commit `4a32bcb4`)
+without test coverage. The module powers the OIL-USD seat in
+grid_fisher — gating live order placement on real money.
+
+**What changed:** 19 unit tests in `tests/test_oil_grid_signal.py`
+covering RSI computation, indicator → (direction, confidence)
+mapping, compute_signal pipeline (fetch failures, empty df, missing
+columns), and get_cached_or_refresh (TTL freshness, force bypass,
+corrupt-cache recovery, malformed-ts recovery).
+
+**Earlier follow-up branch** `feat/grid-fisher-followup-2026-05-11`
+implemented a parallel oil signal module that was superseded by main
+mid-session. Aborted the merge, deleted the branch+worktree, kept
+only the test file which fits main's API.
+
+**Live state:** PF-MetalsLoop running on the latest grid_fisher code.
+Oil signal currently LONG @ 0.535 confidence (just under the 0.56
+arm floor — clean gate). XAG/XAU/BTC/ETH signals also below floor,
+no placements queued. Monitor task `bajdx0t0l` armed on
+`data/grid_fisher_decisions.jsonl` for the first place_buy event.
+
+## Dashboard hours unified + desktop-mode toggle (2026-05-11 late afternoon)
+
+**Status:** SHIPPED — merged, pushed (afa3a524). Worktree cleaned up.
+
+**Why:** User reported dashboard showed all four Avanza bots as OUTSIDE_HOURS
+at 14:23 CEST. Root cause: `dashboard/trading_status.py` hardcoded
+15:30-21:55 (GoldDigger's US-overlap window) for all four bots. User
+trades EU+US, wants unified 08:30-21:30 across all of them.
+
+**What changed (4 commits on `feat/dashboard-hours-desktop-2026-05-11`):**
+
+1. Session window unified to 08:30-21:30 Sthlm in
+   `dashboard/trading_status.py` constants + `portfolio/golddigger/config.py`
+   defaults. Elongir was already 08:30-21:30; metals/fishing use Avanza
+   API closing time.
+2. Bug-fix: `_next_open_hint()` hard-coded "next 15:30" — now reads
+   `SESSION_OPEN`. Previously lied to users after the widening.
+3. `dashboard/app.py`: `_hours_until_stockholm_close` default 21:55→21:30
+   and `/api/metals` `market_close_cet` "21:55"→"21:30".
+4. Desktop-mode toggle button (⊞ glyph) in dashboard header. Click
+   promotes layout to ≥1024px CSS regardless of viewport width.
+   Persists in `localStorage["pi-desktop-mode"]`. Mobile remains default.
+   New: `dashboard/static/js/desktop-mode.js` (50 LOC). Mirrors
+   `@media (min-width:1024px)` rules under `:root.desktop-mode { ... }`
+   in `layout.css` + `responsive.css`.
+5. Tests updated: `test_dashboard_trading_status` (21 cases for new
+   boundaries), `test_golddigger.py::test_flatten_at_session_end` mock
+   moved (21,55)→(21,30). 388 targeted tests pass.
+
+**Plan doc:** `docs/plans/2026-05-11-dashboard-hours-desktop.md`
+
+**Restart needed:**
+- Dashboard (port 5055) — code changed in `dashboard/app.py` + static assets
+- PF-DataLoop if `portfolio/golddigger/config.py` is loaded by the
+  main loop (it is — GoldDigger imports happen at startup)
+
+**Deferred items surfaced this session:**
+
+1. **Avanza positions show wrong account.** `DEFAULT_ACCOUNT_ID="1625505"`
+   in `portfolio/avanza_session.py:35` likely points to the ISK
+   (Beammwave/NextEra/Vertiv), not the trading account. Need user to
+   identify the actual trading-account ID via
+   `/_api/account-overview/overview/categorizedAccounts` or Avanza UI.
+   Out of scope this PR — requires user confirmation.
+
+2. **`signal_log_reconciliation` invariant escalating 22x consecutive.**
+   Real bug: `portfolio/log_rotation.py:230-338 rotate_jsonl()` doesn't
+   hold the sidecar lockfile that `outcome_tracker.log_signal_snapshot`
+   uses for `atomic_append_jsonl`. ~400 JSONL entries lost per rotation
+   pass while SQLite keeps them. Fix: wrap the rotation body with
+   `outcome_tracker._hold_signal_log_lock` (or refactor into
+   `file_utils.py`). Separate PR.
+
+3. **Codex P3 deferred:** `scripts/golddigger_backtest_today.py:20-21,
+   103, 302-303` still uses 15:30-21:55. Backtest tuning will disagree
+   with live bot's widened window until updated. Separate ticket.
+
 ## Grid Market-Maker (2026-05-11 afternoon)
 
 **Status:** SHIPPED — merged to main, pushed, PF-MetalsLoop restarted with new code
@@ -3417,3 +3499,51 @@ tests/test_oil_grid_signal.py
 ### 2026-05-11 12:52 UTC | main
 274e1db3 security(grid-fisher): scrub cookies + auth headers from decision log
 portfolio/grid_fisher.py
+
+### 2026-05-11 12:54 UTC | main
+2ce7bdf2 docs: SESSION_PROGRESS adds grid-fisher follow-up notes
+docs/SESSION_PROGRESS.md
+
+### 2026-05-11 13:00 UTC | feat/dashboard-hours-desktop-2026-05-11
+04d98d19 fix(dashboard): address codex P2 findings on 08:30-21:30 widening
+dashboard/app.py
+dashboard/static/css/responsive.css
+
+### 2026-05-11 13:01 UTC | 
+f5e4e565 feat(dashboard): unify Avanza trading hours to 08:30-21:30 Sthlm
+dashboard/trading_status.py
+docs/plans/2026-05-11-dashboard-hours-desktop.md
+portfolio/golddigger/config.py
+
+### 2026-05-11 13:01 UTC | 
+29f24a2d feat(dashboard): add desktop-mode toggle button in header
+dashboard/static/css/layout.css
+dashboard/static/css/responsive.css
+dashboard/static/index.html
+dashboard/static/js/desktop-mode.js
+dashboard/static/js/main.js
+
+### 2026-05-11 13:01 UTC | 
+0c5558e3 test(dashboard): update fixtures for 08:30-21:30 window + fix hint format
+dashboard/trading_status.py
+tests/test_dashboard_trading_status.py
+tests/test_golddigger.py
+
+### 2026-05-11 13:01 UTC | 
+afa3a524 fix(dashboard): address codex P2 findings on 08:30-21:30 widening
+dashboard/app.py
+dashboard/static/css/responsive.css
+
+### 2026-05-11 13:04 UTC | feat/hold-bias-reduction-2026-05-11
+7cb4d2c3 fix(stage2): gate MACD soft vote on magnitude + weight soft votes in consensus
+portfolio/signal_engine.py
+tests/test_signal_hold_bias_reduction.py
+
+### 2026-05-11 13:05 UTC | feat/grid-fisher-followup-2026-05-11
+b85cfb0d fix(grid-fisher): codex P1/P2 findings on oil signal feed
+data/oil_loop.py
+portfolio/oil_grid_signal.py
+tests/test_oil_grid_signal.py
+
+### 2026-05-11 13:09 UTC | main
+bf14d63a test(oil-grid-signal): add coverage for standalone Brent signal source
