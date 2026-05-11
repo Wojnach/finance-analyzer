@@ -7483,6 +7483,28 @@ Positions: {pos_summary}{prob_summary}""")
                                 "confidence": float(_row.get("confidence") or 0.0),
                                 "atr_pct": _row.get("atr_pct"),
                             }
+                        # Merge OIL-USD signal from the oil_loop feed
+                        # (portfolio.oil_grid_signal). agent_summary.json
+                        # does not carry OIL-USD; the feed is the
+                        # canonical source. Stale (>5min) or missing
+                        # records are skipped so oil instruments stay
+                        # idle on feed outages.
+                        try:
+                            from portfolio.oil_grid_signal import load_signal as _load_oil_signal
+                            _oil_record = _load_oil_signal()
+                            if _oil_record:
+                                _oil_action = (_oil_record.get("action") or "").upper()
+                                _oil_direction = (
+                                    "LONG" if _oil_action == "BUY"
+                                    else "SHORT" if _oil_action == "SELL"
+                                    else None
+                                )
+                                _grid_sigs["OIL-USD"] = {
+                                    "direction": _oil_direction,
+                                    "confidence": float(_oil_record.get("confidence") or 0.0),
+                                }
+                        except Exception:
+                            logger.debug("grid adapter: oil_grid_signal merge skipped", exc_info=True)
                         # Build ob_id -> {bid, ask} from the running prices
                         # dict. metals_loop's prices uses internal keys like
                         # 'silver_bull' so we re-key by the underlying ticker

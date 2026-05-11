@@ -254,6 +254,14 @@ def run_one_cycle(trader: OilSwingTrader,
 
     summary = trader.evaluate_and_execute(prices, signal_data)
 
+    # Refresh the oil signal feed that downstream consumers
+    # (grid fisher in metals_loop) read each tick. BZ=F is not yet
+    # part of portfolio/main.py SYMBOLS, so this is the canonical
+    # OIL-USD signal source until that gap closes.
+    with contextlib.suppress(Exception):
+        from portfolio.oil_grid_signal import write_signal
+        write_signal()
+
     # Track value history for the dashboard
     with contextlib.suppress(Exception):
         from portfolio.file_utils import atomic_append_jsonl
