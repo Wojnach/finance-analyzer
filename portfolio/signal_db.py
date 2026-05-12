@@ -178,47 +178,60 @@ class SignalDB:
         """Load all snapshots as list[dict] matching JSONL format.
 
         Compatible drop-in replacement for accuracy_stats.load_entries().
+
+        Uses two bulk queries (snapshots+ticker_signals, snapshots+outcomes)
+        instead of per-snapshot SELECTs. Reduces load time from O(n_snapshots²)
+        to O(total_rows) which matters after months of accumulated data.
         """
         conn = self._get_conn()
-        snapshots = conn.execute("SELECT * FROM snapshots ORDER BY ts").fetchall()
 
+        snapshots = conn.execute("SELECT * FROM snapshots ORDER BY ts").fetchall()
+        if not snapshots:
+            return []
+
+        snap_by_id = {}
         entries = []
         for snap in snapshots:
-            sid = snap["id"]
-
-            tickers = {}
-            for row in conn.execute(
-                "SELECT * FROM ticker_signals WHERE snapshot_id = ?", (sid,)
-            ):
-                tickers[row["ticker"]] = {
-                    "price_usd": row["price_usd"],
-                    "consensus": row["consensus"],
-                    "buy_count": row["buy_count"],
-                    "sell_count": row["sell_count"],
-                    "total_voters": row["total_voters"],
-                    "signals": json.loads(row["signals"]) if row["signals"] else {},
-                    "regime": row["regime"] if row["regime"] is not None else "unknown",
-                }
-
-            outcomes = {}
-            for row in conn.execute(
-                "SELECT * FROM outcomes WHERE snapshot_id = ?", (sid,)
-            ):
-                if row["ticker"] not in outcomes:
-                    outcomes[row["ticker"]] = {}
-                outcomes[row["ticker"]][row["horizon"]] = {
-                    "price_usd": row["price_usd"],
-                    "change_pct": row["change_pct"],
-                    "ts": row["outcome_ts"],
-                }
-
-            entries.append({
+            entry = {
                 "ts": snap["ts"],
                 "trigger_reasons": json.loads(snap["trigger_reasons"]) if snap["trigger_reasons"] else [],
                 "fx_rate": snap["fx_rate"],
-                "tickers": tickers,
-                "outcomes": outcomes,
-            })
+                "tickers": {},
+                "outcomes": {},
+            }
+            snap_by_id[snap["id"]] = entry
+            entries.append(entry)
+
+        for row in conn.execute(
+            "SELECT * FROM ticker_signals ORDER BY snapshot_id"
+        ):
+            entry = snap_by_id.get(row["snapshot_id"])
+            if entry is None:
+                continue
+            entry["tickers"][row["ticker"]] = {
+                "price_usd": row["price_usd"],
+                "consensus": row["consensus"],
+                "buy_count": row["buy_count"],
+                "sell_count": row["sell_count"],
+                "total_voters": row["total_voters"],
+                "signals": json.loads(row["signals"]) if row["signals"] else {},
+                "regime": row["regime"] if row["regime"] is not None else "unknown",
+            }
+
+        for row in conn.execute(
+            "SELECT * FROM outcomes ORDER BY snapshot_id"
+        ):
+            entry = snap_by_id.get(row["snapshot_id"])
+            if entry is None:
+                continue
+            outcomes = entry["outcomes"]
+            if row["ticker"] not in outcomes:
+                outcomes[row["ticker"]] = {}
+            outcomes[row["ticker"]][row["horizon"]] = {
+                "price_usd": row["price_usd"],
+                "change_pct": row["change_pct"],
+                "ts": row["outcome_ts"],
+            }
 
         return entries
 
