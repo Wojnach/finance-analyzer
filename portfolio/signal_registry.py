@@ -288,6 +288,13 @@ def _register_defaults():
                       "portfolio.signals.gold_overnight_bias",
                       "compute_gold_overnight_bias_signal",
                       requires_context=True, max_confidence=0.7)
+    # Metals VRP — GVZ (gold implied vol) minus realized vol as contrarian
+    # 2026-05-12: BIS WP 619, CBOE GVZ. IV/RV ratio is established alpha source.
+    # Metals-only. Uses FRED GVZCLS (same integration as credit_spread).
+    register_enhanced("metals_vrp",
+                      "portfolio.signals.metals_vrp",
+                      "compute_metals_vrp_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
