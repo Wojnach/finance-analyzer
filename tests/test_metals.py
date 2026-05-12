@@ -204,9 +204,9 @@ class TestMetalsSignalConfig:
             "atr_pct": 0.57,
         }
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
-        # 2026-05-10: 29 → 20 after April-May disable wave (mahalanobis,
-        # EVRP, hurst, shannon, vix_ts, gold_real_yield, etc).
-        assert extra["_total_applicable"] == 20
+        # 2026-05-12: 20 → 17 after disabling volatility_sig, dxy_cross_asset,
+        # forecast (research session signal audit).
+        assert extra["_total_applicable"] == 17
 
     def test_stocks_total_applicable(self):
         """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""
@@ -231,8 +231,9 @@ class TestMetalsSignalConfig:
         }
         with patch("portfolio.market_timing.should_skip_gpu", return_value=False):
             action, conf, extra = generate_signal(ind, ticker="MSTR")
-        # 2026-05-11 (codex C1): 21 → 18 after MSTR _default disable bump.
-        assert extra["_total_applicable"] == 18
+        # 2026-05-12: 18 → 15 after disabling volatility_sig, dxy_cross_asset,
+        # forecast (research session signal audit).
+        assert extra["_total_applicable"] == 15
 
     def test_crypto_total_applicable(self):
         """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""
@@ -254,5 +255,6 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        # 2026-05-10: 33 → 26 after disable wave.
-        assert extra["_total_applicable"] == 26
+        # 2026-05-12: 26 → 23 after disabling volatility_sig, dxy_cross_asset,
+        # forecast (all 3 apply to crypto despite dxy being metals-focused).
+        assert extra["_total_applicable"] == 23

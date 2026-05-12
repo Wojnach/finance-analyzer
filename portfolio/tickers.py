@@ -156,6 +156,20 @@ DISABLED_SIGNALS = {
     "sentiment",        # 2026-05-03: 33.8% at 3h recent (3629 sam), 45.9% all-time (39579 sam).
                         # CryptoBERT predictions are noise. High-volume signal actively hurting
                         # consensus. Always in macro_external cluster but dragging down peers.
+    "volatility_sig",   # 2026-05-12: 46.1% at 1d (7933 sam), 43.9% recent (628 sam).
+                        # Below 47% gate with massive sample — statistically certain.
+                        # 47.2% at 3h (marginal). No horizon provides reliable edge.
+                        # Was regime-gated in ranging but fails across all regimes.
+    "dxy_cross_asset",  # 2026-05-12: 43.3% at 1d (30 sam). SELL accuracy catastrophic
+                        # at 14.3%. Metals-only signal. Not salvageable at current sample.
+    "forecast",         # 2026-05-12: 25.6% recent 1d (223 sam), crashed from 47.0%
+                        # all-time (6966 sam). Chronos-2 time-series model failing in
+                        # ranging regime — oscillating predictions flip rapidly.
+                        # Previous comment said "move to REGIME_GATED_SIGNALS (24h-only)"
+                        # but 25.6% is catastrophic even at 24h. Full disable until
+                        # regime transitions to trending and accuracy recovers.
+                        # Forecast logging (forecast_predictions.jsonl) will be silenced
+                        # again — acceptable tradeoff vs consensus pollution.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.

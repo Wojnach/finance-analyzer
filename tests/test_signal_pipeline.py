@@ -117,43 +117,45 @@ class TestVoteCountIntegrity:
     def test_stock_vote_counts(self, _mock, _gpu_mock):
         """Stock applicable count — tripwire for signal add/disable.
 
-        2026-05-11 (codex C1): 21 → 18 after MSTR _default disable bump
-        (sentiment, volume_flow, heikin_ashi, momentum_factors).
-        Pair with test_consensus.py::test_stock_total_applicable=16
+        2026-05-12: 18 → 15 after disabling volatility_sig, dxy_cross_asset,
+        forecast (research session signal audit).
+        Pair with test_consensus.py::test_stock_total_applicable=13
         (delta = GPU signals counted here, not there).
         """
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
-        assert extra["_total_applicable"] == 18
+        assert extra["_total_applicable"] == 15
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
         """Metals applicable count — same tripwire pattern.
 
-        2026-05-10: 29 → 20 after disable wave.
+        2026-05-12: 20 → 17 after disabling volatility_sig, dxy_cross_asset,
+        forecast (research session signal audit).
         """
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 20
+        assert extra["_total_applicable"] == 17
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_18_applicable(self, _mock, _gpu_mock):
-        """Every stock symbol should have exactly 18 total applicable signals.
+    def test_all_stock_symbols_have_15_applicable(self, _mock, _gpu_mock):
+        """Every stock symbol should have exactly 15 total applicable signals.
 
-        2026-05-11 (codex C1): dropped 21→18 after MSTR _default disable bump.
+        2026-05-12: dropped 18→15 after disabling volatility_sig, dxy_cross_asset,
+        forecast (research session signal audit).
         """
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 18, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 18"
+            assert extra["_total_applicable"] == 15, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 15"
 
 
 # ---------------------------------------------------------------------------
