@@ -102,6 +102,7 @@ DISABLED_SIGNALS = {
     "cubic_trend_persistence",  # pending live validation (added 2026-05-09)
     "vwap_zscore_mr",  # pending live validation (added 2026-05-10)
     "gold_overnight_bias",  # pending live validation (added 2026-05-11)
+    "metals_vrp",  # pending live validation (added 2026-05-12)
     "calendar",         # 2026-05-09: 29.3% recent accuracy — structural BUY bias
                         # (6/8 sub-signals BUY-only). Actively harmful. Was per-horizon
                         # blacklisted at 1d but still voted at other horizons.
@@ -315,4 +316,5 @@ SIGNAL_NAMES = [
     "cubic_trend_persistence",
     "vwap_zscore_mr",
     "btc_proxy",
+    "metals_vrp",
 ]
