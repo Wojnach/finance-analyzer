@@ -109,3 +109,20 @@ on failure (treat corrupt timestamp as stale — safe behavior).
 
 Batches are independent — no ordering constraints.
 Implement in numbered order (critical → performance → polish).
+
+## 5. Implementation Results
+
+| Batch | Status | Commit | Notes |
+|-------|--------|--------|-------|
+| 1 | DONE | `339daf15` | Reordered 5 assignments before Popen. 89/89 agent tests pass. |
+| 2 | DONE | `40429468` | PowerShell Get-CimInstance replaces WMIC. Verified on Win11. |
+| 3 | DONE | `228f7cd8` | 3 bulk queries + dict reassembly. 18/18 signal_db tests pass. |
+| 4 | SKIPPED | — | All 3 fromisoformat calls already have try/except guards. |
+| 5 | PARTIAL | `1221ff02` | Fixed `__import__("json")` → module-level import. oscillator_trend verified NOT dead (holds momentum_factors). |
+
+### False Positives Rejected
+
+- **B4**: health.py fromisoformat already guarded at lines 161, 202, 401.
+- **B5a**: oscillator_trend correlation group holds active `momentum_factors` signal and participates in meta-cluster dedup. NOT dead code.
+- **Agent P0**: risk_management concentration `min(total*pct, cash)` correctly caps allocation at available cash.
+- **Agent P1**: grid_fisher `record_fill()` sets `ORDER_FILLED` status, preventing double-count on subsequent iterations.
