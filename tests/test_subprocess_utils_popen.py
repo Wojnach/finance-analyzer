@@ -123,9 +123,9 @@ class TestKillOrphanedByCmdline:
 
         import os
         my_pid = os.getpid()
-        # Mock wmic returning our own PID
         mock_result = MagicMock()
-        mock_result.stdout = f"Node,ProcessId\nHOST,{my_pid}\n"
+        mock_result.stdout = f"{my_pid}\n"
+        mock_result.returncode = 0
         with patch("portfolio.subprocess_utils.subprocess.run", return_value=mock_result):
             killed = kill_orphaned_by_cmdline("python")
             assert killed == 0
@@ -137,4 +137,8 @@ class TestKillOrphanedByCmdline:
         if sys.platform != "win32":
             pytest.skip("Windows-only test")
 
-        assert kill_orphaned_by_cmdline("totally_nonexistent_process_pattern_xyz_12345") == 0
+        mock_result = MagicMock()
+        mock_result.stdout = ""
+        mock_result.returncode = 0
+        with patch("portfolio.subprocess_utils.subprocess.run", return_value=mock_result):
+            assert kill_orphaned_by_cmdline("totally_nonexistent_process_pattern_xyz_12345") == 0
