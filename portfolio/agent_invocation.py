@@ -855,6 +855,17 @@ def invoke_agent(reasons, tier=3):
         agent_env["PF_HEADLESS_AGENT"] = "1"
         _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
         _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
+        # Set timing/tier state BEFORE Popen so the watchdog thread never
+        # observes a live _agent_proc with stale _agent_start/_agent_timeout
+        # from the previous invocation (race: watchdog fires between Popen
+        # and the old post-Popen assignments, sees huge elapsed time, kills
+        # the freshly spawned process). If Popen fails, _agent_proc stays
+        # None and the watchdog ignores the stale metadata.
+        _agent_start = time.monotonic()
+        _agent_start_wall = time.time()
+        _agent_timeout = timeout
+        _agent_tier = tier
+        _agent_reasons = list(reasons)
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
@@ -864,11 +875,6 @@ def invoke_agent(reasons, tier=3):
         )
         _agent_log = log_fh  # transfer ownership on success
         log_fh = None  # prevent cleanup below from closing it
-        _agent_start = time.monotonic()
-        _agent_start_wall = time.time()  # wall-clock fallback for P2B
-        _agent_timeout = timeout
-        _agent_tier = tier
-        _agent_reasons = list(reasons)
         # BUG-219: Snapshot transaction counts so check_agent_completion()
         # can detect new trades and call record_trade().
         global _patient_txn_count_before, _bold_txn_count_before

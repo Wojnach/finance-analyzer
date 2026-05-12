@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-11
-Branch: improve/auto-session-2026-05-11
+Updated: 2026-05-12
+Branch: improve/auto-session-2026-05-12
 
 ## 1) Architecture Summary
 
@@ -27,7 +27,7 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 
 ### Orchestration (5 modules)
 - `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
-- `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable
+- `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen so watchdog never sees stale start time.
 - `trigger.py` (330 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
@@ -80,9 +80,9 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 - `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
 - `health.py` (~340 lines): Heartbeat, error ring buffer, module failure tracking, signal health, dead signal detection
 - `logging_config.py` (48 lines): RotatingFileHandler (10MB, 3 backups)
-- `signal_db.py`: WAL-mode SQLite dual-write with JSONL fallback
+- `signal_db.py`: WAL-mode SQLite dual-write with JSONL fallback. `load_entries()` optimized from O(n²) per-snapshot SELECTs to 3 bulk queries + dict reassembly (2026-05-12).
 - `process_lock.py` (101 lines): Cross-platform non-blocking file locks (msvcrt/fcntl)
-- `subprocess_utils.py` (233 lines): Windows Job Object subprocess protection, orphan reaper
+- `subprocess_utils.py` (260 lines): Windows Job Object subprocess protection, orphan reaper. WMIC→PowerShell migration (2026-05-12): `kill_orphaned_by_cmdline()` uses Get-CimInstance for Win11 compat.
 - `notification_text.py` (65 lines): Shared text helpers for human-readable notifications
 - `llama_server.py` (309 lines): Unified persistent llama-server manager, cross-process model swap with file lock, query-scoped locking (BUG-165)
 
@@ -221,3 +221,12 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - **B3 (fixed)**: Monte Carlo ATR fallback was generic 2.0% for all assets. Now per-asset-class: crypto=3.5%, metals=4.0%, stocks=2.0%.
 - **B4 (fixed)**: Stuck loading key eviction in shared_state.py logged at DEBUG. Elevated to WARNING.
 - ~6,000+ tests across 242 test files
+
+### Findings from 2026-05-12 Auto Session
+
+- **B1 (fixed)**: Agent spawn race — watchdog could kill freshly spawned process due to stale `_agent_start`. Fix: set metadata before Popen.
+- **B2 (fixed)**: WMIC deprecated in Win11 — `kill_orphaned_by_cmdline()` migrated to PowerShell Get-CimInstance.
+- **B3 (fixed)**: `signal_db.load_entries()` O(n²) per-snapshot queries → 3 bulk queries + dict reassembly.
+- **B4 (skipped)**: health.py fromisoformat already guarded at all 3 call sites.
+- **B5 (partial)**: `__import__("json")` → standard import in metals_cross_asset.py. oscillator_trend correlation group verified NOT dead code.
+- **False positives rejected**: risk_management concentration min() is correct; grid_fisher ORDER_FILLED prevents double-count.

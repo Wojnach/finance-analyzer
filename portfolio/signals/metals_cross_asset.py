@@ -29,6 +29,7 @@ Both are daily-cadence indicators like GVZ.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -136,7 +137,7 @@ def _fetch_fred_values(
             },
             timeout=_FRED_TIMEOUT,
         )
-        data = resp.json() if hasattr(resp, "json") else __import__("json").loads(resp)
+        data = resp.json() if hasattr(resp, "json") else json.loads(resp)
         observations = data.get("observations", [])
         values = []
         for obs in observations:
