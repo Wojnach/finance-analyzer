@@ -1,94 +1,111 @@
-# Improvement Plan — Auto-Session 2026-05-11
+# Improvement Plan — Auto-Session 2026-05-12
 
-## Date: 2026-05-11 (Sunday)
-## Branch: improve/auto-session-2026-05-11
+## Date: 2026-05-12 (Tuesday)
+## Branch: improve/auto-session-2026-05-12
+
+## Exploration Summary
+
+4 parallel agents explored orchestration, signals, portfolio/risk, and infrastructure.
+Direct analysis covered: signal_db, config_validator, auth, file_utils, grid_fisher.
+
+**Codebase health**: Solid. 244 bugs fixed historically, thread-safe caching, atomic I/O,
+proper auth, no security vulnerabilities. Previous auto-session (2026-05-11) addressed
+many items. Several agent "P0" findings were false positives on manual verification.
 
 ## 1. Bugs & Problems Found
 
-### CRITICAL — Silent Failure Path
+### HIGH — Race Condition
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| C1 | `status="incomplete"` (exit 0, no journal) sends NO Telegram alert — operator sees nothing after "invoked" notification | `agent_invocation.py:1272` | Root cause of 43 unresolved critical errors about Layer 2 silent failures |
-| C2 | `_journal_ts_before` captured AFTER subprocess spawned — race where fast agent writes before baseline is read | `agent_invocation.py:871 vs 856` | False "incomplete" detection (low probability but trivial fix) |
-| C3 | `reporting.py` macro/market_health/earnings submodules not covered by `_track_module_outcome` — failures silently swallowed | `reporting.py:248-270` | Submodule failures don't surface in `critical_errors.jsonl` |
-| C4 | `process_lock.py:_lock_file` returns without locking when neither msvcrt nor fcntl available — caller thinks lock is held | `process_lock.py:60` | Silent no-op mutual exclusion on exotic platforms |
+| B1 | Agent spawn sets `_agent_proc` BEFORE `_agent_start`/`_agent_timeout` — watchdog can see new process with stale start time and kill it instantly | `agent_invocation.py:858-871` | Rare but real: freshly spawned agent killed by watchdog |
 
-### HIGH — Data Integrity & Code Quality
+### HIGH — Platform Deprecation
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| H1 | `signal_db.py:insert_snapshot` no explicit `conn.rollback()` on `ticker_signals` INSERT failure — orphaned snapshot rows inflate accuracy denominators | `signal_db.py` | Analytically incorrect accuracy stats |
-| H2 | `config_validator.py` uses raw `json.load` instead of `file_utils.load_json` — race with concurrent config write | `config_validator.py:59` | Startup crash on concurrent write |
-| H3 | `config_validator.py` doesn't validate Binance keys — missing key causes silent data failure at runtime | `config_validator.py` | BTC/ETH data silently missing |
-| H4 | `health.py:check_staleness` — `datetime.fromisoformat(hb)` crashes on corrupt `health_state.json` | `health.py:152` | Dashboard `/api/health` crash |
-| H5 | `metals_loop.py:_load_json_state` uses raw `json.load(open(...))` violating CLAUDE.md rule 4 | `metals_loop.py:559` | Partial read on concurrent write |
-| H6 | `_CORE_SIGNALS` in signal_registry.py is dead code — no signal registers as "core" type | `signal_registry.py:14` | Confusing dead API |
-| H7 | `subprocess_utils.py:kill_orphaned_by_cmdline` uses deprecated WMIC — removed in some Win11 builds | `subprocess_utils.py:213` | Orphan detection fails silently |
+| B2 | `kill_orphaned_by_cmdline()` uses WMIC which is removed in some Win11 builds | `subprocess_utils.py:216` | Orphan detection fails silently on newer Windows |
 
-### HIGH — Signal System
+### MEDIUM — Performance
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| S1 | Disabled core signals (macd, sentiment, claude_fundamental) not force-HOLD'd at generation time — utility boost can circumvent accuracy gate | `signal_engine.py:2725` | Disabled signals can still influence consensus |
-| S2 | Dead `oscillator_trend` correlation group — oscillators always HOLD, group is permanent no-op | `signal_engine.py:1356` | Misleading config, stale meta-cluster comment |
-| S3 | `fibonacci` in `_SHADOW_SAFE_SIGNALS` wastes ~50ms/cycle computing a signal confirmed dead at 43.6% (17K samples) | `signal_engine.py:339` | Unnecessary CPU cost |
+| B3 | `signal_db.load_entries()` runs per-snapshot SELECT for ticker_signals + outcomes — O(n²) | `signal_db.py:186-222` | Degrades over months as snapshot count grows |
 
-### MEDIUM — Performance & Robustness
+### MEDIUM — Data Integrity
 
 | # | Issue | File:Line | Impact |
 |---|-------|-----------|--------|
-| M1 | `signal_db.load_entries()` O(n²) — individual queries per snapshot, degrades over months | `signal_db.py` | Cycle budget blocker after ~2 months |
-| M2 | `kelly_sizing.py` min_samples=5 for per-ticker accuracy — too few for meaningful Kelly sizing | `kelly_sizing.py` | Volatile sizing input |
-| M3 | CF Access JWT not cryptographically verified — presence-only check | `dashboard/auth.py:134` | Auth bypass if port becomes internet-reachable |
+| B4 | `health.py:check_staleness()` calls `datetime.fromisoformat()` on untrusted health_state data without guard | `health.py:~160` | Dashboard `/api/health` crash on corrupt timestamp |
+
+### LOW — Code Quality
+
+| # | Issue | File:Line | Impact |
+|---|-------|-----------|--------|
+| B5 | Dead `oscillator_trend` correlation group in signal_engine — oscillators always HOLD | `signal_engine.py` | Misleading config |
+| B6 | `__import__("json")` inline in metals_cross_asset.py | `signals/metals_cross_asset.py:139` | Code smell |
+| B7 | Equity curve annualization uses 365.25 in one place, 365 in another (0.07% diff) | `equity_curve.py:185 vs :228` | Inconsistent but negligible |
 
 ## 2. Implementation Batches
 
-### Batch 1: Silent Failure Alerting (2 files)
-**Goal:** Fix the #1 operational issue — Layer 2 silent failures go undetected.
+### Batch 1: Agent Spawn Race Condition (1 file, ~10 lines)
+**Goal:** Fix watchdog-vs-spawn race in agent_invocation.py
 
-1. `portfolio/agent_invocation.py`:
-   - Add Telegram alert on `status="incomplete"` (matching "failed" alert pattern)
-   - Move `_journal_ts_before` capture to BEFORE `subprocess.Popen` call
-2. `portfolio/reporting.py`:
-   - Add `_track_module_outcome` calls to macro_context, market_health, earnings_calendar exception handlers
+**Change:** Move `_agent_start`, `_agent_start_wall`, `_agent_timeout`, `_agent_tier`,
+`_agent_reasons` assignments to BEFORE `subprocess.Popen()` call. If Popen fails,
+`_agent_proc` stays None and stale state is harmless (watchdog skips None proc).
 
-### Batch 2: Data Integrity Fixes (3 files)
-**Goal:** Prevent data corruption paths.
+**Impact:** Zero behavior change on happy path. Eliminates rare kill-on-spawn race.
+**Risk:** LOW — only reorders assignments within the same function.
 
-1. `portfolio/signal_db.py`:
-   - Add explicit `conn.rollback()` in except handler for `insert_snapshot`
-   - Wrap ticker_signals INSERT in try/except with proper rollback
-2. `portfolio/health.py`:
-   - Guard `datetime.fromisoformat(hb)` with try/except ValueError
-3. `portfolio/process_lock.py`:
-   - Raise RuntimeError when no locking mechanism available (match main.py pattern)
+### Batch 2: WMIC → PowerShell Migration (1 file, ~20 lines)
+**Goal:** Replace deprecated WMIC with PowerShell Get-CimInstance in subprocess_utils.py
 
-### Batch 3: Config & Convention Fixes (3 files)
-**Goal:** Fix CLAUDE.md rule violations and startup validation gaps.
+**Change:** Rewrite `kill_orphaned_by_cmdline()` to use
+`powershell -NoProfile -Command "Get-CimInstance Win32_Process ..."` instead of WMIC.
 
-1. `portfolio/config_validator.py`:
-   - Use `file_utils.load_json` instead of raw `json.load`
-   - Add Binance API key validation to `REQUIRED_KEYS`
-2. `data/metals_loop.py`:
-   - Replace `_load_json_state` raw `json.load` with `file_utils.load_json`
-3. `portfolio/signal_registry.py`:
-   - Remove dead `_CORE_SIGNALS` dict and all references
-   - Simplify `get_signal_names()` to return enhanced-only
+**Impact:** Orphan detection works on all Win11 builds.
+**Risk:** LOW — PowerShell Get-CimInstance is the documented replacement.
 
-### Batch 4: Infrastructure Hardening (2 files)
-**Goal:** Fix platform-specific issues.
+### Batch 3: signal_db JOIN Optimization (1 file, ~40 lines)
+**Goal:** Replace O(n²) per-snapshot queries with JOINs in load_entries()
 
-1. `portfolio/subprocess_utils.py`:
-   - Replace WMIC-based orphan detection with PowerShell `Get-CimInstance`
-2. `portfolio/signal_db.py`:
-   - Optimize `load_entries()` to use JOINs instead of per-snapshot queries
+**Change:** Single query with LEFT JOINs across snapshots, ticker_signals, and outcomes.
+Post-process into the same dict structure.
+
+**Impact:** Load time goes from O(n²) to O(n). Matters after months of data.
+**Risk:** MEDIUM — query structure change, needs careful testing.
+
+### Batch 4: Health Data Guard (1 file, ~5 lines)
+**Goal:** Guard datetime.fromisoformat() against corrupt health_state.json
+
+**Change:** Wrap the fromisoformat call in try/except ValueError, return (True, inf, state)
+on failure (treat corrupt timestamp as stale — safe behavior).
+
+**Impact:** Dashboard no longer crashes on corrupt health data.
+**Risk:** LOW — adds a guard, doesn't change happy path.
+
+### Batch 5: Dead Code & Quality (2 files, ~10 lines)
+**Goal:** Remove dead oscillator_trend correlation group, fix inline __import__
+
+**Changes:**
+1. `signal_engine.py`: Remove `oscillator_trend` from correlation groups
+2. `signals/metals_cross_asset.py`: Replace `__import__("json")` with module-level import
+
+**Impact:** Cleaner code, no behavioral change.
+**Risk:** LOW — dead code removal + import style fix.
 
 ## 3. Impact Assessment
 
-| Batch | Risk | Testing Impact | Live System Impact |
-|-------|------|----------------|-------------------|
-| 1 | LOW — adds alerting, doesn't change data flow | Existing agent_invocation tests cover the path | Telegram gets alerts that were previously silent |
-| 2 | LOW — adds guards, doesn't change happy path | Need tests for new rollback + fromisoformat guard | More resilient to corrupt data |
-| 3 | LOW — uses existing atomic I/O instead of raw | Existing config_validator tests need update | Startup validation catches more issues |
-| 4 | MEDIUM — changes query patterns and orphan detection | Need tests for JOIN-based queries | Performance improvement for signal_db |
+| Batch | Files | Risk | Testing |
+|-------|-------|------|---------|
+| 1 | agent_invocation.py | LOW | Existing agent tests + new ordering test |
+| 2 | subprocess_utils.py | LOW | Manual verification on Win11 |
+| 3 | signal_db.py | MEDIUM | Existing signal_db tests + new JOIN test |
+| 4 | health.py | LOW | Existing health tests + new corrupt guard test |
+| 5 | signal_engine.py, metals_cross_asset.py | LOW | Existing signal tests |
+
+## 4. Dependency Order
+
+Batches are independent — no ordering constraints.
+Implement in numbered order (critical → performance → polish).
