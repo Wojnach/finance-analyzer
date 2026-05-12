@@ -211,24 +211,27 @@ def kill_orphaned_by_cmdline(pattern, exclude_pid=None):
     if exclude_pid is not None:
         skip.add(exclude_pid)
 
+    ps_cmd = (
+        "Get-CimInstance Win32_Process "
+        f"| Where-Object {{ $_.CommandLine -like '*{pattern}*' }} "
+        "| Select-Object -ExpandProperty ProcessId"
+    )
     try:
         result = subprocess.run(
-            ["wmic", "process", "where",
-             f"CommandLine like '%{pattern}%'",
-             "get", "ProcessId", "/format:csv"],
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
             capture_output=True, text=True, timeout=15,
         )
     except Exception as exc:
-        logger.debug("WMIC process query failed: %s", exc)
+        logger.debug("PowerShell process query failed: %s", exc)
         return 0
 
     killed = 0
     for line in result.stdout.splitlines():
-        parts = line.strip().split(",")
-        if len(parts) < 2:
+        line = line.strip()
+        if not line:
             continue
         try:
-            pid = int(parts[-1])
+            pid = int(line)
         except ValueError:
             continue
         if pid in skip or pid == 0:
