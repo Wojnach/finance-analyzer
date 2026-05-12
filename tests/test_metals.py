@@ -255,6 +255,6 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        # 2026-05-12: 26 → 24 after disabling volatility_sig + forecast
-        # (dxy_cross_asset is metals-only, does not affect crypto count).
-        assert extra["_total_applicable"] == 24
+        # 2026-05-12: 26 → 23 after disabling volatility_sig, dxy_cross_asset,
+        # forecast (all 3 apply to crypto despite dxy being metals-focused).
+        assert extra["_total_applicable"] == 23

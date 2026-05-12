@@ -291,7 +291,7 @@ class TestSignalEngineQwen3:
         """Applicable count should include qwen3 for ALL tickers.
 
         2026-05-12: lower bounds dropped after disabling volatility_sig,
-        dxy_cross_asset, forecast — crypto 26→24, stocks 23→15,
+        dxy_cross_asset, forecast — crypto 26→23, stocks 23→15,
         metals 20→17. The point of this test is that qwen3 is COUNTED,
         not the absolute number; lower bounds left as lower bounds so
         future signal additions don't re-break this test on every audit.
@@ -302,7 +302,7 @@ class TestSignalEngineQwen3:
         stock_count = _compute_applicable_count("NVDA")
         metal_count = _compute_applicable_count("XAU-USD")
 
-        assert crypto_count >= 24
+        assert crypto_count >= 23
         assert stock_count >= 15
         assert metal_count >= 17
 
