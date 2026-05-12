@@ -1,0 +1,30 @@
+# Codex adversarial review: signals-modules
+## Summary
+Worst detectors: `econ_calendar`, `forecast`, `cot_positioning`, `dxy_cross_asset`, and `credit_spread`. The recurring failure mode is time/horizon contamination: wall-clock event timing, 1h-specific features reused as daily signals, and precomputed/stale context treated as live inputs.
+
+## P0 — Blockers
+- `portfolio/signals/econ_calendar.py:44`, `portfolio/econ_dates.py:155`, `portfolio/econ_dates.py:176` — Why it bites: `econ_calendar` re-tags bar timestamps with `replace(tzinfo=UTC)` instead of converting them, then the helper computes `hours_until` from `datetime.now(UTC)` and a hard-coded `14:00 UTC` release time for every event. Historical/replay bars and non-UTC feeds get the wrong event window, and live CPI/NFP/FOMC timing is off by hours. Fix: convert to UTC correctly, pass a reference `datetime` end-to-end, and store per-event release timestamps instead of one fake hour.
+- `portfolio/signals/forecast.py:456`, `portfolio/signals/forecast.py:848`, `portfolio/signals/forecast.py:924` — Why it bites: the detector always blends `1h` and `24h` model votes into one action and explicitly double-weights the `1h` side. The engine horizon never reaches the module, so `1d/3d/5d` decisions are polluted by short-horizon forecasts by construction. Fix: pass `horizon` in `context`, request only matching forecast horizons, and emit a horizon-scoped verdict instead of one blended vote.
+- `portfolio/signals/cot_positioning.py:10`, `portfolio/signals/cot_positioning.py:342`, `portfolio/signals/cot_positioning.py:345` — Why it bites: the primary COT snapshot comes from `external_research.cot_positioning.live` inside a precomputed deep-context file, not raw/live CFTC data, and there is no freshness gate on `report_date` before voting. That violates the “no precomputed signal data” rule and can trade stale offline artifacts. Fix: fetch/validate raw COT data in-module; use cached files only as optional history, never as the live vote source.
+
+## P1 — High
+- `portfolio/signals/dxy_cross_asset.py:4`, `portfolio/signals/dxy_cross_asset.py:71` — Why it bites: the module says it is valid on `1-3h` horizons and then exports a timeless vote from `change_1h_pct`. A 60m DXY move is reused unchanged at `1d/3d/5d`. Fix: gate it to short horizons only, or compute separate `1h/3h/1d` features selected by requested horizon.
+- `portfolio/signals/credit_spread.py:15`, `portfolio/signals/credit_spread.py:178`, `portfolio/signals/credit_spread.py:250` — Why it bites: daily HY OAS data with `5d`/`252d` features is turned into one global vote. At `3h/4h` this is not horizon-aware; it is a slow macro regime being misused as intraday timing. Fix: restrict it to daily+ horizons or add horizon-specific thresholds/features and consume `horizon` from context.
+
+## P2 — Medium
+- `portfolio/signals/forecast.py:76`, `portfolio/signals/forecast.py:104` — Why it bites: `_init_kronos_enabled()` reads `config.json` at import time. Importing the detector does file I/O and freezes config into globals before request context arrives. Fix: lazy-load inside `compute_forecast_signal()` or inject via `context`.
+- `portfolio/signals/gold_overnight_bias.py:53`, `portfolio/signals/gold_overnight_bias.py:56`; `portfolio/signals/intraday_seasonality.py:88`, `portfolio/signals/intraday_seasonality.py:91` — Why it bites: naive timestamps are treated as UTC wall times, and non-datetime indexes fall back to `now()`. The same bars can produce different session/hour votes depending on feed timezone or machine clock. Fix: require timezone-aware timestamps or explicit timezone config; fail closed instead of using wall clock.
+- `portfolio/signals/credit_spread.py:285` — Why it bites: fallback API-key loading uses relative `load_json("config.json")`. Any non-repo CWD silently turns the detector into HOLD. Fix: resolve the repo root from `__file__`, like `cot_positioning.py` already does.
+- `portfolio/signals/vix_term_structure.py:8`, `portfolio/signals/vix_term_structure.py:141` — Why it bites: the module explicitly says it is weak on BTC/equities, but the detector ignores `ticker`/asset class and returns the same VIX verdict for any instrument. It is disabled-pending today, but it will still be wrong if re-enabled. Fix: encode asset eligibility/thresholds in the detector itself instead of relying on downstream accuracy gating.
+
+## P3 — Low
+- `portfolio/signals/orderbook_flow.py:69`, `portfolio/signals/orderbook_flow.py:76` — Why it bites: missing `portfolio.microstructure_state` is swallowed with `except ImportError: pass`, silently zeroing OFI/spread z-scores and changing the vote path. Fix: log the degradation and expose a `state_unavailable` flag, or fail closed.
+- `portfolio/signals/news_event.py:46`, `portfolio/signals/news_event.py:96` — Why it bites: every ticker overwrites the same `data/headlines_latest.json`. Concurrent runs leak cross-ticker state into the fish monitor and make ticker-specific debugging unreliable. Fix: key the file by ticker or persist a map keyed by ticker.
+
+## Tests missing
+- Deterministic replay tests for `econ_calendar` with fixed reference datetimes, including non-UTC bar timestamps and true per-event release hours.
+- Horizon-contract tests asserting `forecast`, `dxy_cross_asset`, `credit_spread`, and `cot_positioning` either reject unsupported horizons or change behavior by horizon.
+- Freshness/source tests for `cot_positioning` that fail if the live vote comes from `external_research.*.live` without a fresh `report_date`.
+- Import-safety test proving `import portfolio.signals.forecast` performs no file I/O.
+- Timezone tests for `gold_overnight_bias` and `intraday_seasonality` with naive vs UTC-aware indexes.
+- Dependency-missing test for `orderbook_flow` asserting missing `microstructure_state` is surfaced, not silently normalized to zeros.

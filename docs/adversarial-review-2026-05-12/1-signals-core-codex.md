@@ -1,0 +1,33 @@
+# Codex adversarial review: signals-core
+## Summary
+This subsystem is not clean. The biggest problems are a destructive JSONL rewrite in `forecast_accuracy.py` and multiple places where the live math explicitly violates the stated policy to force-HOLD weak signals instead of letting them back into consensus.
+
+I did not find SQL injection, `eval`/`exec`, or obvious unclosed sqlite handles in the scoped files, but the accuracy/weighting path still has several horizon, quorum, and neutral-outcome inconsistencies that will skew live decisions.
+
+## P0 — Blockers (production breakage / data loss / silent wrong trades)
+- `portfolio/forecast_accuracy.py:322` — `backfill_forecast_outcomes()` breaks once `updated >= max_entries`, then rewrites only `modified_entries` at lines 325-327. Why it bites: every untouched entry after the processed prefix is dropped from `forecast_predictions.jsonl`; this is direct data loss. Fix: mutate the full `entries` list and write it back, or append the untouched suffix before `_write_predictions()`.
+- `portfolio/signal_engine.py:2479` — `effective_gate = gate - relaxation` combines with `_GATE_RELAXATION_MAX = 0.06` (line 696), so the 47% gate can fall to 41%. Why it bites: signals with 30+ samples and 41-46% accuracy can vote live instead of being force-HOLD, which is exactly the rule this subsystem says must never happen. Fix: do not relax the gate below `0.47`; preserve voter diversity some other way.
+
+## P1 — High (will cause incidents)
+- `portfolio/signal_engine.py:3811` — metals use `MIN_VOTERS_METALS = 2` (defined at line 956) instead of 3. Why it bites: metals can produce live BUY/SELL consensus with only two active voters, violating the stated `MIN_VOTERS = 3` rule and increasing under-quorum trades. Fix: make metals use the same 3-voter floor; solve low-trade frequency elsewhere.
+- `portfolio/ticker_accuracy.py:85` — `direction_probability()` defaults to `min_samples=5`, and lines 131-134 map SELL to `1 - accuracy`. Why it bites: a 40% SELL signal becomes 60% `P(up)` instead of being force-HOLD, and it is allowed after only five samples. Fix: require at least 30 samples, drop sub-47% signals entirely, and never invert sub-50% accuracy into contrarian probability.
+- `portfolio/linear_factor.py:28` — the factor model is stored in one shared `linear_factor_weights.json`, then `train_weights()` saves to it regardless of `horizon` (`portfolio/train_signal_weights.py:101-131`) and `generate_signal()` loads it with no horizon check (`portfolio/signal_engine.py:4129-4132`). Why it bites: training a 3h model silently changes 1d/3d live confidence adjustments and vice versa. Fix: persist per-horizon model artifacts with horizon metadata, and only load the one matching the active horizon.
+
+## P2 — Medium (correctness / robustness)
+- `portfolio/forecast_accuracy.py:142` — `compute_forecast_accuracy()` treats `change_pct == 0` and missing `change_pct` as `actual_up = False`, so flat outcomes count as SELL-correct and BUY-wrong. Why it bites: forecast accuracy drifts bearish on no-move candles and diverges from the neutral-outcome semantics used elsewhere. Fix: reuse `accuracy_stats._vote_correct()` or the same neutral threshold before scoring.
+- `portfolio/signal_decay_alert.py:27` — decay checks read `data/accuracy_cache.json` via raw `open()`/`json.load()` on a relative path. Why it bites: this violates the atomic-I/O rule, and a scheduled task launched from a different cwd just warns and returns `[]`, suppressing decay alerts for that run. Fix: resolve an absolute `DATA_DIR` path and use `load_json()`.
+- `portfolio/signal_db.py:288` — the direct SQL accuracy helpers also use plain sign checks at lines 288, 319-320, 347-348, and 387-388 instead of the shared neutral-outcome rule. Why it bites: tiny ±0.05% moves that live gating treats as neutral are counted as wins/losses here, so DB-backed reports disagree with `accuracy_stats`. Fix: centralize correctness scoring through the same helper/threshold.
+- `portfolio/outcome_tracker.py:394` — malformed recent JSONL lines are skipped with `continue`, and the rewrite path at lines 541-543 only writes parsed `entries`. Why it bites: one corrupt recent line is silently dropped forever on the next backfill instead of being preserved or surfaced. Fix: log and preserve raw malformed lines verbatim, or abort the rewrite when tail parsing fails.
+- `portfolio/train_signal_weights.py:91` — training data is indexed only by `ts`, then walk-forward splits by raw row position (`portfolio/signal_weight_optimizer.py:89-97`). Why it bites: same-timestamp rows from different tickers can land on opposite sides of the train/test boundary, leaking same-cycle future outcomes across assets and overstating OOS correlation. Fix: split on unique timestamps or `(ts, ticker)` groups, not raw row counts.
+
+## P3 — Low (style / dead code / minor)
+- `portfolio/signal_weights.py:99` — `save()` persists `eta`, but `_load()` stops after loading weights and never restores the saved learning rate (lines 111-120). Why it bites: non-default `eta` silently resets after restart, and the trailing comment promises behavior that does not exist. Fix: reload `eta` explicitly or stop persisting/documenting it.
+
+## Tests missing
+- `portfolio/forecast_accuracy.py:322` — no regression test that `backfill_forecast_outcomes(max_entries < len(entries))` preserves the untouched suffix of `forecast_predictions.jsonl`.
+- `portfolio/signal_engine.py:2479` — no policy test that a 30-sample, 46%-accurate signal still resolves to HOLD even when voter-count relaxation fires.
+- `portfolio/signal_engine.py:3811` — no policy test that metals still require 3 active BUY+SELL voters.
+- `portfolio/ticker_accuracy.py:85` and `portfolio/forecast_accuracy.py:142` — no tests that sub-47% signals are not inverted, sub-30-sample signals do not influence probabilities, and flat outcomes are neutral.
+- `portfolio/linear_factor.py:28` and `portfolio/train_signal_weights.py:101` — no isolation test that training a 3h factor model does not change 1d/3d live loading.
+- `portfolio/outcome_tracker.py:394` — no test that a malformed recent JSONL line is preserved or causes an explicit failure, never silent deletion.
+- `portfolio/train_signal_weights.py:91` and `portfolio/signal_weight_optimizer.py:89` — no walk-forward test that all rows sharing a timestamp stay on the same side of the train/test split.

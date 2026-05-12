@@ -1,0 +1,31 @@
+# Codex adversarial review: orchestration
+## Summary
+I would not sign off on this as-is. The subsystem currently violates the stated 60s orchestration contract, can leak work across cycles after ticker-pool timeouts, and has multiple Layer 2 side paths that can silently reuse stale artifacts or misreport health.
+
+## P0 — Blockers
+- `portfolio/market_timing.py:20` — Default loop cadence is hard-coded to `600` seconds for open/closed/weekend states. Why it bites: the orchestrator is reacting every 10 minutes, not every 60s, so all “next cycle” assumptions, trigger freshness, and heartbeat expectations are on the wrong time base. Fix: restore 60s defaults or make 60s the production default with slower cadences only via explicit override.
+- `portfolio/main.py:610` — Ticker-pool timeout abandons running worker threads instead of stopping them. Why it bites: after `as_completed(..., timeout=...)` times out, `future.cancel()` and `pool.shutdown(wait=False, cancel_futures=True)` do not stop in-flight `_process_ticker` calls, so stale workers keep running into later cycles, break the 8-worker cap, and can keep mutating shared caches/rate-limiters after the loop already moved on. Fix: use killable subprocess/process workers or a long-lived bounded executor with explicit cancellation/cooperative stop.
+- `portfolio/llm_batch.py:310` — LLM prewarming is synchronous on the critical path. Why it bites: `prewarm_next_model()` immediately calls `query_llama_server()` (`llm_prewarmer.py:299`), which can wait 300s on the cross-process lock, 90s on server startup, and 240s on the HTTP request (`llama_server.py:488`, `458`, `597`), so a best-effort optimization can stall a loop for roughly 10 minutes. Fix: make prewarm asynchronous/background-only, or give it a tiny dedicated timeout/lock budget and skip on contention.
+- `portfolio/agent_invocation.py:869` — The Layer 2 Claude process is spawned as a free-running child tracked only in module globals. Why it bites: if the parent loop crashes or is restarted mid-run, that Claude child keeps going, and the new process has no persisted PID/job to reap, so overlapping Layer 2 agents can write journal/Telegram or act twice. Fix: bind the child tree to parent lifetime (Job Object / process-group death handling) and persist/reap the active PID on startup.
+
+## P1 — High
+- `portfolio/agent_invocation.py:771` — Multi-agent mode proceeds to synthesis even after specialist failures, and it uses static `_specialist_*.md` paths that are never cleaned. Why it bites: `success_count` is computed and ignored, `build_synthesis_prompt()` still tells the synthesizer to read all report files, and `multi_agent_layer2.cleanup_reports()` is never called, so a timed-out/auth-failed specialist can leave stale prior-run analysis in place and the fresh trade decision will consume it as current input. Fix: wipe specialist outputs before launch, require fresh reports from this invocation only, and fail closed when too few specialists succeed.
+- `portfolio/multi_agent_layer2.py:206` — Specialist timeout cleanup is only `proc.kill()`. Why it bites: this kills only the direct process, not the full Claude subtree, so timed-out specialists can leak descendants; paired with the stale report/log artifacts above, that gives you both resource leakage and silent stale-context reuse. Fix: use the same tree-kill strategy as `claude_gate.py` and always clean artifacts on timeout/failure.
+- `portfolio/health.py:35` — Health marks `last_invocation_ts` from any trigger, not from an actual Layer 2 invocation/completion. Why it bites: `main.py:845-852` still calls `update_health()` after off-hours skips, gate skips, or busy skips, so `check_agent_silence()` can stay green while Layer 2 has not actually run for hours. Fix: only advance invocation timestamps from the real invoke/completion paths.
+- `portfolio/bigbet.py:173` — Big Bet’s Claude path copies the environment but does not strip `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT`, and line `602` only starts cooldown after a successful alert. Why it bites: nested-session/auth failures or repeated sub-threshold probabilities will re-run the 30s `claude -p` call every loop for each ticker/direction, burning time and tokens while making no progress; this path also bypasses the central Claude gate entirely. Fix: route through the shared launcher or at minimum scrub the env, add reject/failure cooldowns, and negative-cache low-probability verdicts.
+
+## P2 — Medium
+- `portfolio/main.py:849` — The outer loop logs every `invoke_agent(...)=False` as `skipped_busy`, even when `invoke_agent()` already logged `skipped_gate`, `blocked_drawdown_*`, or `blocked_trade_guards`. Why it bites: `invocations.jsonl` and the digest pipeline misclassify hard safety blocks as benign concurrency skips, which hides the real reason Layer 2 did not run. Fix: have `invoke_agent()` return an explicit terminal status and write exactly one row.
+- `portfolio/trigger.py:284` — Price-move triggers have no cooldown or re-arm hysteresis. Why it bites: unlike flip triggers, any asset that keeps moving ~2% per cycle can keep re-triggering Tier 2 every loop, which is exactly the sort of cost-escalation cascade the flip cooldown was added to stop. Fix: add a per-ticker cooldown or require the move to retrace below a lower band before it can fire again.
+
+## P3 — Low
+- None.
+
+## Tests missing
+- Integration test that default `get_market_state()` scheduling is 60s in production mode.
+- Timeout-leak test that forces one ticker worker past `_TICKER_POOL_TIMEOUT` and asserts live ticker workers never exceed 8 across later cycles.
+- Restart test that kills the parent loop while Layer 2 is active and asserts the old Claude tree is reaped before the new loop resumes.
+- Prewarmer contention test that holds the llama-server lock/startup path and asserts one loop cycle still completes on schedule instead of waiting through full server budgets.
+- Multi-agent failure test that makes one specialist auth-fail/timeout and asserts synthesis ignores stale `_specialist_*.md` files.
+- Health test covering off-hours skip, gate skip, busy skip, and drawdown block, asserting none of them refresh `last_invocation_ts`.
+- Big Bet test covering nested-session/auth failure and low-probability rejects, asserting they do not re-run `claude -p` every loop.
