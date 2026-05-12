@@ -1,5 +1,40 @@
 # Session Progress
 
+## FGL dual adversarial review (2026-05-12 ~17:30 CET)
+
+**Status:** SHIPPED — `607ea26b` pushed. Codex cleanup pending.
+
+Eight-subsystem dual-independent adversarial review by Codex
+(`codex exec --sandbox read-only`) and Claude (eight
+`general-purpose` subagents) at `main@8d1e4a46`. Surfaces 23 P0
+blockers (15 → 23, +8 vs 2026-05-11) and ~60 P1 incident-class
+defects.
+
+**Top-3 blockers:**
+1. **`portfolio/avanza/trading.py` unified package** has NO account
+   whitelist + NO `avanza_order_lock`. Pension account `2674244`
+   reachable through every order/SL/cancel function (`P0-1` … `P0-4`).
+2. **Avanza 1000 SEK floor wrong** in `trade_validation.py:32`,
+   `kelly_sizing.py:326`, `kelly_metals.py:44` (unchanged from
+   2026-05-11). Codex flagged as P1, Claude as P0; both agree.
+3. **`subprocess_utils.py:214-218` PowerShell command injection** —
+   `pattern` f-spliced into `-like` mask with no sanitisation.
+
+**Tier-A action plan (six < 1-day fixes — see
+`docs/adversarial-review-2026-05-12/99-SYNTHESIS.md`):**
+PowerShell-injection escape, 1000 SEK floor (3 sites),
+NODE_OPTIONS append-not-overwrite (2 sites), `signal_decay_alert.py`
+raw `open()` → `load_json`, `fin_snipe_manager._compute_stop_plan`
+thread `financing_level`, `process_lock.py` write-tmp-then-replace.
+
+**Codex final-report emission rate:** 1/8 as of 17:42 CET (vs 0/8 at
+the same point yesterday — codex got further this run, possibly
+because `_logs` redirect kept stdout flowing). Other 7 still running.
+Per-subsystem reviews under `docs/adversarial-review-2026-05-12/`.
+
+**Worktree:** `Q:/fa-adv-2026-05-12` on `adversarial/2026-05-12`
++ 8 `review/baseline-N-*` branches. Cleanup once codex finishes.
+
 ## Rotation race + Avanza account verify (2026-05-11 late evening)
 
 **Status:** SHIPPED — `49d45f3e` merged + pushed. Loop restarted.
