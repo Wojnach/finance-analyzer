@@ -1,0 +1,339 @@
+# Codex prose extract: 8-infrastructure (2026-05-12)
+
+Heuristic extract from `_logs/8-infrastructure.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 331 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the infrastructure subsystem (atomic I/O, locking, subprocess utils, dashboard, scheduled-task scripts) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- - file_utils is the canonical atomic I/O layer. Raw json.loads(open(...).read()) is a defect anywhere in the codebase.
+- - atomic_append_jsonl must be safe against concurrent appenders + log rotation (the rotation race was just fixed in commit 3b623129).
+- - PF-FixAgentDispatcher: per-category cooldown + exponential backoff (30m → 2h → 12h → effectively disabled). Tool allow-list = Read,Edit,Bash (no commit/push). `data/fix_agent.disabled` flag-file disables it entirely.
+- - Scheduled tasks must `set CLAUDECODE=` (the CLAUDECODE inheritance bug caused a 34h outage Feb 18-19).
+- - Singleton process lock: bat wrapper exits if schtasks restart hits the lock — kill orphans first.
+- 1. file_utils.atomic_write_json: race when two processes write the same path; tmp file leak on crash; encoding mismatch.
+- 2. atomic_append_jsonl + log rotation race repeat (was just patched).
+- 3. process_lock: stale lockfile (PID reused after reboot), non-cleanup on SIGKILL.
+- 4. config_validator: schema drift; loading config.json (symlink to external file with API keys) — never log it.
+- 6. Dashboard endpoints (33 of them): any that mutate state via GET; any that don't atomic-read.
+- 7. subprocess_utils: shell-injection from user-derived args; missing universal_newlines / encoding=utf-8; orphan child on parent SIGTERM.
+- 9. fix_agent_dispatcher: backoff state corruption; spawns even when fix_agent.disabled present; tool-allowlist drift.
+- 10. check_critical_errors: TZ comparison bug on rolling 7d window.
+- 11. PowerShell scripts: ExecutionPolicy bypass, hardcoded paths, missing -ErrorAction.
+- 14. vector_memory: embedding vector dim mismatch; unbounded growth.
+- 15. shadow_registry: registry write race when multiple producers.
+- Reviewing the infrastructure slice in `Q:\finance-analyzer` with a defect-hunting focus against the project rules you listed. I’m starting by reading the in-scope files and searching for the specific risk patterns: atomic I/O, lock handling, auth, subprocess spawning, scheduled-task wrappers, and state mutation paths.
+- → Read the in-scope infrastructure files and map the critical code paths
+- • Produce a severity-ordered review with exact file/line references and missing tests
+- The first shell call hit the local PowerShell profile restrictions rather than the repo. I’m rerunning with profile loading disabled so I can get clean file reads.
+- I’ve confirmed the core I/O and lock helpers. Next I’m tracing their consumers and the dashboard entry points to check where the code violates the canonical read/write layer, mutates over GET, or weakens auth/trust assumptions.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"CLAUDECODE|ExecutionPolicy|ErrorAction|powershell|pwsh|ImagePath|schtasks|singleton|lock|taskkill|claude -p|codex|bypass|Set-ExecutionPolicy\" Q:\\finance-analyzer\\scripts\\win Q:\\finance-analyzer\\scripts\\*.bat Q:\\finance-analyzer\\*.bat" in Q:\fa-adv-2026-05-12
+- Q:\finance-analyzer\dashboard\export_static.py:62:    """Read dashboard token from config.json, if configured."""
+- Q:\finance-analyzer\dashboard\house_blueprint.py:5:`require_auth` cookie/token gate, so the entire `/house/*` surface is
+- Q:\finance-analyzer\dashboard\auth.py:41:# sits just under Chrome's silent 400-day cookie max-age cap (introduced
+- Q:\finance-analyzer\dashboard\auth.py:117:    compatible). Returns 401 for invalid/missing tokens.
+- Q:\finance-analyzer\dashboard\app.py:782:    document.cookie — the browser ignores any attempt to write a name that
+- Q:\finance-analyzer\dashboard\app.py:2043:# Blueprint: /house — read-only viewer over the househunting project
+- Q:\finance-analyzer\scripts\check_critical_errors.py:99:    # Force UTF-8 stdout: violation messages contain `→` (U+2192) which Windows'
+- Q:\finance-analyzer\portfolio\backtester.py:129:            # Filter out disabled signals for old consensus too
+- Q:\finance-analyzer\scripts\fix_agent_dispatcher.py:49:# another fix-agent subprocess (env flag propagates to child Claude).
+- Q:\finance-analyzer\scripts\fix_agent_dispatcher.py:308:        "1. Read CLAUDE.md and any source files referenced by the error messages.\n"
+- Q:\finance-analyzer\scripts\fix_agent_dispatcher.py:311:        "   a. Make the fix directly using Edit (preferred for simple regressions).\n"
+- Q:\finance-analyzer\portfolio\shadow_registry.py:1:"""Shadow-signal registry with promotion criteria and age tracking.
+- Q:\finance-analyzer\portfolio\shadow_registry.py:75:    """Atomically write the registry."""
+- Q:\finance-analyzer\portfolio\shadow_registry.py:130:def days_in_shadow(signal: str, *, path: Path | str | None = None,
+- Q:\finance-analyzer\portfolio\message_store.py:51:# Categories whose messages should be sent to Telegram in addition to being saved.
+- Q:\finance-analyzer\portfolio\message_store.py:123:    # Truncate to Telegram's max message length (BUG-131: truncate at line
+- Q:\finance-analyzer\portfolio\message_store.py:176:    This function bypasses the ``layer1_messages`` config gate — the category
+- Q:\finance-analyzer\portfolio\vector_memory.py:15:Defaults to disabled — graceful fallback if chromadb is not installed.
+- Q:\finance-analyzer\portfolio\shared_state.py:243:# Current market state — updated each run() cycle, used by data_collector for yfinance fallback
+- Q:\finance-analyzer\portfolio\shared_state.py:389:NEWSAPI_TTL = 1800       # 30 min fallback — overridden by newsapi_ttl_for_ticker()
+- Q:\finance-analyzer\scripts\win\adversarial-review.bat:11:claude -p "Follow /fgl protocol. Run a full dual adversarial review of the finance-analyzer codebase: partition into 8 subsystems (signals-core, orchestration, portfolio-risk, metals-core, avanza-api, signals-modules, data-external, infrastructure), create worktree with empty-baseline branches, run /codex:adversarial-review in background for each subsystem, write your own independent adversarial review, collect codex results, cross-critique in both directions, write synthesis doc. Commit all docs to main, push via Windows git, clean up worktrees. Do NOT ask for approval — follow /fgl rules. Spend your entire context on this." --allowedTools "Edit,Read,Bash,Write,Glob,Grep" --max-turns 80 >> data\adversarial_review_out.txt 2>&1
+- Q:\finance-analyzer\scripts\win\install-fix-agent-task.ps1:13:Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+- Q:\finance-analyzer\scripts\win\install-fix-agent-task.ps1:57:Write-Host "To verify: schtasks /Query /TN '$taskName' /V /FO LIST"
+- Q:\finance-analyzer\scripts\win\install-meta-learner-task.ps1:2:# Run as: powershell -ExecutionPolicy Bypass -File scripts\win\install-meta-learner-task.ps1
+- Q:\finance-analyzer\scripts\win\install-loop-health-watchdog-task.ps1:4:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-loop-health-watchdog-task.ps1
+- Q:\finance-analyzer\scripts\win\install-crypto-loop-task.ps1:3:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-crypto-loop-task.ps1
+- Q:\finance-analyzer\scripts\win\install-crypto-loop-task.ps1:8:#   - Multiple-instance ignored (singleton lock at the Python level)
+- Q:\finance-analyzer\scripts\win\install-crypto-loop-task.ps1:33:# weekday-only). Singleton lock prevents double-start when AtLogOn fires
+- Q:\finance-analyzer\scripts\win\install-loop-health-report-task.ps1:5:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-loop-health-report-task.ps1
+- Q:\finance-analyzer\scripts\win\install-adversarial-review-task.ps1:2:# Run as: powershell -ExecutionPolicy Bypass -File scripts\win\install-adversarial-review-task.ps1
+- Q:\finance-analyzer\scripts\win\install-loop-health-daily-task.ps1:4:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-loop-health-daily-task.ps1
+- Q:\finance-analyzer\scripts\win\install-log-rotate-task.ps1:3:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-log-rotate-task.ps1
+- Q:\finance-analyzer\scripts\win\crypto-loop.bat:4:REM instance already holds the singleton lock — we stop instead of
+- Q:\finance-analyzer\scripts\win\crypto-loop.bat:19:    echo [%date% %time%] Another crypto loop instance already holds the lock -- stopping wrapper.
+- Q:\finance-analyzer\scripts\win\install-market-tasks.ps1:2:# Run as: powershell -ExecutionPolicy Bypass -File scripts\win\install-market-tasks.ps1
+- Q:\finance-analyzer\scripts\win\install-mstr-loop-task.ps1:3:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-mstr-loop-task.ps1
+- Q:\finance-analyzer\scripts\win\install-oil-loop-task.ps1:3:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-oil-loop-task.ps1
+- Q:\finance-analyzer\scripts\win\metals-loop.bat:17:    echo [%date% %time%] Another metals loop instance already holds the lock -- stopping wrapper.
+- Q:\finance-analyzer\scripts\win\pf-agent.bat:16:claude -p "You are the Layer 2 trading agent. FIRST read docs/TRADING_PLAYBOOK.md for trading rules. Then read data/layer2_context.md (your memory from previous invocations). Then read data/agent_summary_compact.json (signals, trigger reasons, timeframes), data/portfolio_state.json (Patient portfolio), and data/portfolio_state_bold.json (Bold portfolio). Follow the playbook to analyze, decide, and act for BOTH strategies independently. Compare your previous theses and prices with current data — were you right? Always write a journal entry and send a Telegram message." --allowedTools "Edit,Read,Bash,Write" --max-turns 40
+- Q:\finance-analyzer\scripts\win\oil-loop.bat:4:REM instance already holds the singleton lock — we stop instead of
+- Q:\finance-analyzer\scripts\win\oil-loop.bat:17:    echo [%date% %time%] Another oil loop instance already holds the lock -- stopping wrapper.
+- Q:\finance-analyzer\scripts\win\install-rc-watchdog-task.ps1:14:    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+- Q:\finance-analyzer\scripts\win\install-rc-watchdog-task.ps1:45:Write-Host "  schtasks /Query /TN '$taskName' /V /FO LIST"
+- Q:\finance-analyzer\scripts\win\install-rc-watchdog-task.ps1:48:Write-Host "  schtasks /Run /TN '$taskName'"
+- Q:\finance-analyzer\scripts\win\install-rc-watchdog-task.ps1:49:Write-Host "  # or: powershell -File `"$scriptPath`""
+- Q:\finance-analyzer\scripts\win\install-metals-loop-task.ps1:3:#   powershell -ExecutionPolicy Bypass -File scripts\win\install-metals-loop-task.ps1
+- Q:\finance-analyzer\scripts\win\install-signal-research-task.ps1:2:# Run as: powershell -ExecutionPolicy Bypass -File scripts\win\install-signal-research-task.ps1
+- Q:\finance-analyzer\scripts\win\install-signal-research-task.ps1:12:$existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+- Q:\finance-analyzer\scripts\win\install-signal-research-task.ps1:39:    -Description "Daily AI signal research: academic papers, web search, scoring, implementation, backtest, codex review. Runs Claude Opus." `
+- Q:\finance-analyzer\scripts\win\pf-loop.bat:20:    echo [%date% %time%] Another main loop instance already holds the lock -- stopping wrapper.
+- Q:\finance-analyzer\scripts\win\pf-loop-ensure.ps1:9:$existing = Get-Process cmd -ErrorAction SilentlyContinue |
+- Q:\finance-analyzer\scripts\win\pf-restart.bat:14:powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0pf-restart.ps1" -Target %TARGET%
+- Q:\finance-analyzer\scripts\win\install-loop-resume-task.ps1:16:    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+- Q:\finance-analyzer\scripts\win\install-loop-resume-task.ps1:55:Write-Host "Action: powershell -File $scriptPath"
+- Q:\finance-analyzer\scripts\win\install-loop-resume-task.ps1:57:Write-Host "To verify: schtasks /Query /TN '$taskName' /V /FO LIST"
+- Q:\finance-analyzer\scripts\win\pf-restart.ps1:8:  keeping the old code in memory and blocking the file-singleton lock
+- Q:\finance-analyzer\scripts\win\pf-restart.ps1:76:        Write-Warning "    schtasks /run returned $LASTEXITCODE for $($t.Task)"
+- Q:\finance-analyzer\scripts\win\install-rc-server-task.ps1:14:    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+- Q:\finance-analyzer\scripts\win\install-rc-server-task.ps1:40:    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -WakeDelay"
+- Q:\finance-analyzer\scripts\win\install-rc-server-task.ps1:74:Write-Host "  schtasks /Query /TN '$logonTask' /V /FO LIST"
+- Q:\finance-analyzer\scripts\win\install-rc-server-task.ps1:75:Write-Host "  schtasks /Query /TN '$wakeTask' /V /FO LIST"
+- Q:\finance-analyzer\scripts\win\install-rc-server-task.ps1:78:Write-Host "  schtasks /Run /TN '$wakeTask'"
+- Q:\finance-analyzer\scripts\win\silver-monitor.bat:13:    echo [%date% %time%] Another Silver Monitor instance already holds the lock -- stopping wrapper.
+- Q:\finance-analyzer\scripts\win\rc-server-ensure.ps1:117:            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+- Q:\finance-analyzer\scripts\win\install-rc-keepalive-task.ps1:19:    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+- Q:\finance-analyzer\scripts\win\install-rc-keepalive-task.ps1:23:    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Wake"
+- Q:\finance-analyzer\scripts\win\install-rc-keepalive-task.ps1:88:Write-Host "  schtasks /Query /TN '$taskName' /V /FO LIST"
+- Q:\finance-analyzer\scripts\win\install-rc-keepalive-task.ps1:91:Write-Host "  schtasks /Run /TN '$taskName'"
+- Q:\finance-analyzer\scripts\win\install-rc-keepalive-task.ps1:92:Write-Host "  # or: powershell -File `"$scriptPath`""
+- Q:\finance-analyzer\scripts\win\install-rc-keepalive-task.ps1:93:Write-Host "  # wake mode: powershell -File `"$scriptPath`" -Wake"
+- Q:\finance-analyzer\scripts\win\rc-keepalive.ps1:115:    Stop-Process -Id $rc.ProcessId -Force -ErrorAction SilentlyContinue
+- Q:\finance-analyzer\scripts\win\rc-watchdog.ps1:95:        Stop-Process -Id $pid_val -Force -ErrorAction SilentlyContinue
+- Q:\finance-analyzer\scripts\win\rc-watchdog.ps1:111:        Stop-Process -Id $pid_val -Force -ErrorAction SilentlyContinue
+- The first pass already surfaced several direct rule violations, especially raw `json.loads(...read_text())` on protected files and some dashboard trust/auth edges. I’m reading the exact implementations now to separate real defects from benign code paths and to confirm severity.
+- Q:\finance-analyzer\scripts\fix_agent_dispatcher.py:150:    # os.replace is atomic on Windows + POSIX when src/dest are on the same volume.
+- I’m down in the route bodies now. The key question is whether those GET handlers are truly read-only and whether they stay on the canonical I/O path; I’ve already got one direct `json.loads` bypass in the dashboard export helper and I’m checking if it repeats in live endpoints.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"json\\.loads|read_text\\(|write_text\\(|open\\(|Thread\\(|set_cookie\\(|send_file\\(|os\\.replace|atomic_|load_jsonl_tail|load_jsonl\\(\" Q:\\finance-analyzer\\dashboard\\app.py" in Q:\fa-adv-2026-05-12
+- I’m validating whether the suspicious helpers are actually exposed in dangerous ways. For subprocesses and registry/state files, the difference between “ugly” and “defect” is whether the code can be raced, injected, or left permanently inconsistent by realistic callers.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"acquire_lock_file\\(|release_lock_file\\(|process_lock|singleton\\.lock|exit code 11|SystemExit\\(11\\)|return 11|singleton lock\" Q:\\finance-analyzer" in Q:\fa-adv-2026-05-12
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:106:    cache = load_json(SIGNAL_UTILITY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:139:            _atomic_write_json(SIGNAL_UTILITY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:978:    cache = load_json(cache_file)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:995:    cache = load_json(ACCURACY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1020:        _atomic_write_json(ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1385:    cache = load_json(REGIME_ACCURACY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1408:        _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1522:                _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1726:    cached = load_json(BEST_HORIZON_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1920:    cache = load_json(TICKER_ACCURACY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1943:        _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\ic_computation.py:247:    atomic_write_json(IC_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\ic_computation.py:255:    cache = load_json(IC_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:158:    cached = load_json(SIGNAL_FILE, default=None)
+- Q:\finance-analyzer\portfolio\risk_management.py:165:    cached = load_json(DATA_DIR / _FX_CACHE_FILENAME, default=None)
+- Q:\finance-analyzer\portfolio\signal_engine.py:1360:        cache = load_json(DATA_DIR / "accuracy_cache.json")
+- Q:\finance-analyzer\docs\SYSTEM_HEALTH_CONTRACT.md:115:| **No stale locks** | Every `.singleton.lock` file in `data/` belongs to a running PID | Read lock file → check if PID exists |
+- Q:\finance-analyzer\docs\SYSTEM_HEALTH_CONTRACT.md:119:- `metals_loop.singleton.lock` — should match PF-MetalsLoop PID
+- Q:\finance-analyzer\docs\SYSTEM_HEALTH_CONTRACT.md:120:- `golddigger.singleton.lock` — should match PF-GoldDigger PID (or be absent if not running)
+- Q:\finance-analyzer\docs\SYSTEM_HEALTH_CONTRACT.md:121:- `fin_snipe_manager.singleton.lock` — often stale (0 bytes = definitely stale)
+- Q:\finance-analyzer\data\adv-2026-05-08\codex-orchestration.md:1102:_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- Q:\finance-analyzer\data\adv-2026-05-08\codex-metals-core.md:937:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\portfolio\fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\portfolio\golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\portfolio\golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\portfolio\golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\portfolio\elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\portfolio\elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\portfolio\main.py:52:_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- Q:\finance-analyzer\portfolio\elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\portfolio\elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\AGENT_REVIEW_ORCHESTRATION.md:102:### LO3. process_lock silent no-op when no locking module available [80% confidence]
+- Q:\finance-analyzer\docs\ADVERSARIAL_REVIEW_SYNTHESIS.md:150:On Linux/WSL, the singleton lock always returns True — zero enforcement.
+- Q:\finance-analyzer\docs\ADVERSARIAL_REVIEW_SYNTHESIS.md:586:accuracy cache) are race-prone because each loop's singleton lock only
+- Q:\finance-analyzer\docs\ADVERSARIAL_REVIEW_CLAUDE.md:865:disables the singleton lock on Linux/WSL. Metals loop writes positions state,
+- Q:\finance-analyzer\docs\ADVERSARIAL_REVIEW_CLAUDE.md:919:**What:** Two separate processes, each with their own msvcrt singleton lock.
+- Q:\finance-analyzer\docs\ADVERSARIAL_REVIEW_CLAUDE.md:923:cross-process race because they lock DIFFERENT files (`main_loop.singleton.lock`
+- Q:\finance-analyzer\scripts\health_check.py:345:    for lock_file in DATA_DIR.glob("*.singleton.lock"):
+- Q:\finance-analyzer\docs\adversarial-review-r5\subsystem-8-infrastructure.md:6:`process_lock.py:63`. Two loop instances can run concurrently, interleaving writes.
+- Q:\finance-analyzer\docs\adversarial-review-r5\cross-critique.md:39:1. **IN-R5-1 (process_lock msvcrt 1-byte lock)** — Agent rates P1. Manual assessment: P2.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-12\_prompts\8-infrastructure.txt:37:3. process_lock: stale lockfile (PID reused after reboot), non-cleanup on SIGKILL.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\_prompts\8-infrastructure.txt:37:3. process_lock: stale lockfile (PID reused after reboot), non-cleanup on SIGKILL.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\99-SYNTHESIS.md:42:**Claude P1 (7):** persistence-filter seed asymmetry (signal_engine:566-625); regime-gate exemption uses wrong horizon for 3h decisions; `signal_accuracy_ewma` silently drops tz-naive entries; `signal_history.update_history` hardcoded to `SIGNAL_NAMES` so dynamic signals never recorded; walk-forward survivorship bias; outcome dual-write SQLite-first race; `maybe_prewarm_dashboard_accuracy` falls back to `"noop"` string when `process_lock` import fails — prewarm fires without exclusion.
+- Q:\finance-analyzer\tests\test_unified_loop.py:438:    lock_path = tmp_path / "metals_loop.singleton.lock"
+- Q:\finance-analyzer\tests\test_unified_loop.py:457:    lock_path = tmp_path / "metals_loop.singleton.lock"
+- Q:\finance-analyzer\tests\test_silver_monitor.py:78:    lock_path = tmp_path / "silver_monitor.singleton.lock"
+- Q:\finance-analyzer\tests\test_loop_hardening.py:5:    the singleton lock.
+- Q:\finance-analyzer\tests\test_loop_hardening.py:42:    """When --loop hits the lock-conflict path, main() must return 11."""
+- Q:\finance-analyzer\data\adv-2026-05-10\cross-codex-on-claude-infrastructure.md:5075:- [P1] Windows unlock path skips `seek(0)` — portfolio/process_lock.py:62-73
+- Q:\finance-analyzer\data\adv-2026-05-10\cross-codex-on-claude-infrastructure.md:5183:- [P1] Windows unlock path skips `seek(0)` — portfolio/process_lock.py:62-73
+- Q:\finance-analyzer\data\oil_loop.py:5:  1. Acquire singleton lock (one process at a time).
+- Q:\finance-analyzer\data\oil_loop.py:115:                logger.warning("singleton lock held by pid %d", old_pid)
+- Q:\finance-analyzer\data\oil_loop.py:302:        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- Q:\finance-analyzer\data\metals_llm.py:1089:    Safe to call at startup because the metals_loop singleton lock guarantees
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:35:the metals_loop singleton lock ensures only one metals_loop runs, any such
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:56:- Orphan sweep could kill a legitimate process if metals_loop singleton lock is
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:50:3. process_lock: stale lockfile (PID reused after reboot), non-cleanup on SIGKILL.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8133:portfolio/process_lock.py:1:"""Cross-platform helpers for non-blocking singleton process locks."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8136:portfolio/process_lock.py:28:    """Acquire a non-blocking file lock and return the open handle.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8137:portfolio/process_lock.py:30:    Returns None if another process already holds the lock.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8143:portfolio/process_lock.py:48:    """Release a previously acquired lock handle."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8301:portfolio/process_lock.py:1:"""Cross-platform helpers for non-blocking singleton process locks."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8304:portfolio/process_lock.py:28:    """Acquire a non-blocking file lock and return the open handle.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8305:portfolio/process_lock.py:30:    Returns None if another process already holds the lock.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:8311:portfolio/process_lock.py:48:    """Release a previously acquired lock handle."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:9128:scripts/win\crypto-loop.bat:4:REM instance already holds the singleton lock — we stop instead of
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:9212:scripts/win\install-crypto-loop-task.ps1:8:#   - Multiple-instance ignored (singleton lock at the Python level)
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:10286:scripts/win\oil-loop.bat:4:REM instance already holds the singleton lock — we stop instead of
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:10410:scripts/win\pf-restart.ps1:8:  keeping the old code in memory and blocking the file-singleton lock
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:11893:"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"acquire_lock_file\\(|release_lock_file\\(|singleton\\.lock|EXIT_CODE% EQU 11|return 11|sys\\.exit\\(11\\)|exit\\(11\\)\" portfolio scripts dashboard" in Q:\finance-analyzer
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:11897:"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"ProcessLock|singleton lock|singleton\\.lock|acquire_lock_file\\(\" portfolio/process_lock.py scripts/win portfolio dashboard" in Q:\finance-analyzer
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12388:portfolio\elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12389:portfolio\elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12392:portfolio\fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12395:scripts\health_check.py:345:    for lock_file in DATA_DIR.glob("*.singleton.lock"):
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12396:portfolio\golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12399:portfolio\main.py:52:_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12413:scripts/win\crypto-loop.bat:4:REM instance already holds the singleton lock — we stop instead of
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12414:scripts/win\install-crypto-loop-task.ps1:8:#   - Multiple-instance ignored (singleton lock at the Python level)
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12415:portfolio\elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12416:portfolio\elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12417:portfolio\elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12419:portfolio\elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12420:portfolio\fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12422:scripts/win\oil-loop.bat:4:REM instance already holds the singleton lock — we stop instead of
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12423:scripts/win\pf-restart.ps1:8:  keeping the old code in memory and blocking the file-singleton lock
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12424:portfolio\golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12425:portfolio\golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12427:portfolio\golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:12428:portfolio\main.py:52:_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:14642:scripts/win\pf-restart.ps1-8-  keeping the old code in memory and blocking the file-singleton lock
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:15685:I found 2 auth blockers and 5 high-severity reliability defects across JSONL rewriting, dispatcher backoff durability, subprocess orphan handling, shadow-registry concurrency, and the 7-day critical-error startup check. Cookie `Secure`/`HttpOnly` flags are correct, and I did not find a stale `process_lock.py` lock bug, a PF-FixAgentDispatcher tool-allowlist drift, or a user-derived shell-injection path.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-codex.md:15720:I found 2 auth blockers and 5 high-severity reliability defects across JSONL rewriting, dispatcher backoff durability, subprocess orphan handling, shadow-registry concurrency, and the 7-day critical-error startup check. Cookie `Secure`/`HttpOnly` flags are correct, and I did not find a stale `process_lock.py` lock bug, a PF-FixAgentDispatcher tool-allowlist drift, or a user-derived shell-injection path.
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-claude.md:11:state file is malformed, `process_lock` writes the PID to the lock file but
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\8-infrastructure-claude.md:250:- `process_lock` PID-reuse: simulate stale lock + dead PID, ensure
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:726:Q:/finance-analyzer/portfolio/fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:903:Q:/finance-analyzer/portfolio/elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:910:Q:/finance-analyzer/portfolio/elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:935:Q:/finance-analyzer/portfolio/golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:938:Q:/finance-analyzer/portfolio/golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:945:Q:/finance-analyzer/portfolio/golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1044:Q:/finance-analyzer/portfolio/elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1049:Q:/finance-analyzer/portfolio/elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1096:Q:/finance-analyzer/portfolio/fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1288:Q:/finance-analyzer/data/oil_loop.py:5:  1. Acquire singleton lock (one process at a time).
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1299:Q:/finance-analyzer/data/oil_loop.py:115:                logger.warning("singleton lock held by pid %d", old_pid)
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1307:Q:/finance-analyzer/data/oil_loop.py:302:        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1313:Q:/finance-analyzer/data/crypto_loop.py:4:  1. Acquire singleton lock (one process at a time).
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1323:Q:/finance-analyzer/data/crypto_loop.py:108:                logger.warning("singleton lock held by pid %d", old_pid)
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1331:Q:/finance-analyzer/data/crypto_loop.py:289:        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1621:Q:/finance-analyzer/portfolio/elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1628:Q:/finance-analyzer/portfolio/elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1653:Q:/finance-analyzer/portfolio/golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1656:Q:/finance-analyzer/portfolio/golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1663:Q:/finance-analyzer/portfolio/golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1762:Q:/finance-analyzer/portfolio/elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:1767:Q:/finance-analyzer/portfolio/elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:4542:"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 12 "lock|singleton|process_lock|thread|ThreadPoolExecutor|max_workers=1|session_call_timeout|session_call_error" Q:/finance-analyzer/portfolio/grid_fisher.py Q:/finance-analyzer/portfolio/fin_snipe_manager.py Q:/finance-analyzer/portfolio/golddigger Q:/finance-analyzer/portfolio/elongir' in Q:\fa-adv-2026-05-11
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:5681:Q:/finance-analyzer/portfolio/fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:5988:Q:/finance-analyzer/portfolio/elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:6014:Q:/finance-analyzer/portfolio/elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:6084:Q:/finance-analyzer/portfolio/golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:6113:Q:/finance-analyzer/portfolio/golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:6131:Q:/finance-analyzer/portfolio/golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:6558:Q:/finance-analyzer/portfolio/elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:6576:Q:/finance-analyzer/portfolio/elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:12193:Q:/finance-analyzer/portfolio/fin_snipe_manager.py-52-LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:13573:Q:/finance-analyzer/portfolio/fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:13748:Q:/finance-analyzer/portfolio/golddigger/runner.py-40-SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:13795:Q:/finance-analyzer/portfolio/golddigger/runner.py-99-    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:16563:Q:/finance-analyzer/portfolio/fin_snipe_manager.py-52-LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:17506:52-LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:23354:Q:/finance-analyzer/portfolio/elongir/config.py-66-    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:23382:Q:/finance-analyzer/portfolio/elongir/config.py-102-            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27041:portfolio/elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27064:portfolio/elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27327:portfolio/golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27338:portfolio/golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27356:portfolio/golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27531:portfolio/elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:27549:portfolio/elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:28850:"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 3 "acquire_lock_file|release_lock_file|singleton.lock|process_lock|gpu_lock|ORDER_LOCK|order_lock|trading lock|lock_file" data/metals_loop.py portfolio/grid_fisher.py portfolio/grid_fisher_config.py portfolio/fin_fish.py portfolio/fin_snipe_manager.py portfolio/fish_monitor_smart.py portfolio/golddigger portfolio/elongir' in Q:\finance-analyzer
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:28867:portfolio/fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:28977:portfolio/elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:28995:portfolio/elongir\runner.py:96:    """Release the singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:29022:portfolio/golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:29033:portfolio/golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:29051:portfolio/golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:29076:portfolio/elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\4-metals-core-codex.md:29084:portfolio/elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\2-orchestration-codex.md:660:52:_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- Q:\finance-analyzer\docs\adversarial-review-2026-05-11\1-signals-core-claude.md:156:  exclusion*. **Why it bites:** if `process_lock` is missing or partially-imported,
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:718:worker python.exe. The worker holds the singleton lock at
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:719:`data/main_loop.singleton.lock`. Subsequent `schtasks /run` instances
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:923:kill the old loop process — singleton lock from PID 16396 persisted
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:926:the singleton lock can outlast the process if the OS hasn't reaped
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:1142:singleton lock held by a zombie file handle for 80+ min). Loop's
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:1535:Realized that `schtasks /end` doesn't kill the worker python.exe due to singleton lock. Required `taskkill /pid /f` directly. Cost ~3 hours of confused observations.
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:1614:   - Singleton lock pattern (`data/main_loop.singleton.lock`) preventing duplicate loop instances
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:1756:     - Worker held singleton lock; new instances exited code 11
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:1935:   - Cross-process file locking via `acquire_lock_file` (process_lock.py)
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:2541:- Encountered loop restart issue: schtasks /end didn't kill the process; singleton lock persisted
+- Q:\finance-analyzer\docs\SESSION_PROGRESS.md:2614:   - Singleton lock at `data/main_loop.singleton.lock` using `msvcrt.locking()` byte-range lock
+- Q:\finance-analyzer\docs\adversarial-review\claude-orchestration.md:94:### P2-6: `process_lock.py` silently no-ops when neither msvcrt nor fcntl available
+- Q:\finance-analyzer\docs\INDEPENDENT_ADVERSARIAL_REVIEW.md:104:The singleton lock uses `msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)` which
+- Q:\finance-analyzer\docs\GUIDELINES.md:23:9. **RESTART LOOPS.** If your change touches code loaded by `data/metals_loop.py` or `portfolio/main.py --loop`, restart them so the new code takes effect: kill orphaned python processes first (the singleton lock is held by the running process, so a bare schtasks restart will hit exit code 11 and the bat wrapper will exit), then `cmd.exe /c "schtasks /run /tn PF-MetalsLoop"` and `cmd.exe /c "schtasks /run /tn PF-DataLoop"`. Tail `data/metals_loop_out.txt` and verify the new `SwingTrader init:` / `#1 Baseline established` lines appear with the expected catalog size.
+- Q:\finance-analyzer\docs\fgl\SYNTHESIS.md:71:2. `infrastructure` codex P1 (`process_lock.py:36` first-owner lock
+- Q:\finance-analyzer\docs\fgl\SYNTHESIS.md:737:- `process_lock.py:36` (codex P1) — claude critique disputes:
+- Q:\finance-analyzer\docs\fgl\codex-infrastructure.md:23:[P1] portfolio/process_lock.py:36 — `acquire_lock_file()` creates a brand-new zero-byte lock file and then asks Windows `msvcrt.locking(..., 1)` to lock one byte, which can fail for the first owner as if another process already held the lock | FIX: pre-seed the lock file with a byte before locking or use a sidecar lockfile pattern like `atomic_append_jsonl()`.
+- Q:\finance-analyzer\docs\fgl\claude-infrastructure.md:67:[P2] process_lock.py:78-99 — `_write_lock_metadata` writes pid/started/owner space-separated but the format `key=value` with potential spaces in values (e.g. owner names) is parsed by no consumer in this codebase, so it's effectively a write-only debug breadcrumb. If a consumer is added that splits on space, owner="my service" produces three k=v pairs. | FIX: emit JSON instead, or document that values must be space-free.
+- Q:\finance-analyzer\docs\dual-review-2026-05-04\SYNTHESIS.md:323:- **`process_lock.py` cross-worktree semantics** — two worktrees compete for same lock path.
+- Q:\finance-analyzer\docs\dual-review-2026-05-04\cross-8-infrastructure.md:43:- **`process_lock.py` cross-process semantics on the same physical machine but different worktrees** — both worktrees would compete for the same lock file path. Neither reviewer asked.
+- Q:\finance-analyzer\docs\CHANGELOG.md:536:- **BUG-123: Untracked files break worktrees**: `portfolio/metals_ladder.py`, `portfolio/process_lock.py`, `portfolio/subprocess_utils.py`, `portfolio/notification_text.py` were imported by tracked modules but never committed. Any worktree or fresh clone hit `ModuleNotFoundError`. Now tracked in git along with 5 test files.
+- Q:\finance-analyzer\docs\PLAN_bert_meta_fix.md:191:  `taskkill /F` not `schtasks /end`, the singleton lock can outlast a
+- Q:\finance-analyzer\docs\PLAN_ADVERSARIAL_REVIEW_2.md:13:| 2 | **orchestration** | `main.py`, `agent_invocation.py`, `trigger.py`, `market_timing.py`, `autonomous.py`, `loop_contract.py`, `process_lock.py`, `digest.py`, `daily_digest.py` | Loop reliability, crash recovery, trigger logic, race conditions |
+- Q:\finance-analyzer\docs\plans\2026-05-04-codex-review-followups.md:34:lock (`portfolio.process_lock` already exists for golddigger / metals
+- Q:\finance-analyzer\docs\plans\2026-03-17-merge-triage-plan.md:71:- The useful part is the singleton lock in `data/metals_loop.py` plus its tests.
+- Q:\finance-analyzer\docs\OIL_LOOP_NOTES.md:30:1. Acquire singleton lock at `data/oil_loop.lock`.
+- Q:\finance-analyzer\data\silver_monitor.py:79:SINGLETON_LOCK_FILE = DATA_DIR / "silver_monitor.singleton.lock"
+- Q:\finance-analyzer\data\silver_monitor.py:160:    """Acquire the silver monitor singleton lock."""
+- Q:\finance-analyzer\data\silver_monitor.py:178:    """Release the silver monitor singleton lock if held."""
+- Q:\finance-analyzer\docs\META_REVIEW_CODEX_ON_CLAUDE.md:23:- **2.1 — VALID.** The singleton lock is a silent no-op when `msvcrt` is unavailable at [main.py](/mnt/q/finance-analyzer/portfolio/main.py#L49). On WSL/Linux, duplicate loop protection is absent.
+- Q:\finance-analyzer\docs\META_REVIEW_CODEX_ON_CLAUDE.md:55:- **4.3 — VALID.** The metals singleton lock also no-ops when `msvcrt` is absent at [metals_loop.py](/mnt/q/finance-analyzer/data/metals_loop.py#L583).
+- Q:\finance-analyzer\docs\META_REVIEW_CODEX_ON_CLAUDE.md:119:2. **2.1** The singleton lock silently disappears on non-Windows hosts, which is a concrete WSL/main-loop hazard. [main.py](/mnt/q/finance-analyzer/portfolio/main.py#L49)
+- Q:\finance-analyzer\docs\RESOLVED_BUGS.md:45:- BUG-236 through BUG-242: Fixed 2026-04-30 (crypto datetime, accuracy imports, singleton lock, ruff)
+- Q:\finance-analyzer\data\crypto_loop.py:4:  1. Acquire singleton lock (one process at a time).
+- Q:\finance-analyzer\data\crypto_loop.py:108:                logger.warning("singleton lock held by pid %d", old_pid)
+- Q:\finance-analyzer\data\crypto_loop.py:289:        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- Q:\finance-analyzer\docs\reviews\2026-04-16\codex\metals-core.err:4108:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\docs\reviews\2026-04-16\codex\orchestration.err:184:_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- Q:\finance-analyzer\data\fgl-logs\critique-prompts\critique-infrastructure.txt:92:[P2] process_lock.py:78-99 — `_write_lock_metadata` writes pid/started/owner space-separated but the format `key=value` with potential spaces in values (e.g. owner names) is parsed by no consumer in this codebase, so it's effectively a write-only debug breadcrumb. If a consumer is added that splits on space, owner="my service" produces three k=v pairs. | FIX: emit JSON instead, or document that values must be space-free.
+- Q:\finance-analyzer\data\fgl-logs\codex-critique-of-claude-infrastructure.err:104:[P2] process_lock.py:78-99 — `_write_lock_metadata` writes pid/started/owner space-separated but the format `key=value` with potential spaces in values (e.g. owner names) is parsed by no consumer in this codebase, so it's effectively a write-only debug breadcrumb. If a consumer is added that splits on space, owner="my service" produces three k=v pairs. | FIX: emit JSON instead, or document that values must be space-free.
+- Q:\finance-analyzer\data\fgl-logs\codex-metals-core.err:3161:52: LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- Q:\finance-analyzer\data\fgl-logs\codex-infrastructure.txt:13:[P1] portfolio/process_lock.py:36 — `acquire_lock_file()` creates a brand-new zero-byte lock file and then asks Windows `msvcrt.locking(..., 1)` to lock one byte, which can fail for the first owner as if another process already held the lock | FIX: pre-seed the lock file with a byte before locking or use a sidecar lockfile pattern like `atomic_append_jsonl()`.
+- Q:\finance-analyzer\data\fgl-logs\codex-infrastructure.err:8732:[P1] portfolio/process_lock.py:36 — `acquire_lock_file()` creates a brand-new zero-byte lock file and then asks Windows `msvcrt.locking(..., 1)` to lock one byte, which can fail for the first owner as if another process already held the lock | FIX: pre-seed the lock file with a byte before locking or use a sidecar lockfile pattern like `atomic_append_jsonl()`.
+- Q:\finance-analyzer\docs\CHANGELOG.md:408:- **BUG-204: Silent exception in qwen3 GPU reaper (P3)**: `try: kill_orphaned_llama() except Exception: pass` made VRAM leaks invisible if the reaper itself broke. Promoted to `logger.debug(exc_info=True)`.
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:20:Add `popen_in_job()` to `portfolio/subprocess_utils.py` — a Popen wrapper that:
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:28:`popen_in_job()` instead of raw `Popen`. Store job handles in module globals.
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:42:| `portfolio/subprocess_utils.py` | Add `popen_in_job()` function |
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:43:| `data/metals_llm.py` | Use `popen_in_job()`, add orphan sweep at startup |
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:54:- `popen_in_job()` ctypes calls could fail on unusual Windows configs → graceful
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:55:  fallback to raw Popen (same pattern as existing `run_safe()`)
+- Q:\finance-analyzer\docs\superpowers\plans\2026-04-03-chronos-orphan-fix.md:61:1. Add `popen_in_job()` to `subprocess_utils.py`
+- Q:\finance-analyzer\docs\fgl\codex-infrastructure.md:25:[P1] portfolio/subprocess_utils.py:175 — `popen_in_job()` also ignores the boolean return from `AssignProcessToJobObject`, so long-running children may escape cleanup while callers think they are protected | FIX: verify the API return value and return `(proc, None)` with a warning when assignment fails.
+- Q:\finance-analyzer\docs\fgl\codex-infrastructure.md:26:[P1] portfolio/subprocess_utils.py:239 — `kill_orphaned_by_cmdline()` increments `killed` without checking `taskkill`’s exit status, so failed terminations are reported as successes and orphan sweep outages are masked | FIX: only count the process when `taskkill` returns zero and log `stderr` otherwise.
+- Q:\finance-analyzer\data\fgl-logs\codex-infrastructure.txt:15:[P1] portfolio/subprocess_utils.py:175 — `popen_in_job()` also ignores the boolean return from `AssignProcessToJobObject`, so long-running children may escape cleanup while callers think they are protected | FIX: verify the API return value and return `(proc, None)` with a warning when assignment fails.
+- Q:\finance-analyzer\data\fgl-logs\codex-infrastructure.txt:16:[P1] portfolio/subprocess_utils.py:239 — `kill_orphaned_by_cmdline()` increments `killed` without checking `taskkill`’s exit status, so failed terminations are reported as successes and orphan sweep outages are masked | FIX: only count the process when `taskkill` returns zero and log `stderr` otherwise.
+- Q:\finance-analyzer\data\fgl-logs\codex-infrastructure.err:8734:[P1] portfolio/subprocess_utils.py:175 — `popen_in_job()` also ignores the boolean return from `AssignProcessToJobObject`, so long-running children may escape cleanup while callers think they are protected | FIX: verify the API return value and return `(proc, None)` with a warning when assignment fails.
+- Q:\finance-analyzer\data\fgl-logs\codex-infrastructure.err:8735:[P1] portfolio/subprocess_utils.py:239 — `kill_orphaned_by_cmdline()` increments `killed` without checking `taskkill`’s exit status, so failed terminations are reported as successes and orphan sweep outages are masked | FIX: only count the process when `taskkill` returns zero and log `stderr` otherwise.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"claude -p|CLAUDECODE=|powershell -ExecutionPolicy Bypass|ErrorActionPreference|Stop-Process|schtasks|NoProfile|-ErrorAction|Set-StrictMode|Q:\\\\finance-analyzer|cd /d|python -m|py -3|\\.venv|ExecutionPolicy Bypass\" Q:\\finance-analyzer\\scripts\\win\\*.bat Q:\\finance-analyzer\\scripts\\win\\*.ps1" in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"claude -p|CLAUDECODE=|ExecutionPolicy Bypass|ErrorActionPreference|Stop-Process|schtasks|NoProfile|-ErrorAction|Q:\\\\finance-analyzer|\\.venv|py -3|python -m\" Q:\\finance-analyzer\\scripts\\win" in Q:\fa-adv-2026-05-12
+- Q:\finance-analyzer\scripts\win\install-adversarial-review-task.ps1:38:Write-Host "Output:    Q:\finance-analyzer\data\adversarial_review_out.txt"
+- Q:\finance-analyzer\scripts\win\install-fix-agent-task.ps1:55:Write-Host "Kill switch:       touch Q:\finance-analyzer\data\fix_agent.disabled"
+- Q:\finance-analyzer\scripts\win\install-meta-learner-task.ps1:38:Write-Host "Output:    Q:\finance-analyzer\data\meta_learner_retrain_out.txt"
+- Q:\finance-analyzer\scripts\win\install-oil-loop-task.ps1:46:Write-Host "  .venv\Scripts\python.exe -u data\oil_loop.py --once --debug"
+- Q:\finance-analyzer\scripts\win\install-signal-research-task.ps1:19:$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$scriptPath`"" -WorkingDirectory "Q:\finance-analyzer"
+- Q:\finance-analyzer\scripts\win\install-signal-research-task.ps1:46:Write-Host "Prompt:    Q:\finance-analyzer\docs\signal-research-prompt.md"
+- Q:\finance-analyzer\scripts\win\install-signal-research-task.ps1:47:Write-Host "Output:    Q:\finance-analyzer\data\signal_research_out.txt"
+- Q:\finance-analyzer\scripts\win\pf-restart.ps1:16:    2. Stop-Process -Force on every matching PID.
+- I have enough of the implementation picture to start ranking issues. I’m doing one last pass over the existing tests for these modules so the “Tests missing” section reflects actual gaps rather than guesses.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"concurrent|race|lock|sidecar|rotation|append|prune|atomic_write_jsonl|atomic_append_jsonl|tmp\" Q:\\finance-analyzer\\tests\\test_io_safety.py Q:\\finance-analyzer\\tests\\test_io_safety_sweep.py Q:\\finance-analyzer\\tests\\test_fix_agent_dispatcher.py" in Q:\fa-adv-2026-05-12
+- Q:\finance-analyzer\tests\test_io_safety.py:130:# BUG-51: outcome_tracker.log_signal_snapshot() should use atomic_append_jsonl()
+- Q:\finance-analyzer\tests\test_io_safety.py:137:        """Verify the function uses atomic_append_jsonl, not raw open/write."""
+- Q:\finance-analyzer\tests\test_io_safety.py:143:            "log_signal_snapshot should use atomic_append_jsonl()"
+- Q:\finance-analyzer\tests\test_io_safety.py:147:            "log_signal_snapshot should NOT use raw open() for JSONL append"
+- Q:\finance-analyzer\tests\test_io_safety_sweep.py:176:        # The _save_history function should use atomic_write_jsonl, not open("w")
+- Q:\finance-analyzer\tests\test_fix_agent_dispatcher.py:390:    monkeypatch.setenv(dispatcher.RECURSION_ENV, "5")  # would block if read live
+- Q:\finance-analyzer\tests\test_fix_agent_dispatcher.py:403:# Concurrent writes to critical_errors.jsonl — atomic_append_jsonl must
+- Q:\finance-analyzer\tests\test_fix_agent_dispatcher.py:418:    corruption. Cross-process file locking would close the loss gap but

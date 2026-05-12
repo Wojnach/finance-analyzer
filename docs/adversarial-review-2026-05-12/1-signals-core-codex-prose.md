@@ -1,0 +1,577 @@
+# Codex prose extract: 1-signals-core (2026-05-12)
+
+Heuristic extract from `_logs/1-signals-core.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 569 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the signals-core subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- In-scope files (read these and ONLY these):
+- - Atomic I/O only via file_utils.atomic_write_json / load_json / atomic_append_jsonl. Raw json.loads(open(...).read()) is a defect.
+- - MIN_VOTERS = 3 (consensus = active BUY+SELL voters, not total).
+- - Accuracy gate: signals <47% accuracy with 30+ samples are force-HOLD (not inverted — inversion causes whiplash).
+- Adversarial focus — find these bug classes:
+- 1. Silent failures: try/except that swallow errors or return default values without logging.
+- 2. Race conditions: shared state, JSONL append/rotate races, threading without locks, mutable defaults.
+- 4. Stale data / cache bugs: TTL not honored, time comparisons in mixed tz, "now" used inconsistently.
+- 5. Accuracy/weighting math: sample-size guards missing, biased estimators, mixing horizons, look-ahead bias in IC/factor models.
+- 6. Signal inversion or weight changes that contradict the rule "never invert sub-50% signals — force HOLD instead".
+- 8. Resource leaks: open files / sqlite connections not closed.
+- - path:line — short description. Why it bites: ... Fix: ...
+- Reviewing the listed `signals-core` files only. I’m pulling those files with line numbers first, then I’ll check them against the defect classes you called out: silent failures, atomic I/O, weighting math, stale time handling, and DB safety.
+- The direct reads against `Q:\finance-analyzer` were blocked by the sandbox. I’m checking how that repo is exposed from the current workspace so I can still review only the permitted files and not widen scope.
+- """Signal generation engine - 32-signal voting system with weighted consensus."""
+- _adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
+- """Record the signal currently being computed for a ticker (BUG-178 diag)."""
+- """Return (sig_name, elapsed_seconds) for the most recent signal start
+- on this ticker, or None if no signal has been recorded.
+- Used by main.py's BUG-178 timeout handler to identify which signal hung.
+- individual phases (e.g., cold accuracy_stats load, lock contention)
+- are visible in portfolio.log without waiting for a BUG-178 timeout.
+- Used by main.py's BUG-178 slow-cycle diagnostic to dump per-phase timing
+- -> soft SELL. Slopes within `tiny_eps` of each other -> HOLD.
+- Returns ("HOLD", 0.0) if df is missing/short or slopes truly flat.
+- < -0.6 -> soft BUY (near lower), else HOLD (mid-band).
+- 2026-05-11 (Codex Fix A): added magnitude gate. The strong-vote
+- dead zone (small absolute value). Without this gate, every non-
+- decision should win and the answer is genuinely HOLD.
+- Fallback secondary derivative: count bullish (close>open) vs bearish
+- soft SELL. Anything mixed (incl. doji-style equality) stays HOLD.
+- claim - hence the 0.15 soft conf and the 3/3 unanimity gate (no
+- """Return (vote, conf) when forecast voted HOLD but price+EMA align.
+- Fallback secondary derivative: compare the slope of close prices to
+- soft BUY; both falling -> soft SELL; mixed slopes -> HOLD.
+- for an unrun forecast. The user-visible contract: HOLD when the
+- + accuracy gating force ~87% HOLD on metals (low confidence, vol
+- gate, accuracy gate). When the forecast ran but didn't commit, a
+- price+EMA21 slope-alignment read is a defensible weak tiebreaker.
+- _CRISIS_THRESHOLD = 0.35  # signal accuracy below this counts as "broken"
+- _CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
+- _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
+- _BIAS_PENALTY = 0.5  # 0.5x weight for high-bias signals (85-95%)
+- _BIAS_EXTREME_PENALTY = 0.2  # 0.2x weight for extreme-bias signals (>95%)
+- _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
+- _IC_MULT_FLOOR = 0.6    # never zero out a signal via IC alone
+- _IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
+- """Return how many same-direction cycles a signal must hold to count."""
+- Returns a new dict with non-persistent signals forced to HOLD.
+- The original votes dict is not modified (needed for accuracy tracking).
+- sig: {"vote": vote, "cycles": min_cycles if vote != "HOLD" else 0}
+- ticker_state[sig] = {"vote": "HOLD", "cycles": 0}
+- filtered[sig] = "HOLD"  # still provisional
+- "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
+- _PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
+- _GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
+- "_TICKER_DISABLED_BY_HORIZON missing required '_default' key")
+- """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific.
+- set rather than crash the hot consensus path.
+- f"Relaxed overall accuracy gate "
+- f"accuracy gate and the claim that the directional gate is NEVER "
+- _sentiment_lock = threading.Lock()  # BUG-85: protect concurrent access from ThreadPoolExecutor
+- """Set sentiment direction for a ticker (thread-safe, batched disk write)."""
+- BUG-85 fix: batching prevents concurrent per-ticker writes that clobber each other.
+- BUG-101 fix: dirty flag cleared only AFTER successful write, so a failed write
+- "smart_money",  # BUG-165: 10.0% accuracy in trending-down
+- """Get the set of signals to gate for a regime+horizon combination.
+- NOT unions with it. This is by design (BUG-149, 2026-03-29):
+- of what should still be gated at that intraday horizon. Example:
+- `trend` has 40.7% accuracy at 1d ranging (gate via _default) but
+- 2026-05-02 audit: 04-24 P0-1 / 04-29 SC-P1-1 / 05-01 P0 (carryover)
+- framed this as a "union bug" by analogy to `_get_horizon_disabled_signals`.
+- Re-reading the docstring at line 762-767 and the per-signal comments
+- Finding REJECTED - leaving behavior unchanged. No fix needed.
+- _DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
+- _DYNAMIC_HORIZON_MIN_SAMPLES = 50   # need enough data per signal per horizon
+- """Compute horizon-specific signal weight multipliers from accuracy cache.
+- For each signal, computes the ratio of its accuracy on this horizon vs
+- HORIZON_SIGNAL_WEIGHTS if accuracy cache is unavailable.
+- cache = load_json(DATA_DIR / "accuracy_cache.json")
+- logger.debug("Dynamic horizon weights unavailable, using static fallback", exc_info=True)
+- """Get horizon-specific signal weight multipliers, preferring dynamic computation.
+- Uses cached dynamic weights when available, falling back to static dict.
+- _VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD"})
+- """Normalize and validate a signal's return dict.
+- return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}}
+- logger.warning("Signal %s returned invalid action=%r, defaulting to HOLD", sig_name, action)
+- logger.warning("Signal %s returned non-finite confidence=%r, defaulting to 0.0", sig_name, conf)
+- _DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
+- _DYNAMIC_CORR_MIN_SAMPLES = 30  # minimum signal log entries for reliable correlation
+- _DYNAMIC_CORR_MIN_PAIRS = 20    # minimum non-HOLD pairs to trust agreement rate
+- """Compute agreement rate between two signal vote lists.
+- Only counts pairs where at least one signal voted non-HOLD.
+- """Compute signal correlation groups from recent signal_log data.
+- Uses agreement rate (not Pearson correlation) on non-HOLD vote pairs.
+- Signals that agree > 85% of the time on non-HOLD votes are clustered.
+- vote_map = {"BUY": 1, "SELL": -1, "HOLD": 0}
+- row = {s: vote_map.get(signals.get(s, "HOLD"), 0) for s in active_signals}
+- None leak isn't a runtime crash here, but the bare cast lied about
+- _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+- _META_CLUSTER_PENALTY = 0.35  # 2nd/3rd agreeing leaders get 35% weight
+- """Coerce an accuracy value to a clean float, mapping None/NaN/inf to `default`.
+- 2026-04-17 (P1-C): the live consensus path previously crashed with
+- half-written cache), and with a silent fall-through-as-valid when it
+- """Count how many signals would pass gating at gate=(base_gate - relaxation).
+- Counts only voters that survive the full gate cascade:
+- 2) group-gated (correlation leader below group-leader gate)
+- 3) accuracy gate at (base - relaxation), tiered for high-sample signals
+- 4) directional gate (unchanged by relaxation)
+- """P2-D (2026-04-17): normalize regime strings to a canonical lowercase form.
+- "trending_up") that would otherwise silently fall through to the
+- This is the minimum voter count the OUTER consensus path requires before
+- emitting a non-HOLD action. The circuit breaker uses it to size its
+- recovery floor so relaxation is only engaged when it could reach the
+- so signals gated on BUY-accuracy=30% don't inflate the decision.
+- Returns float - relaxation in absolute accuracy points (e.g., 0.02).
+- raw_candidates = sum(1 for v in votes.values() if v != "HOLD")
+- if v != "HOLD" and sn not in excluded and sn not in group_gated
+- """Compute IC-based weight multiplier for a signal.
+- Returns a multiplicative adjustment based on the signal's Information
+- - IC < 0 with stable ICIR  penalty (contrarian, accuracy gate handles)
+- """Load IC data for the given horizon, computing if cache is stale.
+- Returns the full cache dict {"global": {...}, "per_ticker": {...}}
+- if cached and now - cached.get("_loaded_at", 0) < _IC_DATA_TTL:
+- ``ECON_EVENTS`` linearly. That's cheap, but called per signal per
+- ticker per cycle becomes wasteful. Cache the result for
+- """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
+- Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
+- Rare, balanced signals get more weight; noisy/biased signals get less.
+- Signals below the accuracy gate (with sufficient samples) are force-skipped -
+- forced to HOLD before vote processing - they produce negative alpha.
+- highest-accuracy signal gets full weight. Others get 0.3x penalty.
+- Horizon-specific weights: signals with divergent accuracy across horizons
+- to prevent a single high-activity signal from dominating consensus.
+- Top-N gate: when max_signals is set, only the top max_signals non-HOLD
+- signals (ranked by accuracy) participate in the consensus. This focuses
+- 2026-05-11 (Codex Fix B) - soft-confidence dampening:
+- votes when the strong path would HOLD, and stash a small per-vote
+- strength votes (just direction x accuracy weight), so an all-soft
+- slate could produce full directional confidence - defeating the
+- "weak weight" contract. We now scale each soft vote's contribution
+- key present) keep their original weight x accuracy x regime mult.
+- gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
+- """Return int >= 0, or None if val is missing/poisoned/invalid."""
+- votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
+- votes = {k: ("HOLD" if k in horizon_disabled else v) for k, v in votes.items()}
+- k: ("HOLD" if k in MACRO_WINDOW_FORCE_HOLD_SIGNALS else v)
+- base = float(accuracy_data.get(s, {}).get("accuracy", 0.5))
+- active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
+- active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
+- leader_directions = {sc: votes.get(ldr, "HOLD")
+- active_dirs = set(leader_directions.values()) - {"HOLD"}
+- and accuracy_data.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
+- "Circuit breaker: relaxing accuracy gate by %.0fpp "
+- relaxation * 100, gate, gate - relaxation,
+- effective_gate = gate - relaxation
+- "%s=%.1f%% (%d sam) - rescued at %.0f%% weight",
+- weight = stats.get("buy_accuracy", acc)  # BUG-185: .get() for cache safety
+- weight = stats.get("sell_accuracy", acc)  # BUG-185: .get() for cache safety
+- logger.debug("Accuracy-gated signals (<%s%%): %s", ACCURACY_GATE_THRESHOLD * 100, gated_signals)
+- return "HOLD", round(max(buy_conf, sell_conf), 4)
+- active = {k: v for k, v in votes.items() if v != "HOLD"}
+- """Load per-ticker accuracy for a local model signal."""
+- logger.warning("Failed to load %s accuracy", signal_name, exc_info=True)
+- """Apply accuracy-based abstention to local model votes."""
+- if vote == "HOLD" or not ticker:
+- info["accuracy"] = round(ticker_stats.get("accuracy", 0.0), 3)
+- Cached per DataFrame identity to avoid recomputation within a cycle.
+- 2. Volume/ADX gate - rejects low-conviction signals
+- 6. Per-ticker consensus - penalizes tickers where ensemble accuracy < 50%
+- if volume_ratio is not None and action != "HOLD":
+- if action != "HOLD" and df is not None and isinstance(df, pd.DataFrame) and len(df) >= 5:
+- if action != "HOLD" and active_voters < dynamic_min:
+- if action != "HOLD" and conf > 0.0:
+- if action != "HOLD" and conf > _CALIBRATION_THRESHOLD:
+- shadow_votes: dict[str, str] = {}  # disabled signals tracked for accuracy
+- logger.debug("Shadow signal %s failed: %s", sig_name, e)
+- logger.warning("Signal %s failed: %s", sig_name, e)
+- logger.debug("Signal health tracking failed", exc_info=True)
+- if "candlestick" in votes and votes["candlestick"] == "HOLD" \
+- if "forecast" in votes and votes["forecast"] == "HOLD" \
+- if btc_action in ("BUY", "SELL", "HOLD"):
+- if not action or action not in ("BUY", "HOLD", "SELL"):
+- if is_slow_signal_3h(sig_name) and votes[sig_name] != "HOLD":
+- logger.debug("Per-ticker accuracy unavailable for regime gating exemption", exc_info=True)
+- logger.debug("Recent accuracy unavailable for regime gating override", exc_info=True)
+- "BUG-158: %s exempt from %s regime gating for %s (%.1f%%, %d samples)",
+- "accuracy %.1f%% (%d sam) overrides stale gate",
+- if sig_name in votes and votes[sig_name] != "HOLD":
+- logger.error("Accuracy stats load failed", exc_info=True)
+- accuracy_data = {sig: {"accuracy": 0.0, "total": 999} for sig in SIGNAL_NAMES}
+- "pct": t_stats.get("pct", round(t_stats["accuracy"] * 100, 1)),
+- boosted_acc = min(accuracy_data[sig_name]["accuracy"] * boost, 0.95)
+- current = accuracy_data.get(sig_name, {}).get("accuracy", 0.5)
+- if bh_data["accuracy"] > current + 0.03:
+- if votes[s] != "HOLD" and consensus_votes.get(s) == "HOLD"
+- extra_info["_raw_votes"] = raw_votes  # C10: pre-gate votes for accuracy recovery
+- if ticker and action != "HOLD":
+- logger.debug("Earnings gate failed for %s", ticker, exc_info=True)
+- _vote_map = {"BUY": 1.0, "SELL": -1.0, "HOLD": 0.0}
+- if lf_action == action and action != "HOLD" and lf_conf > 0.3:
+- elif lf_action != "HOLD" and lf_action != action and action != "HOLD":
+- logger.debug("Per-ticker consensus gate failed for %s", ticker, exc_info=True)
+- portfolio\signal_registry.py:1:"""Signal registry - plugin system for modular signal management.
+- portfolio\signal_registry.py:19:    """Register a signal in the global registry.
+- portfolio\signal_registry.py:42:    """Programmatically register an enhanced signal module."""
+- portfolio\signal_registry.py:61:    """Return all registered signal names."""
+- portfolio\signal_registry.py:69:    """Lazy-load and cache the compute function for a signal.
+- portfolio\signal_registry.py:74:    cached = entry.get("func")
+- portfolio\signal_registry.py:75:    if cached is not None and cached is not _FAILED_IMPORT_SENTINEL:
+- portfolio\signal_registry.py:76:        return cached
+- portfolio\signal_registry.py:77:    if cached is _FAILED_IMPORT_SENTINEL and time.monotonic() - entry.get("_fail_ts",
+- portfolio\signal_registry.py:86:        logger.warning("Failed to load signal %s: %s", entry['name'], e)
+- portfolio\signal_registry.py:94:    """Register the default set of enhanced signal modules."""
+- portfolio\signal_registry.py:123:    # forecast signal - Kronos + Chronos price direction prediction; capped at 0.7
+- portfolio\signal_registry.py:142:    # 2026-04-13: added standalone signal to capture DXY Rı~0.6 vs silver at
+- portfolio\signal_registry.py:171:    # 2026-04-17: cross-asset signal, inverts direction for metals (falling ratio =
+- portfolio\signal_registry.py:172:    # 94% recession prediction accuracy, 0.85 correlation with 10Y yields.
+- portfolio\signal_registry.py:201:    # Realized skewness - 3rd moment directional signal (all assets)
+- portfolio\signal_registry.py:213:    # Options-derived signal uncorrelated with trend-following cluster.
+- portfolio\signal_registry.py:223:    # Drift Regime Gate - positive-day fraction regime detector; capped at 0.7
+- portfolio\signal_registry.py:225:    # Fraction of positive close-to-close days in 63-bar window detects drift regime.
+- portfolio\signal_registry.py:243:    # Williams VIX Fix - synthetic volatility bottom/capitulation detector (all
+- portfolio\signal_registry.py:246:    # Bollinger Band signal extreme fear = BUY. Directly targets system's BUY-side
+- portfolio\signal_registry.py:247:    # accuracy weakness. Pure OHLCV, all 5 tickers.
+- portfolio\signal_registry.py:252:    # Treasury risk rotation - bond yield curve shape as cross-asset regime signal
+- portfolio\signal_registry.py:255:    # Only signal using bond market data - zero correlation with existing clusters.
+- portfolio\signal_registry.py:260:    # Intraday seasonality gate - hour-of-day confidence multipliers (all assets)
+- portfolio\signal_registry.py:263:    # in London-NY overlap). Zero correlation with existing signal clusters.
+- portfolio\signal_registry.py:283:    # Gold overnight bias - LBMA fix session drift (metals only); capped at 0.7
+- portfolio\signal_registry.py:285:    # overnight (PM->AM fix) = positive drift, London PM = negative drift.
+- portfolio\signal_registry.py:286:    # Completely uncorrelated with all existing signal clusters.
+- I have access to the workspace copy under `portfolio/`. Next I’m sizing the scoped files and then drilling into the ones that touch weighting, accuracy caches, persistence, DB I/O, and horizon math.
+- portfolio/signal_history.py:3:Maintains a rolling window of the last N votes per signal per ticker.
+- portfolio/signal_decay_alert.py:31:        list[dict]: Each dict has keys: signal, horizon, alltime_acc, recent_acc,
+- portfolio/signal_decay_alert.py:110:                f"  {a['signal']:25s} {a['horizon']:>3s}: "
+- portfolio/signal_decay_alert.py:120:                f"  {a['signal']:25s} {a['horizon']:>3s}: "
+- portfolio/signal_decay_alert.py:129:    """Log decay alerts and write to data/signal_decay_alerts.jsonl."""
+- portfolio/signal_decay_alert.py:148:        logger.debug("Could not write signal_decay_alerts.jsonl", exc_info=True)
+- portfolio/signal_weight_optimizer.py:3:Retrains signal weights using rolling windows to prevent overfitting
+- portfolio/feature_normalizer.py:46:    Call this each signal cycle to build up the rolling distribution.
+- portfolio/train_signal_weights.py:3:Reads signal_log.jsonl, extracts per-signal votes and forward returns,
+- portfolio/short_horizon.py:37:    """Check if a signal should be disabled for 3h horizon predictions."""
+- portfolio/ic_computation.py:247:    atomic_write_json(IC_CACHE_FILE, cache)
+- portfolio/ic_computation.py:249:    logger.info("IC cache updated for %s in %.1fs", horizon, dt)
+- portfolio/ic_computation.py:255:    cache = load_json(IC_CACHE_FILE)
+- portfolio/ic_computation.py:258:    if time.time() - cache.get("time", 0) > IC_CACHE_TTL:
+- portfolio/ic_computation.py:260:    if cache.get("horizon") != horizon:
+- portfolio/ic_computation.py:270:    cache = load_cached_ic(horizon)
+- portfolio/ic_computation.py:272:        cache = compute_and_cache_ic(horizon)
+- portfolio/signal_utils.py:56:    """Convert *val* to float, returning ``NaN`` for non-finite / missing values."""
+- portfolio/forecast_accuracy.py:3:Reads forecast_predictions.jsonl, backfills actual prices at 1h/24h horizons,
+- portfolio/forecast_accuracy.py:4:and computes per-model per-ticker per-horizon accuracy statistics.
+- portfolio/forecast_accuracy.py:25:# forecast_predictions.jsonl. Cache the result for 1h so the hot path is a
+- portfolio/forecast_accuracy.py:46:        if cached and now - cached[0] < _FORECAST_ACCURACY_CACHE_TTL:
+- portfolio/forecast_accuracy.py:48:    # Compute outside the lock so other horizons aren't blocked.
+- portfolio/signal_registry.py:77:    if cached is _FAILED_IMPORT_SENTINEL and time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
+- portfolio/signal_registry.py:171:    # 2026-04-17: cross-asset signal, inverts direction for metals (falling ratio = gold strength).
+- portfolio/outcome_tracker.py:198:        # stocks, yfinance emergency fallback). Previously bypassed
+- portfolio/outcome_tracker.py:285:        ``<dir>/.<filename>.lock`` (e.g. ``data/.signal_log.jsonl.lock``).
+- portfolio/outcome_tracker.py:287:    log_signal_snapshot() appenders. SC-P1-3 (2026-05-02 follow-up).
+- portfolio/outcome_tracker.py:349:    log_signal_snapshot() appenders via the sidecar lock used by
+- portfolio/outcome_tracker.py:518:    #   2. The os.replace is atomic w.r.t. any subsequent appender —
+- portfolio/outcome_tracker.py:544:                # SC-P1-3: copy bytes appended after our snapshot verbatim
+- portfolio/outcome_tracker.py:566:    # accuracy data immediately rather than waiting for the 300s TTL.
+- portfolio/ticker_accuracy.py:3:Computes P(up) at multiple horizons for focus instruments using accuracy-weighted
+- portfolio/ticker_accuracy.py:86:    """Convert signal votes + per-ticker accuracy into P(up) at given horizon.
+- portfolio/ticker_accuracy.py:90:          acc = that signal's accuracy for THIS ticker at THIS horizon
+- portfolio/ticker_accuracy.py:98:        horizon: Outcome horizon for accuracy lookup.
+- portfolio/ticker_accuracy.py:294:        # Overall accuracy summary (1d horizon as primary)
+- portfolio/signal_db.py:1:"""SQLite storage for signal snapshots — replaces signal_log.jsonl for reads.
+- portfolio/signal_db.py:245:        """Find snapshot timestamps that are missing a specific horizon outcome.
+- portfolio/accuracy_degradation.py:25:  P1#2 — throttle replays cached violations so ViolationTracker keeps
+- portfolio/accuracy_degradation.py:158:    # Per-ticker per-signal — lifetime via cached helper (1h TTL inside),
+- portfolio/accuracy_degradation.py:338:    throttled, returns the cached violations from the last full check
+- portfolio/accuracy_degradation.py:350:    # Hourly throttle — replay cached result instead of returning empty
+- portfolio/accuracy_degradation.py:390:    # the state write would let the throttle re-fire every cycle, defeating the
+- portfolio/accuracy_degradation.py:765:    """Surface a silent writer failure to ``critical_errors.jsonl``.
+- portfolio/accuracy_degradation.py:776:    appends every cycle → check_critical_errors and the fix-agent get
+- portfolio/accuracy_degradation.py:811:        logger.exception("Failed to record snapshot writer silent failure: %s", e)
+- portfolio/accuracy_stats.py:60:# 3600s ACCURACY_CACHE_TTL used for the disk-backed caches. The lock
+- portfolio/accuracy_stats.py:66:# on a TTL-boundary race will each recompute once (one wasted walk), but
+- portfolio/accuracy_stats.py:78:# per-horizon data persists across writes via load-merge-write.
+- portfolio/accuracy_stats.py:83:# Atomic writes via _atomic_write_json so concurrent writers race to be last
+- portfolio/accuracy_stats.py:90:# threads computing DIFFERENT horizons don't lose each other's writes (the
+- portfolio/accuracy_stats.py:91:# benign-race assumption only holds for same-horizon races; cross-horizon
+- portfolio/accuracy_stats.py:92:# races would lose 3 of 4 horizons on a 4-thread cold-start cycle, defeating
+- portfolio/accuracy_stats.py:99:    """Return cached utility dict for horizon if disk cache is fresh, else None.
+- portfolio/accuracy_stats.py:102:    regime_accuracy_cache pattern). Per-horizon data persists across writes,
+- portfolio/accuracy_stats.py:103:    so a horizon that hasn't been recomputed since the last process can
+- portfolio/accuracy_stats.py:106:    cache = load_json(SIGNAL_UTILITY_CACHE_FILE)
+- portfolio/accuracy_stats.py:109:    if time.time() - cache.get("time", 0) >= _SIGNAL_UTILITY_DISK_TTL:
+- portfolio/accuracy_stats.py:111:    cached = cache.get(horizon)
+- portfolio/accuracy_stats.py:116:    """Persist cached utility dict for horizon. Merges with existing horizons.
+- portfolio/accuracy_stats.py:119:    threads computing DIFFERENT horizons don't lose each other's writes.
+- portfolio/accuracy_stats.py:120:    The earlier lock-free version assumed all races would be same-horizon
+- portfolio/accuracy_stats.py:125:    Atomic write via _atomic_write_json prevents torn reads even outside
+- portfolio/accuracy_stats.py:128:    Failures are swallowed — a stale L2 cache is harmless (TTL expires) and
+- portfolio/accuracy_stats.py:134:            cache = load_json(SIGNAL_UTILITY_CACHE_FILE, default={})
+- portfolio/accuracy_stats.py:137:            cache[horizon] = data
+- portfolio/accuracy_stats.py:139:            _atomic_write_json(SIGNAL_UTILITY_CACHE_FILE, cache)
+- portfolio/accuracy_stats.py:159:    # H2: Fallback to JSONL using atomic load_jsonl_tail (avoids raw open()).
+- portfolio/accuracy_stats.py:180:    # killing --accuracy report mid-horizon. Matches the None-guard pattern
+- portfolio/accuracy_stats.py:462:    For each signal-log entry that has an outcome at `horizon`, check if
+- portfolio/accuracy_stats.py:642:    cached for _SIGNAL_UTILITY_CACHE_TTL seconds keyed by horizon. The cold
+- portfolio/accuracy_stats.py:652:            cached = _signal_utility_cache.get(horizon)
+- portfolio/accuracy_stats.py:653:            if cached and now - cached[0] < _SIGNAL_UTILITY_CACHE_TTL:
+- portfolio/accuracy_stats.py:700:            # except, so the in-memory cache never populates and every call
+- portfolio/accuracy_stats.py:742:        process for any horizon misses L2 and recomputes.
+- portfolio/accuracy_stats.py:978:    cache = load_json(cache_file)
+- portfolio/accuracy_stats.py:981:            if time.time() - cache.get("time", 0) < ACTIVATION_CACHE_TTL:
+- portfolio/accuracy_stats.py:995:    cache = load_json(ACCURACY_CACHE_FILE)
+- portfolio/accuracy_stats.py:998:            # BUG-133: Use per-horizon timestamps to avoid cross-horizon staleness.
+- portfolio/accuracy_stats.py:1000:            ts = cache.get(f"time_{horizon}", cache.get("time", 0))
+- portfolio/accuracy_stats.py:1002:                cached = cache.get(horizon)
+- portfolio/accuracy_stats.py:1006:            logger.debug("Accuracy cache corrupted or missing horizon %s", horizon)
+- portfolio/accuracy_stats.py:1012:        cache = load_json(ACCURACY_CACHE_FILE, default={})
+- portfolio/accuracy_stats.py:1015:        cache[horizon] = data
+- portfolio/accuracy_stats.py:1016:        # BUG-133: Write per-horizon timestamp so other horizons don't appear fresh.
+- portfolio/accuracy_stats.py:1017:        cache[f"time_{horizon}"] = time.time()
+- portfolio/accuracy_stats.py:1020:        _atomic_write_json(ACCURACY_CACHE_FILE, cache)
+- portfolio/accuracy_stats.py:1035:    cached = load_cached_accuracy(horizon)
+- portfolio/accuracy_stats.py:1039:        cached = load_cached_accuracy(horizon)
+- portfolio/accuracy_stats.py:1088:    requests 4 horizons × 3 metrics = 12 lookups; previously consensus
+- portfolio/accuracy_stats.py:1105:        # write all of them so a horizon with zero scored entries doesn't
+- portfolio/accuracy_stats.py:1112:# Dashboard /api/accuracy serves these four horizons; the loop's normal
+- portfolio/accuracy_stats.py:1383:    Uses the same TTL as the main accuracy cache (ACCURACY_CACHE_TTL).
+- portfolio/accuracy_stats.py:1385:    cache = load_json(REGIME_ACCURACY_CACHE_FILE)
+- portfolio/accuracy_stats.py:1388:            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+- portfolio/accuracy_stats.py:1389:                cached = cache.get(horizon)
+- portfolio/accuracy_stats.py:1393:            logger.debug("Regime accuracy cache corrupted or missing horizon %s", horizon)
+- portfolio/accuracy_stats.py:1400:    Merges with any existing horizons to avoid overwriting other cached data.
+- portfolio/accuracy_stats.py:1403:        cache = load_json(REGIME_ACCURACY_CACHE_FILE, default={})
+- portfolio/accuracy_stats.py:1406:        cache[horizon] = data
+- portfolio/accuracy_stats.py:1408:        _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+- portfolio/accuracy_stats.py:1423:# miss on a TTL-boundary race will each recompute once (acceptable — outcome
+- portfolio/accuracy_stats.py:1449:        cached = _regime_accuracy_cache.get(horizon)
+- portfolio/accuracy_stats.py:1450:        if cached and now - cached[0] < _REGIME_ACCURACY_CACHE_TTL:
+- portfolio/accuracy_stats.py:1492:    stale data for up to 1h (its TTL) even after L1 is dropped, defeating
+- portfolio/accuracy_stats.py:1517:                cache.pop(horizon, None)
+- portfolio/accuracy_stats.py:1522:                _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+- portfolio/accuracy_stats.py:1534:    accuracy for each signal at the 1d horizon. Used by check_accuracy_changes()
+- portfolio/accuracy_stats.py:1545:            "consensus", etc. Unknown keys are accepted as-is so future
+- portfolio/accuracy_stats.py:1574:    file_utils.load_jsonl per CLAUDE.md rule 4 (atomic I/O). The previous
+- portfolio/accuracy_stats.py:1707:    """Compute each signal's best accuracy across all horizons.
+- portfolio/accuracy_stats.py:1709:    For each signal, evaluates accuracy at every horizon in HORIZONS and returns
+- portfolio/accuracy_stats.py:1710:    the horizon with the highest accuracy (provided it meets the minimum sample
+- portfolio/accuracy_stats.py:1712:    predictive horizon for each signal rather than a fixed 1d window.
+- portfolio/accuracy_stats.py:1714:    Results are cached in BEST_HORIZON_CACHE_FILE with the same TTL as the
+- portfolio/accuracy_stats.py:1715:    main accuracy cache (ACCURACY_CACHE_TTL).
+- portfolio/accuracy_stats.py:1726:    cached = load_json(BEST_HORIZON_CACHE_FILE)
+- portfolio/accuracy_stats.py:1729:            if time.time() - cached.get("time", 0) < ACCURACY_CACHE_TTL:
+- portfolio/accuracy_stats.py:1802:        logger.debug("Failed to write best_horizon cache", exc_info=True)
+- portfolio/accuracy_stats.py:1917:    Uses the same TTL as the main accuracy cache (ACCURACY_CACHE_TTL).
+- portfolio/accuracy_stats.py:1920:    cache = load_json(TICKER_ACCURACY_CACHE_FILE)
+- portfolio/accuracy_stats.py:1923:            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+- portfolio/accuracy_stats.py:1924:                cached = cache.get(horizon)
+- portfolio/accuracy_stats.py:1928:            logger.debug("Ticker accuracy cache corrupted or missing horizon %s", horizon)
+- portfolio/accuracy_stats.py:1935:    Merges with existing horizons to avoid overwriting other cached data.
+- portfolio/accuracy_stats.py:1938:        cache = load_json(TICKER_ACCURACY_CACHE_FILE, default={})
+- portfolio/accuracy_stats.py:1941:        cache[horizon] = data
+- portfolio/accuracy_stats.py:1943:        _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
+- portfolio/accuracy_stats.py:1965:    entry signal log when the 1h TTL expires.
+- portfolio/accuracy_stats.py:1967:    cached = load_cached_ticker_accuracy(horizon)
+- portfolio/accuracy_stats.py:1974:        cached = load_cached_ticker_accuracy(horizon)
+- portfolio/signal_engine.py:159:# weighting (accuracy gate, regime mult, horizon mult, correlation
+- portfolio/signal_engine.py:182:# clean unanimity; 2/3 keeps HOLD because that's a coinflip+1, well
+- portfolio/signal_engine.py:348:    claim — hence the 0.15 soft conf and the 3/3 unanimity gate (no
+- portfolio/signal_engine.py:519:_IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
+- portfolio/signal_engine.py:649:# yfinance/FRED/Binance calls that would blow the 60s cycle budget.
+- portfolio/signal_engine.py:709:# so disabling at compute time requires the signal to be bad at EVERY horizon.
+- portfolio/signal_engine.py:711:# is force-HOLD'd per-horizon at consensus time).
+- portfolio/signal_engine.py:713:# Consensus-time: when building consensus for horizon H, apply
+- portfolio/signal_engine.py:723:    # Disabled at ALL horizons — bad everywhere, safe to skip even at compute.
+- portfolio/signal_engine.py:849:        # 2026-05-10: signals with <45% accuracy at 3d horizon (global).
+- portfolio/signal_engine.py:859:        # 2026-05-10: signals with <45% accuracy at 5d horizon.
+- portfolio/signal_engine.py:878:# shape. Catches structural errors (missing _default, invalid horizon keys,
+- portfolio/signal_engine.py:897:    """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific.
+- portfolio/signal_engine.py:932:# multiplicatively with the existing regime/horizon weight chain.
+- portfolio/signal_engine.py:964:# relationship explicit and prevents silent drift if the base MIN_VOTERS_*
+- portfolio/signal_engine.py:970:# Lone-signal escape floor: raised from 2 to _MIN_VOTERS_BASE (3) because a
+- portfolio/signal_engine.py:1129:# exist within range-bound markets, so only gate on longer horizons.
+- portfolio/signal_engine.py:1174:        # horizon weight is insufficient; this signal actively harms 3h consensus.
+- portfolio/signal_engine.py:1196:        # mean_reversion 3h_recent=45.5% — gate on short horizons
+- portfolio/signal_engine.py:1241:    """Get the set of signals to gate for a regime+horizon combination.
+- portfolio/signal_engine.py:1247:    of what should still be gated at that intraday horizon. Example:
+- portfolio/signal_engine.py:1251:    2026-05-02 audit: 04-24 P0-1 / 04-29 SC-P1-1 / 05-01 P0 (carryover)
+- portfolio/signal_engine.py:1252:    framed this as a "union bug" by analogy to `_get_horizon_disabled_signals`.
+- portfolio/signal_engine.py:1267:# Signals with >15pp accuracy divergence between horizons get adjusted.
+- portfolio/signal_engine.py:1332:# Dynamic horizon weight computation settings
+- portfolio/signal_engine.py:1333:_DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
+- portfolio/signal_engine.py:1334:_DYNAMIC_HORIZON_MIN_SAMPLES = 50   # need enough data per signal per horizon
+- portfolio/signal_engine.py:1348:    """Compute horizon-specific signal weight multipliers from accuracy cache.
+- portfolio/signal_engine.py:1350:    For each signal, computes the ratio of its accuracy on this horizon vs
+- portfolio/signal_engine.py:1360:        cache = load_json(DATA_DIR / "accuracy_cache.json")
+- portfolio/signal_engine.py:1364:        # Get recent accuracy for this horizon and comparison horizons
+- portfolio/signal_engine.py:1402:            # Ratio of this-horizon accuracy to cross-horizon accuracy
+- portfolio/signal_engine.py:1412:        logger.debug("Dynamic horizon weights unavailable, using static fallback", exc_info=True)
+- portfolio/signal_engine.py:1417:    """Get horizon-specific signal weight multipliers, preferring dynamic computation.
+- portfolio/signal_engine.py:1518:_DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
+- portfolio/signal_engine.py:1521:# HOLD dominance — max observed r=0.538 (ema↔trend), making the 0.7
+- portfolio/signal_engine.py:1755:    """Coerce an accuracy value to a clean float, mapping None/NaN/inf to `default`.
+- portfolio/signal_engine.py:1817:        # P1-C (2026-04-17 adversarial review): coerce None / NaN values to
+- portfolio/signal_engine.py:1820:        # half-written cache). Replay had `except TypeError` but live didn't.
+- portfolio/signal_engine.py:1946:    # P2-F (2026-04-17): derived from MIN_VOTERS_CRYPTO/STOCK rather than
+- portfolio/signal_engine.py:1968:    # P2-A (2026-04-17): raised from 2 to MIN_VOTERS_BASE (3). A 2-voter
+- portfolio/signal_engine.py:2028:# IC data cache: reuse ic_computation.py infrastructure with in-memory TTL.
+- portfolio/signal_engine.py:2034:    """Load IC data for the given horizon, computing if cache is stale.
+- portfolio/signal_engine.py:2041:        cached = _ic_data_cache.get(horizon)
+- portfolio/signal_engine.py:2042:        if cached and now - cached.get("_loaded_at", 0) < _IC_DATA_TTL:
+- portfolio/signal_engine.py:2047:        cache = load_cached_ic(horizon)
+- portfolio/signal_engine.py:2049:            cache = compute_and_cache_ic(horizon)
+- portfolio/signal_engine.py:2053:                _ic_data_cache[horizon] = cache
+- portfolio/signal_engine.py:2124:    Horizon-specific weights: signals with divergent accuracy across horizons
+- portfolio/signal_engine.py:2148:    gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
+- portfolio/signal_engine.py:2238:    # BUG-149: now horizon-aware — e.g., trend works at 3h in ranging (61.6%)
+- portfolio/signal_engine.py:2246:    # can't see horizon (one vote reused across 3h/4h/12h/1d/3d/5d/10d consensus),
+- portfolio/signal_engine.py:2253:    # event is within ~24h past or ~72h future, force-HOLD the signals
+- portfolio/signal_engine.py:2256:    # the weight loop below so it composes with regime/horizon multipliers.
+- portfolio/signal_engine.py:2558:            weight *= horizon_mults[signal_name]
+- portfolio/signal_engine.py:2561:        # regime, sentiment hits 0.5 (macro) × 0.X (regime) × Y (horizon).
+- portfolio/signal_engine.py:2921:    # 90%+ confidence has 28-32% actual accuracy across all horizons.
+- portfolio/signal_engine.py:3248:    # ML Classifier — disabled: 28.2% accuracy (1,027 samples, 1d horizon).
+- portfolio/signal_engine.py:3289:                        sub_votes.append("HOLD")
+- portfolio/signal_engine.py:3299:                        sub_votes.append("HOLD")
+- portfolio/signal_engine.py:3309:                        sub_votes.append("HOLD")
+- portfolio/signal_engine.py:3318:                        sub_votes.append("HOLD")
+- portfolio/signal_engine.py:3694:    # 3h horizon: gate slow signals that are noise at short timeframes
+- portfolio/signal_engine.py:3702:    # all downstream code (core gate, min_voters, unanimity penalty) sees
+- portfolio/signal_engine.py:3705:    # BUG-149: now horizon-aware via _get_regime_gated()
+- portfolio/signal_engine.py:3729:        # get_or_compute_recent_accuracy expects the base horizon, not the cache key
+- portfolio/signal_engine.py:3763:    # P1-B (2026-04-17 adversarial review): apply horizon-specific blacklist
+- portfolio/signal_engine.py:3855:        # entries when the 1h TTL expires (was 215s wall before the fix).
+- portfolio/signal_engine.py:3901:            # BUG-134: Use acc_horizon (not hardcoded "1d") so regime accuracy
+- portfolio/signal_engine.py:3960:            # BUG-135: Use acc_horizon (not hardcoded "1d") so utility boost
+- portfolio/signal_engine.py:3984:    # Multi-horizon: optionally use each signal's best horizon accuracy.
+- portfolio/signal_engine.py:3993:                    # Only override if best-horizon accuracy is meaningfully better
+- portfolio/signal_engine.py:3998:            logger.debug("Best-horizon accuracy unavailable", exc_info=True)
+- portfolio/signal_engine.py:4043:    # BUG-227: Apply core gate AND MIN_VOTERS gate to weighted consensus.
+- portfolio/signal_engine.py:4189:    # anti-correlated with accuracy at every horizon (70-80% bucket is the
+- The first pass already surfaced one definite atomic-I/O violation in `signal_decay_alert.py`. I’m narrowing to high-risk sections now: consensus gating in `signal_engine.py`, accuracy cache math, the outcome/forecast trackers, and the SQLite layer.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"MIN_VOTERS|accuracy_gate|0\\.47|47%|force[-_ ]HOLD|invert|inversion|recent|7d|0\\.7|0\\.3|0\\.75|0\\.80|ranging|high-vol|high_vol|high vol\" portfolio/signal_engine.py portfolio/accuracy_stats.py portfolio/signal_weights.py portfolio/signal_weight_optimizer.py portfolio/ticker_accuracy.py portfolio/forecast_accuracy.py portfolio/ic_computation.py portfolio/linear_factor.py portfolio/short_horizon.py" in Q:\fa-adv-2026-05-12
+- portfolio/signal_decay_alert.py:36:            cache = json.load(f)
+- portfolio/accuracy_degradation.py:356:    # BUG-178/W15-W16 review (2026-04-16, P2#4): return [] rather than
+- portfolio/accuracy_degradation.py:407:    return [_dict_to_violation(c) for c in cached]
+- portfolio/accuracy_stats.py:302:            values weight recent data more aggressively.
+- portfolio/accuracy_stats.py:856:# P2-B (2026-04-17 adversarial review): default min_recent_samples was 50
+- portfolio/accuracy_stats.py:866:    """Blend all-time and recent accuracy using adaptive recency weighting.
+- portfolio/accuracy_stats.py:868:    When recent accuracy diverges sharply from all-time (> divergence_threshold),
+- portfolio/accuracy_stats.py:869:    fast-track to higher recent weight for faster regime adaptation.
+- portfolio/accuracy_stats.py:884:    # Codex round-10 P2 (2026-04-17 follow-up): don't early-return recent
+- portfolio/accuracy_stats.py:886:    # must apply to recent-only signals too (a 20-sample signal with recent
+- portfolio/accuracy_stats.py:887:    # accuracy=0.80 should default to neutral 0.5, not vote at 0.80).
+- portfolio/accuracy_stats.py:896:    # names, not just alltime. Previously a signal present only in `recent`
+- portfolio/accuracy_stats.py:913:        # Codex round-10 P2 (2026-04-17 follow-up): previously a recent-only
+- portfolio/accuracy_stats.py:914:        # signal with <min_recent_samples samples fell through to rc_acc,
+- portfolio/accuracy_stats.py:915:        # letting an immature signal's raw recent accuracy drive consensus.
+- portfolio/accuracy_stats.py:926:            blended = rc_acc  # recent-only signal with enough samples
+- portfolio/accuracy_stats.py:941:        # a recent-only signal with 20-29 one-sided votes still influenced
+- portfolio/accuracy_stats.py:943:        # recent directional accuracy, even though the overall `accuracy`
+- portfolio/accuracy_stats.py:952:            # Prevents silent gate-bypass when a key exists only in `recent`.
+- portfolio/accuracy_stats.py:1049:    """Cached recent-window (default 7d) accuracy, computed at most once."""
+- portfolio/accuracy_stats.py:1542:            recent-window per-signal accuracy, per-ticker per-signal blocks,
+- portfolio/signal_engine.py:59:    """Return (sig_name, elapsed_seconds) for the most recent signal start
+- portfolio/signal_engine.py:160:# group leader) still applies, so a soft vote on a force-HOLD signal
+- portfolio/signal_engine.py:161:# is still force-HOLD'd. We are NOT bypassing the accuracy gate.
+- portfolio/signal_engine.py:428:# force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
+- portfolio/signal_engine.py:431:# 2026-04-11 (A-PR-batch-5): raised 0.45 → 0.47. The signal audit on
+- portfolio/signal_engine.py:453:# threshold get that direction force-HOLD'd while the other direction can still
+- portfolio/signal_engine.py:466:# a 5pp safety margin above coin-flip.  Rescued signals get a 0.7x weight
+- portfolio/signal_engine.py:472:# Adaptive recency blend: when recent accuracy diverges from all-time by more
+- portfolio/signal_engine.py:473:# than this threshold, increase recent weight for faster regime adaptation.
+- portfolio/signal_engine.py:489:# degraded (recent accuracy < 35% with 50+ samples), the market is in a
+- portfolio/signal_engine.py:493:_CRISIS_THRESHOLD = 0.35  # signal accuracy below this counts as "broken"
+- portfolio/signal_engine.py:558:# Cross-ticker consensus cache: stores the most recent consensus action per
+- portfolio/signal_engine.py:644:# track accuracy while they remain force-HOLD in consensus.
+- portfolio/signal_engine.py:678:_PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
+- portfolio/signal_engine.py:689:# Expected impact: kicks in during regime transitions where the 47% gate is
+- portfolio/signal_engine.py:690:# silencing several voters whose recent accuracy dipped to 45-47%. Keeps at
+- portfolio/signal_engine.py:696:_GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
+- portfolio/signal_engine.py:698:# Per-ticker signal disable: force HOLD for specific signal+ticker combos
+- portfolio/signal_engine.py:759:    # 2026-04-16 after-hours audit: signals that PASS global gate (>0.47)
+- portfolio/signal_engine.py:796:        # 2026-04-30 audit: added signals with <40% 1d_recent accuracy (50+ sam).
+- portfolio/signal_engine.py:1104:        # recent (Apr 26 audit, 41 sam). Removed boost, added to regime gate.
+- portfolio/signal_engine.py:1108:        # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
+- portfolio/signal_engine.py:1128:# BUG-149: trend has 61.6% accuracy on 3h even in ranging — short-term trends
+- portfolio/signal_engine.py:1134:        # 2026-04-02 audit: 13 signals below 45% on 1d_recent. Gate the worst.
+- portfolio/signal_engine.py:1152:            # 2026-04-12: econ_calendar 34.2% in ranging (1911 sam). SELL-only signal
+- portfolio/signal_engine.py:1166:            # at _default in ranging where it pushes false BUY consensus.
+- portfolio/signal_engine.py:1176:        # the accuracy gate defaults to 0.5 and passes the 47% gate. At 1d the
+- portfolio/signal_engine.py:1180:        # pure noise. Gate at 3h/4h in ranging; let it vote at 12h/1d/3d/5d.
+- portfolio/signal_engine.py:1248:    `trend` has 40.7% accuracy at 1d ranging (gate via _default) but
+- portfolio/signal_engine.py:1268:# Updated: 2026-04-27 accuracy audit (3h_recent vs 1d_recent).
+- portfolio/signal_engine.py:1550:    """Compute signal correlation groups from recent signal_log data.
+- portfolio/signal_engine.py:1692:    # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
+- portfolio/signal_engine.py:1720:_CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+- portfolio/signal_engine.py:1734:    # effective weight = 1.0 + 5*0.15 = 1.75x. Previously 3 members at 0.3x gave
+- portfolio/signal_engine.py:1751:_META_CLUSTER_PENALTY = 0.35  # 2nd/3rd agreeing leaders get 35% weight
+- portfolio/signal_engine.py:2122:    highest-accuracy signal gets full weight. Others get 0.3x penalty.
+- portfolio/signal_engine.py:2237:    # Regime gating: force-HOLD signals that produce negative alpha in this regime.
+- portfolio/signal_engine.py:2252:    # Macro-window force-HOLD pre-pass (2026-04-28). When a high-impact
+- portfolio/signal_engine.py:2472:        # newer signals use the standard 47% gate.
+- portfolio/signal_engine.py:2859:            # Very low volume — force HOLD
+- portfolio/signal_engine.py:2864:            # Low volume + weak trend + marginal confidence — force HOLD
+- portfolio/signal_engine.py:2962:    # Don't force HOLD (too aggressive) — just reduce confidence.
+- portfolio/signal_engine.py:3157:            # by the existing 0.3x ranging regime weight).
+- portfolio/signal_engine.py:3486:            # "registered but force-HOLD pending live validation" signals
+- portfolio/signal_engine.py:3720:    # 7d recent accuracy is significantly above the gate threshold (>55%, 50+ samples),
+- portfolio/signal_engine.py:3723:    # Example: fibonacci went from 43% all-time to 68.2% recent — should not be gated.
+- portfolio/signal_engine.py:3776:    # Codex round 2 P1 (2026-04-28): macro-window force-HOLD must mutate
+- portfolio/signal_engine.py:3819:    # Core gate: if no core signal is active, force HOLD regardless of enhanced votes
+- portfolio/signal_engine.py:4014:    # Macro-window force-HOLD has already been applied to `votes` above
+- portfolio/signal_engine.py:4142:            if lf_action == action and action != "HOLD" and lf_conf > 0.3:
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Pattern '.' -Path 'portfolio/signal_engine.py' | Select-Object -Skip 940 -First 40" in Q:\fa-adv-2026-05-12
+- portfolio\signal_engine.py:1049:    """Set sentiment direction for a ticker (thread-safe, batched disk write)."""
+- portfolio\signal_engine.py:1060:    BUG-85 fix: batching prevents concurrent per-ticker writes that clobber each other.
+- portfolio\signal_engine.py:1061:    BUG-101 fix: dirty flag cleared only AFTER successful write, so a failed write
+- portfolio\signal_engine.py:1069:    # Write outside the lock to avoid holding it during I/O
+- portfolio\signal_engine.py:1073:        # BUG-101: Only clear dirty flag after successful write
+- portfolio\signal_engine.py:1077:        # Dirty flag remains True - next cycle will retry the write
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 950 -First 20' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 425 -First 60' in Q:\fa-adv-2026-05-12
+- portfolio/accuracy_stats.py:1275:            SIGNAL_NAMES, key=lambda s: sig_acc[s]["accuracy"], reverse=True
+- portfolio/accuracy_stats.py:1302:                ticker_acc.keys(), key=lambda t: ticker_acc[t]["accuracy"], reverse=True
+- portfolio/accuracy_stats.py:1903:    ranked.sort(key=lambda x: x["accuracy"], reverse=True)
+- portfolio/signal_engine.py:434:# Tightening the gate by 2pp removes ~4 coin-flip-adjacent signals from
+- portfolio/signal_engine.py:438:# 2026-04-12: Tiered gate for high-confidence coin-flips. With 5000+ samples,
+- portfolio/signal_engine.py:439:# a signal at 49.8% is coin-flip with p < 0.001 — no amount of waiting will
+- portfolio/signal_engine.py:462:# Directional rescue (2026-04-28): when a signal fails the overall accuracy
+- portfolio/signal_engine.py:463:# gate but its vote direction has strong accuracy, rescue it at reduced weight.
+- portfolio/signal_engine.py:529:# When it flips direction or goes HOLD→non-HOLD for the first time, cycles=1.
+- portfolio/signal_engine.py:628:# Disabled signal per-ticker rescue (2026-04-18): signals in DISABLED_SIGNALS
+- portfolio/signal_engine.py:2011:    - IC < 0 with stable ICIR → penalty (contrarian, accuracy gate handles)
+- portfolio/signal_engine.py:2454:        # True from a prior iteration into line 2123 (`if _rescued: weight
+- portfolio/signal_engine.py:2456:        # if/else at line 2072 set _rescued, so the bug doesn't manifest in
+- portfolio/signal_engine.py:2498:                    "%s=%.1f%% (%d sam) — rescued at %.0f%% weight",
+- portfolio/signal_engine.py:2958:    # RES-2026-04-17: The consensus system has below-coinflip accuracy for some
+- portfolio/signal_engine.py:3154:            # Gate: sustained extreme fear — contrarian BUY is unreliable
+- portfolio/signal_engine.py:3249:    # Worse than coin flip; actively harmful to consensus. Still tracked for
+- portfolio/signal_engine.py:3864:        # system itself has below-coinflip accuracy (e.g. ETH-USD 47.7% at 3h,
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_db.py | Select-Object -Skip 220 -First 220' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_weights.py | Select-Object -Skip 120 -First 40' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_weights.py | Select-Object -Skip 110 -First 20' in Q:\fa-adv-2026-05-12
+- """Load weights from disk.  No-ops silently if the file is missing."""
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 4120 -First 40' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/forecast_accuracy.py | Select-Object -Skip 220 -First 240' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/outcome_tracker.py | Select-Object -Skip 220 -First 240' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/outcome_tracker.py | Select-Object -Skip 460 -First 180' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/accuracy_stats.py | Select-Object -Skip 850 -First 120' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 2295 -First 80' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 2438 -First 110' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 2390 -First 55' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 680 -First 30' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"_ic_data_cache|_macro_window_cache|_cross_ticker|_sentiment_lock|Lock\\(|threading\\.Lock|threading\\.RLock\" portfolio/signal_engine.py" in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 2652 -First 28' in Q:\fa-adv-2026-05-12
+- I’ve confirmed two strong production-grade defects now: one data-loss path in forecast outcome backfill and one hard rule violation that lets 41-46% signals back into consensus. I’m doing a final pass on the degradation/alerting modules to make sure I’m not missing another blocker before I write the findings up.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/accuracy_degradation.py | Select-Object -Skip 198 -First 24' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_engine.py | Select-Object -Skip 3804 -First 16' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/outcome_tracker.py | Select-Object -Skip 388 -First 14' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/outcome_tracker.py | Select-Object -Skip 540 -First 8' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/forecast_accuracy.py | Select-Object -Skip 268 -First 64' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/signal_weights.py | Select-Object -Skip 96 -First 30' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/linear_factor.py | Select-Object -Skip 24 -First 8' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/linear_factor.py | Select-Object -Skip 162 -First 34' in Q:\fa-adv-2026-05-12
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/train_signal_weights.py | Select-Object -Skip 100 -First 40' in Q:\fa-adv-2026-05-12
+- portfolio/forecast_accuracy.py:35:    """Cached wrapper around compute_forecast_accuracy().
+- portfolio/forecast_accuracy.py:392:    accuracy = compute_forecast_accuracy(days=days)
+- portfolio/forecast_accuracy.py:431:    accuracy = compute_forecast_accuracy()

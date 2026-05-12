@@ -1,0 +1,1427 @@
+# Codex prose extract: 6-signals-modules (2026-05-12)
+
+Heuristic extract from `_logs/6-signals-modules.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 1419 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the signals-modules subsystem (all 50 detector modules in portfolio/signals/) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- Disabled-pending: ml_classifier_disabled (force-HOLD), oscillators, orderbook_flow, smart_money (disabled globally 2026-04-24), mahalanobis_turbulence, crypto_evrp, futures_basis, hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio, statistical_jump_regime, network_momentum, ovx_metals_spillover, xtrend_equity_spillover, complexity_gap_regime, realized_skewness.
+- - Every detector must return a verdict + confidence in a consistent shape (read portfolio/signal_utils.py to confirm).
+- - Force-HOLD via DISABLED_SIGNALS list in signal_engine.py — modules can still register but their vote is ignored.
+- - Each detector must be horizon-aware (some signals work at 3h but fail at 1d) — single global verdict is a bug.
+- - Live prices only; no precomputed signal data shall sneak in.
+- - Look-ahead bias is the #1 silent failure: signals computed using future bars.
+- 2. NaN handling: ta libs leak NaN at warm-up; detector returns BUY/SELL when underlying value is NaN.
+- 6. Signature drift: missing or extra args vs registry expectation.
+- 7. Detectors that silently swallow ImportError when an optional dep is missing — produce silent HOLD with no log.
+- 9. Inconsistent return for empty input (some return HOLD, others return None, others raise).
+- 10. Module-level network calls / file reads at import time — bad for tests.
+- 11. Per-ticker gating missing: signal works for crypto but is applied to metals.
+- 12. Cache pollution: shared dicts not keyed by ticker.
+- - path:line — Why it bites: ... Fix: ...
+- portfolio/signal_engine.py:44:# each stuck ticker was running. Surfaces silent hangs (signals that never
+- portfolio/signal_engine.py:47:# disabled-signals dispatch path. Cheap (single dict write per signal call).
+- portfolio/signal_engine.py:151:# always pick a direction. So when these signals would otherwise HOLD
+- portfolio/signal_engine.py:164:# the weight ranking continues to prefer real conviction signals.
+- portfolio/signal_engine.py:177:# clear direction. Mixed/ambiguous secondary signals keep HOLD.
+- portfolio/signal_engine.py:427:# Accuracy gate: signals with blended accuracy below this threshold are
+- portfolio/signal_engine.py:428:# force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
+- portfolio/signal_engine.py:434:# Tightening the gate by 2pp removes ~4 coin-flip-adjacent signals from
+- portfolio/signal_engine.py:440:# fix it. Raising the gate to 50% for established signals removes structure
+- portfolio/signal_engine.py:444:# consensus collapse found the 5000 threshold catching signals during regime
+- portfolio/signal_engine.py:452:# Directional accuracy gate: signals whose BUY or SELL accuracy is below this
+- portfolio/signal_engine.py:466:# a 5pp safety margin above coin-flip.  Rescued signals get a 0.7x weight
+- portfolio/signal_engine.py:495:_CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
+- portfolio/signal_engine.py:503:_BIAS_PENALTY = 0.5  # 0.5x weight for high-bias signals (85-95%)
+- portfolio/signal_engine.py:505:_BIAS_EXTREME_PENALTY = 0.2  # 0.2x weight for extreme-bias signals (>95%)
+- portfolio/signal_engine.py:521:# Signal persistence filter (2026-04-20): require signals to maintain their
+- portfolio/signal_engine.py:569:    Returns a new dict with non-persistent signals forced to HOLD.
+- portfolio/signal_engine.py:628:# Disabled signal per-ticker rescue (2026-04-18): signals in DISABLED_SIGNALS
+- portfolio/signal_engine.py:656:    # 2026-04-29: Added compute-only signals to accumulate accuracy data.
+- portfolio/signal_engine.py:686:# the consensus is a weighted sum of possibly-correlated signals — 3 correlated
+- portfolio/signal_engine.py:759:    # 2026-04-16 after-hours audit: signals that PASS global gate (>0.47)
+- portfolio/signal_engine.py:796:        # 2026-04-30 audit: added signals with <40% 1d_recent accuracy (50+ sam).
+- portfolio/signal_engine.py:800:        # These signals are already auto-gated by the blended accuracy gate,
+- portfolio/signal_engine.py:849:        # 2026-05-10: signals with <45% accuracy at 3d horizon (global).
+- portfolio/signal_engine.py:859:        # 2026-05-10: signals with <45% accuracy at 5d horizon.
+- portfolio/signal_engine.py:897:    """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific.
+- portfolio/signal_engine.py:1006:# Core signals that must have at least 1 active voter for non-HOLD consensus.
+- portfolio/signal_engine.py:1007:# Enhanced signals can strengthen/weaken but never create consensus alone.
+- portfolio/signal_engine.py:1126:# Regime-gated signals: completely silenced (forced HOLD) in certain regimes
+- portfolio/signal_engine.py:1134:        # 2026-04-02 audit: 13 signals below 45% on 1d_recent. Gate the worst.
+- portfolio/signal_engine.py:1185:        # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
+- portfolio/signal_engine.py:1197:        # SELL-biased signals work short-term even in uptrends — do NOT gate at 3h
+- portfolio/signal_engine.py:1203:        # BUG-155: bb 21.7% in trending-down (false reversal signals)
+- portfolio/signal_engine.py:1241:    """Get the set of signals to gate for a regime+horizon combination.
+- portfolio/signal_engine.py:1252:    framed this as a "union bug" by analogy to `_get_horizon_disabled_signals`.
+- portfolio/signal_engine.py:1583:        # Drop signals that are always HOLD (no variance)
+- portfolio/signal_engine.py:1687:    # signals were voting with full weight despite being completely redundant.
+- portfolio/signal_engine.py:1720:_CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+- portfolio/signal_engine.py:1790:    """Count how many signals would pass gating at gate=(base_gate - relaxation).
+- portfolio/signal_engine.py:1795:      3) accuracy gate at (base - relaxation), tiered for high-sample signals
+- portfolio/signal_engine.py:1911:    so signals gated on BUY-accuracy=30% don't inflate the decision.
+- portfolio/signal_engine.py:1971:    # large slate is catching signals that the downstream quorum would
+- portfolio/signal_engine.py:2113:    Rare, balanced signals get more weight; noisy/biased signals get less.
+- portfolio/signal_engine.py:2124:    Horizon-specific weights: signals with divergent accuracy across horizons
+- portfolio/signal_engine.py:2130:    Top-N gate: when max_signals is set, only the top max_signals non-HOLD
+- portfolio/signal_engine.py:2131:    signals (ranked by accuracy) participate in the consensus. This focuses
+- portfolio/signal_engine.py:2163:    #             mature 50% signals that cleared the min-samples gate.
+- portfolio/signal_engine.py:2237:    # Regime gating: force-HOLD signals that produce negative alpha in this regime.
+- portfolio/signal_engine.py:2253:    # event is within ~24h past or ~72h future, force-HOLD the signals
+- portfolio/signal_engine.py:2264:    # Top-N gate: only let the top max_signals (by accuracy) participate.
+- portfolio/signal_engine.py:2382:    # When macro signals are broken but trend signals have >55% accuracy, the
+- portfolio/signal_engine.py:2470:        # Accuracy gate: skip signals that are below threshold with enough data.
+- portfolio/signal_engine.py:2471:        # Tiered: established signals (10000+ samples) use a tighter 50% gate;
+- portfolio/signal_engine.py:2472:        # newer signals use the standard 47% gate.
+- portfolio/signal_engine.py:2538:        # IC-based weight adjustment: boost signals with high return-magnitude
+- portfolio/signal_engine.py:2563:        # FORCE_HOLD signals were already mutated to HOLD above and won't
+- portfolio/signal_engine.py:2582:        # Correlation penalty: secondary signals in a group get reduced weight
+- portfolio/signal_engine.py:2584:            weight *= penalized_signals[signal_name]
+- portfolio/signal_engine.py:2617:        logger.debug("Accuracy-gated signals (<%s%%): %s", ACCURACY_GATE_THRESHOLD * 100, gated_signals)
+- portfolio/signal_engine.py:2819:      2. Volume/ADX gate — rejects low-conviction signals
+- portfolio/signal_engine.py:2936:    # High Shannon entropy across BUY/SELL/HOLD means signals genuinely disagree —
+- portfolio/signal_engine.py:3041:    # The double-underscore prefix is reserved; no registered signal uses it.
+- portfolio/signal_engine.py:3050:    # Check if GPU-intensive signals should be skipped (stocks outside market hours)
+- portfolio/signal_engine.py:3474:        # BUG-144: Include regime so enhanced signals (forecast.py) can apply
+- portfolio/signal_engine.py:3483:            # BUG-178 fix (2026-04-10): respect DISABLED_SIGNALS in the dispatch
+- portfolio/signal_engine.py:3486:            # "registered but force-HOLD pending live validation" signals
+- portfolio/signal_engine.py:3527:            # Skip GPU-intensive enhanced signals for stocks outside market hours
+- portfolio/signal_engine.py:3573:        # Persist signal health (single batch write for all enhanced signals)
+- portfolio/signal_engine.py:3685:    # This allows accuracy tracking for regime-gated signals, breaking the
+- portfolio/signal_engine.py:3686:    # dead-signal trap where gated signals can never accumulate accuracy data.
+- portfolio/signal_engine.py:3694:    # 3h horizon: gate slow signals that are noise at short timeframes
+- portfolio/signal_engine.py:3798:    # Enhanced signals can strengthen/weaken a consensus but never create one alone.
+- portfolio/signal_engine.py:3886:        # H3: Fail-closed: gate all signals (0% accuracy, 999 samples) rather than
+- portfolio/signal_engine.py:3897:    # real accuracy values for cached signals, negating the fail-closed gate.
+- portfolio/signal_engine.py:3918:    # BUG-158: Override global accuracy with per-ticker accuracy for ALL signals.
+- portfolio/signal_engine.py:4002:    # Signal persistence filter: only let signals that maintained their vote
+- portfolio/signal_engine.py:4201:    # Update cross-ticker consensus cache for synthetic cross-asset signals
+- multiple signal modules.  Import from here instead of duplicating locally.
+- """Convert *val* to float, returning ``NaN`` for non-finite / missing values."""
+- Weight_i = i + 1 for i in 0..period-1 (most recent bar has highest weight).
+- """Compute majority vote from a list of BUY/SELL/HOLD strings.
+- HOLD votes are treated as abstentions - they do not block a directional
+- composite with 5 HOLDs and 2 BUYs produces BUY (not HOLD), because the
+- votes: List of "BUY", "SELL", or "HOLD" strings
+- If True, confidence = winner / total_votes (including HOLD).
+- (action, confidence) tuple where action is "BUY", "SELL", or "HOLD"
+- hold = sum(1 for v in votes if v == "HOLD")
+- """Signal generation engine - 32-signal voting system with weighted consensus."""
+- _adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
+- """Record the signal currently being computed for a ticker (BUG-178 diag)."""
+- """Return (sig_name, elapsed_seconds) for the most recent signal start
+- on this ticker, or None if no signal has been recorded.
+- Used by main.py's BUG-178 timeout handler to identify which signal hung.
+- individual phases (e.g., cold accuracy_stats load, lock contention)
+- are visible in portfolio.log without waiting for a BUG-178 timeout.
+- Used by main.py's BUG-178 slow-cycle diagnostic to dump per-phase timing
+- -> soft SELL. Slopes within `tiny_eps` of each other -> HOLD.
+- Returns ("HOLD", 0.0) if df is missing/short or slopes truly flat.
+- < -0.6 -> soft BUY (near lower), else HOLD (mid-band).
+- 2026-05-11 (Codex Fix A): added magnitude gate. The strong-vote
+- dead zone (small absolute value). Without this gate, every non-
+- decision should win and the answer is genuinely HOLD.
+- Fallback secondary derivative: count bullish (close>open) vs bearish
+- soft SELL. Anything mixed (incl. doji-style equality) stays HOLD.
+- claim - hence the 0.15 soft conf and the 3/3 unanimity gate (no
+- """Return (vote, conf) when forecast voted HOLD but price+EMA align.
+- Fallback secondary derivative: compare the slope of close prices to
+- soft BUY; both falling -> soft SELL; mixed slopes -> HOLD.
+- for an unrun forecast. The user-visible contract: HOLD when the
+- + accuracy gating force ~87% HOLD on metals (low confidence, vol
+- gate, accuracy gate). When the forecast ran but didn't commit, a
+- price+EMA21 slope-alignment read is a defensible weak tiebreaker.
+- _CRISIS_THRESHOLD = 0.35  # signal accuracy below this counts as "broken"
+- _CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
+- _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
+- _BIAS_PENALTY = 0.5  # 0.5x weight for high-bias signals (85-95%)
+- _BIAS_EXTREME_PENALTY = 0.2  # 0.2x weight for extreme-bias signals (>95%)
+- _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
+- _IC_MULT_FLOOR = 0.6    # never zero out a signal via IC alone
+- _IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
+- """Return how many same-direction cycles a signal must hold to count."""
+- Returns a new dict with non-persistent signals forced to HOLD.
+- The original votes dict is not modified (needed for accuracy tracking).
+- sig: {"vote": vote, "cycles": min_cycles if vote != "HOLD" else 0}
+- ticker_state[sig] = {"vote": "HOLD", "cycles": 0}
+- filtered[sig] = "HOLD"  # still provisional
+- "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
+- _PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
+- _GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
+- "_TICKER_DISABLED_BY_HORIZON missing required '_default' key")
+- """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific.
+- set rather than crash the hot consensus path.
+- f"Relaxed overall accuracy gate "
+- f"accuracy gate and the claim that the directional gate is NEVER "
+- _sentiment_lock = threading.Lock()  # BUG-85: protect concurrent access from ThreadPoolExecutor
+- """Set sentiment direction for a ticker (thread-safe, batched disk write)."""
+- BUG-85 fix: batching prevents concurrent per-ticker writes that clobber each other.
+- BUG-101 fix: dirty flag cleared only AFTER successful write, so a failed write
+- "smart_money",  # BUG-165: 10.0% accuracy in trending-down
+- """Get the set of signals to gate for a regime+horizon combination.
+- NOT unions with it. This is by design (BUG-149, 2026-03-29):
+- of what should still be gated at that intraday horizon. Example:
+- `trend` has 40.7% accuracy at 1d ranging (gate via _default) but
+- 2026-05-02 audit: 04-24 P0-1 / 04-29 SC-P1-1 / 05-01 P0 (carryover)
+- framed this as a "union bug" by analogy to `_get_horizon_disabled_signals`.
+- Re-reading the docstring at line 762-767 and the per-signal comments
+- Finding REJECTED - leaving behavior unchanged. No fix needed.
+- _DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
+- _DYNAMIC_HORIZON_MIN_SAMPLES = 50   # need enough data per signal per horizon
+- """Compute horizon-specific signal weight multipliers from accuracy cache.
+- For each signal, computes the ratio of its accuracy on this horizon vs
+- HORIZON_SIGNAL_WEIGHTS if accuracy cache is unavailable.
+- cache = load_json(DATA_DIR / "accuracy_cache.json")
+- logger.debug("Dynamic horizon weights unavailable, using static fallback", exc_info=True)
+- """Get horizon-specific signal weight multipliers, preferring dynamic computation.
+- Uses cached dynamic weights when available, falling back to static dict.
+- _VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD"})
+- """Normalize and validate a signal's return dict.
+- return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}}
+- logger.warning("Signal %s returned invalid action=%r, defaulting to HOLD", sig_name, action)
+- logger.warning("Signal %s returned non-finite confidence=%r, defaulting to 0.0", sig_name, conf)
+- _DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
+- _DYNAMIC_CORR_MIN_SAMPLES = 30  # minimum signal log entries for reliable correlation
+- _DYNAMIC_CORR_MIN_PAIRS = 20    # minimum non-HOLD pairs to trust agreement rate
+- """Compute agreement rate between two signal vote lists.
+- Only counts pairs where at least one signal voted non-HOLD.
+- """Compute signal correlation groups from recent signal_log data.
+- Uses agreement rate (not Pearson correlation) on non-HOLD vote pairs.
+- Signals that agree > 85% of the time on non-HOLD votes are clustered.
+- vote_map = {"BUY": 1, "SELL": -1, "HOLD": 0}
+- row = {s: vote_map.get(signals.get(s, "HOLD"), 0) for s in active_signals}
+- None leak isn't a runtime crash here, but the bare cast lied about
+- _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+- _META_CLUSTER_PENALTY = 0.35  # 2nd/3rd agreeing leaders get 35% weight
+- """Coerce an accuracy value to a clean float, mapping None/NaN/inf to `default`.
+- 2026-04-17 (P1-C): the live consensus path previously crashed with
+- half-written cache), and with a silent fall-through-as-valid when it
+- """Count how many signals would pass gating at gate=(base_gate - relaxation).
+- Counts only voters that survive the full gate cascade:
+- 2) group-gated (correlation leader below group-leader gate)
+- 3) accuracy gate at (base - relaxation), tiered for high-sample signals
+- 4) directional gate (unchanged by relaxation)
+- """P2-D (2026-04-17): normalize regime strings to a canonical lowercase form.
+- "trending_up") that would otherwise silently fall through to the
+- This is the minimum voter count the OUTER consensus path requires before
+- emitting a non-HOLD action. The circuit breaker uses it to size its
+- recovery floor so relaxation is only engaged when it could reach the
+- so signals gated on BUY-accuracy=30% don't inflate the decision.
+- Returns float - relaxation in absolute accuracy points (e.g., 0.02).
+- raw_candidates = sum(1 for v in votes.values() if v != "HOLD")
+- if v != "HOLD" and sn not in excluded and sn not in group_gated
+- """Compute IC-based weight multiplier for a signal.
+- Returns a multiplicative adjustment based on the signal's Information
+- - IC < 0 with stable ICIR  penalty (contrarian, accuracy gate handles)
+- """Load IC data for the given horizon, computing if cache is stale.
+- Returns the full cache dict {"global": {...}, "per_ticker": {...}}
+- if cached and now - cached.get("_loaded_at", 0) < _IC_DATA_TTL:
+- ``ECON_EVENTS`` linearly. That's cheap, but called per signal per
+- ticker per cycle becomes wasteful. Cache the result for
+- """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
+- Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
+- Rare, balanced signals get more weight; noisy/biased signals get less.
+- Signals below the accuracy gate (with sufficient samples) are force-skipped -
+- forced to HOLD before vote processing - they produce negative alpha.
+- highest-accuracy signal gets full weight. Others get 0.3x penalty.
+- Horizon-specific weights: signals with divergent accuracy across horizons
+- to prevent a single high-activity signal from dominating consensus.
+- Top-N gate: when max_signals is set, only the top max_signals non-HOLD
+- signals (ranked by accuracy) participate in the consensus. This focuses
+- 2026-05-11 (Codex Fix B) - soft-confidence dampening:
+- votes when the strong path would HOLD, and stash a small per-vote
+- strength votes (just direction x accuracy weight), so an all-soft
+- slate could produce full directional confidence - defeating the
+- "weak weight" contract. We now scale each soft vote's contribution
+- key present) keep their original weight x accuracy x regime mult.
+- gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
+- """Return int >= 0, or None if val is missing/poisoned/invalid."""
+- votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
+- votes = {k: ("HOLD" if k in horizon_disabled else v) for k, v in votes.items()}
+- k: ("HOLD" if k in MACRO_WINDOW_FORCE_HOLD_SIGNALS else v)
+- base = float(accuracy_data.get(s, {}).get("accuracy", 0.5))
+- active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
+- active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
+- leader_directions = {sc: votes.get(ldr, "HOLD")
+- active_dirs = set(leader_directions.values()) - {"HOLD"}
+- and accuracy_data.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
+- "Circuit breaker: relaxing accuracy gate by %.0fpp "
+- relaxation * 100, gate, gate - relaxation,
+- effective_gate = gate - relaxation
+- "%s=%.1f%% (%d sam) - rescued at %.0f%% weight",
+- weight = stats.get("buy_accuracy", acc)  # BUG-185: .get() for cache safety
+- weight = stats.get("sell_accuracy", acc)  # BUG-185: .get() for cache safety
+- logger.debug("Accuracy-gated signals (<%s%%): %s", ACCURACY_GATE_THRESHOLD * 100, gated_signals)
+- return "HOLD", round(max(buy_conf, sell_conf), 4)
+- active = {k: v for k, v in votes.items() if v != "HOLD"}
+- """Load per-ticker accuracy for a local model signal."""
+- logger.warning("Failed to load %s accuracy", signal_name, exc_info=True)
+- """Apply accuracy-based abstention to local model votes."""
+- if vote == "HOLD" or not ticker:
+- info["accuracy"] = round(ticker_stats.get("accuracy", 0.0), 3)
+- Cached per DataFrame identity to avoid recomputation within a cycle.
+- 2. Volume/ADX gate - rejects low-conviction signals
+- 6. Per-ticker consensus - penalizes tickers where ensemble accuracy < 50%
+- if volume_ratio is not None and action != "HOLD":
+- if action != "HOLD" and df is not None and isinstance(df, pd.DataFrame) and len(df) >= 5:
+- if action != "HOLD" and active_voters < dynamic_min:
+- if action != "HOLD" and conf > 0.0:
+- if action != "HOLD" and conf > _CALIBRATION_THRESHOLD:
+- shadow_votes: dict[str, str] = {}  # disabled signals tracked for accuracy
+- logger.debug("Shadow signal %s failed: %s", sig_name, e)
+- logger.warning("Signal %s failed: %s", sig_name, e)
+- logger.debug("Signal health tracking failed", exc_info=True)
+- if "candlestick" in votes and votes["candlestick"] == "HOLD" \
+- if "forecast" in votes and votes["forecast"] == "HOLD" \
+- if btc_action in ("BUY", "SELL", "HOLD"):
+- if not action or action not in ("BUY", "HOLD", "SELL"):
+- if is_slow_signal_3h(sig_name) and votes[sig_name] != "HOLD":
+- logger.debug("Per-ticker accuracy unavailable for regime gating exemption", exc_info=True)
+- logger.debug("Recent accuracy unavailable for regime gating override", exc_info=True)
+- "BUG-158: %s exempt from %s regime gating for %s (%.1f%%, %d samples)",
+- "accuracy %.1f%% (%d sam) overrides stale gate",
+- if sig_name in votes and votes[sig_name] != "HOLD":
+- logger.error("Accuracy stats load failed", exc_info=True)
+- accuracy_data = {sig: {"accuracy": 0.0, "total": 999} for sig in SIGNAL_NAMES}
+- "pct": t_stats.get("pct", round(t_stats["accuracy"] * 100, 1)),
+- boosted_acc = min(accuracy_data[sig_name]["accuracy"] * boost, 0.95)
+- current = accuracy_data.get(sig_name, {}).get("accuracy", 0.5)
+- if bh_data["accuracy"] > current + 0.03:
+- if votes[s] != "HOLD" and consensus_votes.get(s) == "HOLD"
+- extra_info["_raw_votes"] = raw_votes  # C10: pre-gate votes for accuracy recovery
+- if ticker and action != "HOLD":
+- logger.debug("Earnings gate failed for %s", ticker, exc_info=True)
+- _vote_map = {"BUY": 1.0, "SELL": -1.0, "HOLD": 0.0}
+- if lf_action == action and action != "HOLD" and lf_conf > 0.3:
+- elif lf_action != "HOLD" and lf_action != action and action != "HOLD":
+- logger.debug("Per-ticker consensus gate failed for %s", ticker, exc_info=True)
+- → Inventory all signal modules and scan for high-risk patterns: look-ahead, NaN leakage, empty-data handling, import-time side effects, optional dependency fallbacks, asset gating, cache state
+- • Write the adversarial review in strict markdown with severity ordering and missing-test gaps
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^def |register|compute_|generate_|signal" portfolio/signals -g "*.py"' in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "except ImportError|except Exception|return .*HOLD|return None|raise |DISABLED|cache|global |lru_cache|@cache|@lru_cache" portfolio/signals -g "*.py"' in Q:\finance-analyzer
+- portfolio/signals\calendar_seasonal.py:39:# Maximum confidence for any calendar signal
+- portfolio/signals\calendar_seasonal.py:77:    (red candle on Monday), signal BUY.
+- portfolio/signals\calendar_seasonal.py:320:    """Compute the composite calendar/seasonal signal.
+- portfolio/signals\calendar_seasonal.py:394:    # ---- Compute each sub-signal ----
+- portfolio/signals\calendar_seasonal.py:464:    # Require at least 2 active votes in the winning direction to emit a signal.
+- portfolio/signals\calendar_seasonal.py:465:    # Without this quorum, a single BUY sub-signal (e.g., just month_end or
+- portfolio/signals\credit_spread.py:1:"""Credit spread risk appetite signal — cross-asset macro indicator.
+- portfolio/signals\credit_spread.py:253:    """Compute credit spread risk appetite signal.
+- portfolio/signals\credit_spread.py:273:    # All tickers can use this signal
+- portfolio/signals\credit_spread.py:291:        logger.debug("No FRED API key available for credit spread signal")
+- portfolio/signals\drift_regime_gate.py:1:"""Drift Regime Gate signal module.
+- portfolio/signals\drift_regime_gate.py:15:    Activating value + reversal signals ONLY during drift regimes (>60% positive
+- portfolio/signals\drift_regime_gate.py:42:    Returns (fraction_value, signal).
+- portfolio/signals\drift_regime_gate.py:72:    Returns (velocity_value, signal).
+- portfolio/signals\drift_regime_gate.py:109:    Returns (normalised_distance, signal).
+- portfolio/signals\drift_regime_gate.py:137:    """Compute drift regime gate signal.
+- portfolio/signals\drift_regime_gate.py:170:    # Cap confidence at 0.7 (this is a regime-based signal, not pure price)
+- portfolio/signals\crypto_macro.py:1:"""Crypto macro signal — options gravity, gold rotation, exchange reserves.
+- portfolio/signals\crypto_macro.py:3:Composite signal with 5 sub-indicators, majority vote, confidence capped at 0.7.
+- portfolio/signals\crypto_macro.py:34:_NETFLOW_ACCUM_DAYS = 5       # 5+ consecutive negative netflow = strong signal
+- portfolio/signals\crypto_macro.py:81:    # Use nearest expiry PCR for short-term signal
+- portfolio/signals\crypto_macro.py:103:    """Sub-3: Gold-BTC rotation signal.
+- portfolio/signals\crypto_macro.py:198:    """Compute the crypto macro composite signal.
+- portfolio/signals\futures_flow.py:1:"""Futures flow signal — OI, long/short ratios, funding rate history.
+- portfolio/signals\futures_flow.py:3:Composite signal with 6 sub-indicators, majority vote, confidence capped at 0.7.
+- portfolio/signals\futures_flow.py:48:    Falling OI = HOLD (deleveraging, no directional signal)
+- portfolio/signals\futures_flow.py:157:    Also checks 3-period trend for strengthening signal.
+- portfolio/signals\futures_flow.py:224:    """Compute the futures flow composite signal.
+- portfolio/signals\copper_gold_ratio.py:1:"""Copper/Gold ratio intermarket signal module.
+- portfolio/signals\copper_gold_ratio.py:12:    - Currently at 5-decade lows (strongest risk-off signal in 50 years)
+- portfolio/signals\copper_gold_ratio.py:172:    """Compute copper/gold ratio intermarket signal.
+- portfolio/signals\copper_gold_ratio.py:194:    # Determine if this is a metals ticker (inverted signal direction)
+- portfolio/signals\copper_gold_ratio.py:204:    # --- Sub-signal 1: Ratio z-score ---
+- portfolio/signals\copper_gold_ratio.py:217:    # --- Sub-signal 2: Ratio trend ---
+- portfolio/signals\copper_gold_ratio.py:226:    # --- Sub-signal 3: Ratio momentum ---
+- portfolio/signals\copper_gold_ratio.py:235:    # --- Sub-signal 4: Copper-gold spread ---
+- portfolio/signals\copper_gold_ratio.py:248:    # For metals tickers: INVERT the signal direction.
+- portfolio/signals\fibonacci.py:1:"""Composite Fibonacci and price-level signal module.
+- portfolio/signals\fibonacci.py:4:and pivot points, returning a majority-vote composite BUY/SELL/HOLD signal
+- portfolio/signals\fibonacci.py:191:    """Fibonacci Retracement sub-signal.
+- portfolio/signals\fibonacci.py:221:    """Golden Pocket (61.8%-65% zone) sub-signal.
+- portfolio/signals\fibonacci.py:257:    """Fibonacci Extension sub-signal.
+- portfolio/signals\fibonacci.py:304:    """Standard Pivot Points sub-signal.
+- portfolio/signals\fibonacci.py:338:    """Camarilla Pivot Points sub-signal.
+- portfolio/signals\fibonacci.py:343:        R4 = C + (H - L) * 1.1 / 2   (not used for signal, for info)
+- portfolio/signals\fibonacci.py:344:        S4 = C - (H - L) * 1.1 / 2   (not used for signal, for info)
+- portfolio/signals\fibonacci.py:370:# Composite signal — public API
+- portfolio/signals\fibonacci.py:374:    """Compute the composite Fibonacci and price-level signal.
+- portfolio/signals\fibonacci.py:479:        sub_signals["fib_retracement"] = "HOLD"
+- portfolio/signals\fibonacci.py:490:        sub_signals["golden_pocket"] = "HOLD"
+- portfolio/signals\fibonacci.py:501:        sub_signals["fib_extension"] = "HOLD"
+- portfolio/signals\fibonacci.py:512:        sub_signals["pivot_standard"] = "HOLD"
+- portfolio/signals\fibonacci.py:526:        sub_signals["pivot_camarilla"] = "HOLD"
+- portfolio/signals\gold_overnight_bias.py:1:"""Gold overnight bias signal module.
+- portfolio/signals\gold_overnight_bias.py:72:    """Core sub-signal: BUY overnight, SELL London PM.
+- portfolio/signals\gold_overnight_bias.py:122:    on overnight position, but signal still BUY for the drift).
+- portfolio/signals\gold_overnight_bias.py:146:    """Compute gold overnight bias signal."""
+- portfolio/signals\gold_overnight_bias.py:163:    # Sub-signal 1: Session phase (core)
+- portfolio/signals\gold_overnight_bias.py:166:    # Sub-signal 2: Trend alignment
+- portfolio/signals\gold_overnight_bias.py:169:    # Sub-signal 3: Fix proximity
+- portfolio/signals\claude_fundamental.py:103:                        "but no 'signals' or 'tickers' data. Signal will return HOLD.",
+- portfolio/signals\claude_fundamental.py:369:    return f"""You are a fundamental analyst signal for a trading system.
+- portfolio/signals\claude_fundamental.py:403:- Each sub_signal votes independently: BUY, SELL, or HOLD
+- portfolio/signals\claude_fundamental.py:575:            vote = sub_signals.get(name, "HOLD").upper()
+- portfolio/signals\claude_fundamental.py:607:            vote = sub_signals.get(name, "HOLD").upper()
+- portfolio/signals\claude_fundamental.py:642:    is a health signal. The revised approach is to ALWAYS write the row but
+- portfolio/signals\claude_fundamental.py:795:    suppressed to ~0% BUY post-merge), effectively deactivating the signal.
+- portfolio/signals\claude_fundamental.py:895:    """Signal entry point — called once per ticker by signal_engine.
+- portfolio/signals\claude_fundamental.py:921:    # Refresh in background thread — never block the signal loop.
+- portfolio/signals\cot_positioning.py:1:"""CFTC Commitment of Traders (COT) positioning signal for precious metals.
+- portfolio/signals\cot_positioning.py:13:COT reports are published weekly (Friday for Tuesday data), so this signal
+- portfolio/signals\cot_positioning.py:31:# loaders would return None, the signal would silently fall back to API
+- portfolio/signals\cot_positioning.py:202:    (less short) = bullish signal.
+- portfolio/signals\cot_positioning.py:314:    """Compute COT positioning composite signal for precious metals.
+- portfolio/signals\cot_positioning.py:317:        df: Price DataFrame (used minimally — this is a fundamental signal).
+- portfolio/signals\cot_positioning.py:321:        Standard signal dict with action, confidence, sub_signals, indicators.
+- portfolio/signals\cross_asset_tsmom.py:177:    """Compute cross-asset time-series momentum signal."""
+- portfolio/signals\cubic_trend_persistence.py:1:"""Cubic trend persistence signal module.
+- portfolio/signals\cubic_trend_persistence.py:125:    # --- sub-signal 1: trend direction ---
+- portfolio/signals\cubic_trend_persistence.py:133:    # --- sub-signal 2: cubic expected return ---
+- portfolio/signals\cubic_trend_persistence.py:141:    # --- sub-signal 3: trend exhaustion (contrarian) ---
+- portfolio/signals\complexity_gap_regime.py:1:"""Complexity gap regime signal — Random Matrix Theory market structure detector.
+- portfolio/signals\complexity_gap_regime.py:53:# Safe-haven tickers (invert signal direction)
+- portfolio/signals\complexity_gap_regime.py:203:    """Compute complexity gap regime signal.
+- portfolio/signals\complexity_gap_regime.py:248:    # Sub-signal votes
+- portfolio/signals\futures_basis.py:1:"""Futures basis regime signal — mark-index spread analysis.
+- portfolio/signals\futures_basis.py:185:    """Compute futures basis regime signal.
+- portfolio/signals\futures_basis.py:187:    This signal fetches its own data from Binance premiumIndexKlines rather
+- portfolio/signals\econ_calendar.py:1:"""Economic calendar signal — event proximity, risk-off, and post-event relief.
+- portfolio/signals\econ_calendar.py:10:BUG-218 fix: added post_event_relief sub-signal so the composite can emit BUY,
+- portfolio/signals\econ_calendar.py:49:    """Hours until next event → risk-off signal.
+- portfolio/signals\econ_calendar.py:99:    This is the strongest sub-signal: if ANY high-impact event is within
+- portfolio/signals\econ_calendar.py:115:    """Post-event relief BUY signal.
+- portfolio/signals\econ_calendar.py:121:    BUG-218: This sub-signal adds BUY capability that was previously missing,
+- portfolio/signals\econ_calendar.py:122:    making the econ_calendar signal structurally balanced (not SELL-only).
+- portfolio/signals\econ_calendar.py:177:    """Compute the composite economic calendar signal.
+- portfolio/signals\econ_calendar.py:210:    # Compute each sub-signal
+- portfolio/signals\econ_calendar.py:217:        logger.exception("event_proximity sub-signal failed")
+- portfolio/signals\econ_calendar.py:223:        logger.exception("event_type sub-signal failed")
+- portfolio/signals\econ_calendar.py:229:        logger.exception("pre_event_risk sub-signal failed")
+- portfolio/signals\econ_calendar.py:235:        logger.exception("sector_exposure sub-signal failed")
+- portfolio/signals\econ_calendar.py:241:        logger.exception("post_event_relief sub-signal failed")
+- portfolio/signals\forecast.py:1:"""Forecast signal — price direction prediction from time-series models.
+- portfolio/signals\forecast.py:4:into a majority-vote composite signal with four sub-signals:
+- portfolio/signals\forecast.py:11:Registered as enhanced signal #28 with weight=0 (shadow mode) initially.
+- portfolio/signals\forecast.py:55:# composite-vote sub-signal to HOLD (see lines ~811/820) while still counting
+- portfolio/signals\forecast.py:62:#     raw_sub_signals["kronos_*"] for accuracy backfill.
+- portfolio/signals\forecast.py:63:#   - In shadow mode the Kronos sub-signal is EXCLUDED FROM THE COMPOSITE
+- portfolio/signals\forecast.py:82:        sub-signal is EXCLUDED from the composite vote pool (see
+- portfolio/signals\forecast.py:445:    dilute the 4-vote majority and make the signal always return HOLD.
+- portfolio/signals\forecast.py:449:    sub-signal is EXCLUDED from the vote pool regardless of `kronos_ok`. The
+- portfolio/signals\forecast.py:465:        alive_votes.append(sub_signals.get("kronos_1h", "HOLD"))
+- portfolio/signals\forecast.py:466:        alive_votes.append(sub_signals.get("kronos_1h", "HOLD"))
+- portfolio/signals\forecast.py:467:        alive_votes.append(sub_signals.get("kronos_24h", "HOLD"))
+- portfolio/signals\forecast.py:470:        alive_votes.append(sub_signals.get("chronos_1h", "HOLD"))
+- portfolio/signals\forecast.py:471:        alive_votes.append(sub_signals.get("chronos_1h", "HOLD"))
+- portfolio/signals\forecast.py:472:        alive_votes.append(sub_signals.get("chronos_24h", "HOLD"))
+- portfolio/signals\forecast.py:484:_HOLD_THRESHOLD = 0.55        # Below this: force HOLD (signal can't predict)
+- portfolio/signals\forecast.py:489:# where actual moves are 3-5% make the signal useless.
+- portfolio/signals\forecast.py:552:    """Load raw sub-signal accuracy for 1h and 24h forecast votes."""
+- portfolio/signals\forecast.py:569:            logger.debug("Failed to load forecast sub-signal accuracy: %s", e)
+- portfolio/signals\forecast.py:576:    """Gate individual forecast sub-signals using raw historical accuracy."""
+- portfolio/signals\forecast.py:684:    # so high-vol environments make the signal useless
+- portfolio/signals\forecast.py:710:        # Below threshold — signal can't predict this ticker, abstain
+- portfolio/signals\forecast.py:734:    """Compute the composite forecast signal.
+- portfolio/signals\forecast.py:854:            result["sub_signals"]["chronos_1h"] = chronos["1h"].get("action", "HOLD")
+- portfolio/signals\forecast.py:859:            result["sub_signals"]["chronos_24h"] = chronos["24h"].get("action", "HOLD")
+- portfolio/signals\forecast.py:882:            # excludes the sub-signal when _KRONOS_SHADOW is True, so the
+- portfolio/signals\forecast.py:887:            # — left zero statistical signal in 3668 logged predictions.
+- portfolio/signals\dxy_cross_asset.py:1:"""DXY cross-asset signal — inverse correlation with metals and crypto.
+- portfolio/signals\dxy_cross_asset.py:4:on 1-3h horizons, and -0.72 correlation with BTC. This standalone signal
+- portfolio/signals\candlestick.py:311:    # Doji detected -- signal depends on trend.
+- portfolio/signals\mahalanobis_turbulence.py:1:"""Mahalanobis turbulence index — cross-asset regime detection signal.
+- portfolio/signals\mahalanobis_turbulence.py:60:# Safe-haven tickers (invert signal direction)
+- portfolio/signals\mahalanobis_turbulence.py:107:    Also computes absorption ratio as complementary sub-signal.
+- portfolio/signals\mahalanobis_turbulence.py:191:# --------------- Sub-signal voters ---------------
+- portfolio/signals\mahalanobis_turbulence.py:248:    """Compute Mahalanobis turbulence regime signal.
+- portfolio/signals\mahalanobis_turbulence.py:298:    # Sub-signal votes
+- portfolio/signals\mahalanobis_turbulence.py:306:    # Cap confidence at 0.7 (external/cross-asset data signal)
+- portfolio/signals\intraday_seasonality.py:11:signal outputs HOLD to suppress noise. Direction comes from trend context,
+- portfolio/signals\intraday_seasonality.py:155:    """Compute intraday seasonality gate signal."""
+- portfolio/signals\intraday_seasonality.py:176:    # Sub-signal 1: Hour alpha
+- portfolio/signals\intraday_seasonality.py:179:    # Sub-signal 2: Day-of-week
+- portfolio/signals\intraday_seasonality.py:182:    # Sub-signal 3: Trend direction
+- portfolio/signals\crypto_evrp.py:1:"""Crypto Expected Volatility Risk Premium (eVRP) signal module.
+- portfolio/signals\crypto_evrp.py:19:and can signal contrarian BUY opportunities.
+- portfolio/signals\crypto_evrp.py:196:    """Sub-signal 1: eVRP absolute level."""
+- portfolio/signals\crypto_evrp.py:207:    """Sub-signal 2: eVRP percentile rank in recent history.
+- portfolio/signals\crypto_evrp.py:209:    Returns (signal, percentile_value).
+- portfolio/signals\crypto_evrp.py:230:    # Use just the DVOL percentile as proxy (DVOL carries most of the signal)
+- portfolio/signals\crypto_evrp.py:246:    """Sub-signal 3: eVRP 5-day momentum (direction of DVOL change).
+- portfolio/signals\crypto_evrp.py:265:    """Compute crypto Expected Volatility Risk Premium signal.
+- portfolio/signals\crypto_evrp.py:321:    # Sub-signal 1: eVRP absolute level
+- portfolio/signals\crypto_evrp.py:324:    # Sub-signal 2: eVRP percentile
+- portfolio/signals\crypto_evrp.py:327:    # Sub-signal 3: eVRP momentum
+- portfolio/signals\hash_ribbons.py:1:"""Hash Ribbons BTC miner capitulation signal.
+- portfolio/signals\hash_ribbons.py:7:bottom signal (9 signals since 2011, Capriole Investments).
+- portfolio/signals\hash_ribbons.py:14:This is a BUY-only signal (outputs BUY or HOLD, never SELL).
+- portfolio/signals\hash_ribbons.py:47:# BTC tickers this signal applies to
+- portfolio/signals\hash_ribbons.py:190:    This catches the signal even if we missed the exact crossover day.
+- portfolio/signals\hash_ribbons.py:227:    """Compute Hash Ribbons BTC miner capitulation signal.
+- portfolio/signals\hash_ribbons.py:246:    # BTC-only signal
+- portfolio/signals\mean_reversion.py:4:BUY/SELL/HOLD signal with confidence score.
+- portfolio/signals\mean_reversion.py:47:    Returns (rsi2_value, signal).
+- portfolio/signals\mean_reversion.py:74:    Returns (rsi3_value, signal).
+- portfolio/signals\mean_reversion.py:103:    Returns (ibs_value, signal).
+- portfolio/signals\mean_reversion.py:133:    Returns (consecutive_count, signal).
+- portfolio/signals\mean_reversion.py:178:    signal in the gap-fill direction.
+- portfolio/signals\mean_reversion.py:188:    Returns (gap_pct, fill_pct, signal).
+- portfolio/signals\mean_reversion.py:258:    Returns (pct_b_value, signal).
+- portfolio/signals\mean_reversion.py:297:    """Combined IBS + RSI(2) signal.  Only votes when both agree.
+- portfolio/signals\mean_reversion.py:303:    Returns (ibs_value, rsi2_value, signal).
+- portfolio/signals\mean_reversion.py:339:    """Ornstein-Uhlenbeck half-life + z-score mean reversion signal.
+- portfolio/signals\mean_reversion.py:347:    Returns (half_life, zscore, signal).
+- portfolio/signals\mean_reversion.py:399:    """Compute composite mean-reversion signal from OHLCV data.
+- portfolio/signals\mean_reversion.py:506:        sub_signals["rsi2_mr"] = "HOLD"
+- portfolio/signals\mean_reversion.py:516:        sub_signals["rsi3_mr"] = "HOLD"
+- portfolio/signals\mean_reversion.py:526:        sub_signals["ibs"] = "HOLD"
+- portfolio/signals\mean_reversion.py:536:        sub_signals["consecutive_days"] = "HOLD"
+- portfolio/signals\mean_reversion.py:549:        sub_signals["gap_fill"] = "HOLD"
+- portfolio/signals\mean_reversion.py:560:            sub_signals["bb_pct_b"] = "HOLD"
+- portfolio/signals\mean_reversion.py:564:        sub_signals["bb_pct_b"] = "HOLD"
+- portfolio/signals\mean_reversion.py:575:        sub_signals["ibs_rsi2_combined"] = "HOLD"
+- portfolio/signals\mean_reversion.py:587:        sub_signals["half_life_mr"] = "HOLD"
+- portfolio/signals\macro_regime.py:17:vote HOLD — the signal degrades gracefully rather than failing.
+- portfolio/signals\macro_regime.py:224:    This is a short-lived risk-off signal that only activates ~4 days per
+- portfolio/signals\macro_regime.py:302:    """Compute the composite macro-regime signal.
+- portfolio/signals\macro_regime.py:312:        ``fed`` sub-dicts.  When None or missing keys, affected sub-signals
+- portfolio/signals\macro_regime.py:319:        ``sub_signals`` dict mapping each sub-signal name to its vote,
+- portfolio/signals\macro_regime.py:367:        logger.exception("sma_regime sub-signal failed")
+- portfolio/signals\macro_regime.py:373:        logger.exception("dxy_risk sub-signal failed")
+- portfolio/signals\macro_regime.py:379:        logger.exception("yield_curve sub-signal failed")
+- portfolio/signals\macro_regime.py:385:        logger.exception("yield_10y_momentum sub-signal failed")
+- portfolio/signals\macro_regime.py:391:        logger.exception("fomc_proximity sub-signal failed")
+- portfolio/signals\macro_regime.py:397:        logger.exception("golden_death_cross sub-signal failed")
+- portfolio/signals\momentum.py:4:BUY/SELL/HOLD signal with confidence score.
+- portfolio/signals\momentum.py:29:# is PPO (26-period EMA warm-up + 9-period signal line) which needs ~35 bars,
+- portfolio/signals\momentum.py:85:    Returns (stoch_k, stoch_d, signal).
+- portfolio/signals\momentum.py:123:    Returns (stoch_rsi_value, signal).
+- portfolio/signals\momentum.py:148:    Returns (cci_value, signal).
+- portfolio/signals\momentum.py:174:    Returns (williams_r_value, signal).
+- portfolio/signals\momentum.py:197:    Returns (roc_value, signal).
+- portfolio/signals\momentum.py:224:    """Percentage Price Oscillator with signal line.
+- portfolio/signals\momentum.py:226:    Returns (ppo_value, ppo_signal_value, signal).
+- portfolio/signals\momentum.py:227:    PPO crosses above signal = BUY.
+- portfolio/signals\momentum.py:228:    PPO crosses below signal = SELL.
+- portfolio/signals\momentum.py:248:    # Bullish cross: PPO crosses above signal
+- portfolio/signals\momentum.py:252:    # Bearish cross: PPO crosses below signal
+- portfolio/signals\momentum.py:266:    Returns (bull_power, bear_power, signal).
+- portfolio/signals\momentum.py:289:    """Compute composite momentum signal from OHLCV data.
+- portfolio/signals\momentum.py:359:        sub_signals["rsi_divergence"] = "HOLD"
+- portfolio/signals\momentum.py:368:        sub_signals["stochastic"] = "HOLD"
+- portfolio/signals\momentum.py:378:        sub_signals["stochastic_rsi"] = "HOLD"
+- portfolio/signals\momentum.py:387:        sub_signals["cci"] = "HOLD"
+- portfolio/signals\momentum.py:396:        sub_signals["williams_r"] = "HOLD"
+- portfolio/signals\momentum.py:405:        sub_signals["roc"] = "HOLD"
+- portfolio/signals\momentum.py:415:        sub_signals["ppo"] = "HOLD"
+- portfolio/signals\momentum.py:426:        sub_signals["bull_bear_power"] = "HOLD"
+- portfolio/signals\hurst_regime.py:1:"""Hurst exponent regime detector signal module.
+- portfolio/signals\hurst_regime.py:110:# ── Sub-signal 1: Hurst Regime Classification ────────────────────────────
+- portfolio/signals\hurst_regime.py:123:# ── Sub-signal 2: Trend Direction (when trending) ────────────────────────
+- portfolio/signals\hurst_regime.py:150:# ── Sub-signal 3: Mean-Reversion Extreme (when MR) ──────────────────────
+- portfolio/signals\hurst_regime.py:153:    """Contrarian signal at RSI extremes (for mean-reverting regime).
+- portfolio/signals\hurst_regime.py:174:# ── Sub-signal 4: Hurst Momentum (regime shift detection) ───────────────
+- portfolio/signals\hurst_regime.py:214:    """Compute Hurst regime detector signal from OHLCV data.
+- portfolio/signals\hurst_regime.py:289:            sub_signals["hurst_regime"] = "HOLD"
+- portfolio/signals\hurst_regime.py:290:            sub_signals["trend_direction"] = "HOLD"
+- portfolio/signals\hurst_regime.py:293:        # MR sub-signal is inactive in trending regime
+- portfolio/signals\hurst_regime.py:294:        sub_signals["mr_extreme"] = "HOLD"
+- portfolio/signals\hurst_regime.py:306:            sub_signals["hurst_regime"] = "HOLD"
+- portfolio/signals\hurst_regime.py:307:            sub_signals["mr_extreme"] = "HOLD"
+- portfolio/signals\hurst_regime.py:310:        # Trend sub-signal is inactive in MR regime
+- portfolio/signals\hurst_regime.py:311:        sub_signals["trend_direction"] = "HOLD"
+- portfolio/signals\hurst_regime.py:315:        # Random walk: no edge, force HOLD on all sub-signals
+- portfolio/signals\hurst_regime.py:316:        sub_signals["hurst_regime"] = "HOLD"
+- portfolio/signals\hurst_regime.py:317:        sub_signals["trend_direction"] = "HOLD"
+- portfolio/signals\hurst_regime.py:318:        sub_signals["mr_extreme"] = "HOLD"
+- portfolio/signals\hurst_regime.py:329:        sub_signals["hurst_momentum"] = "HOLD"
+- portfolio/signals\news_event.py:1:"""News/event detection signal — headline velocity, keyword severity, sentiment shift.
+- portfolio/signals\news_event.py:7:  4. source_weight      — credible sources amplify signal
+- portfolio/signals\news_event.py:500:    """Compute the composite news/event detection signal.
+- portfolio/signals\news_event.py:546:    # Compute each sub-signal
+- portfolio/signals\network_momentum.py:1:"""Network momentum signal — cross-asset momentum spillover.
+- portfolio/signals\network_momentum.py:298:    # This sub-signal amplifies the network divergence signal
+- portfolio/signals\network_momentum.py:302:        return "HOLD", 0.0  # low correlation = network signals are noise
+- portfolio/signals\network_momentum.py:310:    """Compute network momentum signal.
+- portfolio/signals\network_momentum.py:337:    # Sub-indicator 2: network divergence (the core signal)
+- portfolio/signals\network_momentum.py:353:    # The correlation regime sub-signal inherits the network divergence
+- portfolio/signals\network_momentum.py:354:    # direction: it answers "is the network signal trustworthy?" not
+- portfolio/signals\oscillators.py:1:"""Composite advanced oscillators signal module.
+- portfolio/signals\oscillators.py:4:BUY/SELL/HOLD signal with confidence score.
+- portfolio/signals\oscillators.py:11:    5. Know Sure Thing (KST)       (multi-ROC composite + signal crossover)
+- portfolio/signals\oscillators.py:14:    8. Coppock Curve (14, 11, 10)  (WMA of dual ROC, long-term buy signal)
+- portfolio/signals\oscillators.py:45:    Returns (ao_value, signal).
+- portfolio/signals\oscillators.py:70:    # This is a bullish reversal signal.
+- portfolio/signals\oscillators.py:102:    Returns (aroon_osc_value, signal).
+- portfolio/signals\oscillators.py:138:    Returns (vi_plus, vi_minus, signal).
+- portfolio/signals\oscillators.py:181:    Returns (cmo_value, signal).
+- portfolio/signals\oscillators.py:214:    KST crosses above signal = BUY.  Below signal = SELL.
+- portfolio/signals\oscillators.py:216:    Returns (kst_value, kst_signal_value, signal).
+- portfolio/signals\oscillators.py:252:    # Bullish cross: KST crosses above signal
+- portfolio/signals\oscillators.py:256:    # Bearish cross: KST crosses below signal
+- portfolio/signals\oscillators.py:278:    Returns (stc_value, signal).
+- portfolio/signals\oscillators.py:334:    5. Signal = SMA(signal_period, TRIX)
+- portfolio/signals\oscillators.py:337:    TRIX crosses above signal line also valid as BUY.
+- portfolio/signals\oscillators.py:339:    Returns (trix_value, signal).
+- portfolio/signals\oscillators.py:392:    Turns up from below 0 = BUY (classic long-term buy signal).
+- portfolio/signals\oscillators.py:393:    No traditional sell signal; we generate SELL when CC turns down from
+- portfolio/signals\oscillators.py:396:    Returns (coppock_value, signal).
+- portfolio/signals\oscillators.py:435:    """Compute composite oscillator signal from OHLCV data.
+- portfolio/signals\oscillators.py:510:        sub_signals["awesome"] = "HOLD"
+- portfolio/signals\oscillators.py:519:        sub_signals["aroon"] = "HOLD"
+- portfolio/signals\oscillators.py:529:        sub_signals["vortex"] = "HOLD"
+- portfolio/signals\oscillators.py:539:        sub_signals["chande"] = "HOLD"
+- portfolio/signals\oscillators.py:549:        sub_signals["kst"] = "HOLD"
+- portfolio/signals\oscillators.py:559:        sub_signals["schaff"] = "HOLD"
+- portfolio/signals\oscillators.py:568:        sub_signals["trix"] = "HOLD"
+- portfolio/signals\oscillators.py:577:        sub_signals["coppock"] = "HOLD"
+- portfolio/signals\momentum_factors.py:4:BUY/SELL/HOLD signal with confidence score.
+- portfolio/signals\momentum_factors.py:47:    Returns (ts_momentum_pct, signal).
+- portfolio/signals\momentum_factors.py:96:    |z_roc| > 1.5 triggers signal (was fixed +-5%).
+- portfolio/signals\momentum_factors.py:101:    Returns (roc_value, signal).
+- portfolio/signals\momentum_factors.py:143:    Returns (proximity_ratio, signal).
+- portfolio/signals\momentum_factors.py:174:    Returns (low_ratio, signal).
+- portfolio/signals\momentum_factors.py:217:    Returns (consecutive_count, signal).
+- portfolio/signals\momentum_factors.py:258:    Returns (roc_recent, roc_older, signal).
+- portfolio/signals\momentum_factors.py:294:    Returns (price_change_pct, vol_ratio, signal).
+- portfolio/signals\momentum_factors.py:336:    non-seasonal signal content.  Returns the original DataFrame if no
+- portfolio/signals\momentum_factors.py:366:    """Compute composite momentum-factor signal from OHLCV data.
+- portfolio/signals\momentum_factors.py:438:        sub_signals["ts_momentum_12_1"] = "HOLD"
+- portfolio/signals\momentum_factors.py:448:        sub_signals["roc_20"] = "HOLD"
+- portfolio/signals\momentum_factors.py:458:        sub_signals["high_proximity"] = "HOLD"
+- portfolio/signals\momentum_factors.py:468:        sub_signals["low_reversal"] = "HOLD"
+- portfolio/signals\momentum_factors.py:478:        sub_signals["consecutive_bars"] = "HOLD"
+- portfolio/signals\momentum_factors.py:489:        sub_signals["price_acceleration"] = "HOLD"
+- portfolio/signals\momentum_factors.py:501:        sub_signals["volume_weighted_momentum"] = "HOLD"
+- portfolio/signals\residual_pair_reversion.py:1:"""Residual pair reversion signal — cointegration-based pairs trading.
+- portfolio/signals\residual_pair_reversion.py:6:ranging markets because the signal is relative, not directional.
+- portfolio/signals\residual_pair_reversion.py:194:    suppress signal (HOLD).  Stable beta confirms the pair relationship.
+- portfolio/signals\residual_pair_reversion.py:210:    # Stable relationship — confirm directional signal
+- portfolio/signals\residual_pair_reversion.py:240:    """Compute residual pair reversion signal.
+- portfolio/signals\residual_pair_reversion.py:359:    # z-score is the primary directional signal
+- portfolio/signals\heikin_ashi.py:1:"""Composite Heikin-Ashi and advanced trend signal module.
+- portfolio/signals\heikin_ashi.py:105:# Sub-signal 1: Heikin-Ashi Trend (strong candles with no opposing wicks)
+- portfolio/signals\heikin_ashi.py:116:    Returns (signal, ha_color, ha_streak).
+- portfolio/signals\heikin_ashi.py:176:# Sub-signal 2: Heikin-Ashi Doji (reversal after streak)
+- portfolio/signals\heikin_ashi.py:230:# Sub-signal 3: Heikin-Ashi Color Change
+- portfolio/signals\heikin_ashi.py:265:# Sub-signal 4: Hull Moving Average Cross (9, 21)
+- portfolio/signals\heikin_ashi.py:274:    Returns (signal, hull_fast, hull_slow).
+- portfolio/signals\heikin_ashi.py:297:# Sub-signal 5: Alligator Indicator
+- portfolio/signals\heikin_ashi.py:311:    Returns (signal, lips, teeth, jaw).
+- portfolio/signals\heikin_ashi.py:342:# Sub-signal 6: Elder Impulse System
+- portfolio/signals\heikin_ashi.py:355:    Returns (signal, elder_color).
+- portfolio/signals\heikin_ashi.py:390:# Sub-signal 7: TTM Squeeze
+- portfolio/signals\heikin_ashi.py:416:    Returns (signal, squeeze_on, momentum).
+- portfolio/signals\heikin_ashi.py:456:        # Squeeze is still on -- no trade signal yet
+- portfolio/signals\heikin_ashi.py:482:    """Compute a composite Heikin-Ashi and advanced trend signal.
+- portfolio/signals\heikin_ashi.py:593:    # --- Sub-signal 1: HA Trend ----------------------------------------
+- portfolio/signals\heikin_ashi.py:596:    # --- Sub-signal 2: HA Doji -----------------------------------------
+- portfolio/signals\heikin_ashi.py:599:    # --- Sub-signal 3: HA Color Change ---------------------------------
+- portfolio/signals\heikin_ashi.py:602:    # --- Sub-signal 4: Hull MA Cross -----------------------------------
+- portfolio/signals\heikin_ashi.py:605:    # --- Sub-signal 5: Alligator Indicator -----------------------------
+- portfolio/signals\heikin_ashi.py:608:    # --- Sub-signal 6: Elder Impulse System ----------------------------
+- portfolio/signals\heikin_ashi.py:611:    # --- Sub-signal 7: TTM Squeeze -------------------------------------
+- portfolio/signals\shannon_entropy.py:61:# ---- sub-signal 1: Entropy Regime -------------------------------------------
+- portfolio/signals\shannon_entropy.py:86:# ---- sub-signal 2: Trend Direction ------------------------------------------
+- portfolio/signals\shannon_entropy.py:115:# ---- sub-signal 3: Entropy Momentum -----------------------------------------
+- portfolio/signals\shannon_entropy.py:121:    Returns (delta, signal).
+- portfolio/signals\shannon_entropy.py:144:# ---- sub-signal 4: Trend Strength ------------------------------------------
+- portfolio/signals\shannon_entropy.py:169:# ---- Main composite signal --------------------------------------------------
+- portfolio/signals\shannon_entropy.py:172:    """Compute Shannon entropy-based market regime signal.
+- portfolio/signals\shannon_entropy.py:217:            "sub_signals": {"entropy_regime": "HOLD", "trend": "HOLD",
+- portfolio/signals\shannon_entropy.py:226:            "sub_signals": {"entropy_regime": "HOLD", "trend": trend_dir,
+- portfolio/signals\shannon_entropy.py:304:        "sub_signals": {"entropy_regime": "HOLD", "trend": trend_dir,
+- portfolio/signals\orderbook_flow.py:1:"""Orderbook flow signal — microstructure-based short-term prediction.
+- portfolio/signals\orderbook_flow.py:95:    """Compute orderbook flow composite signal.
+- portfolio/signals\orderbook_flow.py:126:        sub_signals["depth_imbalance"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:136:        sub_signals["trade_flow"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:147:            sub_signals["vpin"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:149:        sub_signals["vpin"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:161:            sub_signals["ofi"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:168:            sub_signals["ofi"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:175:    sub_signals["spread_health"] = "HOLD"
+- portfolio/signals\orderbook_flow.py:187:        sub_signals["trade_pressure"] = "HOLD"
+- portfolio/signals\gold_real_yield_paradox.py:1:"""Gold-Yield Divergence Index (GYDI) signal — macro regime detector.
+- portfolio/signals\gold_real_yield_paradox.py:243:    """Compute GYDI signal for gold (and silver via gold proxy).
+- portfolio/signals\statistical_jump_regime.py:1:"""Statistical Jump Model regime signal module.
+- portfolio/signals\statistical_jump_regime.py:141:    """Compute Statistical Jump Model regime signal.
+- portfolio/signals\statistical_jump_regime.py:195:    # In high-vol regimes, trend signals are less reliable → bias toward HOLD
+- portfolio/signals\statistical_jump_regime.py:198:        vol_vote = "HOLD"  # High vol = uncertain, don't add directional signal
+- portfolio/signals\ovx_metals_spillover.py:1:"""OVX Metals Spillover signal — oil implied volatility as metals predictor.
+- portfolio/signals\ovx_metals_spillover.py:14:This signal uses oil IMPLIED VOLATILITY (expectation of future moves).
+- portfolio/signals\ovx_metals_spillover.py:169:    """Compute OVX metals spillover signal.
+- portfolio/signals\realized_skewness.py:1:"""Realized skewness directional signal module.
+- portfolio/signals\realized_skewness.py:4:a majority-vote composite BUY/SELL/HOLD signal with confidence score.
+- portfolio/signals\realized_skewness.py:9:    3. Kurtosis Confirmation — high kurtosis + negative skew = stronger signal
+- portfolio/signals\realized_skewness.py:50:    """Sub-signal 1: z-scored realized skewness.
+- portfolio/signals\realized_skewness.py:83:    """Sub-signal 2: skewness momentum (acceleration).
+- portfolio/signals\realized_skewness.py:112:    """Sub-signal 3: kurtosis confirmation.
+- portfolio/signals\realized_skewness.py:147:    """Sub-signal 4: short-window vs long-window skewness divergence.
+- portfolio/signals\realized_skewness.py:186:    """Compute realized skewness directional signal.
+- portfolio/signals\smart_money.py:1:"""Composite Smart Money Concepts (SMC) and market structure signal.
+- portfolio/signals\smart_money.py:286:    # Check sell-side sweep (bullish signal): wick below recent swing low
+- portfolio/signals\smart_money.py:296:    # Check buy-side sweep (bearish signal): wick above recent swing high
+- portfolio/signals\smart_money.py:402:    """Compute the composite Smart Money Concepts signal.
+- portfolio/signals\smart_money.py:561:        logger.exception("smart_money: unexpected error computing signal")
+- portfolio/signals\metals_cross_asset.py:1:"""Cross-asset signal for metals -- correlated market indicators.
+- portfolio/signals\metals_cross_asset.py:6:    3. Gold/Silver Ratio: mean-reversion signal (high = silver cheap)
+- portfolio/signals\metals_cross_asset.py:216:    # one-off API hiccups shouldn't downgrade the whole signal to stale
+- portfolio/signals\metals_cross_asset.py:233:                "sub-signals for these will vote HOLD this cycle",
+- portfolio/signals\metals_cross_asset.py:270:    """Compute cross-asset composite signal for metals.
+- portfolio/signals\metals_cross_asset.py:326:        sub_signals["copper"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:338:        sub_signals["gvz"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:350:            sub_signals["gs_ratio"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:355:            sub_signals["gs_ratio"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:359:            sub_signals["gs_ratio"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:372:            sub_signals["gs_velocity"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:380:            sub_signals["gs_velocity"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:387:        sub_signals["spy_risk"] = "BUY" if is_silver else "HOLD"
+- portfolio/signals\metals_cross_asset.py:392:        sub_signals["spy_risk"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:402:        sub_signals["oil"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:416:        sub_signals["epu"] = "HOLD"
+- portfolio/signals\metals_cross_asset.py:435:        sub_signals["tips_yield"] = "HOLD"
+- portfolio/signals\structure.py:1:"""Composite price-structure / breakout signal.
+- portfolio/signals\structure.py:35:                    fast: int = 12, slow: int = 26, signal: int = 9) -> pd.Series:
+- portfolio/signals\structure.py:36:    """MACD histogram (MACD line minus signal line)."""
+- portfolio/signals\structure.py:40:    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+- portfolio/signals\structure.py:178:    """Compute the composite price-structure signal.
+- portfolio/signals\structure.py:226:        logger.exception("high_low_breakout sub-signal failed")
+- portfolio/signals\structure.py:232:        logger.exception("donchian_55 sub-signal failed")
+- portfolio/signals\structure.py:238:        logger.exception("rsi_centerline sub-signal failed")
+- portfolio/signals\structure.py:244:        logger.exception("macd_zeroline sub-signal failed")
+- portfolio/signals\treasury_risk_rotation.py:1:"""Treasury yield curve risk rotation signal.
+- portfolio/signals\treasury_risk_rotation.py:156:    """Compute treasury risk rotation signal."""
+- portfolio/signals\trend.py:1:"""Composite trend signal — 7 sub-indicators with majority voting.
+- portfolio/signals\trend.py:34:# Sub-signal 1: Golden Cross / Death Cross
+- portfolio/signals\trend.py:66:# Sub-signal 2: Moving Average Ribbon
+- portfolio/signals\trend.py:90:# Sub-signal 3: Price vs MA200
+- portfolio/signals\trend.py:108:# Sub-signal 4: Supertrend(10, 3)
+- portfolio/signals\trend.py:189:    """Return (signal, supertrend_value, direction)."""
+- portfolio/signals\trend.py:201:# Sub-signal 5: Parabolic SAR (0.02, 0.2)
+- portfolio/signals\trend.py:284:    """Return (signal, sar_value)."""
+- portfolio/signals\trend.py:298:# Sub-signal 6: Ichimoku Cloud
+- portfolio/signals\trend.py:306:    Cloud is projected 26 periods ahead, but for a current-bar signal we
+- portfolio/signals\trend.py:310:    Returns (signal, tenkan, kijun).
+- portfolio/signals\trend.py:341:        signal = "BUY"
+- portfolio/signals\trend.py:343:        signal = "SELL"
+- portfolio/signals\trend.py:345:        signal = "HOLD"
+- portfolio/signals\trend.py:347:    return signal, safe_float(tenkan_val), safe_float(kijun_val)
+- portfolio/signals\trend.py:360:# Sub-signal 7: ADX(14) / +DI / -DI
+- portfolio/signals\trend.py:372:    Returns (signal, adx, plus_di, minus_di).
+- portfolio/signals\trend.py:433:    """Compute a composite trend signal from 7 sub-indicators.
+- portfolio/signals\trend.py:481:        "sub_signals": {k: "HOLD" for k in [
+- portfolio/signals\volatility.py:1:"""Composite volatility signal — 7 sub-indicators with majority voting.
+- portfolio/signals\volatility.py:293:    """Compute composite volatility signal from OHLCV DataFrame.
+- portfolio/signals\volatility.py:313:        logger.warning("volatility signal: missing columns %s", missing)
+- portfolio/signals\volatility.py:321:        logger.warning("volatility signal: only %d rows (need %d)", len(df), MIN_ROWS)
+- portfolio/signals\volatility.py:355:        sub_signals["bb_squeeze"] = "HOLD"
+- portfolio/signals\volatility.py:362:        sub_signals["bb_breakout"] = "HOLD"
+- portfolio/signals\volatility.py:370:        sub_signals["atr_expansion"] = "HOLD"
+- portfolio/signals\volatility.py:379:        sub_signals["keltner"] = "HOLD"
+- portfolio/signals\volatility.py:388:        sub_signals["historical_vol"] = "HOLD"
+- portfolio/signals\volatility.py:397:        sub_signals["donchian"] = "HOLD"
+- portfolio/signals\volatility.py:406:        sub_signals["garch"] = "HOLD"
+- portfolio/signals\volatility.py:423:    logger.debug("volatility signal returning empty: %s", reason)
+- portfolio/signals\volatility.py:430:        # depending on whether the signal succeeded or fell into the empty
+- portfolio/signals\vix_term_structure.py:1:"""VIX term structure signal — contango/backwardation regime detection.
+- portfolio/signals\vix_term_structure.py:142:    """Compute VIX term structure signal for any Tier-1 instrument.
+- portfolio/signals\vol_ratio_regime.py:1:"""Volatility ratio regime detector + directional signal.
+- portfolio/signals\vol_ratio_regime.py:4:trending or ranging, then generates directional BUY/SELL/HOLD signals:
+- portfolio/signals\vol_ratio_regime.py:129:    """Compute volatility ratio regime signal.
+- portfolio/signals\vol_ratio_regime.py:188:        # Additional ranging sub-signal: Bollinger %B mean reversion
+- portfolio/signals\vol_ratio_regime.py:213:        # Additional trending sub-signal: price vs SMA(10) distance
+- portfolio/signals\volume_flow.py:70:    intraday signal stays responsive.
+- portfolio/signals\volume_flow.py:233:    """Compute composite volume flow signal from OHLCV data.
+- portfolio/signals\volume_flow.py:326:        # --- Sub-signal votes ------------------------------------------
+- portfolio/signals\volume_flow.py:359:        logger.exception("volume_flow: unexpected error computing signal")
+- portfolio/signals\williams_vix_fix.py:1:"""Williams VIX Fix signal module.
+- portfolio/signals\williams_vix_fix.py:5:in the lookback window, expressing it as a percentage.  Spikes signal
+- portfolio/signals\williams_vix_fix.py:52:    Returns (wvf_value, signal).
+- portfolio/signals\williams_vix_fix.py:78:    Returns (percentile_value, signal).
+- portfolio/signals\williams_vix_fix.py:108:    Returns (rsi_value, signal).
+- portfolio/signals\williams_vix_fix.py:148:    Returns (complacency_count, signal).
+- portfolio/signals\williams_vix_fix.py:176:    """Compute Williams VIX Fix signal.
+- portfolio/signals\vwap_zscore_mr.py:1:"""VWAP Z-Score mean reversion signal module.
+- portfolio/signals\vwap_zscore_mr.py:10:    3. volume_confirm — volume above average confirms signal conviction
+- portfolio/signals\vwap_zscore_mr.py:35:    """Compute VWAP Z-Score mean reversion signal."""
+- portfolio/signals\vwap_zscore_mr.py:58:        # Sub-signal 1: VWAP Z-score
+- portfolio/signals\vwap_zscore_mr.py:68:        # Sub-signal 2: VWAP slope (trend context)
+- portfolio/signals\vwap_zscore_mr.py:84:        # Sub-signal 3: Volume confirmation
+- portfolio/signals\__init__.py:1:"""Enhanced signal modules — grouped technical indicators.
+- portfolio/signals\xtrend_equity_spillover.py:1:"""Cross-asset equity trend spillover signal.
+- portfolio/signals\xtrend_equity_spillover.py:45:# Safe-haven assets get INVERTED signal: bullish equities = risk-on = SELL safe havens
+- portfolio/signals\xtrend_equity_spillover.py:190:    """Compute cross-asset equity trend spillover signal.
+- portfolio/signals\xtrend_equity_spillover.py:226:    # For safe-haven assets: INVERT the signal
+- """Signal registry - plugin system for modular signal management.
+- """Register a signal in the global registry.
+- """Programmatically register an enhanced signal module."""
+- """Return all registered signal names."""
+- """Lazy-load and cache the compute function for a signal.
+- if cached is not None and cached is not _FAILED_IMPORT_SENTINEL:
+- if cached is _FAILED_IMPORT_SENTINEL and time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
+- logger.warning("Failed to load signal %s: %s", entry['name'], e)
+- """Register the default set of enhanced signal modules."""
+- portfolio/signals\econ_calendar.py:59:        return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:68:    return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:82:        return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:89:        return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:93:    return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:111:    return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:147:    return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:161:        return "HOLD", indicators
+- portfolio/signals\econ_calendar.py:173:    return "HOLD", indicators
+- portfolio/signals\credit_spread.py:151:        return "HOLD", {"oas_zscore": 0.0}
+- portfolio/signals\credit_spread.py:161:        return "HOLD", {"oas_zscore": 0.0}
+- portfolio/signals\credit_spread.py:184:        return "HOLD", {"oas_mom_5d": 0.0}
+- portfolio/signals\credit_spread.py:206:        return "HOLD", {"oas_accel": 0.0}
+- portfolio/signals\credit_spread.py:230:        return "HOLD", {"oas_crisis": False}
+- portfolio/signals\gold_real_yield_paradox.py:10:Data: FRED DFII10 (10Y TIPS real yield), cached 4 hours.
+- portfolio/signals\gold_real_yield_paradox.py:153:        return "HOLD", {"corr_break_score": 0.0}
+- portfolio/signals\gold_real_yield_paradox.py:159:        return "HOLD", {"corr_break_score": 0.0}
+- portfolio/signals\gold_real_yield_paradox.py:163:        return "HOLD", {"corr_break_score": 0.0}
+- portfolio/signals\news_event.py:36:# Inner NewsAPI cache uses NEWSAPI_TTL (30 min) to protect daily quota.
+- portfolio/signals\news_event.py:186:        return "HOLD", indicators
+- portfolio/signals\news_event.py:211:    return "HOLD", indicators
+- portfolio/signals\news_event.py:239:    return "HOLD", indicators
+- portfolio/signals\news_event.py:301:        return "HOLD", indicators
+- portfolio/signals\news_event.py:310:    return "HOLD", indicators
+- portfolio/signals\news_event.py:344:    return "HOLD", indicators
+- portfolio/signals\news_event.py:376:    return "HOLD", indicators
+- portfolio/signals\news_event.py:389:        return "HOLD", indicators
+- portfolio/signals\news_event.py:413:    return "HOLD", indicators
+- portfolio/signals\news_event.py:441:        return "HOLD", indicators
+- portfolio/signals\news_event.py:450:        return "HOLD", indicators
+- portfolio/signals\news_event.py:453:        return "HOLD", indicators
+- portfolio/signals\news_event.py:463:        return "HOLD", indicators
+- portfolio/signals\news_event.py:491:        return "HOLD", indicators
+- portfolio/signals\news_event.py:494:        return "HOLD", indicators
+- portfolio/signals\news_event.py:496:    return "HOLD", indicators
+- portfolio/signals\ovx_metals_spillover.py:110:    return "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:116:        return 0.0, "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:120:        return 0.0, "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:126:    return change_pct, "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:133:        return 0.0, "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:138:        return 0.0, "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:144:    return float(z), "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:150:        return "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:154:        return "HOLD"
+- portfolio/signals\ovx_metals_spillover.py:163:    return "HOLD"
+- portfolio/signals\mahalanobis_turbulence.py:204:    return "HOLD"
+- portfolio/signals\mahalanobis_turbulence.py:210:        return "HOLD"
+- portfolio/signals\mahalanobis_turbulence.py:215:        return "HOLD"
+- portfolio/signals\mahalanobis_turbulence.py:225:    return "HOLD"
+- portfolio/signals\mahalanobis_turbulence.py:231:        return "HOLD"
+- portfolio/signals\mahalanobis_turbulence.py:242:    return "HOLD"
+- portfolio/signals\cot_positioning.py:168:        return "HOLD", 0.0, indicators
+- portfolio/signals\cot_positioning.py:181:        return "HOLD", 0.0, indicators
+- portfolio/signals\cot_positioning.py:194:    return "HOLD", 0.0, indicators
+- portfolio/signals\cot_positioning.py:208:        return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:223:    return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:236:        return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:248:        return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:255:        return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:265:    return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:291:        return "HOLD", indicators
+- portfolio/signals\cot_positioning.py:306:    return "HOLD", indicators
+- portfolio/signals\gold_overnight_bias.py:17:weight).  Non-metals tickers return HOLD.
+- portfolio/signals\gold_overnight_bias.py:105:        return "HOLD", 0.0
+- portfolio/signals\gold_overnight_bias.py:109:        return "HOLD", 0.0
+- portfolio/signals\gold_overnight_bias.py:115:    return "HOLD", 0.0
+- portfolio/signals\gold_overnight_bias.py:131:        return "HOLD", 0.0
+- portfolio/signals\oscillators.py:52:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:56:        return safe_float(val), "HOLD"
+- portfolio/signals\oscillators.py:60:        return safe_float(val), "HOLD"
+- portfolio/signals\oscillators.py:87:    return safe_float(val), "HOLD"
+- portfolio/signals\oscillators.py:105:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:122:    return osc, "HOLD"
+- portfolio/signals\oscillators.py:141:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:158:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:167:    return vip, vim, "HOLD"
+- portfolio/signals\oscillators.py:195:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:202:    return val, "HOLD"
+- portfolio/signals\oscillators.py:226:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:240:        return safe_float(kst_val), safe_float(sig_val), "HOLD"
+- portfolio/signals\oscillators.py:244:        return safe_float(kst_val), safe_float(sig_val), "HOLD"
+- portfolio/signals\oscillators.py:250:        return safe_float(kst_val), safe_float(sig_val), "HOLD"
+- portfolio/signals\oscillators.py:260:    return safe_float(kst_val), safe_float(sig_val), "HOLD"
+- portfolio/signals\oscillators.py:281:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:304:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:321:    return val, "HOLD"
+- portfolio/signals\oscillators.py:353:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:360:        return val, "HOLD"
+- portfolio/signals\oscillators.py:364:        return val, "HOLD"
+- portfolio/signals\oscillators.py:383:    return val, "HOLD"
+- portfolio/signals\oscillators.py:400:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:409:        return float("nan"), "HOLD"
+- portfolio/signals\oscillators.py:415:        return val, "HOLD"
+- portfolio/signals\oscillators.py:419:        return val, "HOLD"
+- portfolio/signals\oscillators.py:429:    return val, "HOLD"
+- portfolio/signals\network_momentum.py:140:        return "HOLD", 0.0
+- portfolio/signals\network_momentum.py:148:    return "HOLD", 0.0
+- portfolio/signals\network_momentum.py:224:        return "HOLD", 0.0, indicators
+- portfolio/signals\network_momentum.py:229:        return "HOLD", 0.0, indicators
+- portfolio/signals\network_momentum.py:259:    return "HOLD", 0.0, indicators
+- portfolio/signals\network_momentum.py:272:        return "HOLD", 0.0
+- portfolio/signals\network_momentum.py:276:        return "HOLD", 0.0
+- portfolio/signals\network_momentum.py:293:        return "HOLD", 0.0
+- portfolio/signals\network_momentum.py:304:    return "HOLD", 0.0
+- portfolio/signals\macro_regime.py:92:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:98:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:111:    return "HOLD", indicators
+- portfolio/signals\macro_regime.py:127:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:132:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:143:    return "HOLD", indicators
+- portfolio/signals\macro_regime.py:157:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:162:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:170:    return "HOLD", indicators
+- portfolio/signals\macro_regime.py:201:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:206:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:214:    return "HOLD", indicators
+- portfolio/signals\macro_regime.py:232:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:237:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:243:    return "HOLD", indicators
+- portfolio/signals\macro_regime.py:271:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:280:        return "HOLD", indicators
+- portfolio/signals\macro_regime.py:294:    return "HOLD", indicators
+- portfolio/signals\drift_regime_gate.py:45:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:53:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:59:    return frac_val, "HOLD"
+- portfolio/signals\drift_regime_gate.py:75:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:84:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:90:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:97:    return vel_val, "HOLD"
+- portfolio/signals\drift_regime_gate.py:112:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:119:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:123:        return float("nan"), "HOLD"
+- portfolio/signals\drift_regime_gate.py:129:    return dist, "HOLD"
+- portfolio/signals\copper_gold_ratio.py:44:_CACHE_TTL = 300  # 5-minute cache for external fetches
+- portfolio/signals\copper_gold_ratio.py:71:    cached = _CACHE.get("ratio_df")
+- portfolio/signals\copper_gold_ratio.py:72:    if cached and now - cached[0] < _CACHE_TTL:
+- portfolio/signals\copper_gold_ratio.py:73:        return cached[1]
+- portfolio/signals\futures_flow.py:51:        return "HOLD"
+- portfolio/signals\futures_flow.py:57:        return "HOLD"
+- portfolio/signals\futures_flow.py:76:    return "HOLD"
+- portfolio/signals\futures_flow.py:86:        return "HOLD"
+- portfolio/signals\futures_flow.py:92:        return "HOLD"
+- portfolio/signals\futures_flow.py:106:    return "HOLD"
+- portfolio/signals\futures_flow.py:116:        return "HOLD"
+- portfolio/signals\futures_flow.py:123:    return "HOLD"
+- portfolio/signals\futures_flow.py:133:        return "HOLD"
+- portfolio/signals\futures_flow.py:140:        return "HOLD"
+- portfolio/signals\futures_flow.py:149:    return "HOLD"
+- portfolio/signals\futures_flow.py:160:        return "HOLD"
+- portfolio/signals\futures_flow.py:180:    return "HOLD"
+- portfolio/signals\futures_flow.py:190:        return "HOLD"
+- portfolio/signals\futures_flow.py:203:        return "HOLD"
+- portfolio/signals\futures_flow.py:211:            return "HOLD"
+- portfolio/signals\futures_flow.py:220:    return "HOLD"
+- portfolio/signals\intraday_seasonality.py:117:        return "HOLD", mult
+- portfolio/signals\intraday_seasonality.py:118:    return "HOLD", mult
+- portfolio/signals\intraday_seasonality.py:128:        return "HOLD", mult
+- portfolio/signals\intraday_seasonality.py:129:    return "HOLD", mult
+- portfolio/signals\intraday_seasonality.py:137:        return "HOLD", 0.0
+- portfolio/signals\intraday_seasonality.py:141:        return "HOLD", 0.0
+- portfolio/signals\intraday_seasonality.py:143:        return "HOLD", 0.0
+- portfolio/signals\intraday_seasonality.py:149:    return "HOLD", abs(pct_diff)
+- portfolio/signals\momentum_factors.py:52:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:77:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:85:    return 0.0, "HOLD"
+- portfolio/signals\momentum_factors.py:104:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:110:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:124:        return round(roc, 4), "HOLD"
+- portfolio/signals\momentum_factors.py:132:    return round(roc, 4), "HOLD"
+- portfolio/signals\momentum_factors.py:146:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:154:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:162:    return round(ratio, 4), "HOLD"
+- portfolio/signals\momentum_factors.py:180:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:188:        return float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:205:    return round(ratio, 4), "HOLD"
+- portfolio/signals\momentum_factors.py:224:        return 0, "HOLD"
+- portfolio/signals\momentum_factors.py:232:        return 0, "HOLD"
+- portfolio/signals\momentum_factors.py:247:    return signed_count, "HOLD"
+- portfolio/signals\momentum_factors.py:261:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:267:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:274:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:282:    return round(roc_recent, 4), round(roc_older, 4), "HOLD"
+- portfolio/signals\momentum_factors.py:300:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:307:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:316:        return round(price_change, 4), float("nan"), "HOLD"
+- portfolio/signals\momentum_factors.py:327:    return round(price_change, 4), round(vol_ratio, 4), "HOLD"
+- portfolio/signals\crypto_macro.py:46:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:50:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:63:        return "HOLD", indicators
+- portfolio/signals\crypto_macro.py:69:    return "HOLD", indicators
+- portfolio/signals\crypto_macro.py:79:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:88:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:99:    return "HOLD", indicators
+- portfolio/signals\crypto_macro.py:112:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:128:    return "HOLD", indicators
+- portfolio/signals\crypto_macro.py:138:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:158:    return "HOLD", indicators
+- portfolio/signals\crypto_macro.py:169:        return "HOLD", {}
+- portfolio/signals\crypto_macro.py:180:        return "HOLD", indicators
+- portfolio/signals\crypto_macro.py:194:    return "HOLD", indicators
+- portfolio/signals\futures_basis.py:75:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:80:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:89:    return "HOLD", z
+- portfolio/signals\futures_basis.py:99:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:105:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:112:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:120:    return "HOLD", v_normalized
+- portfolio/signals\futures_basis.py:133:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:138:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:147:    return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:157:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:167:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:173:        return "HOLD", 0.0
+- portfolio/signals\futures_basis.py:181:    return "HOLD", a_normalized
+- portfolio/signals\hurst_regime.py:131:        return 0.0, "HOLD"
+- portfolio/signals\hurst_regime.py:139:        return 0.0, "HOLD"
+- portfolio/signals\hurst_regime.py:147:    return safe_float(spread), "HOLD"
+- portfolio/signals\hurst_regime.py:158:        return float("nan"), "HOLD"
+- portfolio/signals\hurst_regime.py:164:        return float("nan"), "HOLD"
+- portfolio/signals\hurst_regime.py:171:    return val, "HOLD"
+- portfolio/signals\hurst_regime.py:187:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\hurst_regime.py:197:        return float("nan"), safe_float(h_now), "HOLD"
+- portfolio/signals\hurst_regime.py:207:    return safe_float(roc), safe_float(h_now), "HOLD"
+- portfolio/signals\complexity_gap_regime.py:169:    return "HOLD"
+- portfolio/signals\complexity_gap_regime.py:175:        return "HOLD"
+- portfolio/signals\complexity_gap_regime.py:186:    return "HOLD"
+- portfolio/signals\complexity_gap_regime.py:197:    return "HOLD"
+- portfolio/signals\crypto_evrp.py:71:    cached = _DVOL_CACHE.get(cache_key)
+- portfolio/signals\crypto_evrp.py:72:    if cached and (time.time() - cached[0]) < _DVOL_CACHE_TTL:
+- portfolio/signals\crypto_evrp.py:73:        return cached[1]
+- portfolio/signals\crypto_evrp.py:121:    cached = _DVOL_HISTORY_CACHE.get(cache_key)
+- portfolio/signals\crypto_evrp.py:122:    if cached and (time.time() - cached[0]) < _DVOL_HISTORY_TTL:
+- portfolio/signals\crypto_evrp.py:123:        return cached[1]
+- portfolio/signals\crypto_evrp.py:201:    return "HOLD"
+- portfolio/signals\crypto_evrp.py:212:        return "HOLD", 50.0
+- portfolio/signals\crypto_evrp.py:220:        return "HOLD", 50.0
+- portfolio/signals\crypto_evrp.py:227:        return "HOLD", 50.0
+- portfolio/signals\crypto_evrp.py:234:        return "HOLD", 50.0
+- portfolio/signals\crypto_evrp.py:242:    return "HOLD", pctile
+- portfolio/signals\crypto_evrp.py:252:        return "HOLD", 0.0
+- portfolio/signals\crypto_evrp.py:261:    return "HOLD", change
+- portfolio/signals\smart_money.py:102:        return "HOLD", indicators
+- portfolio/signals\smart_money.py:122:    return "HOLD", indicators
+- portfolio/signals\smart_money.py:144:        return "HOLD", "neutral"
+- portfolio/signals\smart_money.py:174:        return "HOLD", "bullish"
+- portfolio/signals\smart_money.py:176:        return "HOLD", "bearish"
+- portfolio/signals\smart_money.py:178:    return "HOLD", "neutral"
+- portfolio/signals\smart_money.py:254:    return "HOLD", total_unfilled
+- portfolio/signals\smart_money.py:280:        return "HOLD"
+- portfolio/signals\smart_money.py:306:    return "HOLD"
+- portfolio/signals\smart_money.py:335:        return "HOLD", False, False
+- portfolio/signals\smart_money.py:341:        return "HOLD", False, False
+- portfolio/signals\smart_money.py:394:    return "HOLD", in_demand, in_supply
+- portfolio/signals\heikin_ashi.py:122:        return "HOLD", color, 0
+- portfolio/signals\heikin_ashi.py:172:    return "HOLD", color, streak
+- portfolio/signals\heikin_ashi.py:188:        return "HOLD"
+- portfolio/signals\heikin_ashi.py:193:        return "HOLD"
+- portfolio/signals\heikin_ashi.py:199:        return "HOLD"  # Not a doji
+- portfolio/signals\heikin_ashi.py:219:        return "HOLD"
+- portfolio/signals\heikin_ashi.py:226:    return "HOLD"
+- portfolio/signals\heikin_ashi.py:242:        return "HOLD"
+- portfolio/signals\heikin_ashi.py:252:        return "HOLD"
+- portfolio/signals\heikin_ashi.py:254:        return "HOLD"
+- portfolio/signals\heikin_ashi.py:261:    return "HOLD"
+- portfolio/signals\heikin_ashi.py:283:        return "HOLD", float("nan"), float("nan")
+- portfolio/signals\heikin_ashi.py:293:    return "HOLD", fast_f, slow_f
+- portfolio/signals\heikin_ashi.py:327:        return "HOLD", float("nan"), float("nan"), float("nan")
+- portfolio/signals\heikin_ashi.py:338:    return "HOLD", lips_f, teeth_f, jaw_f
+- portfolio/signals\heikin_ashi.py:365:        return "HOLD", "blue"
+- portfolio/signals\heikin_ashi.py:374:        return "HOLD", "blue"
+- portfolio/signals\heikin_ashi.py:386:    return "HOLD", "blue"
+- portfolio/signals\heikin_ashi.py:435:        return "HOLD", False, 0.0
+- portfolio/signals\heikin_ashi.py:451:        return "HOLD", squeeze_on, 0.0
+- portfolio/signals\heikin_ashi.py:457:        return "HOLD", True, mom_f
+- portfolio/signals\heikin_ashi.py:465:    return "HOLD", False, mom_f
+- portfolio/signals\heikin_ashi.py:523:    - Sub-indicators that lack enough data individually return HOLD.
+- portfolio/signals\forecast.py:48:# Forecast models master switch. Set to True to disable all model calls (early-return HOLD).
+- portfolio/signals\forecast.py:124:# BUG-102: Lock protects circuit breaker state and dedup cache from ThreadPoolExecutor races.
+- portfolio/signals\forecast.py:129:# logging cached replays. Key: ticker, value: ISO-8601 timestamp.
+- portfolio/signals\forecast.py:475:        return "HOLD", 0.0
+- portfolio/signals\forecast.py:480:# Per-ticker accuracy cache TTL
+- portfolio/signals\forecast.py:534:    """Load per-ticker forecast accuracy, cached via _cached().
+- portfolio/signals\forecast.py:691:            return "HOLD", 0.0, gating_info
+- portfolio/signals\forecast.py:712:        return "HOLD", 0.0, gating_info
+- portfolio/signals\forecast.py:730:    return "HOLD"
+- portfolio/signals\momentum.py:48:        return "HOLD"
+- portfolio/signals\momentum.py:77:    return "HOLD"
+- portfolio/signals\momentum.py:100:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum.py:107:        return k_val, d_val, "HOLD"
+- portfolio/signals\momentum.py:117:    return k_val, d_val, "HOLD"
+- portfolio/signals\momentum.py:135:        return float("nan"), "HOLD"
+- portfolio/signals\momentum.py:141:    return val, "HOLD"
+- portfolio/signals\momentum.py:161:        return float("nan"), "HOLD"
+- portfolio/signals\momentum.py:167:    return val, "HOLD"
+- portfolio/signals\momentum.py:185:        return float("nan"), "HOLD"
+- portfolio/signals\momentum.py:191:    return val, "HOLD"
+- portfolio/signals\momentum.py:205:        return float("nan"), "HOLD"
+- portfolio/signals\momentum.py:209:        return val, "HOLD"
+- portfolio/signals\momentum.py:219:    return val, "HOLD"
+- portfolio/signals\momentum.py:239:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum.py:246:        return ppo_val, sig_val, "HOLD"
+- portfolio/signals\momentum.py:256:    return ppo_val, sig_val, "HOLD"
+- portfolio/signals\momentum.py:277:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\momentum.py:283:    return bp, brp, "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:112:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:118:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:120:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:127:    return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:134:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:138:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:145:    return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:151:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:158:    return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:164:        return "HOLD"
+- portfolio/signals\cross_asset_tsmom.py:171:    return "HOLD"
+- portfolio/signals\claude_fundamental.py:41:# --- Three-tier cache ---
+- portfolio/signals\claude_fundamental.py:93:    """Check if a tier's cache has expired."""
+- portfolio/signals\claude_fundamental.py:147:# Earnings calendar cache (refreshed every 12h)
+- portfolio/signals\claude_fundamental.py:211:        fundamentals: Dict of all fundamentals from alpha_vantage cache
+- portfolio/signals\claude_fundamental.py:295:    """Load fundamentals from alpha_vantage cache (returns empty dict on failure)."""
+- portfolio/signals\claude_fundamental.py:677:    """Refresh one tier's cache by calling the claude CLI."""
+- portfolio/signals\hash_ribbons.py:151:    return "HOLD", indicators
+- portfolio/signals\hash_ribbons.py:179:    return "HOLD", indicators
+- portfolio/signals\hash_ribbons.py:193:        return "HOLD", {"days_since_recovery": None}
+- portfolio/signals\hash_ribbons.py:217:    return "HOLD", indicators
+- portfolio/signals\vix_term_structure.py:98:    return "HOLD"
+- portfolio/signals\vix_term_structure.py:107:    return "HOLD"
+- portfolio/signals\vix_term_structure.py:113:        return 0.0, "HOLD"
+- portfolio/signals\vix_term_structure.py:117:        return 0.0, "HOLD"
+- portfolio/signals\vix_term_structure.py:123:    return float(z), "HOLD"
+- portfolio/signals\vix_term_structure.py:128:        return 0.0, "HOLD"
+- portfolio/signals\vix_term_structure.py:132:        return 0.0, "HOLD"
+- portfolio/signals\vix_term_structure.py:138:    return float(slope_pct), "HOLD"
+- portfolio/signals\shannon_entropy.py:94:        return 0.0, "HOLD"
+- portfolio/signals\shannon_entropy.py:103:        return 0.0, "HOLD"
+- portfolio/signals\shannon_entropy.py:112:    return float(spread_pct), "HOLD"
+- portfolio/signals\shannon_entropy.py:125:        return 0.0, "HOLD"
+- portfolio/signals\shannon_entropy.py:131:        return 0.0, "HOLD"
+- portfolio/signals\metals_cross_asset.py:68:# --- FRED-sourced macro indicators (daily, 4h cache) ---
+- portfolio/signals\metals_cross_asset.py:106:    series_id: str, fred_api_key: str, cache: dict,
+- portfolio/signals\metals_cross_asset.py:108:    """Fetch a FRED series.  Returns list of floats (newest first), cached 4h."""
+- portfolio/signals\metals_cross_asset.py:112:            cache.get("key") == fred_api_key
+- portfolio/signals\metals_cross_asset.py:113:            and cache.get("data")
+- portfolio/signals\metals_cross_asset.py:114:            and now - cache.get("time", 0) < _FRED_CACHE_TTL
+- portfolio/signals\metals_cross_asset.py:116:            return cache["data"]
+- portfolio/signals\metals_cross_asset.py:120:        return cache.get("data")
+- portfolio/signals\metals_cross_asset.py:126:        return cache.get("data")
+- portfolio/signals\metals_cross_asset.py:153:                cache["key"] = fred_api_key
+- portfolio/signals\metals_cross_asset.py:154:                cache["data"] = values
+- portfolio/signals\metals_cross_asset.py:155:                cache["time"] = now
+- portfolio/signals\metals_cross_asset.py:164:    return cache.get("data")
+- portfolio/signals\metals_cross_asset.py:204:    # Daily anchors — always fetched, cached with their own TTL elsewhere:
+- portfolio/signals\fibonacci.py:215:    return "HOLD", info
+- portfolio/signals\fibonacci.py:251:    return "HOLD", info
+- portfolio/signals\fibonacci.py:298:    return "HOLD", info
+- portfolio/signals\fibonacci.py:332:    return "HOLD", info
+- portfolio/signals\fibonacci.py:366:    return "HOLD", info
+- portfolio/signals\mean_reversion.py:50:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:56:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:63:    return val, "HOLD"
+- portfolio/signals\mean_reversion.py:77:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:83:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:90:    return val, "HOLD"
+- portfolio/signals\mean_reversion.py:106:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:114:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:122:    return ibs, "HOLD"
+- portfolio/signals\mean_reversion.py:137:        return 0, "HOLD"
+- portfolio/signals\mean_reversion.py:166:    return count, "HOLD"
+- portfolio/signals\mean_reversion.py:191:        return 0.0, 0.0, "HOLD"
+- portfolio/signals\mean_reversion.py:197:        return 0.0, 0.0, "HOLD"
+- portfolio/signals\mean_reversion.py:203:        return safe_float(gap_pct), 0.0, "HOLD"
+- portfolio/signals\mean_reversion.py:210:        return safe_float(gap_pct), 0.0, "HOLD"
+- portfolio/signals\mean_reversion.py:213:        return safe_float(gap_pct), 0.0, "HOLD"
+- portfolio/signals\mean_reversion.py:230:        return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
+- portfolio/signals\mean_reversion.py:234:        return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
+- portfolio/signals\mean_reversion.py:244:    return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
+- portfolio/signals\mean_reversion.py:261:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:274:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:278:        return float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:290:    return pct_b, "HOLD"
+- portfolio/signals\mean_reversion.py:306:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:315:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:324:        return safe_float(ibs), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:333:    return safe_float(ibs), rsi2_val, "HOLD"
+- portfolio/signals\mean_reversion.py:350:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:354:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:365:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:371:        return float("nan"), float("nan"), "HOLD"
+- portfolio/signals\mean_reversion.py:379:        return float(half_life), 0.0, "HOLD"
+- portfolio/signals\mean_reversion.py:386:        return float(half_life), zscore, "HOLD"
+- portfolio/signals\mean_reversion.py:393:    return float(half_life), zscore, "HOLD"
+- portfolio/signals\candlestick.py:248:        return "HOLD"
+- portfolio/signals\candlestick.py:256:        return "HOLD"
+- portfolio/signals\candlestick.py:264:        return "HOLD"
+- portfolio/signals\candlestick.py:272:        return "HOLD"
+- portfolio/signals\candlestick.py:274:    return "HOLD"
+- portfolio/signals\candlestick.py:284:        return "HOLD"
+- portfolio/signals\candlestick.py:302:    return "HOLD"
+- portfolio/signals\candlestick.py:309:        return "HOLD"  # not a doji
+- portfolio/signals\candlestick.py:316:    return "HOLD"      # no trend = indecision, abstain
+- portfolio/signals\candlestick.py:329:        return "HOLD"
+- portfolio/signals\candlestick.py:331:        return "HOLD"
+- portfolio/signals\candlestick.py:336:        return "HOLD"
+- portfolio/signals\candlestick.py:338:        return "HOLD"
+- portfolio/signals\candlestick.py:356:    return "HOLD"
+- portfolio/signals\residual_pair_reversion.py:168:        return float("nan"), "HOLD"
+- portfolio/signals\residual_pair_reversion.py:178:        return float("nan"), "HOLD"
+- portfolio/signals\residual_pair_reversion.py:184:    return z_val, "HOLD"
+- portfolio/signals\residual_pair_reversion.py:197:        return float("nan"), "HOLD"
+- portfolio/signals\residual_pair_reversion.py:204:        return float("nan"), "HOLD"
+- portfolio/signals\residual_pair_reversion.py:208:        return std_val, "HOLD"
+- portfolio/signals\residual_pair_reversion.py:212:    return std_val, "HOLD"  # Stability alone doesn't generate direction
+- portfolio/signals\residual_pair_reversion.py:226:        return float("nan"), "HOLD"
+- portfolio/signals\residual_pair_reversion.py:229:        return hl_val, "HOLD"  # Too slow for actionable MR
+- portfolio/signals\residual_pair_reversion.py:232:    return hl_val, "HOLD"
+- portfolio/signals\trend.py:46:        return "HOLD"
+- portfolio/signals\trend.py:48:        return "HOLD"
+- portfolio/signals\trend.py:53:        return "HOLD"
+- portfolio/signals\trend.py:62:    return "HOLD"
+- portfolio/signals\trend.py:77:            return "HOLD"
+- portfolio/signals\trend.py:86:    return "HOLD"
+- portfolio/signals\trend.py:98:        return "HOLD"
+- portfolio/signals\trend.py:104:    return "HOLD"
+- portfolio/signals\trend.py:194:        return "HOLD", float("nan"), 0
+- portfolio/signals\trend.py:288:        return "HOLD", float("nan")
+- portfolio/signals\trend.py:294:    return "HOLD", float(val)
+- portfolio/signals\trend.py:319:        return "HOLD", float("nan"), float("nan")
+- portfolio/signals\trend.py:334:        return "HOLD", safe_float(tenkan_val), safe_float(kijun_val)
+- portfolio/signals\trend.py:376:        return "HOLD", float("nan"), float("nan"), float("nan")
+- portfolio/signals\trend.py:412:        return "HOLD", float("nan"), float("nan"), float("nan")
+- portfolio/signals\trend.py:425:    return "HOLD", adx_val, pdi_val, mdi_val
+- portfolio/signals\trend.py:474:    - Sub-indicators that lack enough data individually return HOLD.
+- portfolio/signals\treasury_risk_rotation.py:92:    return "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:97:        return "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:103:    return "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:109:        return 0.0, "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:114:        return 0.0, "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:120:    return z, "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:126:        return "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:129:        return "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:142:    return "HOLD"
+- portfolio/signals\treasury_risk_rotation.py:150:    return "HOLD"
+- portfolio/signals\realized_skewness.py:79:    return 0.0, "HOLD", indicators
+- portfolio/signals\realized_skewness.py:94:        return 0.0, "HOLD", {"skew_momentum": np.nan}
+- portfolio/signals\realized_skewness.py:108:    return 0.0, "HOLD", indicators
+- portfolio/signals\realized_skewness.py:121:        return 0.0, "HOLD", {"kurtosis": np.nan}
+- portfolio/signals\realized_skewness.py:133:        return 0.0, "HOLD", indicators
+- portfolio/signals\realized_skewness.py:143:    return 0.0, "HOLD", indicators
+- portfolio/signals\realized_skewness.py:161:        return 0.0, "HOLD", {"skew_divergence": np.nan}
+- portfolio/signals\realized_skewness.py:180:    return 0.0, "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:70:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:94:        return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:99:        return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:108:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:134:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:161:        return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:164:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:187:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:228:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:256:    if _FOMC_MAX_DATE is not None and last_date > _FOMC_MAX_DATE:  # H14: cached
+- portfolio/signals\calendar_seasonal.py:266:            return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:272:            return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:280:    return "HOLD", indicators
+- portfolio/signals\calendar_seasonal.py:312:    return "HOLD", indicators
+- portfolio/signals\volume_flow.py:169:        return "HOLD"
+- portfolio/signals\volume_flow.py:174:    return "HOLD"
+- portfolio/signals\volume_flow.py:179:        return "HOLD"
+- portfolio/signals\volume_flow.py:184:    return "HOLD"
+- portfolio/signals\volume_flow.py:189:        return "HOLD"
+- portfolio/signals\volume_flow.py:194:    return "HOLD"
+- portfolio/signals\volume_flow.py:199:        return "HOLD"
+- portfolio/signals\volume_flow.py:204:    return "HOLD"
+- portfolio/signals\volume_flow.py:209:        return "HOLD"
+- portfolio/signals\volume_flow.py:214:    return "HOLD"
+- portfolio/signals\volume_flow.py:222:        return "HOLD"
+- portfolio/signals\volume_flow.py:225:    return "HOLD"
+- portfolio/signals\structure.py:58:        return "HOLD", indicators
+- portfolio/signals\structure.py:74:        return "HOLD", indicators
+- portfolio/signals\structure.py:83:    return "HOLD", indicators
+- portfolio/signals\structure.py:96:        return "HOLD", indicators
+- portfolio/signals\structure.py:114:    return "HOLD", indicators
+- portfolio/signals\structure.py:126:        return "HOLD", indicators
+- portfolio/signals\structure.py:133:        return "HOLD", indicators
+- portfolio/signals\structure.py:139:    return "HOLD", indicators
+- portfolio/signals\structure.py:153:        return "HOLD", indicators
+- portfolio/signals\structure.py:162:        return "HOLD", indicators
+- portfolio/signals\structure.py:170:    return "HOLD", indicators
+- portfolio/signals\volatility.py:93:    return "HOLD"
+- portfolio/signals\volatility.py:108:        return "HOLD", {"atr": float(current_atr) if not np.isnan(current_atr) else 0.0,
+- portfolio/signals\volatility.py:165:        return "HOLD", {"hist_vol": 0.0}
+- portfolio/signals\volatility.py:285:    return "HOLD", indicators
+- portfolio/signals\williams_vix_fix.py:55:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:65:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:69:    return current_wvf, "HOLD"
+- portfolio/signals\williams_vix_fix.py:82:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:87:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:94:    return pct_val, "HOLD"
+- portfolio/signals\williams_vix_fix.py:111:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:116:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:121:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:129:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:134:    return rsi_val, "HOLD"
+- portfolio/signals\williams_vix_fix.py:152:        return float("nan"), "HOLD"
+- portfolio/signals\williams_vix_fix.py:163:        return low_count_val, "HOLD"
+- portfolio/signals\williams_vix_fix.py:168:    return low_count_val, "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:140:        return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:146:    return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:153:        return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:159:    return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:166:        return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:172:    return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:179:        return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:184:    return "HOLD"
+- portfolio/signals\xtrend_equity_spillover.py:212:    # Fetch SPY/QQQ data (cached 1 hour)
+- portfolio/signals\cross_asset_tsmom.py:20:Data: yfinance for TLT/SPY/GC=F/BTC-USD (free, no API key). Cached 1 hour.
+- portfolio/signals\treasury_risk_rotation.py:17:Data: yfinance IEF + TLT (free, no API key). Cached 1 hour.
+- portfolio/signals\treasury_risk_rotation.py:48:    """Fetch IEF and TLT daily closes via yfinance.  Cached 1 hour."""
+- portfolio/signals\xtrend_equity_spillover.py:18:Data: yfinance for SPY and QQQ (free, no API key).  Cached 1 hour via
+- portfolio/signals\gold_overnight_bias.py:6:  - Overnight (PM fix 15:00 UTC to AM fix 10:30 UTC): persistent positive
+- portfolio/signals\gold_overnight_bias.py:8:  - London PM session (AM fix 10:30 UTC to PM fix 15:00 UTC): persistent
+- portfolio/signals\claude_fundamental.py:912:    # Market hours gate — only refresh during EU+US hours (07:00-21:00 UTC weekdays).
+- I hit a shell policy restriction on array-slicing `Get-Content`, so I’m switching to `Select-Object -Skip/-First` windows for the line-level verification. The first concrete suspect is `heikin_ashi` because it explicitly says it forward-shifts Alligator lines; I’m validating whether it compares the current bar against future-projected values.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signal_engine.py | Select-Object -Skip 3465 -First 120" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signal_engine.py | Select-Object -Skip 1480 -First 50" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\heikin_ashi.py | Select-Object -Skip 280 -First 90" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\heikin_ashi.py | Select-Object -Skip 470 -First 170" in Q:\finance-analyzer
+- Otherwise          = HOLD (sleeping / intertwined).
+- Returns (signal, lips, teeth, jaw).
+- return "HOLD", float("nan"), float("nan"), float("nan")
+- return "HOLD", lips_f, teeth_f, jaw_f
+- - Mixed                           = blue  (HOLD)
+- """Compute a composite Heikin-Ashi and advanced trend signal.
+- 'action': 'BUY' | 'SELL' | 'HOLD',
+- - Returns HOLD with 0.0 confidence when data is insufficient.
+- - Sub-indicators that lack enough data individually return HOLD.
+- missing = required_cols - set(col_map.keys())
+- The enhanced-dispatch side is straightforward: `requires_context` gets `compute_fn(df, context=...)`, `requires_macro` gets `compute_fn(df, macro=...)`, otherwise `compute_fn(df)`. I’m now checking the module ASTs against that contract and surfacing anything that silently falls back to `HOLD` on missing deps or does work at import time.
+- The shell sandbox is happy with `rg`/`Get-Content` but blocks inline Python, so I’m switching the cross-file audit to the Node REPL for structured scans. That will let me inventory signatures and pattern hits without touching the repo.
+- """Claude Fundamental Signal (#28) - three-tier LLM cascade for fundamental analysis.
+- Defaults are tuned for accuracy tracking - need enough samples to
+- measure hit rate. Haiku is cheap/fast so runs often. Opus is expensive
+- """Check if a tier's cache has expired."""
+- "but no 'signals' or 'tickers' data. Signal will return HOLD.",
+- """News/event detection signal - headline velocity, keyword severity, sentiment shift.
+- 4. source_weight      - credible sources amplify signal
+- """Write top 10 scored headlines to disk for fish monitor consumption."""
+- """Forecast signal - price direction prediction from time-series models.
+- into a majority-vote composite signal with four sub-signals:
+- Registered as enhanced signal #28 with weight=0 (shadow mode) initially.
+- """Read kronos_enabled from config.json at import time.
+- sub-signal is EXCLUDED from the composite vote pool (see
+- _PREDICTION_DEDUP_EVICT_AGE = 600  # BUG-106: evict entries older than 10 minutes
+- """DXY cross-asset signal - inverse correlation with metals and crypto.
+- on 1-3h horizons, and -0.72 correlation with BTC. This standalone signal
+- Thresholds differ by asset class - crypto is noisier so uses wider gate.
+- HOLD with 0 confidence if ticker is unsupported or DXY data
+- """Orderbook flow signal - microstructure-based short-term prediction.
+- Signal #31.  Combines 6 microstructure sub-indicators via majority vote:
+- Returns HOLD for stock tickers or when data unavailable.
+- _OFI_THRESHOLD = 5.0  # fallback when z-score unavailable
+- """Compute orderbook flow composite signal.
+- """Credit spread risk appetite signal - cross-asset macro indicator.
+- Signal #35.  Uses ICE BofA High Yield Option-Adjusted Spread (HY OAS)
+- 4. Crisis Level Gate:    hard threshold at 500bp (every bear market)
+- Cached for 4 hours since data updates daily.
+- Cached for 4 hours since data is daily.
+- """Gold-Yield Divergence Index (GYDI) signal - macro regime detector.
+- Data: FRED DFII10 (10Y TIPS real yield), cached 4 hours.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\trend.py | Select-Object -Skip 295 -First 70" in Q:\finance-analyzer
+- Cloud is projected 26 periods ahead, but for a current-bar signal we
+- """Composite Fibonacci and price-level signal module.
+- and pivot points, returning a majority-vote composite BUY/SELL/HOLD signal
+- """Composite price-structure / breakout signal.
+- Each sub-indicator votes BUY / SELL / HOLD.  The composite action is the
+- majority vote; confidence is the fraction of non-HOLD votes that agree with
+- fast: int = 12, slow: int = 26, signal: int = 9) -> pd.Series:
+- """MACD histogram (MACD line minus signal line)."""
+- low of prior *period* bars).  HOLD when inside the channel.
+- If no cross occurred on the latest bar, HOLD.
+- """Compute the composite price-structure signal.
+- ``action`` (BUY / SELL / HOLD), ``confidence`` (0.0-1.0),
+- """Composite Smart Money Concepts (SMC) and market structure signal.
+- Combines five sub-indicators into a single BUY/SELL/HOLD vote via majority
+- At least 50 rows recommended; returns HOLD on insufficient data.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\calendar_seasonal.py | Select-Object -Skip 360 -First 120" in Q:\finance-analyzer
+- dow_action, dow_ind = "HOLD", {}
+- tt_action, tt_ind = "HOLD", {}
+- me_action, me_ind = "HOLD", {}
+- sim_action, sim_ind = "HOLD", {}
+- jan_action, jan_ind = "HOLD", {}
+- ph_action, ph_ind = "HOLD", {}
+- fomc_action, fomc_ind = "HOLD", {}
+- santa_action, santa_ind = "HOLD", {}
+- active_votes = buy_count + sell_count  # non-HOLD votes
+- """Gold overnight bias signal module.
+- Exploits the systematic directional drift in gold prices between LBMA
+- - Overnight (PM fix 15:00 UTC to AM fix 10:30 UTC): persistent positive
+- drift.  Over 54 years, $100 invested only overnight became $112,274.
+- - London PM session (AM fix 10:30 UTC to PM fix 15:00 UTC): persistent
+- negative drift.  Same $100 invested intraday became $6.97.
+- 3. Fix Proximity    -- confidence boost within 90 min of fix times
+- weight).  Non-metals tickers return HOLD.
+- Source: Sprott Money 2024, LBMA fix data 1970-2024.
+- """Core sub-signal: BUY overnight, SELL London PM.
+- Overnight runs from PM fix (15:00 = 900 min) to AM fix (10:30 = 630 min
+- next day).  London PM runs from AM fix to PM fix.
+- Confidence is higher mid-session (established drift) and lower near
+- """Economic calendar signal - event proximity, risk-off, and post-event relief.
+- BUG-218 fix: added post_event_relief sub-signal so the composite can emit BUY,
+- not just SELL/HOLD. Previously structurally SELL-only.
+- """Hours until next event  risk-off signal.
+- This is the strongest sub-signal: if ANY high-impact event is within
+- signal outputs HOLD to suppress noise. Direction comes from trend context,
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "H14|H13|H3|BUG-|horizon" portfolio/signals/calendar_seasonal.py portfolio/signals/econ_calendar.py portfolio/signals/gold_overnight_bias.py portfolio/signals/intraday_seasonality.py portfolio/signals/dxy_cross_asset.py portfolio/signals/credit_spread.py portfolio/signals/vix_term_structure.py' in Q:\finance-analyzer
+- portfolio/signals/dxy_cross_asset.py:4:on 1-3h horizons, and -0.72 correlation with BTC. This standalone signal
+- portfolio/signals/econ_calendar.py:10:BUG-218 fix: added post_event_relief sub-signal so the composite can emit BUY,
+- portfolio/signals/econ_calendar.py:121:    BUG-218: This sub-signal adds BUY capability that was previously missing,
+- portfolio/signals/econ_calendar.py:213:        # BUG-118: Warn when all economic dates have passed (data staleness)
+- portfolio/signals/calendar_seasonal.py:36:# H14: Cache max() at module level — was recomputed on every call (420 calls/cycle).
+- portfolio/signals/calendar_seasonal.py:255:    # BUG-118: Warn when all FOMC dates are in the past (data staleness)
+- portfolio/signals/calendar_seasonal.py:256:    if _FOMC_MAX_DATE is not None and last_date > _FOMC_MAX_DATE:  # H14: cached
+- portfolio/signals/calendar_seasonal.py:395:    # BUG-104: All exception handlers now log failures instead of silently swallowing.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\forecast.py | Select-Object -Skip 720 -First 240" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\cot_positioning.py | Select-Object -Skip 300 -First 120" in Q:\finance-analyzer
+- """VIX term structure signal - contango/backwardation regime detection.
+- to all assets; per-ticker accuracy gating auto-disables for assets
+- """Compute VIX term structure signal for any Tier-1 instrument.
+- """Compute COT positioning composite signal for precious metals.
+- df: Price DataFrame (used minimally - this is a fundamental signal).
+- Standard signal dict with action, confidence, sub_signals, indicators.
+- """Compute the composite forecast signal.
+- OHLCV data (used as fallback if candle fetch fails).
+- "Kronos candle fallback from df for %s (%d candles)", ticker, len(kronos_candles)
+- logger.debug("Kronos df candle fallback failed for %s: %s", ticker, e)
+- """CFTC Commitment of Traders (COT) positioning signal for precious metals.
+- Signal #33.  Contrarian positioning indicator using CFTC COT reports.
+- 4. Real Yield Direction: falling yields = bullish gold (with regime gate)
+- deep context files (metals_precompute.py) with CFTC API fallback.
+- COT reports are published weekly (Friday for Tuesday data), so this signal
+- SM-P1-4 (2026-05-02): use absolute _DATA_DIR - was relative `f"data/..."`
+- SM-P1-4 (2026-05-02): use absolute _DATA_DIR - was relative
+- commodity_name should be 'GOLD' or 'SILVER'.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\forecast.py | Select-Object -Skip 438 -First 40" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\econ_calendar.py | Select-Object -Skip 36 -First 14" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\credit_spread.py | Select-Object -Skip 274 -First 18" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\vix_term_structure.py | Select-Object -Skip 136 -First 50" in Q:\finance-analyzer
+- logger.debug("config.json fallback read failed", exc_info=True)
+- logger.debug("No FRED API key available for credit spread signal")
+- When Kronos is dead (high failure rate), its 2 permanent HOLD votes
+- dilute the 4-vote majority and make the signal always return HOLD.
+- sub-signal is EXCLUDED from the vote pool regardless of `kronos_ok`. The
+- shadow mode is for logging + accuracy backfill only - adding HOLD weights
+- to the composite would tie against Chronos's verdicts (observed 3668
+- times in the previous shadow-mode run, all forced to HOLD). The raw
+- 1h horizon gets 2x weight (counted twice) because short-term predictions
+- I found a stronger, more deterministic bug than the generic horizon complaints: `cot_positioning.py` does not source its “live” COT snapshot from the market/API path at all on the happy path. It reads `external_research.cot_positioning.live` out of a precomputed deep-context file, which is exactly the kind of precomputed signal input the subsystem rules forbid.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\cot_positioning.py | Select-Object -Skip 330 -First 40" in Q:\finance-analyzer
+- portfolio/signals/cot_positioning.py:11:deep context files (metals_precompute.py) with CFTC API fallback.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content portfolio\\signals\\claude_fundamental.py | Select-Object -Skip 670 -First 55" in Q:\finance-analyzer
+- """Refresh one tier's cache by calling the claude CLI."""

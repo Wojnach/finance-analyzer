@@ -1,0 +1,940 @@
+# Codex prose extract: 7-data-external (2026-05-12)
+
+Heuristic extract from `_logs/7-data-external.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 932 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the data-external subsystem (data collectors, sentiment, microstructure, fundamentals) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- - Live prices first; cache TTLs must be honored.
+- - Atomic I/O via file_utils. JSON state file writes never raw.
+- 1. Rate-limit math: requests-per-day counter not persistent across restarts; multi-process counter race.
+- 4. Sentiment: BERT model fallback to wrong tokenizer; sentiment score normalization (0..1 vs -1..+1) inconsistent.
+- 6. fx_rates: stale FX cached > 24h, no validation that rate is sane.
+- 7. price_source: CL=F → Binance FAPI fallback chain — silent fallback to wrong instrument when primary fails.
+- 8. Microstructure: OFI/VPIN window bias, depth imbalance sign convention, persistence of rolling state across process restart.
+- 9. Indicators: pandas-ta vs talib drift; warm-up bars not respected.
+- 10. Onchain BTC: MVRV / SOPR cache key without timestamp -> stale.
+- 12. tickers.py: ticker normalization (XAG=F vs XAG-USD vs SILVER) inconsistent across modules.
+- → Inspect shared infrastructure: retries, API helpers, ticker normalization, calendars, cache/state utilities referenced by the in-scope modules
+- • Trace data collectors and external adapters for rate-limit persistence, fallback chains, cache TTLs, and timezone handling
+- • Review sentiment, on-chain, FX, indicators, and microstructure logic for scoring/sign conventions, stale state, and restart bias
+- • Assemble only concrete findings with severity, file/line references, and missing-test gaps
+- I’ve confirmed the target modules and I’m narrowing onto the shared failure surfaces first: retry policy, clocks/timezones, cache/state writes, and ticker/fallback plumbing. Next I’m searching those patterns across the in-scope files to decide where a full read is necessary.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"json\\.dump|write_text|open\\(|pickle|to_json|to_csv|os\\.replace|file_utils|atomic|cache|ttl|expires|stale\" Q:\\finance-analyzer\\portfolio" in Q:\finance-analyzer
+- Q:\finance-analyzer\portfolio\econ_dates.py:254:    ``datetime.now``. ``events_within_hours`` reads wall clock directly
+- Q:\finance-analyzer\portfolio\equity_curve.py:552:            first_ts = datetime.datetime.fromisoformat(trips[0]["buy_ts"])
+- Q:\finance-analyzer\portfolio\equity_curve.py:553:            last_ts = datetime.datetime.fromisoformat(trips[-1]["sell_ts"])
+- Q:\finance-analyzer\portfolio\elongir\signal.py:12:from datetime import UTC, datetime
+- Q:\finance-analyzer\portfolio\elongir\signal.py:238:            entry_dt = datetime.fromisoformat(entry_time_iso)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:239:            if entry_dt.tzinfo is None:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:240:                entry_dt = entry_dt.replace(tzinfo=UTC)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:242:                datetime.now(UTC) - entry_dt
+- Q:\finance-analyzer\portfolio\loop_contract.py:277:def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation]:
+- Q:\finance-analyzer\portfolio\crypto_scheduler.py:275:    # Fundamentals from cache
+- Q:\finance-analyzer\portfolio\crypto_scheduler.py:285:        logger.debug("Failed to load MSTR fundamentals from cache", exc_info=True)
+- Q:\finance-analyzer\portfolio\avanza_orders.py:15:- stale-CONFIRM race (replayed CONFIRM confirms a NEWER order)
+- Q:\finance-analyzer\portfolio\avanza_orders.py:152:    """Check for Telegram confirmations and expire stale orders.
+- Q:\finance-analyzer\portfolio\avanza_orders.py:161:    created orders cannot be silently confirmed by a stale CONFIRM that
+- Q:\finance-analyzer\portfolio\avanza_orders.py:257:    # Load stored offset (BUG-128: now atomic JSON; handles legacy plain-text format)
+- Q:\finance-analyzer\portfolio\avanza_orders.py:339:    # Save offset atomically to prevent corruption on crash (BUG-128)
+- Q:\finance-analyzer\portfolio\crypto_precompute.py:98:    """Aggregate crypto deep context into the cached JSON file."""
+- Q:\finance-analyzer\portfolio\bigbet.py:32:# Max age for condition streak entries — streaks older than this are stale
+- Q:\finance-analyzer\portfolio\bigbet.py:364:MAX_ACTIVE_BET_SECONDS = 6 * 3600  # 6 hours — auto-expire stale bets
+- Q:\finance-analyzer\portfolio\bigbet.py:408:            count = 1  # fresh or stale — start at 1
+- Q:\finance-analyzer\portfolio\claude_gate.py:64:#   1. Race past the kill switch (CLAUDE_ENABLED check is non-atomic)
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:1:"""Alpha Vantage fundamentals — daily-refresh stock fundamentals cache.
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:37:    """Load fundamentals cache from disk on startup."""
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:41:        logger.info("No fundamentals cache found at %s", CACHE_FILE)
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:46:        logger.info("Loaded fundamentals for %d tickers from cache", len(data))
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:50:    """Write current cache to disk atomically."""
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:57:        logger.warning("Failed to save fundamentals cache: %s", e)
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:61:    """Return cached fundamentals for a ticker, or None if not available."""
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:67:    """Return all cached fundamentals (for reporting)."""
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:160:    BUG-108: Protected by _cache_lock for thread safety.
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:172:    """Check if cached data for ticker is older than max_stale_days."""
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:189:    """Return age of cached data in hours, or None if not cached."""
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:236:    # Build refresh list: stock tickers not recently cached, not skipped
+- Q:\finance-analyzer\portfolio\alpha_vantage.py:305:    Only runs when cache is >24h old. Designed to be called from the main loop.
+- Q:\finance-analyzer\portfolio\cumulative_tracker.py:181:    Cached for 5 minutes via shared_state._cached().
+- Q:\finance-analyzer\portfolio\data_collector.py:46:    ("12h", "1h", 100, 300),  # ~4d data, cache 5min
+- Q:\finance-analyzer\portfolio\data_collector.py:47:    ("2d", "4h", 100, 900),  # ~17d data, cache 15min
+- Q:\finance-analyzer\portfolio\data_collector.py:48:    ("7d", "1d", 100, 3600),  # ~100d data, cache 1hr
+- Q:\finance-analyzer\portfolio\data_collector.py:49:    ("1mo", "3d", 100, 14400),  # ~300d data, cache 4hr
+- Q:\finance-analyzer\portfolio\data_collector.py:50:    ("3mo", "1w", 100, 43200),  # ~2yr data, cache 12hr
+- Q:\finance-analyzer\portfolio\data_collector.py:51:    ("6mo", "1M", 48, 86400),  # ~4yr data, cache 24hr
+- Q:\finance-analyzer\portfolio\data_collector.py:285:            cached = _ss._tool_cache.get(cache_key)
+- Q:\finance-analyzer\portfolio\data_collector.py:286:            if cached and time.time() - cached["time"] < ttl:
+- Q:\finance-analyzer\portfolio\data_collector.py:287:                return (label, cached["data"])
+- Q:\finance-analyzer\portfolio\avanza_client.py:118:    """Reset the cached BankID session verification flag."""
+- Q:\finance-analyzer\portfolio\avanza_client.py:243:    """Get the trading account ID from Avanza overview (cached).
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:24:Load each model lazily on first use, cache (tokenizer, model, device, lock)
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:39:import fails, if a model cache dir is missing, if CUDA OOMs on the load,
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:108:        # instead of the Hub cache layout, so we resolve the path differently.
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:115:# Module-level cache: model_name -> (tokenizer, model, device, lock).
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:231:    # caller's _get_model() doesn't cache, so subsequent predict calls
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:303:    cached tuple on subsequent calls.
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:467:    """Drop the model cache. Tests only - don't call this in production code.
+- Q:\finance-analyzer\portfolio\avanza_account_check.py:22:Result is cached for the lifetime of the process so the metals loop,
+- Q:\finance-analyzer\portfolio\avanza_account_check.py:205:            Failed verifications are NOT cached — they re-check on each
+- Q:\finance-analyzer\portfolio\avanza_account_check.py:324:    """Drop the cached verification — useful in tests."""
+- Q:\finance-analyzer\portfolio\agent_invocation.py:117:    Uses ``_completion_lock`` to make the is-alive-check + spawn atomic
+- Q:\finance-analyzer\portfolio\agent_invocation.py:859:        # observes a live _agent_proc with stale _agent_start/_agent_timeout
+- Q:\finance-analyzer\portfolio\agent_invocation.py:863:        # None and the watchdog ignores the stale metadata.
+- Q:\finance-analyzer\portfolio\agent_invocation.py:1043:        # BUG-181: Write neutral context on failure to prevent stale bias
+- Q:\finance-analyzer\portfolio\earnings_calendar.py:156:    """Get cached earnings proximity for a ticker.
+- Q:\finance-analyzer\portfolio\earnings_calendar.py:169:        cached = _earnings_cache.get(ticker)
+- Q:\finance-analyzer\portfolio\earnings_calendar.py:170:        if cached and now - cached["time"] < EARNINGS_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\earnings_calendar.py:171:            return cached["data"]
+- Q:\finance-analyzer\portfolio\earnings_calendar.py:214:    """Clear the earnings cache (for testing)."""
+- Q:\finance-analyzer\portfolio\avanza_session.py:276:    stale context reference after a relaunch. Otherwise acquires the lock
+- Q:\finance-analyzer\portfolio\avanza_session.py:310:    # both places atomically (no stale-CSRF-against-fresh-context mismatch).
+- Q:\finance-analyzer\portfolio\avanza_session.py:333:                "Session returned 403 Forbidden — CSRF token may be stale. "
+- Q:\finance-analyzer\portfolio\avanza_session.py:742:        valid_days: Days until the stop-loss expires (default 8).
+- Q:\finance-analyzer\portfolio\autonomous.py:8:- Throttling for routine HOLD messages
+- Q:\finance-analyzer\portfolio\autonomous.py:49:    """Load cached consensus accuracy from agent_summary (compact preferred)."""
+- Q:\finance-analyzer\portfolio\autonomous.py:182:        logger.info("Autonomous: throttled (routine HOLD)")
+- Q:\finance-analyzer\portfolio\autonomous.py:807:    # Routine HOLD: throttle
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:15:# C2: Protect all read-modify-write cache operations from concurrent ticker threads
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:20:# threads race through load_cached_accuracy() → None → signal_accuracy() and
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:24:# get_or_compute_*() helpers below use double-checked locking: cache hits
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:27:# freshly-populated cache. The lock is held THROUGH the compute (unlike the
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:28:# signal_utility cache below) because cache-miss is rare (~once per hour
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:41:# In-memory cache for signal_utility (added 2026-04-15, BUG-178 mitigation).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:45:# disk-backed cache — so when the OS file cache is cold (memory pressure,
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:47:# 3-4s cold read, which can compound under file-cache page-in contention.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:56:# must either pass entries= explicitly (which bypasses the cache) or call
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:57:# invalidate_signal_utility_cache() after the write.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:60:# 3600s ACCURACY_CACHE_TTL used for the disk-backed caches. The lock
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:73:# L2 disk-backed cache (added 2026-05-03, BUG-178 follow-up).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:81:# backfill runs daily — a fresh-after-restart cache from earlier today is
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:82:# more accurate than a freshly-computed cache from a partially-loaded SQLite.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:83:# Atomic writes via _atomic_write_json so concurrent writers race to be last
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:93:# the L2 cache's purpose). Disk write is ~10-50ms — keeping this lock
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:99:    """Return cached utility dict for horizon if disk cache is fresh, else None.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:102:    regime_accuracy_cache pattern). Per-horizon data persists across writes,
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:106:    cache = load_json(SIGNAL_UTILITY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:107:    if not isinstance(cache, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:109:    if time.time() - cache.get("time", 0) >= _SIGNAL_UTILITY_DISK_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:111:    cached = cache.get(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:112:    return cached if isinstance(cached, dict) else None
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:116:    """Persist cached utility dict for horizon. Merges with existing horizons.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:125:    Atomic write via _atomic_write_json prevents torn reads even outside
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:128:    Failures are swallowed — a stale L2 cache is harmless (TTL expires) and
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:135:            if not isinstance(cache, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:136:                cache = {}
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:137:            cache[horizon] = data
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:138:            cache["time"] = time.time()
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:139:            _atomic_write_json(SIGNAL_UTILITY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:141:        logger.debug("signal_utility disk cache write failed", exc_info=True)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:159:    # H2: Fallback to JSONL using atomic load_jsonl_tail (avoids raw open()).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:642:    cached for _SIGNAL_UTILITY_CACHE_TTL seconds keyed by horizon. The cold
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:644:    and the OS file cache occasionally cold, this was a legitimate
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:645:    per-cycle cost. Passing an explicit `entries` list bypasses the cache
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:652:            cached = _signal_utility_cache.get(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:653:            if cached and now - cached[0] < _SIGNAL_UTILITY_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:654:                return cached[1]
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:655:        # L1 miss — try L2 disk cache before paying the cold compute. After
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:670:    # Explicit entries — bypass cache (caller controls the dataset).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:676:    cache wrapper can call it without re-entering the cached function
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:700:            # except, so the in-memory cache never populates and every call
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:701:            # pays cold cost (~2.5s). That's the entire BUG-178 cache regression.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:736:    """Clear both the in-memory L1 and the disk-backed L2 signal_utility cache.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:746:    the cached utility values are stale by definition and forcing recompute
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:753:    Disk file removal is best-effort and silent on failure: a stale L2 file
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:762:        logger.debug("signal_utility disk cache delete failed", exc_info=True)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:976:    """Load cached activation rates, recomputing if stale."""
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:978:    cache = load_json(cache_file)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:979:    if cache is not None:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:981:            if time.time() - cache.get("time", 0) < ACTIVATION_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:982:                return cache.get("rates", {})
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:984:            logger.debug("Activation rates cache corrupted, regenerating")
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:990:        logger.warning("Failed to write activation rates cache", exc_info=True)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:995:    cache = load_json(ACCURACY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:996:    if cache is not None:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:998:            # BUG-133: Use per-horizon timestamps to avoid cross-horizon staleness.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1002:                cached = cache.get(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1003:                if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1004:                    return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1006:            logger.debug("Accuracy cache corrupted or missing horizon %s", horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1013:        if not isinstance(cache, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1014:            cache = {}
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1015:        cache[horizon] = data
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1017:        cache[f"time_{horizon}"] = time.time()
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1019:        cache["time"] = time.time()
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1020:        _atomic_write_json(ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1023:# BUG-178 (2026-04-16) cache-miss wrappers. See _accuracy_compute_lock comment
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1025:# `cached = load_cached_accuracy(h); if not cached: cached = signal_accuracy(h);
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1026:# write_accuracy_cache(h, cached)` should call these instead so the compute
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1030:    """Return cached all-time accuracy, computing it once if cache is cold.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1033:    others wait on _accuracy_compute_lock and then read the populated cache.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1035:    cached = load_cached_accuracy(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1036:    if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1037:        return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1039:        cached = load_cached_accuracy(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1040:        if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1041:            return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1051:    cached = load_cached_accuracy(cache_key)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1052:    if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1053:        return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1055:        cached = load_cached_accuracy(cache_key)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1056:        if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1057:            return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1071:    cached = load_cached_accuracy(cache_key)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1072:    if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1073:        return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1075:        cached = load_cached_accuracy(cache_key)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1076:        if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1077:            return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1089:    was the only one without a cache, forcing a full signal-log scan
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1096:    cached = load_cached_accuracy(cache_key)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1097:    if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1098:        return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1100:        cached = load_cached_accuracy(cache_key)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1101:        if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1102:            return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1149:    on the steady-state path. On miss, fans out to 12 cache reads + at
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1155:    in-loop callers that hit the same cache from ticker threads.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1188:        # First gate check using in-memory (and possibly stale) ts.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1381:    """Load cached regime accuracy, returning None if missing or stale.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1383:    Uses the same TTL as the main accuracy cache (ACCURACY_CACHE_TTL).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1385:    cache = load_json(REGIME_ACCURACY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1386:    if cache is not None:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1388:            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1389:                cached = cache.get(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1390:                if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1391:                    return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1393:            logger.debug("Regime accuracy cache corrupted or missing horizon %s", horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1398:    """Persist regime accuracy data to the cache file.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1400:    Merges with any existing horizons to avoid overwriting other cached data.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1404:        if not isinstance(cache, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1405:            cache = {}
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1406:        cache[horizon] = data
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1407:        cache["time"] = time.time()
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1408:        _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1411:# L1 in-memory cache for regime accuracy (added 2026-05-04).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1418:# stale flag. This L1 cache makes the second-through-Nth ticker thread per
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1424:# backfill is daily so the cache is normally cold once per cycle window).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1431:    """L1+L2 cached wrapper around signal_accuracy_by_regime.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1436:    2. L2 (regime_accuracy_cache.json on disk) — survives process restart.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1444:    accuracy gate falls through to global per-signal accuracy. A cache miss
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1449:        cached = _regime_accuracy_cache.get(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1450:        if cached and now - cached[0] < _REGIME_ACCURACY_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1451:            return cached[1]
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1468:    # failure (e.g. SQLite locked) doesn't poison the cache for 5 minutes.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1487:    """Clear both layers of the regime accuracy cache.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1491:    cache file's "time" field — without that, the L2 would keep serving
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1492:    stale data for up to 1h (its TTL) even after L1 is dropped, defeating
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1498:    failure is logged but doesn't raise — a stale L2 self-corrects on its
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1510:            if not isinstance(cache, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1513:                # Drop everything: write empty so stale entries can't reappear
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1517:                cache.pop(horizon, None)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1521:                cache["time"] = 0
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1522:                _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1574:    file_utils.load_jsonl per CLAUDE.md rule 4 (atomic I/O). The previous
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1714:    Results are cached in BEST_HORIZON_CACHE_FILE with the same TTL as the
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1715:    main accuracy cache (ACCURACY_CACHE_TTL).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1726:    cached = load_json(BEST_HORIZON_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1727:    if cached is not None and isinstance(cached, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1729:            if time.time() - cached.get("time", 0) < ACCURACY_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1730:                data = cached.get("data")
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1797:    # --- Write cache ---
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1802:        logger.debug("Failed to write best_horizon cache", exc_info=True)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1915:    """Load cached per-ticker per-signal accuracy, returning None if stale.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1917:    Uses the same TTL as the main accuracy cache (ACCURACY_CACHE_TTL).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1920:    cache = load_json(TICKER_ACCURACY_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1921:    if cache is not None:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1923:            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1924:                cached = cache.get(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1925:                if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1926:                    return cached
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1928:            logger.debug("Ticker accuracy cache corrupted or missing horizon %s", horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1933:    """Persist per-ticker per-signal accuracy data to the cache file.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1935:    Merges with existing horizons to avoid overwriting other cached data.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1939:        if not isinstance(cache, dict):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1940:            cache = {}
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1941:        cache[horizon] = data
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1942:        cache["time"] = time.time()
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1943:        _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1961:    Checks the ticker accuracy cache first; on miss, computes from the
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1962:    full signal log and writes the cache. BUG-178 (2026-04-16): the
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1963:    cache-miss compute path is now serialized via _accuracy_compute_lock
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1965:    entry signal log when the 1h TTL expires.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1967:    cached = load_cached_ticker_accuracy(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1968:    if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1969:        return _filter_min_samples(cached, min_samples)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1973:        # populated the cache while we waited.
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1974:        cached = load_cached_ticker_accuracy(horizon)
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1975:        if cached:
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1976:            return _filter_min_samples(cached, min_samples)
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:25:  P1#2 — throttle replays cached violations so ViolationTracker keeps
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:158:    # Per-ticker per-signal — lifetime via cached helper (1h TTL inside),
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:338:    throttled, returns the cached violations from the last full check
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:350:    # Hourly throttle — replay cached result instead of returning empty
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:357:    # replaying cached violations. Otherwise a 24h+ blackout (FOMC week,
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:360:    # the same stale alert to CRITICAL after 3 cycles.
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:363:        # Clear the cached violation list so post-blackout checks start
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:390:    # the state write would let the throttle re-fire every cycle, defeating the
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:391:    # whole point. The cached violations list is also written so the next
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:401:    """Re-build Violation objects from the cached state JSON.
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:406:    cached = state.get("last_full_check_violations") or []
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:407:    return [_dict_to_violation(c) for c in cached]
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:704:    freshly-written snapshot rather than replaying the cached
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:769:    bypass, downstream swallow, partial atomic write). The natural
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:827:    "Δ vs prev 7d", and on a recurring failure the same stale data
+- Q:\finance-analyzer\portfolio\accuracy_degradation.py:849:        # Refuse to ship stale data: today's snapshot must already exist.
+- Q:\finance-analyzer\portfolio\avanza\tick_rules.py:19:# Module-level cache: ob_id -> list of TickEntry
+- Q:\finance-analyzer\portfolio\avanza\tick_rules.py:29:    """Fetch (and cache) the tick-size table for an orderbook.
+- Q:\finance-analyzer\portfolio\avanza\tick_rules.py:49:    logger.debug("get_tick_rules ob_id=%s entries=%d (cached)", ob_id, len(entries))
+- Q:\finance-analyzer\portfolio\avanza\tick_rules.py:103:    """Clear the module-level tick-rule cache."""
+- Q:\finance-analyzer\portfolio\avanza\tick_rules.py:105:    logger.debug("tick_rules cache cleared")
+- Q:\finance-analyzer\portfolio\avanza\trading.py:230:        valid_days: Days until the stop-loss expires (default 8).
+- Q:\finance-analyzer\portfolio\avanza\trading.py:304:        valid_days: Days until the stop-loss expires.
+- Q:\finance-analyzer\portfolio\forecast_signal.py:67:    """Override the Chronos model (e.g. from config). Resets cached pipeline."""
+- Q:\finance-analyzer\portfolio\fin_snipe_manager.py:11:- cancels stale/mismatched orders so only the intended ladder remains
+- Q:\finance-analyzer\portfolio\fin_snipe_manager.py:429:        # magnitude. Fetch the live rate (with the same 15-min cache the
+- Q:\finance-analyzer\portfolio\fin_snipe_manager.py:1085:    # Prune stale tracking data: remove entries for orders no longer on Avanza
+- Q:\finance-analyzer\portfolio\forecast_accuracy.py:22:# BUG-178/W15-W16 follow-up (2026-04-16): per-cycle in-memory cache for
+- Q:\finance-analyzer\portfolio\forecast_accuracy.py:26:# dict lookup. Mirrors the signal_utility cache pattern in accuracy_stats.py:
+- Q:\finance-analyzer\portfolio\forecast_accuracy.py:45:        cached = _forecast_accuracy_cache.get(key)
+- Q:\finance-analyzer\portfolio\forecast_accuracy.py:46:        if cached and now - cached[0] < _FORECAST_ACCURACY_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\forecast_accuracy.py:47:            return cached[1]
+- Q:\finance-analyzer\portfolio\forecast_accuracy.py:58:    """Clear the in-memory forecast accuracy cache.
+- Q:\finance-analyzer\portfolio\fx_rates.py:4:staleness behaviour: Telegram alerting when stale, hardcoded 10.50 fallback,
+- Q:\finance-analyzer\portfolio\fx_rates.py:5:and ConnectionError semantics. These would be lost with _cached().
+- Q:\finance-analyzer\portfolio\fx_rates.py:22:# BUG-215: Thread-safe FX cache. Accessed from 8-worker ThreadPoolExecutor.
+- Q:\finance-analyzer\portfolio\fx_rates.py:33:    if cached_rate and now - cached_time < 900:  # 15 min cache
+- Q:\finance-analyzer\portfolio\fx_rates.py:56:    # Fallback to stale cached value
+- Q:\finance-analyzer\portfolio\fx_rates.py:63:            logger.warning("Using stale FX rate (%.1fh old)", age_secs / 3600)
+- Q:\finance-analyzer\portfolio\fx_rates.py:67:    # BUG-117: Use ERROR level — hardcoded rate may be severely stale.
+- Q:\finance-analyzer\portfolio\fx_rates.py:69:    logger.error("Using hardcoded FX fallback rate %.2f SEK — no cached or live rate available", FX_RATE_FALLBACK)
+- Q:\finance-analyzer\portfolio\fin_snipe.py:33:    """Load a JSON file safely via file_utils (atomic-read, TOCTOU-safe)."""
+- Q:\finance-analyzer\portfolio\gpu_gate.py:104:    """Reap the lock file iff stale-by-mtime AND owner pid is dead.
+- Q:\finance-analyzer\portfolio\gpu_gate.py:115:    ``Breaking stale GPU lock`` warning either way so log-grep tools and
+- Q:\finance-analyzer\portfolio\gpu_gate.py:127:        logger.warning("Breaking stale GPU lock: %s (pid=%s, dead)",
+- Q:\finance-analyzer\portfolio\gpu_gate.py:138:    """Background daemon: reap stale-dead locks every 30 s.
+- Q:\finance-analyzer\portfolio\gpu_gate.py:194:    # Lazy-spawn the stale-lock sweeper. Idempotent so no cost after the
+- Q:\finance-analyzer\portfolio\gpu_gate.py:223:                # Lock file exists — check if same process (re-entry) or stale.
+- Q:\finance-analyzer\portfolio\gpu_gate.py:229:                # BUG-182: Only break stale lock if owning process is dead.
+- Q:\finance-analyzer\portfolio\gpu_gate.py:233:                    continue  # retry atomic create
+- Q:\finance-analyzer\portfolio\fin_fish.py:720:        # Config leverage is stale (set when cert was added, not at current price).
+- Q:\finance-analyzer\portfolio\file_utils.py:25:    """Atomically write text to a file using tempfile + os.replace.
+- Q:\finance-analyzer\portfolio\file_utils.py:46:    """Atomically write JSON data to a file using tempfile + os.replace.
+- Q:\finance-analyzer\portfolio\file_utils.py:224:    between rotation's "read all lines" and ``os.replace`` would
+- Q:\finance-analyzer\portfolio\file_utils.py:262:    """Append a single JSON entry to a JSONL file with atomic semantics
+- Q:\finance-analyzer\portfolio\file_utils.py:267:    rotation's read → write-tmp → ``os.replace`` could discard any
+- Q:\finance-analyzer\portfolio\file_utils.py:298:                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+- Q:\finance-analyzer\portfolio\file_utils.py:352:    Reads the file, keeps the tail, and atomically rewrites it.
+- Q:\finance-analyzer\portfolio\grid_fisher.py:15:State is held in ``data/grid_fisher_state.json`` (atomic JSON via
+- Q:\finance-analyzer\portfolio\grid_fisher.py:626:    the cached ``inventory_units`` for the instrument; the caller may
+- Q:\finance-analyzer\portfolio\grid_fisher.py:641:            # fill / cancel by the live position delta vs cached
+- Q:\finance-analyzer\portfolio\grid_fisher.py:814:        cached Playwright context stays bound to it.
+- Q:\finance-analyzer\portfolio\grid_fisher.py:1222:        for ob, cached, live in reconcile.inventory_drift:
+- Q:\finance-analyzer\portfolio\grid_fisher.py:1223:            self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+- Q:\finance-analyzer\portfolio\health.py:55:    Prevents uptime_seconds from inheriting a stale start_time
+- Q:\finance-analyzer\portfolio\health.py:71:    /api/health endpoint flips fresh→stale every triggering cycle, which
+- Q:\finance-analyzer\portfolio\health.py:80:    have" hint and must never crash the loop. The atomic write means a
+- Q:\finance-analyzer\portfolio\health.py:89:# Keepalive default interval. The dashboard's stale gate fires at 300s
+- Q:\finance-analyzer\portfolio\health.py:100:    paths, anything that can block longer than the 300s stale threshold)
+- Q:\finance-analyzer\portfolio\health.py:153:    """Check if the loop heartbeat is stale.
+- Q:\finance-analyzer\portfolio\health.py:180:    # Try cached timestamp from health_state first (avoids re-parsing invocations.jsonl)
+- Q:\finance-analyzer\portfolio\health.py:191:        # Write back to health state so subsequent calls hit the cache
+- Q:\finance-analyzer\portfolio\health.py:232:    reflects the *current* state, not a stale "last known failure" — the
+- Q:\finance-analyzer\portfolio\health.py:344:        "status": "stale" if is_stale else "healthy",
+- Q:\finance-analyzer\portfolio\health.py:372:    """Check if outcome backfill is stale (no recent outcomes in signal_log).
+- Q:\finance-analyzer\portfolio\health.py:374:    Returns dict with: stale (bool), newest_outcome_age_hours (float),
+- Q:\finance-analyzer\portfolio\health.py:385:        return {"stale": True, "newest_outcome_age_hours": float("inf"),
+- Q:\finance-analyzer\portfolio\health.py:409:        return {"stale": True, "newest_outcome_age_hours": float("inf"),
+- Q:\finance-analyzer\portfolio\health.py:418:        "stale": age_hours > max_age_hours,
+- Q:\finance-analyzer\portfolio\ic_computation.py:23:# IC cache reads/writes silently went to a phantom directory and IC-based
+- Q:\finance-analyzer\portfolio\ic_computation.py:236:    """Compute IC data and write to cache file."""
+- Q:\finance-analyzer\portfolio\ic_computation.py:241:    cache = {
+- Q:\finance-analyzer\portfolio\ic_computation.py:247:    atomic_write_json(IC_CACHE_FILE, cache)
+- Q:\finance-analyzer\portfolio\ic_computation.py:249:    logger.info("IC cache updated for %s in %.1fs", horizon, dt)
+- Q:\finance-analyzer\portfolio\ic_computation.py:250:    return cache
+- Q:\finance-analyzer\portfolio\ic_computation.py:254:    """Load cached IC data, returning None if stale."""
+- Q:\finance-analyzer\portfolio\ic_computation.py:255:    cache = load_json(IC_CACHE_FILE)
+- Q:\finance-analyzer\portfolio\ic_computation.py:256:    if cache is None:
+- Q:\finance-analyzer\portfolio\ic_computation.py:258:    if time.time() - cache.get("time", 0) > IC_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\ic_computation.py:260:    if cache.get("horizon") != horizon:
+- Q:\finance-analyzer\portfolio\ic_computation.py:262:    return cache
+- Q:\finance-analyzer\portfolio\ic_computation.py:270:    cache = load_cached_ic(horizon)
+- Q:\finance-analyzer\portfolio\ic_computation.py:271:    if cache is None:
+- Q:\finance-analyzer\portfolio\ic_computation.py:272:        cache = compute_and_cache_ic(horizon)
+- Q:\finance-analyzer\portfolio\ic_computation.py:273:    ic_data = cache.get("global", {})
+- Q:\finance-analyzer\portfolio\golddigger\bot.py:153:            logger.warning("Stale data (>%.0fs) — holding", stale_max)
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:34:# FRED yield cache (yields don't change intraday often)
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:40:# yfinance ^TNX has been returning 16h+ stale bars, flooding logs every cycle.
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:71:    data_quality: str = "ok"  # "ok", "partial", "stale"
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:115:    """Fetch an intraday market proxy via yfinance with cache + staleness checks."""
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:118:    cached = _proxy_cache.get(cache_key)
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:119:    if cached and now - cached["time"] < ttl_seconds:
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:120:        return cached["value"]
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:131:            return cached["value"] if cached else None
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:138:            return cached["value"] if cached else None
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:145:            # 2026-04-09: yfinance ^TNX has been stuck on 16h+ stale bars,
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:146:            # and the old behavior of returning the last cached value here
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:149:            # per-cycle warnings. Drop the stale cache entry, return None,
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:157:                    "Proxy %s stale: %.1f min old (limit %.1f) — dropping cache, "
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:158:                    "caller will fall back. Further stale events for this proxy "
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:183:        # 2026-04-09: on fresh recovery after a prior stale run, log once and
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:187:                "Proxy %s recovered (bar %.1f min old) — resuming cache",
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:197:        return cached["value"] if cached else None
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:318:    Falls back to cached value if API is unavailable.
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:329:        logger.debug("No FRED API key — using cached yield or None")
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:636:        quality = "partial" if len(missing) < 3 else "stale"
+- Q:\finance-analyzer\portfolio\kelly_metals.py:50:    """Read per-ticker consensus accuracy from accuracy_cache.json."""
+- Q:\finance-analyzer\portfolio\kelly_metals.py:164:    # Try per-ticker accuracy from cache
+- Q:\finance-analyzer\portfolio\kelly_metals.py:175:            # Blend: 60% DB (more data), 40% cache (includes recent)
+- Q:\finance-analyzer\portfolio\indicators.py:156:    # BUG-169: Access regime cache under lock — 8 threads from ThreadPoolExecutor
+- Q:\finance-analyzer\portfolio\indicators.py:157:    # can call this concurrently. The check-then-clear pattern must be atomic.
+- Q:\finance-analyzer\portfolio\iskbets.py:99:    Results are cached for 5 minutes via shared_state._cached() to avoid
+- Q:\finance-analyzer\portfolio\llm_batch.py:3:During parallel ticker processing, expired LLM cache entries are enqueued
+- Q:\finance-analyzer\portfolio\llm_batch.py:46:# LLM batch, and _cached_or_enqueue returns stale data on the off-cycle 2
+- Q:\finance-analyzer\portfolio\llm_batch.py:57:# 2. Rotation gate sits at the _cached_or_enqueue caller via should_enqueue_fn,
+- Q:\finance-analyzer\portfolio\llm_batch.py:64:#    That way rotation is driven by actual LLM invocations, not by idle cache-
+- Q:\finance-analyzer\portfolio\llm_batch.py:104:    """Add a Ministral cache miss to the batch queue."""
+- Q:\finance-analyzer\portfolio\llm_batch.py:111:    """Add a Qwen3 cache miss to the batch queue."""
+- Q:\finance-analyzer\portfolio\llm_batch.py:139:    """Flush a batch using query_llama_server_batch (atomic, lock held for entire phase)."""
+- Q:\finance-analyzer\portfolio\llama_server.py:271:# Plex transcode detection: cached query of nvidia-smi compute-apps.
+- Q:\finance-analyzer\portfolio\llama_server.py:355:    KV cache) and 4 s ceiling (the original hardcoded sleep). If nvidia-smi
+- Q:\finance-analyzer\portfolio\llama_server.py:367:    floor covers 8B Q4 weights (~4.5 GB) + KV cache (~0.8 GB) + transient
+- Q:\finance-analyzer\portfolio\llama_server.py:505:            # Check if lock is stale (owner dead)
+- Q:\finance-analyzer\portfolio\llama_server.py:577:    reuse the KV cache across successive requests whenever the new prompt
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:11:Appending to the existing log is atomic; modifying earlier rows requires a
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:70:# decommissioned tickers from being matched to multi-week-stale snapshots.
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:268:    The lookup reads the outcomes file once on first call and caches the
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:269:    dict in a closure — re-call returns the stale cache unless you pass a
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:284:                    cache[k] = outcome
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:289:        return cache.get((ts, ticker, horizon))
+- Q:\finance-analyzer\portfolio\llm_prewarmer.py:291:        # work minimal — the load + KV-cache-prime cost dominates and
+- Q:\finance-analyzer\portfolio\llm_calibration.py:6:accuracy logic with thread-locks, TTL caches, and horizon fanout. Mixing
+- Q:\finance-analyzer\portfolio\llm_calibration.py:30:* Does not cache results. Compute is cheap; cache at the caller if needed.
+- Q:\finance-analyzer\portfolio\meta_learner.py:40:# BUG-148: Module-level model cache to avoid deserializing on every predict() call.
+- Q:\finance-analyzer\portfolio\meta_learner.py:401:    # BUG-148: Use cached model, reload only when file is newer (retrained).
+- Q:\finance-analyzer\portfolio\meta_learner.py:403:    cached = _model_cache.get(horizon)
+- Q:\finance-analyzer\portfolio\meta_learner.py:404:    if cached and cached[1] == mtime:
+- Q:\finance-analyzer\portfolio\meta_learner.py:405:        model = cached[0]
+- Q:\finance-analyzer\portfolio\loop_contract.py:37:# accuracy_degradation invariant uses a throttled-replay design (replays
+- Q:\finance-analyzer\portfolio\loop_contract.py:38:# cached violations every cycle to keep ViolationTracker.consecutive
+- Q:\finance-analyzer\portfolio\loop_contract.py:363:    # lose that race. 2s covers it by 50× while still rejecting stale
+- Q:\finance-analyzer\portfolio\loop_contract.py:628:            message="LLM batch flush did not complete. LLM signal results may be stale.",
+- Q:\finance-analyzer\portfolio\loop_contract.py:734:    # Internally hourly-throttled (replays cached violations on cycles in
+- Q:\finance-analyzer\portfolio\loop_contract.py:766:    # means atomic_write_json died between write and rename and the
+- Q:\finance-analyzer\portfolio\loop_contract.py:783:    is in a bad state (cache corruption, missing snapshot file, malformed
+- Q:\finance-analyzer\portfolio\loop_contract.py:813:    This check independently flags the JSONL going stale via mtime:
+- Q:\finance-analyzer\portfolio\loop_contract.py:866:            f"accuracy_snapshots.jsonl is stale: last write "
+- Q:\finance-analyzer\portfolio\loop_contract.py:993:# Orphaned .tmp scan: only flag stale enough to rule out the brief window
+- Q:\finance-analyzer\portfolio\loop_contract.py:994:# during which a healthy atomic_write_json sits between write-and-rename.
+- Q:\finance-analyzer\portfolio\loop_contract.py:1018:    different invariant — atomic_write_residue) can't take down the
+- Q:\finance-analyzer\portfolio\loop_contract.py:1041:                    f"file is malformed or atomic write left a partial copy."
+- Q:\finance-analyzer\portfolio\loop_contract.py:1147:    portfolio.file_utils.atomic_write_json writes to ``<path>.tmp`` then
+- Q:\finance-analyzer\portfolio\loop_contract.py:1157:        logger.debug("atomic write residue scan failed: %s", e)
+- Q:\finance-analyzer\portfolio\loop_contract.py:1165:    stale: list[dict] = []
+- Q:\finance-analyzer\portfolio\loop_contract.py:1178:        # atomic_write_json writes to <path>.tmp; some callers use other
+- Q:\finance-analyzer\portfolio\loop_contract.py:1188:        stale.append({
+- Q:\finance-analyzer\portfolio\loop_contract.py:1192:    if not stale:
+- Q:\finance-analyzer\portfolio\loop_contract.py:1195:        invariant="atomic_write_residue",
+- Q:\finance-analyzer\portfolio\loop_contract.py:1202:            f"atomic_write_json crashed mid-write — readers see stale data."
+- Q:\finance-analyzer\portfolio\loop_contract.py:1205:            "count": len(stale),
+- Q:\finance-analyzer\portfolio\loop_contract.py:1206:            "stale_files": stale[:_TMP_RESIDUE_MAX_REPORT],
+- Q:\finance-analyzer\portfolio\loop_contract.py:1409:    ``ttl_s`` seconds (Codex P2 2026-04-28) so the dispatcher's 24 h
+- Q:\finance-analyzer\portfolio\loop_contract.py:2072:    # Per-call cache so multiple violations of the same invariant see
+- Q:\finance-analyzer\portfolio\loop_contract.py:2346:        # All good — clear tracker counters AND any stale alert state
+- Q:\finance-analyzer\portfolio\metals_precompute.py:91:    """Aggregate all metals context into cached JSON files.
+- Q:\finance-analyzer\portfolio\metals_precompute.py:1059:    """Load cached external research or seed with known data for silver."""
+- Q:\finance-analyzer\portfolio\metals_precompute.py:1147:    """Load cached external research or seed with known data for gold."""
+- Q:\finance-analyzer\portfolio\log_rotation.py:246:    The full read → write-tmp → ``os.replace`` sequence runs under the
+- Q:\finance-analyzer\portfolio\log_rotation.py:247:    same sidecar lock that ``atomic_append_jsonl`` holds. Without that
+- Q:\finance-analyzer\portfolio\log_rotation.py:357:        # atomic within the same volume on Windows + POSIX.
+- Q:\finance-analyzer\portfolio\metals_orderbook.py:39:    """Mark a function so tests can call func.__wrapped__ to bypass _cached."""
+- Q:\finance-analyzer\portfolio\metals_cross_assets.py:77:    """Mark function so tests can bypass _cached via func.__wrapped__."""
+- Q:\finance-analyzer\portfolio\local_llm_report.py:306:            "stale": [
+- Q:\finance-analyzer\portfolio\message_throttle.py:3:Trade messages always bypass the throttle.
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:11:the metals_loop reads cached values for most cycles and only refreshes
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:115:    Returns the same shape as the cached file so callers can round-trip.
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:153:    the cached value is older than ``REFRESH_INTERVAL_SEC``.
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:155:    The cache file lives at ``data/oil_grid_signal.json`` so other
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:158:    cached = load_json(SIGNAL_FILE, default=None)
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:159:    if not force and isinstance(cached, dict) and cached.get("ts"):
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:162:                cached["ts"], "%Y-%m-%dT%H:%M:%SZ",
+- Q:\finance-analyzer\portfolio\oil_grid_signal.py:169:                return cached
+- Q:\finance-analyzer\portfolio\news_keywords.py:317:# Memoize per-ticker patterns; tickers are a fixed small set so the cache
+- Q:\finance-analyzer\portfolio\news_keywords.py:318:# never grows large. None values are cached too (use sentinel-via-membership).
+- Q:\finance-analyzer\portfolio\loop_health.py:14:| `stale`  | heartbeat exists but age > STALE_THRESHOLD_SECONDS |
+- Q:\finance-analyzer\portfolio\loop_health.py:18:The `stale` and `missing` states are what the watchdog alerts on. The
+- Q:\finance-analyzer\portfolio\loop_health.py:35:# Default stale threshold — loops cycle every 60s, so anything older than
+- Q:\finance-analyzer\portfolio\loop_health.py:68:    `state` is one of: "fresh", "stale", "missing", "unparseable".
+- Q:\finance-analyzer\portfolio\loop_health.py:124:    out["state"] = "fresh" if age_seconds <= stale_threshold_seconds else "stale"
+- Q:\finance-analyzer\portfolio\loop_health.py:151:          "unhealthy": [name, ...],   # loops in stale/missing/unparseable
+- Q:\finance-analyzer\portfolio\main.py:283:    # Market health refresh (hourly via internal cache, self-checking)
+- Q:\finance-analyzer\portfolio\main.py:380:    # Signal postmortem (daily — uses accuracy cache, generates once per day)
+- Q:\finance-analyzer\portfolio\main.py:385:        # Regenerate if missing or stale (>20 hours old)
+- Q:\finance-analyzer\portfolio\main.py:474:    # Rate limiters, cache locks, and GPU gate are already thread-safe.
+- Q:\finance-analyzer\portfolio\main.py:588:    #   signals occasionally pull stale/miss data under contention bursts.
+- Q:\finance-analyzer\portfolio\main.py:597:    #   2 (signal_utility TTL cache) ship together so we can see per-phase
+- Q:\finance-analyzer\portfolio\main.py:664:    # Ministral/Qwen3/fingpt cache misses were enqueued during parallel
+- Q:\finance-analyzer\portfolio\main.py:834:        # dashboard /api/health flips stale 300s into any triggering cycle
+- Q:\finance-analyzer\portfolio\main.py:870:    # bigbet sweeps that would otherwise re-trip the dashboard stale gate.
+- Q:\finance-analyzer\portfolio\main.py:927:            if outcome_status["stale"]:
+- Q:\finance-analyzer\portfolio\main.py:929:                msg = (f"⚠️ SAFEGUARD: Outcome backfill stale! "
+- Q:\finance-analyzer\portfolio\main.py:1143:    # Check if previous loop crashed (stale heartbeat)
+- Q:\finance-analyzer\portfolio\main.py:1168:    # Load Alpha Vantage fundamentals cache from disk
+- Q:\finance-analyzer\portfolio\main.py:1173:        logger.warning("Failed to load fundamentals cache: %s", e)
+- Q:\finance-analyzer\portfolio\ml_signal.py:107:    cached = _pred_cache.get(ticker)
+- Q:\finance-analyzer\portfolio\ml_signal.py:108:    if cached and now - cached["time"] < PRED_TTL:
+- Q:\finance-analyzer\portfolio\ml_signal.py:109:        return cached["data"]
+- Q:\finance-analyzer\portfolio\portfolio_mgr.py:1:"""Portfolio state management — load, save, atomic writes, value calculation."""
+- Q:\finance-analyzer\portfolio\market_timing.py:158:# Holiday set cache — avoids recalculating Easter + date arithmetic every cycle.
+- Q:\finance-analyzer\portfolio\market_timing.py:168:    Results are cached per year.
+- Q:\finance-analyzer\portfolio\market_timing.py:202:    Results are cached per year.
+- Q:\finance-analyzer\portfolio\macro_context.py:25:# 2026-04-13: Intraday DXY cache is 3 min — 60m bars refresh at each hour
+- Q:\finance-analyzer\portfolio\macro_context.py:273:    extended periods (16h stale), triggering `TypeError('NoneType' object is
+- Q:\finance-analyzer\portfolio\macro_context.py:279:    has its own 1h cache + circuit breaker.
+- Q:\finance-analyzer\portfolio\market_health.py:5:cached hourly to avoid rate limits.
+- Q:\finance-analyzer\portfolio\market_health.py:460:    """Get cached market health snapshot.  Refreshes hourly.
+- Q:\finance-analyzer\portfolio\market_health.py:463:        force: bypass cache and recompute
+- Q:\finance-analyzer\portfolio\market_health.py:474:    """Post-cycle hook: refresh market health if stale.
+- Q:\finance-analyzer\portfolio\price_source.py:18:yfinance SI=F                   655.4 s      389 ms    ← 85× stale
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:358:         then os.replace under the lock so the rename is atomic w.r.t.
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:360:         the process window was clobbered by the os.replace.
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:518:    #   2. The os.replace is atomic w.r.t. any subsequent appender —
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:543:                    f_out.write((json.dumps(entry) + "\n").encode("utf-8"))
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:565:    # Invalidate signal utility cache so the next cycle picks up fresh
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:571:            logger.info("Signal utility cache invalidated after backfill (%d entries)", updated)
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:573:            logger.debug("Could not invalidate signal utility cache", exc_info=True)
+- Q:\finance-analyzer\portfolio\portfolio_validator.py:261:    # from portfolio_mgr.atomic_write_json: a partial write could be read
+- Q:\finance-analyzer\portfolio\portfolio_validator.py:264:    # decode failures and uses the same atomic-rename window as the writer.
+- Q:\finance-analyzer\portfolio\onchain_data.py:30:    """A-DE-5 (2026-04-11): Coerce a cache timestamp to a unix-epoch float.
+- Q:\finance-analyzer\portfolio\onchain_data.py:39:        - anything else / fail  → 0.0 (treated as ancient → cache miss)
+- Q:\finance-analyzer\portfolio\onchain_data.py:41:    Returning 0 on failure is safe: it forces a cache miss, which costs
+- Q:\finance-analyzer\portfolio\onchain_data.py:58:    # forces a cache miss, which costs one extra API call but never breaks
+- Q:\finance-analyzer\portfolio\onchain_data.py:93:# Persistent cache (survives restarts)
+- Q:\finance-analyzer\portfolio\onchain_data.py:97:    """Save on-chain data to persistent cache file."""
+- Q:\finance-analyzer\portfolio\onchain_data.py:99:        # BUG-125: Use atomic_write_json to prevent corrupt cache on crash
+- Q:\finance-analyzer\portfolio\onchain_data.py:102:        logger.warning("Failed to write onchain cache", exc_info=True)
+- Q:\finance-analyzer\portfolio\onchain_data.py:106:    """Load on-chain data from persistent cache if fresh enough."""
+- Q:\finance-analyzer\portfolio\onchain_data.py:116:        logger.warning("On-chain cache load failed: %s", e, exc_info=True)
+- Q:\finance-analyzer\portfolio\onchain_data.py:239:    # Save to persistent cache
+- Q:\finance-analyzer\portfolio\onchain_data.py:245:    """Get on-chain data for BTC, using in-memory + persistent cache.
+- Q:\finance-analyzer\portfolio\onchain_data.py:249:    # H12/DC-R3-5: On restart, seed the in-memory cache from the persistent cache
+- Q:\finance-analyzer\portfolio\onchain_data.py:255:        # this cache stored "ts" as an ISO 8601 string instead of an epoch
+- Q:\finance-analyzer\portfolio\onchain_data.py:262:            # Still fresh — pre-populate the in-memory cache so _cached() returns
+- Q:\finance-analyzer\portfolio\onchain_data.py:272:                    logger.debug("On-chain: seeded in-memory cache from persistent (age %.0fs)",
+- Q:\finance-analyzer\portfolio\onchain_data.py:277:        # Try persistent cache even without token
+- Q:\finance-analyzer\portfolio\onchain_data.py:278:        cached = _load_onchain_cache(max_age_seconds=ONCHAIN_TTL * 2)
+- Q:\finance-analyzer\portfolio\onchain_data.py:279:        if cached:
+- Q:\finance-analyzer\portfolio\onchain_data.py:280:            logger.debug("No BGeometrics token, using stale cache")
+- Q:\finance-analyzer\portfolio\onchain_data.py:281:            return cached
+- Q:\finance-analyzer\portfolio\microstructure_state.py:227:    if age_ms > 120_000:  # stale if >2 minutes old
+- Q:\finance-analyzer\portfolio\sentiment.py:266:    Tries the in-process BERT cache first (portfolio.bert_sentiment) because
+- Q:\finance-analyzer\portfolio\sentiment.py:270:    cache dir is missing.
+- Q:\finance-analyzer\portfolio\sentiment.py:494:    also benefits from the in-process GPU cache. _run_model's _INPROC_BERT_MAP
+- Q:\finance-analyzer\portfolio\sentiment.py:868:    # fingpt enqueues directly because it doesn't use the signal cache — it
+- Q:\finance-analyzer\portfolio\risk_management.py:38:# update sequence in _streaming_max — both reading the cached offset and
+- Q:\finance-analyzer\portfolio\risk_management.py:39:# writing back the new offset have to be atomic relative to other workers.
+- Q:\finance-analyzer\portfolio\risk_management.py:46:    FEAT-3 (2026-04-29): Uses a byte-offset cache so subsequent calls only
+- Q:\finance-analyzer\portfolio\risk_management.py:50:    PR-P1-2 (2026-05-02): _peak_cache reads + writes are serialized under
+- Q:\finance-analyzer\portfolio\risk_management.py:51:    _peak_cache_lock to avoid the 8-worker ThreadPoolExecutor losing cached
+- Q:\finance-analyzer\portfolio\risk_management.py:67:    # Snapshot cache under the lock — keeps the (read offset, decide
+- Q:\finance-analyzer\portfolio\risk_management.py:71:        cached = _peak_cache.get(cache_key)
+- Q:\finance-analyzer\portfolio\risk_management.py:72:        if cached is not None:
+- Q:\finance-analyzer\portfolio\risk_management.py:73:            if file_size >= cached["offset"]:
+- Q:\finance-analyzer\portfolio\risk_management.py:74:                start_offset = cached["offset"]
+- Q:\finance-analyzer\portfolio\risk_management.py:75:                peak = cached["peak"]
+- Q:\finance-analyzer\portfolio\risk_management.py:122:    """Return USD→SEK rate, preferring (1) summary, (2) cached, (3) hardcoded.
+- Q:\finance-analyzer\portfolio\risk_management.py:135:         update the disk cache for future fallbacks.
+- Q:\finance-analyzer\portfolio\risk_management.py:136:      2. Cached rate from ``DATA_DIR/fx_rate_cache.json`` if present and
+- Q:\finance-analyzer\portfolio\risk_management.py:137:         in-band. The cache is best-effort: corrupt JSON or missing/invalid
+- Q:\finance-analyzer\portfolio\risk_management.py:138:         rate field is treated as no-cache.
+- Q:\finance-analyzer\portfolio\risk_management.py:145:    correctly even if a stale agent_summary still embeds 1.0 itself.
+- Q:\finance-analyzer\portfolio\risk_management.py:161:            logger.debug("fx cache persist failed: %s", e)
+- Q:\finance-analyzer\portfolio\risk_management.py:164:    # Try disk cache.
+- Q:\finance-analyzer\portfolio\risk_management.py:165:    cached = load_json(DATA_DIR / _FX_CACHE_FILENAME, default=None)
+- Q:\finance-analyzer\portfolio\risk_management.py:166:    if isinstance(cached, dict):
+- Q:\finance-analyzer\portfolio\risk_management.py:167:        # 2026-05-10 (codex re-review): cached.get("rate") is Any|None;
+- Q:\finance-analyzer\portfolio\risk_management.py:171:        rate_raw = cached.get("rate")
+- Q:\finance-analyzer\portfolio\risk_management.py:182:        "and no usable cache at %s. Portfolio valuations may be ~10%% off if "
+- Q:\finance-analyzer\portfolio\risk_management.py:197:    # P1-15 (2026-05-02): use cached fallback chain instead of raw .get(..., 1.0).
+- Q:\finance-analyzer\portfolio\risk_management.py:255:            # feed is stale while holdings are underwater, the
+- Q:\finance-analyzer\portfolio\risk_management.py:258:            # WARNING so dashboards/oncall can see "feed stale"
+- Q:\finance-analyzer\portfolio\risk_management.py:594:    # _resolve_fx_rate inside _compute_portfolio_value walk the cache chain
+- Q:\finance-analyzer\portfolio\risk_management.py:752:    # P1-15 (2026-05-02): use cached fallback chain instead of raw .get(..., 1.0).
+- Q:\finance-analyzer\portfolio\sentiment_shadow_backfill.py:91:    decommissioned tickers from matching multi-week-stale snapshots).
+- Q:\finance-analyzer\portfolio\oil_precompute.py:994:    """Load cached external research or seed with baseline oil data."""
+- Q:\finance-analyzer\portfolio\reporting.py:239:            vix = _cached("vix", 900, fetch_vix)  # 15min cache
+- Q:\finance-analyzer\portfolio\reporting.py:314:        # Use cached accuracy to avoid redundant full-log scans
+- Q:\finance-analyzer\portfolio\reporting.py:394:    # BGeometrics on-chain data (BTC only, 12h cache)
+- Q:\finance-analyzer\portfolio\reporting.py:743:    # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
+- Q:\finance-analyzer\portfolio\reporting.py:744:    # so Layer 2 always sees all instruments. Prune entries stale for >24h.
+- Q:\finance-analyzer\portfolio\reporting.py:756:                            # Prune entries that have been stale for too long
+- Q:\finance-analyzer\portfolio\reporting.py:766:                            data["stale"] = True
+- Q:\finance-analyzer\portfolio\reporting.py:771:            logger.warning("[reporting] stale data preservation failed", exc_info=True)
+- Q:\finance-analyzer\portfolio\reporting.py:779:    # what triggers recovery — clears a stale prior failure record).
+- Q:\finance-analyzer\portfolio\shadow_registry.py:154:    `stale_days`. Each dict includes `signal`, `days_in_shadow`, and the
+- Q:\finance-analyzer\portfolio\shadow_registry.py:157:    stale = []
+- Q:\finance-analyzer\portfolio\shadow_registry.py:165:            stale.append({
+- Q:\finance-analyzer\portfolio\shadow_registry.py:170:    return sorted(stale, key=lambda x: -x["days_in_shadow"])
+- Q:\finance-analyzer\portfolio\shared_state.py:14:# Tool cache — avoid re-running expensive tools every cycle
+- Q:\finance-analyzer\portfolio\shared_state.py:21:_CACHE_MAX_SIZE = 512  # evict expired entries when cache exceeds this size
+- Q:\finance-analyzer\portfolio\shared_state.py:25:# Tracks which keys are currently being refreshed. When a thread sees a cache
+- Q:\finance-analyzer\portfolio\shared_state.py:26:# miss and the key is already loading, it returns stale data (if available)
+- Q:\finance-analyzer\portfolio\shared_state.py:31:# permanently stuck keys (batch flush crash before updating cache).
+- Q:\finance-analyzer\portfolio\shared_state.py:34:_MAX_STALE_FACTOR = 3  # return None if cached data is older than TTL * this factor
+- Q:\finance-analyzer\portfolio\shared_state.py:38:    """Cache-through helper: returns cached data if fresh, else calls func.
+- Q:\finance-analyzer\portfolio\shared_state.py:40:    Dogpile prevention (BUG-166): when multiple threads detect a cache miss
+- Q:\finance-analyzer\portfolio\shared_state.py:41:    simultaneously, only one thread fetches the data. Others return stale
+- Q:\finance-analyzer\portfolio\shared_state.py:45:    On error, returns stale data if it's less than TTL * _MAX_STALE_FACTOR old.
+- Q:\finance-analyzer\portfolio\shared_state.py:52:        # Evict expired entries when cache grows too large
+- Q:\finance-analyzer\portfolio\shared_state.py:78:        # this key, return stale data instead of calling func redundantly.
+- Q:\finance-analyzer\portfolio\shared_state.py:84:                    logger.debug("[%s] stale-while-revalidate (another thread loading)", key)
+- Q:\finance-analyzer\portfolio\shared_state.py:86:            # No stale data available — return None rather than pile on
+- Q:\finance-analyzer\portfolio\shared_state.py:87:            logger.debug("[%s] no stale data, another thread loading — returning None", key)
+- Q:\finance-analyzer\portfolio\shared_state.py:95:            # Don't cache None results — they typically indicate transient
+- Q:\finance-analyzer\portfolio\shared_state.py:120:                        "[%s] stale data too old (%.0fs > %.0fs max), returning None",
+- Q:\finance-analyzer\portfolio\shared_state.py:131:    """Check cache — if fresh return it, if expired enqueue for batch and return stale.
+- Q:\finance-analyzer\portfolio\shared_state.py:134:    the request to the batch queue and returns stale data (or None).
+- Q:\finance-analyzer\portfolio\shared_state.py:142:    - should_enqueue_fn: callable returning bool. If provided and the cache
+- Q:\finance-analyzer\portfolio\shared_state.py:143:      is stale-but-present, skip the enqueue when the callback says "no"
+- Q:\finance-analyzer\portfolio\shared_state.py:144:      (rotation off-cycle). If stale data is NOT available, force-enqueue
+- Q:\finance-analyzer\portfolio\shared_state.py:146:      when no stale fallback exists. Default None means "always enqueue",
+- Q:\finance-analyzer\portfolio\shared_state.py:149:    - max_stale_factor: integer override for how stale data can be returned,
+- Q:\finance-analyzer\portfolio\shared_state.py:162:        # Check stale availability BEFORE deciding whether to enqueue, because
+- Q:\finance-analyzer\portfolio\shared_state.py:163:        # the rotation gate can only safely skip enqueue when we have stale
+- Q:\finance-analyzer\portfolio\shared_state.py:164:        # fallback to return. If stale is exhausted we must force-enqueue.
+- Q:\finance-analyzer\portfolio\shared_state.py:166:        # 2026-04-10 code-review finding N1: also treat cached `data is None`
+- Q:\finance-analyzer\portfolio\shared_state.py:167:        # as "stale NOT available". main.py writes _update_cache(key, None)
+- Q:\finance-analyzer\portfolio\shared_state.py:172:        # enqueues on failed-cache entries matching legacy recovery behavior.
+- Q:\finance-analyzer\portfolio\shared_state.py:185:        # - Callback returns False AND stale available: skip (rotation off-cycle,
+- Q:\finance-analyzer\portfolio\shared_state.py:186:        #   stale fallback carries us until next on-cycle)
+- Q:\finance-analyzer\portfolio\shared_state.py:187:        # - Callback returns False AND stale NOT available: enqueue anyway
+- Q:\finance-analyzer\portfolio\shared_state.py:212:        # Return stale if available
+- Q:\finance-analyzer\portfolio\shared_state.py:228:    """Update a cache entry directly (for batch flush results)."""
+- Q:\finance-analyzer\portfolio\shared_state.py:246:# Regime detection cache (invalidated each cycle)
+- Q:\finance-analyzer\portfolio\shared_state.py:389:NEWSAPI_TTL = 1800       # 30 min fallback — overridden by newsapi_ttl_for_ticker()
+- Q:\finance-analyzer\portfolio\mstr_loop\strategies\momentum_rider.py:80:        # Don't enter on a stale signal block (MSTR closed hours).
+- Q:\finance-analyzer\portfolio\mstr_loop\strategies\momentum_rider.py:81:        if bundle.stale:
+- Q:\finance-analyzer\portfolio\mstr_loop\strategies\mean_reversion.py:65:        if bundle.stale:
+- Q:\finance-analyzer\portfolio\mstr_loop\data_provider.py:49:    # Is the signal block marked stale by the main loop? (MSTR closed hours)
+- Q:\finance-analyzer\portfolio\mstr_loop\data_provider.py:50:    stale: bool
+- Q:\finance-analyzer\portfolio\mstr_loop\data_provider.py:64:        if self.stale:
+- Q:\finance-analyzer\portfolio\mstr_loop\data_provider.py:212:        stale=bool(sig.get("stale", False)),
+- Q:\finance-analyzer\portfolio\mstr_loop\state.py:7:Atomic I/O only — never raw json.dump. Corrupt state file falls back to a
+- Q:\finance-analyzer\portfolio\mstr_loop\state.py:197:    """Persist state atomically. Non-fatal on write failure (logs only)."""
+- Q:\finance-analyzer\portfolio\mstr_loop\loop.py:62:            "stale": bundle_or_none.stale,
+- Q:\finance-analyzer\portfolio\mstr_loop\config.py:191:# File paths (all atomic-write via portfolio.file_utils)
+- Q:\finance-analyzer\portfolio\signals\crypto_evrp.py:71:    cached = _DVOL_CACHE.get(cache_key)
+- Q:\finance-analyzer\portfolio\signals\crypto_evrp.py:72:    if cached and (time.time() - cached[0]) < _DVOL_CACHE_TTL:
+- Q:\finance-analyzer\portfolio\signals\crypto_evrp.py:73:        return cached[1]
+- Q:\finance-analyzer\portfolio\signals\crypto_evrp.py:121:    cached = _DVOL_HISTORY_CACHE.get(cache_key)
+- Q:\finance-analyzer\portfolio\signals\crypto_evrp.py:122:    if cached and (time.time() - cached[0]) < _DVOL_HISTORY_TTL:
+- Q:\finance-analyzer\portfolio\signals\crypto_evrp.py:123:        return cached[1]
+- Q:\finance-analyzer\portfolio\signals\forecast.py:124:# BUG-102: Lock protects circuit breaker state and dedup cache from ThreadPoolExecutor races.
+- Q:\finance-analyzer\portfolio\signals\forecast.py:125:# The read-check-write pattern in _log_health() is not atomic without a lock.
+- Q:\finance-analyzer\portfolio\signals\forecast.py:129:# logging cached replays. Key: ticker, value: ISO-8601 timestamp.
+- Q:\finance-analyzer\portfolio\signals\forecast.py:237:    # BUG-102: Use lock to make read-check-write atomic
+- Q:\finance-analyzer\portfolio\signals\forecast.py:480:# Per-ticker accuracy cache TTL
+- Q:\finance-analyzer\portfolio\signals\forecast.py:534:    """Load per-ticker forecast accuracy, cached via _cached().
+- Q:\finance-analyzer\portfolio\signals\forecast.py:941:    # BUG-106: Evict stale entries to prevent unbounded dict growth
+- Q:\finance-analyzer\portfolio\signals\forecast.py:967:                # BUG-106: Evict stale entries older than 10 minutes
+- Q:\finance-analyzer\portfolio\signals\forecast.py:968:                stale = [k for k, v in _last_prediction_ts.items()
+- Q:\finance-analyzer\portfolio\signals\forecast.py:970:                for k in stale:
+- Q:\finance-analyzer\portfolio\trigger.py:122:            logger.info("trigger: pruning %d stale ticker(s) from baseline: %s", len(removed), ", ".join(sorted(removed)))
+- Q:\finance-analyzer\portfolio\signals\econ_calendar.py:213:        # BUG-118: Warn when all economic dates have passed (data staleness)
+- Q:\finance-analyzer\portfolio\signals\copper_gold_ratio.py:44:_CACHE_TTL = 300  # 5-minute cache for external fetches
+- Q:\finance-analyzer\portfolio\signals\copper_gold_ratio.py:71:    cached = _CACHE.get("ratio_df")
+- Q:\finance-analyzer\portfolio\signals\copper_gold_ratio.py:72:    if cached and now - cached[0] < _CACHE_TTL:
+- Q:\finance-analyzer\portfolio\signals\copper_gold_ratio.py:73:        return cached[1]
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:41:# --- Three-tier cache ---
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:93:    """Check if a tier's cache has expired."""
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:147:# Earnings calendar cache (refreshed every 12h)
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:211:        fundamentals: Dict of all fundamentals from alpha_vantage cache
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:295:    """Load fundamentals from alpha_vantage cache (returns empty dict on failure)."""
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:677:    """Refresh one tier's cache by calling the claude CLI."""
+- Q:\finance-analyzer\portfolio\signal_postmortem.py:253:    """Load cached postmortem for inclusion in agent_summary.
+- Q:\finance-analyzer\portfolio\signals\calendar_seasonal.py:255:    # BUG-118: Warn when all FOMC dates are in the past (data staleness)
+- Q:\finance-analyzer\portfolio\signals\calendar_seasonal.py:256:    if _FOMC_MAX_DATE is not None and last_date > _FOMC_MAX_DATE:  # H14: cached
+- Q:\finance-analyzer\portfolio\signal_history.py:28:# only guarantees the FILE write is atomic — not that the read+modify+write
+- Q:\finance-analyzer\portfolio\signal_history.py:29:# sequence is atomic across threads.
+- Q:\finance-analyzer\portfolio\signal_decay_alert.py:36:            cache = json.load(f)
+- Q:\finance-analyzer\portfolio\signal_decay_alert.py:38:        logger.warning("Cannot load accuracy cache: %s", e)
+- Q:\finance-analyzer\portfolio\signals\gold_real_yield_paradox.py:10:Data: FRED DFII10 (10Y TIPS real yield), cached 4 hours.
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:68:# --- FRED-sourced macro indicators (daily, 4h cache) ---
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:106:    series_id: str, fred_api_key: str, cache: dict,
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:108:    """Fetch a FRED series.  Returns list of floats (newest first), cached 4h."""
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:112:            cache.get("key") == fred_api_key
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:113:            and cache.get("data")
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:114:            and now - cache.get("time", 0) < _FRED_CACHE_TTL
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:116:            return cache["data"]
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:120:        return cache.get("data")
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:126:        return cache.get("data")
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:153:                cache["key"] = fred_api_key
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:154:                cache["data"] = values
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:155:                cache["time"] = now
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:164:    return cache.get("data")
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:204:    # Daily anchors — always fetched, cached with their own TTL elsewhere:
+- Q:\finance-analyzer\portfolio\signals\metals_cross_asset.py:216:    # one-off API hiccups shouldn't downgrade the whole signal to stale
+- Q:\finance-analyzer\portfolio\signal_weights.py:8:Weights are persisted to JSON via the same atomic I/O used across the project.
+- Q:\finance-analyzer\portfolio\signal_engine.py:33:# ADX computation cache — keyed by (id(df), len(df), last_close) tuple so a
+- Q:\finance-analyzer\portfolio\signal_engine.py:35:# stale hit (see _compute_adx for the C1 content-key rationale, 2026-05-10
+- Q:\finance-analyzer\portfolio\signal_engine.py:519:_IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
+- Q:\finance-analyzer\portfolio\signal_engine.py:558:# Cross-ticker consensus cache: stores the most recent consensus action per
+- Q:\finance-analyzer\portfolio\signal_engine.py:945:# 5-minute cache. econ_dates is hardcoded so the underlying data
+- Q:\finance-analyzer\portfolio\signal_engine.py:1207:        # wrong when the downtrend classification is stale or stocks are recovering.
+- Q:\finance-analyzer\portfolio\signal_engine.py:1333:_DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
+- Q:\finance-analyzer\portfolio\signal_engine.py:1348:    """Compute horizon-specific signal weight multipliers from accuracy cache.
+- Q:\finance-analyzer\portfolio\signal_engine.py:1356:    HORIZON_SIGNAL_WEIGHTS if accuracy cache is unavailable.
+- Q:\finance-analyzer\portfolio\signal_engine.py:1360:        cache = load_json(DATA_DIR / "accuracy_cache.json")
+- Q:\finance-analyzer\portfolio\signal_engine.py:1361:        if not cache:
+- Q:\finance-analyzer\portfolio\signal_engine.py:1366:        this_data = cache.get(this_key, {})
+- Q:\finance-analyzer\portfolio\signal_engine.py:1379:            ch_acc = cache.get(ch_key, {})
+- Q:\finance-analyzer\portfolio\signal_engine.py:1419:    Uses cached dynamic weights when available, falling back to static dict.
+- Q:\finance-analyzer\portfolio\signal_engine.py:1518:_DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
+- Q:\finance-analyzer\portfolio\signal_engine.py:1759:    half-written cache), and with a silent fall-through-as-valid when it
+- Q:\finance-analyzer\portfolio\signal_engine.py:1820:        # half-written cache). Replay had `except TypeError` but live didn't.
+- Q:\finance-analyzer\portfolio\signal_engine.py:2028:# IC data cache: reuse ic_computation.py infrastructure with in-memory TTL.
+- Q:\finance-analyzer\portfolio\signal_engine.py:2034:    """Load IC data for the given horizon, computing if cache is stale.
+- Q:\finance-analyzer\portfolio\signal_engine.py:2041:        cached = _ic_data_cache.get(horizon)
+- Q:\finance-analyzer\portfolio\signal_engine.py:2042:        if cached and now - cached.get("_loaded_at", 0) < _IC_DATA_TTL:
+- Q:\finance-analyzer\portfolio\signal_engine.py:2043:            return cast(dict[Any, Any], cached)
+- Q:\finance-analyzer\portfolio\signal_engine.py:2047:        cache = load_cached_ic(horizon)
+- Q:\finance-analyzer\portfolio\signal_engine.py:2048:        if cache is None:
+- Q:\finance-analyzer\portfolio\signal_engine.py:2049:            cache = compute_and_cache_ic(horizon)
+- Q:\finance-analyzer\portfolio\signal_engine.py:2050:        if cache:
+- Q:\finance-analyzer\portfolio\signal_engine.py:2051:            cache["_loaded_at"] = now
+- Q:\finance-analyzer\portfolio\signal_engine.py:2053:                _ic_data_cache[horizon] = cache
+- Q:\finance-analyzer\portfolio\signal_engine.py:2054:            return cast(dict[Any, Any], cache)
+- Q:\finance-analyzer\portfolio\signal_engine.py:2453:        # adds a third branch to the gate-check below cannot leak a stale
+- Q:\finance-analyzer\portfolio\signal_engine.py:2527:            weight = stats.get("buy_accuracy", acc)  # BUG-185: .get() for cache safety
+- Q:\finance-analyzer\portfolio\signal_engine.py:2529:            weight = stats.get("sell_accuracy", acc)  # BUG-185: .get() for cache safety
+- Q:\finance-analyzer\portfolio\signal_engine.py:2798:        # BUG-86: Thread-safe cache write with eviction
+- Q:\finance-analyzer\portfolio\signal_engine.py:3271:    # BTC-only. Data from BGeometrics (12h cache, 15 req/day).
+- Q:\finance-analyzer\portfolio\signal_engine.py:3349:    # Uses batch queue: on cache miss, enqueues for post-cycle flush instead of
+- Q:\finance-analyzer\portfolio\signal_engine.py:3360:            # _cached_or_enqueue skips the enqueue and returns stale data.
+- Q:\finance-analyzer\portfolio\signal_engine.py:3361:            # max_stale_factor=5 gives 5 * 15 min = 75 min of stale tolerance,
+- Q:\finance-analyzer\portfolio\signal_engine.py:3721:    # exempt it from regime gating even if all-time data is bad. Prevents stale regime
+- Q:\finance-analyzer\portfolio\signal_engine.py:3729:        # get_or_compute_recent_accuracy expects the base horizon, not the cache key
+- Q:\finance-analyzer\portfolio\signal_engine.py:3756:                "accuracy %.1f%% (%d sam) overrides stale gate",
+- Q:\finance-analyzer\portfolio\signal_engine.py:3766:    # _weighted_consensus, leaving `extra_info["_voters"]` stale - Stage 4's
+- Q:\finance-analyzer\portfolio\signal_engine.py:3779:    # line ~3333 ("core_active == 0 ...") sees a stale 1 even when the
+- Q:\finance-analyzer\portfolio\signal_engine.py:3853:        # cache-miss compute via _accuracy_compute_lock so 5 parallel ticker
+- Q:\finance-analyzer\portfolio\signal_engine.py:3855:        # entries when the 1h TTL expires (was 215s wall before the fix).
+- Q:\finance-analyzer\portfolio\signal_engine.py:3897:    # real accuracy values for cached signals, negating the fail-closed gate.
+- Q:\finance-analyzer\portfolio\signal_engine.py:3971:                        # The accuracy_data may be a reference to cached alltime data.
+- Q:\finance-analyzer\portfolio\signal_engine.py:4201:    # Update cross-ticker consensus cache for synthetic cross-asset signals
+- Q:\finance-analyzer\portfolio\signals\news_event.py:36:# Inner NewsAPI cache uses NEWSAPI_TTL (30 min) to protect daily quota.
+- Q:\finance-analyzer\portfolio\signal_registry.py:69:    """Lazy-load and cache the compute function for a signal.
+- Q:\finance-analyzer\portfolio\signal_registry.py:74:    cached = entry.get("func")
+- Q:\finance-analyzer\portfolio\signal_registry.py:75:    if cached is not None and cached is not _FAILED_IMPORT_SENTINEL:
+- Q:\finance-analyzer\portfolio\signal_registry.py:76:        return cached
+- Q:\finance-analyzer\portfolio\signal_registry.py:77:    if cached is _FAILED_IMPORT_SENTINEL and time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
+- Q:\finance-analyzer\portfolio\telegram_poller.py:22:# pending getUpdates, and then the stale filter (msg_date < startup-60s)
+- Q:\finance-analyzer\portfolio\telegram_poller.py:25:# _handle_update bypasses the stale filter for post-restart pending
+- Q:\finance-analyzer\portfolio\telegram_poller.py:38:# 60 s stale filter applies.
+- Q:\finance-analyzer\portfolio\telegram_poller.py:53:        # process don't get re-fetched (and re-stale-filtered) on restart.
+- Q:\finance-analyzer\portfolio\telegram_poller.py:54:        # ``_initial_offset`` is the value we loaded from disk — the stale
+- Q:\finance-analyzer\portfolio\telegram_poller.py:93:        """Persist current offset atomically. Best-effort: a write failure
+- Q:\finance-analyzer\portfolio\telegram_poller.py:144:    # examined and intentionally not acted on (stale, empty, unrecognized,
+- Q:\finance-analyzer\portfolio\telegram_poller.py:146:    # would just settle them the same way, so we ack the offset.
+- Q:\finance-analyzer\portfolio\telegram_poller.py:201:            # accidentally re-running a stale getUpdates queue from a long
+- Q:\finance-analyzer\portfolio\telegram_poller.py:328:        #      race against an external atomic_write_json rename mid-read on
+- Q:\finance-analyzer\portfolio\strategies\elongir_strategy.py:22:    - Silver spot: from SharedData (metals loop cache, updated every 60s)
+- Q:\finance-analyzer\portfolio\strategies\elongir_strategy.py:75:        # Fetch own FX rate (cached in fx_rates module)
+- Q:\finance-analyzer\portfolio\strategies\golddigger_strategy.py:35:    - FX (USD/SEK): from SharedData (metals loop cache)
+- Q:\finance-analyzer\portfolio\strategies\golddigger_strategy.py:36:    - US10Y: from GoldDigger's own provider (15min cache)
+- Q:\finance-analyzer\portfolio\strategies\golddigger_strategy.py:37:    - Cert bid/ask: from SharedData cert_prices (metals loop cache, 60s stale)
+- Q:\finance-analyzer\portfolio\strategies\golddigger_strategy.py:91:        # Fetch own FX rate (cached in fx_rates module, ~daily refresh)
+- Q:\finance-analyzer\portfolio\signals\xtrend_equity_spillover.py:212:    # Fetch SPY/QQQ data (cached 1 hour)
+- Q:\finance-analyzer\portfolio\autonomous.py:794:    if normalized and all(("consensus" in r and "hold" in r and "buy" not in r and "sell" not in r) for r in normalized):
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:464:    direction. HOLD calls are skipped (no direction to score).
+- Q:\finance-analyzer\portfolio\accuracy_stats.py:1105:        # write all of them so a horizon with zero scored entries doesn't
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:1:"""In-process BERT sentiment inference (CryptoBERT, Trading-Hero-LLM, FinBERT).
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:37:portfolio/sentiment.py wraps every call to this module in try/except and
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:86:        # sentiment.py expects positive/negative/neutral, so map at read time.
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:298:    return tokenizer, model, device, threading.Lock()
+- Q:\finance-analyzer\portfolio\bert_sentiment.py:350:    tokenizer, model, device, lock = _get_model(model_name)
+- Q:\finance-analyzer\portfolio\feature_normalizer.py:1:"""Rolling z-score feature normalizer for signal inputs.
+- Q:\finance-analyzer\portfolio\feature_normalizer.py:4:provides z-score normalization.  This makes signal thresholds regime-adaptive:
+- Q:\finance-analyzer\portfolio\elongir\data_provider.py:99:    """Read XAG-USD signals from agent_summary_compact.json.
+- Q:\finance-analyzer\portfolio\elongir\signal.py:60:            1. 5m RSI < oversold threshold (30)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:61:            2. Price below 5m BB lower OR 15m BB lower
+- Q:\finance-analyzer\portfolio\elongir\signal.py:71:        tf5 = indicators.tf_5m
+- Q:\finance-analyzer\portfolio\elongir\signal.py:72:        tf15 = indicators.tf_15m
+- Q:\finance-analyzer\portfolio\elongir\signal.py:74:        rsi_5m = tf5.rsi
+- Q:\finance-analyzer\portfolio\elongir\signal.py:75:        macd_hist_5m = tf5.macd_histogram
+- Q:\finance-analyzer\portfolio\elongir\signal.py:76:        bb_lower_5m = tf5.bb_lower
+- Q:\finance-analyzer\portfolio\elongir\signal.py:77:        bb_lower_15m = tf15.bb_lower
+- Q:\finance-analyzer\portfolio\elongir\signal.py:83:                silver_price, rsi_5m, bb_lower_5m, bb_lower_15m, high_1h
+- Q:\finance-analyzer\portfolio\elongir\signal.py:88:                    "DIP_DETECTED: RSI=%.1f, price=%.2f, bb_lower_5m=%.2f",
+- Q:\finance-analyzer\portfolio\elongir\signal.py:89:                    rsi_5m or 0, silver_price, bb_lower_5m or 0,
+- Q:\finance-analyzer\portfolio\elongir\signal.py:91:            self._update_prev(rsi_5m, macd_hist_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:97:            improving = self._check_macd_improving(macd_hist_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:98:            rsi_turning = self._check_rsi_turning_up(rsi_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:114:            if rsi_5m is not None and rsi_5m > self.cfg.rsi_overbought:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:115:                logger.info("DIP fizzled: RSI recovered to %.1f without MACD confirmation", rsi_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:118:            self._update_prev(rsi_5m, macd_hist_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:123:            if rsi_5m is not None and rsi_5m > self.cfg.rsi_recovery:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:124:                logger.info("BUY TRIGGER: RSI %.1f crossed above %.1f", rsi_5m, self.cfg.rsi_recovery)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:126:                self._update_prev(rsi_5m, macd_hist_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:130:            if rsi_5m is not None and rsi_5m < self.cfg.rsi_oversold - 10:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:131:                logger.info("CONFIRMING_BUY failed: RSI dropped further to %.1f", rsi_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:134:            self._update_prev(rsi_5m, macd_hist_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:137:        self._update_prev(rsi_5m, macd_hist_5m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:143:        rsi_5m: float | None,
+- Q:\finance-analyzer\portfolio\elongir\signal.py:144:        bb_lower_5m: float | None,
+- Q:\finance-analyzer\portfolio\elongir\signal.py:145:        bb_lower_15m: float | None,
+- Q:\finance-analyzer\portfolio\elongir\signal.py:150:        if rsi_5m is None or rsi_5m >= self.cfg.rsi_oversold:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:153:        # 2. Price below BB lower (5m or 15m)
+- Q:\finance-analyzer\portfolio\elongir\signal.py:155:        if bb_lower_5m is not None and silver_price < bb_lower_5m:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:157:        if bb_lower_15m is not None and silver_price < bb_lower_15m:
+- Q:\finance-analyzer\portfolio\elongir\signal.py:201:        SELL_SIGNAL -- 5m RSI overbought + MACD histogram declining
+- Q:\finance-analyzer\portfolio\elongir\signal.py:204:        TAKE_PROFIT -- price reached 2% above entry
+- Q:\finance-analyzer\portfolio\elongir\signal.py:224:                        "TAKE_PROFIT", "TIME_STOP", or None.
+- Q:\finance-analyzer\portfolio\elongir\signal.py:234:            return "TAKE_PROFIT"
+- Q:\finance-analyzer\portfolio\elongir\signal.py:256:        tf5 = indicators.tf_5m
+- Q:\finance-analyzer\portfolio\elongir\signal.py:257:        rsi_5m = tf5.rsi
+- Q:\finance-analyzer\portfolio\elongir\signal.py:267:        if (rsi_5m is not None
+- Q:\finance-analyzer\portfolio\elongir\signal.py:268:                and rsi_5m > self.cfg.rsi_overbought
+- Q:\finance-analyzer\portfolio\fin_evolve.py:102:    coverage), so the fallback is required to score MSTR/fin-crypto entries
+- Q:\finance-analyzer\portfolio\fin_evolve.py:268:    Skips horizons already scored (idempotent). Uses the API fallback so
+- Q:\finance-analyzer\portfolio\fin_evolve.py:317:    and writes scored results to data/journal_outcomes.jsonl (append-only).
+- Q:\finance-analyzer\portfolio\fin_evolve.py:950:    # 2. Accuracy by command — dynamic across all commands present in scored data
+- Q:\finance-analyzer\portfolio\fin_fish.py:497:    return _score_candidates_buy(candidates, spot, vol, drift, hours)
+- Q:\finance-analyzer\portfolio\fin_fish.py:541:    return _score_candidates_sell(candidates, spot, vol, drift, hours)
+- Q:\finance-analyzer\portfolio\funding_rate.py:28:    # funding signal for the cycle (and 8 of those = whole cycle thread pool
+- Q:\finance-analyzer\portfolio\fish_monitor_smart.py:137:        GC=F, CL=F) hit Binance FAPI for real-time, ETFs hit Alpaca,
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:3:Computes 30-second log-returns, rolling z-scores (60-min window), and a
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:4:weighted composite score S_t that drives entry/exit decisions.
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:35:    valid: bool = False        # True when enough data for z-scores
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:45:def _zscore(value: float, window: deque, min_samples: int = 10) -> float:
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:46:    """Compute z-score of value relative to rolling window.
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:59:    """Rolling z-score composite signal for gold intraday trading.
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:62:    z-scores over a configurable rolling window (default 120 = 60 min).
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:139:        # Compute z-scores
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:140:        z_gold = _zscore(r_gold, self._gold_returns, self.min_window)
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:141:        z_fx = _zscore(r_fx, self._fx_returns, self.min_window)
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:142:        z_yield = _zscore(delta_y_bps, self._yield_changes, self.min_window)
+- Q:\finance-analyzer\portfolio\golddigger\signal.py:144:        # Composite score: gold UP, USD DOWN, yields DOWN = bullish
+- Q:\finance-analyzer\portfolio\kelly_sizing.py:161:    normalized weight. Only considers signals that are actively voting (non-HOLD).
+- Q:\finance-analyzer\portfolio\linear_factor.py:4:signal snapshots and forward returns. Produces a continuous score rather than
+- Q:\finance-analyzer\portfolio\linear_factor.py:8:where zi are z-scored signal features.
+- Q:\finance-analyzer\portfolio\linear_factor.py:147:        """Convert continuous score to BUY/SELL/HOLD action.
+- Q:\finance-analyzer\portfolio\linear_factor.py:151:            threshold: Minimum absolute score for directional signal.
+- Q:\finance-analyzer\portfolio\llm_outcome_backfill.py:98:    2026-04-28: horizon is normalized via `or "1d"` to match the write
+- Q:\finance-analyzer\portfolio\llm_batch.py:251:    # Phase 3: All fingpt sentiment queries (lock held for entire phase)
+- Q:\finance-analyzer\portfolio\llm_batch.py:255:    # inference time per cycle. Fingpt is a SHADOW sentiment signal (does
+- Q:\finance-analyzer\portfolio\local_llm_report.py:151:    # crossed the 60 % / 200-sample promotion gate from portfolio/sentiment.py.
+- Q:\finance-analyzer\portfolio\local_llm_report.py:315:    # Per-shadow-model sentiment accuracy from the A/B log backfill.
+- Q:\finance-analyzer\portfolio\local_llm_report.py:326:        logger.debug("sentiment shadow accuracy load failed: %s", e)
+- Q:\finance-analyzer\portfolio\main.py:668:    # bespoke scripts/fingpt_daemon.py. The sentiment A/B log write is
+- Q:\finance-analyzer\portfolio\main.py:686:        # sentiment._pending_ab_entries via _stash_fingpt_result, write out
+- Q:\finance-analyzer\portfolio\main.py:744:    # BUG-85: Flush batched sentiment state to disk once per cycle (not per-ticker)
+- Q:\finance-analyzer\portfolio\microstructure_state.py:4:The orderbook_flow signal reads the accumulated OFI and spread z-score
+- Q:\finance-analyzer\portfolio\ministral_trader.py:180:        match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
+- Q:\finance-analyzer\portfolio\mstr_loop\data_provider.py:4:plus the MSTR-weighted consensus score plus live price fields strategies
+- Q:\finance-analyzer\portfolio\news_keywords.py:15:# Keyword tiers: word/phrase -> weight multiplier for sentiment scoring
+- Q:\finance-analyzer\portfolio\news_keywords.py:81:    (re.compile(r"\b" + re.escape(kw) + r"\b", re.IGNORECASE), weight)
+- Q:\finance-analyzer\portfolio\news_keywords.py:164:    weight, _ = score_headline(title)
+- Q:\finance-analyzer\portfolio\news_keywords.py:266:# Headline relevance (added 2026-04-28 for sentiment regression fix)
+- Q:\finance-analyzer\portfolio\news_keywords.py:269:# Background: shadow LLM accuracy investigation found that the sentiment
+- Q:\finance-analyzer\portfolio\news_keywords.py:277:#   1. It triggers a keyword from score_headline (weight > 1.0), OR
+- Q:\finance-analyzer\portfolio\news_keywords.py:312:        return re.compile(r"\b" + re.escape(short) + r"\b", re.IGNORECASE)
+- Q:\finance-analyzer\portfolio\news_keywords.py:337:    weight, _ = score_headline(title)
+- Q:\finance-analyzer\portfolio\mstr_loop\config.py:185:# Auto-scorecard (v2 Tier 1) — writes after every closed trade
+- Q:\finance-analyzer\portfolio\oil_precompute.py:857:            + ("contrarian sell signal" if nc_zscore > 1.5
+- Q:\finance-analyzer\portfolio\oil_precompute.py:858:               else "contrarian buy signal" if nc_zscore < -1.5
+- Q:\finance-analyzer\portfolio\outcome_tracker.py:99:        return extra.get("funding_action", "HOLD")
+- Q:\finance-analyzer\portfolio\price_source.py:75:    # CL=F/BZ=F routed to Alpaca (futures unsupported) → fallback to
+- Q:\finance-analyzer\portfolio\qwen3_trader.py:175:        match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
+- Q:\finance-analyzer\portfolio\mstr_loop\execution.py:331:    trade is never blocked by a scorecard write.
+- Q:\finance-analyzer\portfolio\mstr_loop\execution.py:347:        mod.main()  # writes data/mstr_loop_scorecard.json as side-effect
+- Q:\finance-analyzer\portfolio\mstr_loop\execution.py:349:        pass  # scorecard main() calls sys.exit, swallow
+- Q:\finance-analyzer\portfolio\reporting.py:366:    # Signal activation rates (normalized weights for Layer 2 reference)
+- Q:\finance-analyzer\portfolio\sentiment.py:5:data/sentiment_ab_log.jsonl for accuracy tracking. Once a shadow model proves
+- Q:\finance-analyzer\portfolio\sentiment.py:279:            # we end up stuck on the subprocess fallback. sentiment.py already
+- Q:\finance-analyzer\portfolio\sentiment.py:301:# Fingpt is a SHADOW sentiment signal — it never votes. Its output lands in
+- Q:\finance-analyzer\portfolio\sentiment.py:319:# AFTER get_sentiment() has already returned to the signal engine. The
+- Q:\finance-analyzer\portfolio\sentiment.py:321:# log write is DEFERRED: get_sentiment() stashes the primary + finbert shadow
+- Q:\finance-analyzer\portfolio\sentiment.py:328:# accuracy tracking consumes: one row per get_sentiment() call, with a
+- Q:\finance-analyzer\portfolio\sentiment.py:495:    knows that FINBERT_SCRIPT -> "FinBERT" and will hit bert_sentiment.predict
+- Q:\finance-analyzer\portfolio\sentiment.py:727:    """Log A/B test results to sentiment_ab_log.jsonl for accuracy comparison."""
+- Q:\finance-analyzer\portfolio\sentiment.py:752:    2026-04-28 (fix/sentiment-relevance-and-aggregation): two changes here.
+- Q:\finance-analyzer\portfolio\sentiment.py:769:    data/sentiment_ab_log.jsonl for accuracy tracking.
+- Q:\finance-analyzer\portfolio\sentiment.py:807:    # Compute dissemination score for weight amplification
+- Q:\finance-analyzer\portfolio\sentiment_shadow_backfill.py:153:    """Read the sentiment A/B log and backfill outcomes.
+- Q:\finance-analyzer\portfolio\sentiment_shadow_backfill.py:160:        existing argmax sentiment accuracy horizon.
+- Q:\finance-analyzer\portfolio\sentiment_shadow_backfill.py:247:        primary_class = _SENTIMENT_TO_CLASS.get(primary_sentiment, "HOLD")
+- Q:\finance-analyzer\portfolio\sentiment_shadow_backfill.py:264:            predicted_class = _SENTIMENT_TO_CLASS.get(sentiment, "HOLD")
+- Q:\finance-analyzer\portfolio\mstr_loop\strategies\mean_reversion.py:98:        # Signal flip — weighted LONG score exceeds threshold → close SHORT.
+- Q:\finance-analyzer\portfolio\mstr_loop\strategies\momentum_rider.py:1:"""momentum_rider — ride MSTR trends LONG using MSTR-weighted signal score.
+- Q:\finance-analyzer\portfolio\mstr_loop\strategies\momentum_rider.py:113:        # Signal flip — MSTR-weighted SHORT score exceeds its threshold.
+- Q:\finance-analyzer\portfolio\signal_history.py:26:# discarded. Persistence scores, streaks, and noisy-signal lists are then
+- Q:\finance-analyzer\portfolio\signal_history.py:102:    """Compute persistence score for each signal for a ticker.
+- Q:\finance-analyzer\portfolio\signal_history.py:104:    Persistence score measures how often a signal maintains the same direction
+- Q:\finance-analyzer\portfolio\signals\cot_positioning.py:91:    commodity_name should be 'GOLD' or 'SILVER'.
+- Q:\finance-analyzer\portfolio\signals\copper_gold_ratio.py:204:    # --- Sub-signal 1: Ratio z-score ---
+- Q:\finance-analyzer\portfolio\signals\copper_gold_ratio.py:215:        zscore_vote = "HOLD"
+- Q:\finance-analyzer\portfolio\signal_engine.py:1016:_sentiment_lock = threading.Lock()  # BUG-85: protect concurrent access from ThreadPoolExecutor
+- Q:\finance-analyzer\portfolio\signal_engine.py:1049:    """Set sentiment direction for a ticker (thread-safe, batched disk write)."""
+- Q:\finance-analyzer\portfolio\signal_engine.py:1843:    """P2-D (2026-04-17): normalize regime strings to a canonical lowercase form.
+- Q:\finance-analyzer\portfolio\signal_engine.py:2110:    Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
+- Q:\finance-analyzer\portfolio\signal_engine.py:2296:    # below sentiment's already-halved weight, making the overlay
+- Q:\finance-analyzer\portfolio\signal_engine.py:2561:        # regime, sentiment hits 0.5 (macro) × 0.X (regime) × Y (horizon).
+- Q:\finance-analyzer\portfolio\signal_engine.py:3041:    # The double-underscore prefix is reserved; no registered signal uses it.
+- Q:\finance-analyzer\portfolio\signal_engine.py:3191:    votes["sentiment"] = "HOLD"
+- Q:\finance-analyzer\portfolio\signal_engine.py:3257:    votes["funding"] = "HOLD"
+- Q:\finance-analyzer\portfolio\signal_engine.py:3270:    # On-Chain BTC Signal — MVRV Z-Score, SOPR, NUPL, Exchange Netflow.
+- Q:\finance-analyzer\portfolio\signal_engine.py:3954:    # Utility boost: scale accuracy weight by return-based utility score.
+- Q:\finance-analyzer\portfolio\trade_risk_classifier.py:12:HOLD is always LOW (score 0, no factors).
+- Q:\finance-analyzer\portfolio\signals\futures_basis.py:120:    return "HOLD", v_normalized
+- Q:\finance-analyzer\portfolio\signals\futures_basis.py:181:    return "HOLD", a_normalized
+- Q:\finance-analyzer\portfolio\signals\futures_flow.py:1:"""Futures flow signal — OI, long/short ratios, funding rate history.
+- Q:\finance-analyzer\portfolio\signals\forecast.py:49:# Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.
+- Q:\finance-analyzer\portfolio\trigger.py:77:    Shared by signal flip (section 2) and sentiment reversal (section 5).
+- Q:\finance-analyzer\portfolio\trigger.py:390:_FADE_FLIP_RE = re.compile(r'\bflipped (?:BUY|SELL)->HOLD \(sustained\)')
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:4:BUY/SELL/HOLD signal with confidence score.
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:339:    """Ornstein-Uhlenbeck half-life + z-score mean reversion signal.
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:345:    Signal fires when half-life is short (<40 bars) AND z-score is extreme.
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:347:    Returns (half_life, zscore, signal).
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:383:    # Signal: short half-life + extreme z-score
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:386:        return float(half_life), zscore, "HOLD"
+- Q:\finance-analyzer\portfolio\signals\mean_reversion.py:393:    return float(half_life), zscore, "HOLD"
+- Q:\finance-analyzer\portfolio\signals\momentum_factors.py:4:BUY/SELL/HOLD signal with confidence score.
+- Q:\finance-analyzer\portfolio\signals\momentum.py:4:BUY/SELL/HOLD signal with confidence score.
+- Q:\finance-analyzer\portfolio\signals\orderbook_flow.py:31:_OFI_THRESHOLD = 5.0  # fallback when z-score unavailable
+- Q:\finance-analyzer\portfolio\signals\orderbook_flow.py:63:    # Read accumulated OFI, OFI z-score, multiscale, and spread z-score
+- Q:\finance-analyzer\portfolio\signals\orderbook_flow.py:126:        sub_signals["depth_imbalance"] = "HOLD"
+- Q:\finance-analyzer\portfolio\signals\orderbook_flow.py:152:    # Sub 4: OFI — prefer z-score (asset-normalized), fallback to absolute
+- Q:\finance-analyzer\portfolio\signals\news_event.py:1:"""News/event detection signal — headline velocity, keyword severity, sentiment shift.
+- Q:\finance-analyzer\portfolio\signals\news_event.py:53:    """Write top 10 scored headlines to disk for fish monitor consumption."""
+- Q:\finance-analyzer\portfolio\signals\news_event.py:63:            weight, _ = score_headline(title)
+- Q:\finance-analyzer\portfolio\signals\news_event.py:226:        weight, matched = score_headline(title)
+- Q:\finance-analyzer\portfolio\signals\news_event.py:520:            "sentiment_shift": "HOLD",
+- Q:\finance-analyzer\portfolio\signals\oscillators.py:4:BUY/SELL/HOLD signal with confidence score.
+- Q:\finance-analyzer\portfolio\signals\realized_skewness.py:4:a majority-vote composite BUY/SELL/HOLD signal with confidence score.
+- Q:\finance-analyzer\portfolio\signals\realized_skewness.py:50:    """Sub-signal 1: z-scored realized skewness.
+- Q:\finance-analyzer\portfolio\signals\ovx_metals_spillover.py:16:Metals-only (XAU-USD, XAG-USD). Returns HOLD for other tickers.
+- Q:\finance-analyzer\portfolio\signals\residual_pair_reversion.py:359:    # z-score is the primary directional signal
+- Q:\finance-analyzer\portfolio\signals\vwap_zscore_mr.py:58:        # Sub-signal 1: VWAP Z-score
+- Q:\finance-analyzer\portfolio\avanza_session.py:208:# Keeps the singleton + _pw_lock (BUG-129 / A-AV-1). The whole retry runs
+- Q:\finance-analyzer\portfolio\circuit_breaker.py:50:                # BUG-245: Reset backoff on successful recovery
+- Q:\finance-analyzer\portfolio\circuit_breaker.py:61:                # BUG-245: Exponential backoff — double timeout on each failed
+- Q:\finance-analyzer\portfolio\gpu_gate.py:106:    Returns True if the lock was broken (caller can retry acquire), False
+- Q:\finance-analyzer\portfolio\file_utils.py:238:            pass  # best-effort; lock open below will retry
+- Q:\finance-analyzer\portfolio\loop_contract.py:1216:    Catches the retry-storm bug class: same trigger_id appearing twice
+- Q:\finance-analyzer\portfolio\market_health.py:75:    # Alpaca retry + yfinance emergency fallback internally.
+- Q:\finance-analyzer\portfolio\shared_state.py:98:            # retry. Stale data (if any) is preserved for fallback.
+- Q:\finance-analyzer\portfolio\signal_engine.py:1077:        # Dirty flag remains True — next cycle will retry the write
+- Q:\finance-analyzer\portfolio\signals\claude_fundamental.py:155:    Cached for 12h to avoid excessive Yahoo Finance requests.
+- The broad searches are enough to target the risky modules now. I’m switching to exact file reads with numbered output so I can verify whether each suspected issue is real and tie it to a concrete control path.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"AutoTokenizer|from_pretrained|label_map|scores|confidence|neutral|positive|negative|fallback|per_text|batched|meta|cache_dir|snapshot\" Q:\\finance-analyzer\\portfolio\\bert_sentiment.py" in Q:\finance-analyzer
+- Q:\finance-analyzer\portfolio\golddigger\bot.py:224:                logger.info("Entry blocked: XAU-USD consensus SELL (%dB/%dS)",
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:447:    """Read latest XAU-USD signal consensus from agent_summary_compact.json."""
+- Q:\finance-analyzer\portfolio\golddigger\data_provider.py:549:    """Read XAU-USD ATR percentage from agent_summary_compact.json."""
+- Q:\finance-analyzer\portfolio\sentiment_shadow_backfill.py:108:# price snapshots key by "BTC-USD" etc. Map here so lookups hit.
+- Q:\finance-analyzer\portfolio\signal_engine.py:3615:    # 47.8% — worst of all Tier 1. Injecting BTC-USD's consensus as a synthetic
+- Q:\finance-analyzer\portfolio\signals\cross_asset_tsmom.py:20:Data: yfinance for TLT/SPY/GC=F/BTC-USD (free, no API key). Cached 1 hour.
+- Q:\finance-analyzer\portfolio\signals\crypto_macro.py:4:Only applicable to crypto tickers (BTC-USD, ETH-USD). Non-crypto -> immediate HOLD.
+- Q:\finance-analyzer\portfolio\signals\futures_flow.py:4:Only applicable to crypto tickers (BTC-USD, ETH-USD). Non-crypto → immediate HOLD.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"fetch_json|requests\\.|open\\(|atomic_|cache|ttl|Deribit|netflow|ratio|load_json|write|time\\.|datetime|CL=F|GC=F|SI=F|BTC-USD|XAU-USD|XAG-USD\" Q:\\finance-analyzer\\portfolio\\crypto_macro_data.py" in Q:\finance-analyzer

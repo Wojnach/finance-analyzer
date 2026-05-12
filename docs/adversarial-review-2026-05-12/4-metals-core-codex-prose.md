@@ -1,0 +1,1105 @@
+# Codex prose extract: 4-metals-core (2026-05-12)
+
+Heuristic extract from `_logs/4-metals-core.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 1097 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the metals-core subsystem (metals/oil/crypto swing loops, grid-fisher market-maker, fishing tools) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- In-scope files (read these and ONLY these):
+- - Metals loop is a SEPARATE process from main Layer 1 loop. 60s cycle with embedded 10s silver fast-tick.
+- - Grid fisher: 2-tier buy ladders (1200 SEK/leg, 6500 SEK global cap), with-signal direction only, EOD-flat.
+- - Use forward slashes in paths. Atomic I/O via file_utils.
+- - Stop-loss via /_api/trading/stoploss/new only.
+- - Local LLM (Ministral-8B / Chronos-2 / Qwen3-8B) runs through GPU lock.
+- - Live prices first — silver warrants are volatile, never trade on stale data.
+- - Never re-enter same warrant on signal flip without bounce confirmation (per memory rules).
+- 1. Trading-hours mismatch — commodity warrants vs equities (DST-aware).
+- 4. Stop-loss API misuse (Mar 3 instant-fill incident repeat).
+- 5. MINI warrant barrier proximity check before placing stops.
+- 6. Order lock / process lock contention with main loop and golddigger.
+- 7. Silent failure on Avanza session expiry (BankID 24h re-auth) — silent retry vs surface.
+- 10. fin_snipe/fin_fish: hardcoded paths, missing tz, wrong rounding for Swedish krona vs USD.
+- I’m restricting the review to the files you listed and starting by mapping the exact in-scope file set, then I’ll inspect trading-hours, lock/order, stop-loss, EOD-flat, sizing, staleness, path/tz/rounding, and ORB bias logic against those rules.
+- The first pass hit the shell profile and policy wrapper, so I’m rerunning with profile loading disabled and simpler read-only commands to enumerate only the allowed files.
+- → Inspect trading-hours, EOD-flat, stop-loss, barrier, and exposure logic
+- portfolio/fish_monitor_smart.py:64:    """Signal-aware position monitor for fishing sessions.
+- portfolio/grid_fisher.py:254:# sell orders time to round-trip. The exact close varies with DST; using
+- portfolio/grid_fisher.py:410:    string fields are scrubbed of cookies/auth headers before write
+- portfolio/grid_fisher.py:701:    """High-level driver — owns state + session + signal/quote callables.
+- portfolio/grid_fisher.py:800:        """Invoke an Avanza session method from a persistent worker thread.
+- portfolio/grid_fisher.py:813:        GridFisher — all session calls land on the same thread and the
+- portfolio/grid_fisher.py:1177:        # Wrapping the read calls in _safe_session_call moves the sync
+- portfolio/fin_snipe.py:46:    """Return all Avanza stop-loss orders for the current session."""
+- portfolio/fin_fish.py:734:                # (depends on product, but skip if too close)
+- portfolio/grid_tiers.py:79:    """Return a non-empty reason string if the tier sits too close to the barrier.
+- portfolio/golddigger\data_provider.py:317:    Cached for 1 hour since Treasury yields are based on daily closes.
+- portfolio/golddigger\bot.py:35:        # Fallback: assume CET (UTC+1) — close enough for market hours
+- portfolio/mstr_loop\config.py:185:# Auto-scorecard (v2 Tier 1) — writes after every closed trade
+- portfolio/mstr_loop\data_provider.py:49:    # Is the signal block marked stale by the main loop? (MSTR closed hours)
+- portfolio/mstr_loop\risk.py:47:    Call once per cycle before gate checks. Rolls `session_start_equity`
+- portfolio/mstr_loop\execution.py:177:    # strategy exit rule drives the close.
+- portfolio/mstr_loop\session.py:27:        # Fallback: approximate via fixed offset. DST in Sweden is
+- portfolio/mstr_loop\session.py:102:        # Advance until we hit a weekday
+- portfolio/mstr_loop\strategies\momentum_rider.py:80:        # Don't enter on a stale signal block (MSTR closed hours).
+- portfolio/mstr_loop\strategies\mean_reversion.py:98:        # Signal flip — weighted LONG score exceeds threshold → close SHORT.
+- portfolio/mstr_loop\strategies\overnight_gap.py:9:This strategy would enter at Monday 15:30 CET with direction matching
+- portfolio/mstr_loop\strategies\overnight_gap.py:15:  2. Friday-close MSTR snapshot from the signal log.
+- portfolio/fin_snipe_manager.py:544:    # Only skip placement of NEW stops when too close.
+- data/crypto_loop.py:347:            drift = CYCLE_SECONDS - (time.time() - cycle_started)
+- data/oil_loop.py:358:            drift = CYCLE_SECONDS - (time.time() - cycle_started)
+- portfolio/iskbets.py:332:        # BUG-201 (2026-04-16): Route through detect_auth_failure. This gate
+- portfolio/iskbets.py:339:            logger.warning("ISKBETS L2 GATE: auth failure detected for %s — overriding default-approve to SKIP", ticker)
+- data/metals_loop.py:1841:    if cache and time.time() - cache["ts"] < 300:
+- data/metals_loop.py:2091:    closed externally (stop-loss triggered, manual sell). Call
+- data/metals_loop.py:3052:        # session drift). Fish engine stays without a position on failure.
+- data/metals_loop.py:3872:                # JS exec'd on the page raised (Playwright session drift
+- data/metals_loop.py:3971:    Returns ``(False, [])`` on read failure — fail closed: callers MUST
+- data/metals_loop.py:4005:            # failures (auth drift, Avanza shape change, network). The
+- data/metals_loop.py:4034:       complete. If the snapshot read fails, the function fails closed —
+- data/metals_loop.py:4812:            # failures (API shape, stop-loss endpoint auth, etc.).
+- data/metals_loop.py:6988:                # sync failures, Avanza session drift.
+- data/metals_loop.py:7172:                            _silver_reset_session()  # clear stale alert thresholds from prior position
+- portfolio/elongir\signal.py:239:            if entry_dt.tzinfo is None:
+- portfolio/elongir\signal.py:240:                entry_dt = entry_dt.replace(tzinfo=UTC)
+- portfolio/golddigger\risk.py:142:        """Check if stop-loss is hit. Returns True if position should be closed."""
+- portfolio/golddigger\risk.py:149:        """Check if take-profit is hit. Returns True if position should be closed."""
+- portfolio/fish_monitor_smart.py:230:                    result["ministral_action"] = llm.get("ministral", "HOLD")
+- portfolio/fish_monitor_smart.py:584:            if ministral and ministral != "HOLD":
+- portfolio/fish_instrument_finder.py:4:fetches quotes for each, and ranks by spread + barrier distance.
+- portfolio/fish_instrument_finder.py:64:    """Get warrant details (barrier, leverage, parity) from Avanza API."""
+- portfolio/fish_instrument_finder.py:72:                "barrier": ki.get("barrierLevel"),
+- portfolio/fish_instrument_finder.py:92:        underlying_price: current underlying price (for barrier distance calc)
+- portfolio/fish_instrument_finder.py:96:        List of dicts sorted by quality (lowest spread, safest barrier first):
+- portfolio/fish_instrument_finder.py:97:        [{name, ob_id, bid, ask, spread_pct, leverage, barrier,
+- portfolio/fish_instrument_finder.py:134:            # Get warrant details for barrier/leverage
+- portfolio/fish_instrument_finder.py:137:            barrier = None
+- portfolio/fish_instrument_finder.py:142:                barrier = details.get("barrier")
+- portfolio/fish_instrument_finder.py:143:                if barrier and underlying_price > 0:
+- portfolio/fish_instrument_finder.py:144:                    barrier_dist = abs(underlying_price - barrier) / underlying_price * 100
+- portfolio/fish_instrument_finder.py:159:                "barrier": barrier,
+- portfolio/fish_instrument_finder.py:169:    # Rank: prefer low spread, then high barrier distance (safer)
+- portfolio/fish_instrument_finder.py:173:        barrier = -(c["barrier_distance_pct"] or 0)
+- portfolio/fish_instrument_finder.py:174:        return (spread, barrier)
+- portfolio/fin_snipe_manager.py:11:- cancels stale/mismatched orders so only the intended ladder remains
+- portfolio/fin_snipe_manager.py:52:LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
+- portfolio/fin_snipe_manager.py:415:        # so a future re-entry starts a fresh hold-time clock instead of
+- portfolio/fin_snipe_manager.py:429:        # magnitude. Fetch the live rate (with the same 15-min cache the
+- portfolio/fin_snipe_manager.py:1085:    # Prune stale tracking data: remove entries for orders no longer on Avanza
+- portfolio/oil_grid_signal.py:11:the metals_loop reads cached values for most cycles and only refreshes
+- portfolio/oil_grid_signal.py:113:    """Pull Brent klines and produce a fresh signal dict.
+- portfolio/oil_grid_signal.py:115:    Returns the same shape as the cached file so callers can round-trip.
+- portfolio/oil_grid_signal.py:152:    """Return the current oil signal, refreshing from kline data when
+- portfolio/oil_grid_signal.py:153:    the cached value is older than ``REFRESH_INTERVAL_SEC``.
+- portfolio/oil_grid_signal.py:155:    The cache file lives at ``data/oil_grid_signal.json`` so other
+- portfolio/oil_grid_signal.py:158:    cached = load_json(SIGNAL_FILE, default=None)
+- portfolio/oil_grid_signal.py:159:    if not force and isinstance(cached, dict) and cached.get("ts"):
+- portfolio/oil_grid_signal.py:162:                cached["ts"], "%Y-%m-%dT%H:%M:%SZ",
+- portfolio/oil_grid_signal.py:169:                return cached
+- portfolio/fin_fish.py:7:- Chronos/model drift for directional bias
+- portfolio/fin_fish.py:9:- Avanza warrant barrier safety checks
+- portfolio/fin_fish.py:14:expected gain on bounce, EV in SEK, and barrier distance.
+- portfolio/fin_fish.py:99:        "barrier": 0,
+- portfolio/fin_fish.py:113:        "barrier": 0,
+- portfolio/fin_fish.py:127:        "barrier": 0,
+- portfolio/fin_fish.py:141:        "barrier": 0,
+- portfolio/fin_fish.py:154:        "barrier": 0,
+- portfolio/fin_fish.py:317:    """Extract Chronos 24h drift from signal data, or None if unavailable."""
+- portfolio/fin_fish.py:364:    # Blend Chronos drift if available
+- portfolio/fin_fish.py:380:    Uses RSI, Chronos, consensus signal, Fear & Greed, econ calendar,
+- portfolio/fin_fish.py:497:    return _score_candidates_buy(candidates, spot, vol, drift, hours)
+- portfolio/fin_fish.py:541:    return _score_candidates_sell(candidates, spot, vol, drift, hours)
+- portfolio/fin_fish.py:560:        fp = fill_probability_buy(spot, level, vol, drift, hours, is_24h=True)
+- portfolio/fin_fish.py:715:        barrier = warrant["barrier"]
+- portfolio/fin_fish.py:717:        is_daily_cert = warrant["api_type"] == "certificate" and barrier == 0
+- portfolio/fin_fish.py:719:        # Dynamic leverage: compute from spot and barrier for warrants.
+- portfolio/fin_fish.py:720:        # Config leverage is stale (set when cert was added, not at current price).
+- portfolio/fin_fish.py:721:        # Daily certs (no barrier) keep config leverage.
+- portfolio/fin_fish.py:722:        if not is_daily_cert and barrier > 0:
+- portfolio/fin_fish.py:723:            dist = abs(spot - barrier)
+- portfolio/fin_fish.py:728:        # Barrier checks only for MINI warrants (barrier > 0)
+- portfolio/fin_fish.py:729:        if not is_daily_cert and barrier > 0:
+- portfolio/fin_fish.py:730:            if direction == "LONG" and spot <= barrier:
+- portfolio/fin_fish.py:732:            if direction == "SHORT" and spot >= barrier:
+- portfolio/fin_fish.py:733:                # BEAR MINIs get knocked out if underlying goes above barrier
+- portfolio/fin_fish.py:736:            barrier_distance = abs(spot - barrier) / spot * 100
+- portfolio/fin_fish.py:745:            # Check barrier safety at fishing level (MINI warrants only)
+- portfolio/fin_fish.py:746:            if not is_daily_cert and barrier > 0:
+- portfolio/fin_fish.py:748:                    fish_barrier_dist = round((level - barrier) / level * 100, 2)
+- portfolio/fin_fish.py:750:                    fish_barrier_dist = round(abs(level - barrier) / level * 100, 2)
+- portfolio/fin_fish.py:769:                    warrant_price_at_fish = max(0.01, (level - barrier) / parity * fx_rate)
+- portfolio/fin_fish.py:771:                    warrant_price_at_fish = max(0.01, (barrier - level) / parity * fx_rate)
+- portfolio/fin_fish.py:818:                "barrier": barrier,
+- portfolio/fin_fish.py:867:                "barrier": w["barrier"],
+- portfolio/grid_fisher_config.py:12:Hold profile: minutes to hours (5x leverage + barrier risk make overnight
+- portfolio/grid_fisher_config.py:44:#   stop loss  = P * (1 - GRID_STOP_PCT/100)
+- portfolio/grid_fisher_config.py:88:# Knockout / barrier safety
+- portfolio/grid_fisher_config.py:91:# of the warrant's knockout barrier. Reused threshold from exit_optimizer.
+- portfolio/price_targets.py:9:Chronos forecast drift blending for improved accuracy.
+- portfolio/price_targets.py:315:        Annualised drift from Chronos 24h forecast.  When provided,
+- portfolio/price_targets.py:337:    # Blend Chronos drift when available
+- portfolio/price_targets.py:393:            fp = fill_probability_buy(price_usd, target_price, vol, drift,
+- portfolio/price_targets.py:469:    # Forecast signals for Chronos drift
+- portfolio/price_targets.py:504:        # Chronos drift from forecast signal
+- portfolio/iskbets.py:99:    Results are cached for 5 minutes via shared_state._cached() to avoid
+- portfolio/iskbets.py:219:    """Build a minimal prompt for the Layer 2 APPROVE/SKIP gate."""
+- portfolio/iskbets.py:567:            "Trailing stop will now lock in profit as price rises.",
+- portfolio/grid_tiers.py:3:Given a live quote, a per-leg SEK budget, and optional barrier metadata,
+- portfolio/grid_tiers.py:11:space when ``barrier`` metadata is supplied.
+- portfolio/grid_tiers.py:63:    we use this only for the barrier-proximity guard, which is conservative
+- portfolio/grid_tiers.py:74:    barrier: Optional[float],
+- portfolio/grid_tiers.py:82:    below barrier; SHORT warrants when underlying rises above. We compute the
+- portfolio/grid_tiers.py:85:    if barrier is None or underlying_price is None or leverage is None:
+- portfolio/grid_tiers.py:96:        distance_pct = (implied_underlying - barrier) / barrier * 100.0
+- portfolio/grid_tiers.py:99:        distance_pct = (barrier - implied_underlying) / barrier * 100.0
+- portfolio/grid_tiers.py:117:    barrier: Optional[float] = None,
+- portfolio/grid_tiers.py:131:        direction: ``"LONG"`` or ``"SHORT"`` — controls barrier check direction.
+- portfolio/grid_tiers.py:134:            no barrier).
+- portfolio/grid_tiers.py:135:        barrier: knockout barrier in underlying-price units. None => no
+- portfolio/grid_tiers.py:187:                barrier=barrier,
+- portfolio/crypto_precompute.py:6:the schema mirrors how metals_precompute writes silver/gold separately
+- portfolio/crypto_precompute.py:98:    """Aggregate crypto deep context into the cached JSON file."""
+- data/oil_loop.py:5:  1. Acquire singleton lock (one process at a time).
+- data/oil_loop.py:72:# Singleton lock (matches metals_loop pattern)
+- data/oil_loop.py:79:    review caught NameError on stale-lock cleanup in WSL/CI).
+- data/oil_loop.py:96:    """Try to grab a per-process lock. Returns lock handle or None on conflict.
+- data/oil_loop.py:98:    Uses O_CREAT|O_EXCL for atomic creation (no TOCTOU race). On stale lock
+- data/oil_loop.py:115:                logger.warning("singleton lock held by pid %d", old_pid)
+- data/oil_loop.py:117:            # Stale lock — remove and retry once
+- data/oil_loop.py:272:    """Write a JSON heartbeat file each successful cycle.
+- data/oil_loop.py:302:        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- data/oil_loop.py:304:    lock = acquire_singleton_lock()
+- data/oil_loop.py:305:    if lock is None:
+- data/oil_loop.py:362:        release_singleton_lock(lock)
+- data/crypto_loop.py:4:  1. Acquire singleton lock (one process at a time).
+- data/crypto_loop.py:70:# Singleton lock (matches metals_loop pattern)
+- data/crypto_loop.py:89:    """Try to grab a per-process lock. Returns lock handle or None on conflict.
+- data/crypto_loop.py:91:    Uses O_CREAT|O_EXCL for atomic creation (no TOCTOU race). On stale lock
+- portfolio/golddigger\runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- portfolio/golddigger\runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- portfolio/golddigger\data_provider.py:34:# FRED yield cache (yields don't change intraday often)
+- portfolio/golddigger\data_provider.py:40:# yfinance ^TNX has been returning 16h+ stale bars, flooding logs every cycle.
+- portfolio/golddigger\data_provider.py:71:    data_quality: str = "ok"  # "ok", "partial", "stale"
+- portfolio/golddigger\data_provider.py:115:    """Fetch an intraday market proxy via yfinance with cache + staleness checks."""
+- portfolio/golddigger\data_provider.py:118:    cached = _proxy_cache.get(cache_key)
+- portfolio/golddigger\data_provider.py:119:    if cached and now - cached["time"] < ttl_seconds:
+- portfolio/golddigger\data_provider.py:120:        return cached["value"]
+- portfolio/golddigger\data_provider.py:127:        # H11/DC-R3-4: yfinance is not thread-safe; hold the shared lock
+- portfolio/golddigger\data_provider.py:131:            return cached["value"] if cached else None
+- portfolio/golddigger\data_provider.py:138:            return cached["value"] if cached else None
+- portfolio/golddigger\data_provider.py:145:            # 2026-04-09: yfinance ^TNX has been stuck on 16h+ stale bars,
+- portfolio/golddigger\data_provider.py:146:            # and the old behavior of returning the last cached value here
+- portfolio/golddigger\data_provider.py:149:            # per-cycle warnings. Drop the stale cache entry, return None,
+- portfolio/golddigger\data_provider.py:157:                    "Proxy %s stale: %.1f min old (limit %.1f) — dropping cache, "
+- portfolio/golddigger\data_provider.py:158:                    "caller will fall back. Further stale events for this proxy "
+- portfolio/golddigger\data_provider.py:183:        # 2026-04-09: on fresh recovery after a prior stale run, log once and
+- portfolio/golddigger\data_provider.py:187:                "Proxy %s recovered (bar %.1f min old) — resuming cache",
+- portfolio/golddigger\data_provider.py:197:        return cached["value"] if cached else None
+- portfolio/golddigger\data_provider.py:318:    Falls back to cached value if API is unavailable.
+- portfolio/golddigger\data_provider.py:329:        logger.debug("No FRED API key — using cached yield or None")
+- portfolio/golddigger\data_provider.py:489:    """Read Chronos forecast from agent_summary_compact.json."""
+- portfolio/golddigger\data_provider.py:636:        quality = "partial" if len(missing) < 3 else "stale"
+- portfolio/golddigger\bot.py:153:            logger.warning("Stale data (>%.0fs) — holding", stale_max)
+- portfolio/golddigger\bot.py:224:                logger.info("Entry blocked: XAU-USD consensus SELL (%dB/%dS)",
+- portfolio/golddigger\bot.py:256:        # Chronos forecast gate (Phase 4)
+- portfolio/golddigger\config.py:45:    # cap already gate weak EU-hours signals — no need to lock out the
+- portfolio/golddigger\config.py:110:    aug_require_vol_confirm: bool = True   # block entry when volatility signal is SELL
+- portfolio/golddigger\augmented_signals.py:55:        # Momentum gate: block entry on strong bearish momentum
+- portfolio/golddigger\augmented_signals.py:59:        # Structure gate: block entry at structural resistance / bearish structure
+- portfolio/elongir\runner.py:78:    """Acquire the Elongir singleton lock."""
+- portfolio/elongir\runner.py:96:    """Release the singleton lock if held."""
+- portfolio/elongir\config.py:65:    # --- Singleton lock ---
+- portfolio/elongir\config.py:66:    lock_file: str = str(DATA_DIR / "elongir.singleton.lock")
+- portfolio/elongir\config.py:102:            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- portfolio/mstr_loop\data_provider.py:27:    price_usd: float               # current MSTR price from signal block
+- portfolio/mstr_loop\data_provider.py:50:    stale: bool
+- portfolio/mstr_loop\data_provider.py:64:        if self.stale:
+- portfolio/mstr_loop\data_provider.py:166:        logger.debug("data_provider: no signal block for ticker %s", t)
+- portfolio/mstr_loop\data_provider.py:186:    # BTC cross-asset block — read the precomputed regime from the main
+- portfolio/mstr_loop\data_provider.py:187:    # loop's signal engine. Fall back to "unknown" if BTC block missing.
+- portfolio/mstr_loop\data_provider.py:212:        stale=bool(sig.get("stale", False)),
+- portfolio/mstr_loop\loop.py:27:    """Write the loop_health watchdog heartbeat after a successful cycle.
+- portfolio/mstr_loop\loop.py:62:            "stale": bundle_or_none.stale,
+- portfolio/mstr_loop\execution.py:331:    trade is never blocked by a scorecard write.
+- portfolio/mstr_loop\strategies\mean_reversion.py:65:        if bundle.stale:
+- portfolio/mstr_loop\strategies\momentum_rider.py:8:have historical >60% accuracy on MSTR (ministral, econ_calendar, calendar,
+- portfolio/mstr_loop\strategies\momentum_rider.py:81:        if bundle.stale:
+- data/crypto_loop.py:108:                logger.warning("singleton lock held by pid %d", old_pid)
+- data/crypto_loop.py:110:            # Stale lock — remove and retry once
+- data/crypto_loop.py:251:    """Write a JSON heartbeat file each successful cycle.
+- data/crypto_loop.py:263:    pre-migration behavior where every heartbeat-write failure was
+- data/crypto_loop.py:289:        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- data/crypto_loop.py:291:    lock = acquire_singleton_lock()
+- data/crypto_loop.py:292:    if lock is None:
+- data/crypto_loop.py:351:        release_singleton_lock(lock)
+- portfolio/grid_fisher.py:330:_state_lock = threading.Lock()  # serialises load/save across threads
+- portfolio/grid_fisher.py:336:    """Load state from *state_path*. Returns a fresh state on missing/corrupt/old."""
+- portfolio/grid_fisher.py:626:    the cached ``inventory_units`` for the instrument; the caller may
+- portfolio/grid_fisher.py:641:            # fill / cancel by the live position delta vs cached
+- portfolio/grid_fisher.py:717:    Signal callables (injected so unit tests can provide deterministic data):
+- portfolio/grid_fisher.py:814:        cached Playwright context stays bound to it.
+- portfolio/grid_fisher.py:913:        barrier: Optional[float] = None,
+- portfolio/grid_fisher.py:955:            barrier=barrier,
+- portfolio/grid_fisher.py:1031:        """After a buy fills, place a matching sell limit + stop loss.
+- portfolio/grid_fisher.py:1222:        for ob, cached, live in reconcile.inventory_drift:
+- portfolio/grid_fisher.py:1223:            self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+- portfolio/grid_fisher.py:1358:                barrier=cat.get("barrier") if cat.get("barrier") else None,
+- portfolio/oil_precompute.py:994:    """Load cached external research or seed with baseline oil data."""
+- data/metals_loop.py:414:# Stop levels (distance from barrier as % of bid)
+- data/metals_loop.py:540:    """Write loop_health watchdog heartbeat after each successful cycle.
+- data/metals_loop.py:798:# actually hit the network; cache hits don't consume budget.
+- data/metals_loop.py:893:    """Acquire single-instance lock for metals loop (non-blocking).
+- data/metals_loop.py:910:        # Always lock byte 0 — "a+" mode positions at EOF for existing files,
+- data/metals_loop.py:911:        # so without seek(0) two processes could lock different byte ranges.
+- data/metals_loop.py:933:    """Release single-instance lock if held."""
+- data/metals_loop.py:1100:    Updates ``_underlying_prices`` and returns the price, or the cached value
+- data/metals_loop.py:1112:        logger.debug("_silver_fetch_xag: Binance FAPI call failed, using cached XAG-USD", exc_info=True)
+- data/metals_loop.py:1127:        logger.debug("_gold_fetch_xau: Binance FAPI call failed, using cached XAU-USD", exc_info=True)
+- data/metals_loop.py:1150:            "_load_momentum_state: read failed, starting fresh",
+- data/metals_loop.py:1581:    2026-04-21 — exposes signal_ts (ISO string from Layer 1's write clock,
+- data/metals_loop.py:1583:    reject stale data without relying on os.path.getmtime (which atomic
+- data/metals_loop.py:1604:        # This is the write-time clock; if it is materially older than now we
+- data/metals_loop.py:1605:        # know the content is stale regardless of what os.path.getmtime claims.
+- data/metals_loop.py:1669:        # gracefully (signal data is stale for one cycle). Stack trace
+- data/metals_loop.py:1840:    cache = _underlying_klines_cache.get(ticker)
+- data/metals_loop.py:1842:        return cache["klines"]
+- data/metals_loop.py:2189:                # PREVIOUS trade; the fresh holding would otherwise be
+- data/metals_loop.py:2217:                        # would submit the stale size.
+- data/metals_loop.py:2562:                            "update_smart_trailing_stops: hardware stop sync failed key=%s — broker stop is stale: %s: %s",
+- data/metals_loop.py:2752:    # Read fish_precomputed for gold change, orb, vol_scalar
+- data/metals_loop.py:2944:    peak — stale-signal chase. ``decision["signal_ts"]`` is stamped by
+- data/metals_loop.py:2945:    ``fish_engine._evaluate_entry``. A missing field is treated as fresh
+- data/metals_loop.py:2963:                f"[fish] SKIP BUY: signal stale ({age:.0f}s > "
+- data/metals_loop.py:2979:        # Fetch buying power — try cached data, page-based, or fixed fallback
+- data/metals_loop.py:3152:    """Write data/fish_precomputed.json for the fishing monitor.
+- data/metals_loop.py:3232:        # --- Vol scalar (hourly refresh from signal ATR) ---
+- data/metals_loop.py:3292:        # --- Write the precomputed file ---
+- data/metals_loop.py:3313:_last_prob_report = {}  # cached probability report
+- data/metals_loop.py:3318:    Combines: signal consensus, Chronos forecasts, Monte Carlo price ranges,
+- data/metals_loop.py:3353:        entry["ministral"] = {"action": "HOLD", "confidence": 0}
+- data/metals_loop.py:3371:                            "action": ticker_llm["ministral"].get("action", "HOLD"),
+- data/metals_loop.py:3399:                w = 0.8  # Chronos weight
+- data/metals_loop.py:3406:        # Ministral weight
+- data/metals_loop.py:3944:            "_cleanup_stop_orders_for: cleanup failed key=%s — stop state may be stale",
+- data/metals_loop.py:3959:    2026-04-13 (Bug 2a): retry once with a fresh Playwright context on
+- data/metals_loop.py:3962:    inside asyncio loop" during a fish-engine sell path. A stale
+- data/metals_loop.py:4049:       just leaves the local state stale, which the post-sell
+- data/metals_loop.py:4195:        # local state file stays stale but broker reality is correct;
+- data/metals_loop.py:4242:    path. The post-sell ``_cleanup_stop_orders_for`` will clear stale
+- data/metals_loop.py:4300:            "_sync_local_stop_state_after_rearm: rewrite failed ob_id=%s — local state may be stale",
+- data/metals_loop.py:4468:                # Compute barrier distance
+- data/metals_loop.py:4470:                barrier = winfo.get("barrier") or 0
+- data/metals_loop.py:4471:                if und > 0 and barrier > 0:
+- data/metals_loop.py:4472:                    entry["barrier_distance_pct"] = round((und - barrier) / und * 100, 1)
+- data/metals_loop.py:4650:        # CODEX-7 finding 2: place_order may raise. Wrap the call in a
+- data/metals_loop.py:6037:        ctx["account"] = cached_account_data
+- data/metals_loop.py:6052:                account=cached_account_data or None,
+- data/metals_loop.py:6089:            "barrier": p.get('barrier'),
+- data/metals_loop.py:6129:    # Everything else is T1 (Haiku) — price moves, trailing, heartbeat, LLM consensus
+- data/metals_loop.py:6917:            log("LLM thread: Ministral every 5min, Chronos every 60s")
+- data/metals_loop.py:7284:                # Refresh account data + warrant catalog (every 10th check ~5 min)
+- data/metals_loop.py:7560:                # L3 EMERGENCY: auto-sell positions near barrier
+- data/metals_loop.py:7692:                            # lock contention, state corruption, or
+- portfolio/golddigger\signal.py:183:            logger.info("Entry blocked: spread %.2f%% > max %.2f%%", spread_pct * 100, spread_max * 100)
+- portfolio/golddigger\runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- portfolio/golddigger\runner.py:46:    """Write loop_health watchdog heartbeat after each successful cycle.
+- portfolio/fish_monitor_smart.py:359:        - Signal flip: vote margin > 4
+- portfolio/fish_monitor_smart.py:395:        # --- Signal flip with 4+ vote margin ---
+- portfolio/oil_grid_signal.py:1:"""Minimal OIL-USD signal source for the grid market-maker.
+- portfolio/golddigger\risk.py:54:                "DAILY LOSS LIMIT HIT: P&L %.0f SEK <= %.0f SEK limit. Trading halted.",
+- portfolio/elongir\data_provider.py:99:    """Read XAG-USD signals from agent_summary_compact.json.
+- portfolio/golddigger\data_provider.py:447:    """Read latest XAU-USD signal consensus from agent_summary_compact.json."""
+- portfolio/golddigger\data_provider.py:549:    """Read XAU-USD ATR percentage from agent_summary_compact.json."""
+- portfolio/mstr_loop\config.py:39:# Signals with 0.0 weight are forced neutral (below-coin-flip on MSTR).
+- portfolio/mstr_loop\strategies\momentum_rider.py:4:threshold with a sane RSI and cooldown cleared. Exit on signal flip,
+- portfolio/mstr_loop\strategies\momentum_rider.py:113:        # Signal flip — MSTR-weighted SHORT score exceeds its threshold.
+- portfolio/orb_postmortem.py:85:    # Buy/sell target hit
+- portfolio/orb_postmortem.py:91:        # Both targets hit -- full predicted spread captured
+- portfolio/orb_postmortem.py:100:        # Neither target hit -- no trade
+- portfolio/orb_postmortem.py:221:            lines.append("- Low buy target hit rate. Consider using conservative (25th pctl) instead of median for buy targets.")
+- portfolio/orb_postmortem.py:223:            lines.append("- Low sell target hit rate. Consider using conservative (25th pctl) instead of median for sell targets.")
+- portfolio/orb_postmortem.py:225:            lines.append("- Good both-target hit rate. Median targets are reliable for this market.")
+- portfolio/grid_tiers.py:126:            whose realised notional would be below ``MIN_LEG_SEK`` are
+- portfolio/grid_tiers.py:141:        knockout or min-size checks are still returned with their
+- portfolio/grid_fisher_config.py:9:``portfolio/grid_tiers.py`` reads from this module only — no magic
+- portfolio/grid_fisher_config.py:45:# Target must clear courtage (~2 SEK round-trip on 1200 SEK = 0.17%) plus
+- portfolio/grid_fisher_config.py:90:# Skip tiers whose implied underlying move would land within this fraction
+- portfolio/orb_backtest.py:98:    trade_count: int            # Days where buy target was hit
+- portfolio/orb_backtest.py:99:    winning_trades: int         # Trades where both buy and sell targets hit
+- portfolio/orb_backtest.py:203:            # Sell target not hit — exit at midpoint between actual high and low
+- portfolio/price_targets.py:62:    For SELL (target >= price): probability running max hits target.
+- portfolio/price_targets.py:63:    For BUY  (target <= price): probability running min hits target.
+- portfolio/price_targets.py:104:    # Flip: P(min <= target) = P(max of -process >= -target)
+- portfolio/price_targets.py:105:    # Symmetry: negate drift, swap price/target relationship
+- portfolio/price_targets.py:387:            fp = fill_probability(price_usd, target_price, vol, drift,
+- portfolio/iskbets.py:552:        "stage1_hit": "Stage 1 target hit",
+- portfolio/iskbets.py:560:            f"{emoji} *{short_ticker} hit target #1* @ ${price:,.2f}",
+- portfolio/grid_fisher.py:7:  TICK      check signal -> arm/cancel ladder -> place tiers -> detect fills
+- portfolio/grid_fisher.py:315:            # are unaffected by signal flips because they reference an
+- portfolio/grid_fisher.py:563:    inventory at avg entry). Used by the global-cap gate."""
+- portfolio/grid_fisher.py:619:    For each ARMED tier whose order_id is missing from ``open_order_ids``:
+- portfolio/grid_fisher.py:917:        """Place any missing buy tiers, respecting per-instrument cap and
+- portfolio/grid_fisher.py:920:        Existing ARMED tiers are kept as-is. If a tier index is missing
+- portfolio/grid_fisher.py:1311:            # instrument (signal flipped away then back too quickly).
+- portfolio/grid_fisher.py:1340:            # Global cap gate — sum planned notional across every
+- portfolio/grid_fisher.py:1342:            # would breach GRID_GLOBAL_MAX_SEK, skip placement entirely
+- portfolio/grid_fisher.py:1350:                instr_report["skip"] = "global_cap"
+- data/metals_loop.py:64:# log output should use pytest's `caplog` with
+- data/metals_loop.py:162:    """Walk the logger hierarchy to find a handler that would emit `target_level`.
+- data/metals_loop.py:777:prev_signal_actions = {}  # for signal flip detection
+- data/metals_loop.py:890:_signal_action_history = deque(maxlen=10)  # last 10 XAG signal actions for flip detection
+- data/metals_loop.py:1252:         write a momentum candidate and optionally send Telegram.
+- data/metals_loop.py:1346:      2. Current XAG-USD price from Binance (fallback for first run)
+- data/metals_loop.py:1368:    # Fallback: current XAG-USD price
+- data/metals_loop.py:1974:# the legacy POSITIONS dict (which would duplicate trailing-stop /
+- data/metals_loop.py:2270:                # Codex review 2026-04-15 P1: only skip legacy tracking
+- data/metals_loop.py:2287:                # Codex review round 5 P1: skip legacy tracking ONLY
+- data/metals_loop.py:2319:                    # the legacy POSITIONS dict — that would trigger
+- data/metals_loop.py:2376:        # decisions, wrong stop-loss arming, and mis-sized spike orders.
+- data/metals_loop.py:2775:    # Read Layer 2 journal for latest XAG-USD context
+- data/metals_loop.py:2995:            log("[fish] WARNING: buying power unknown, using 1500 SEK fallback")
+- data/metals_loop.py:3024:                    log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
+- data/metals_loop.py:3031:                log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
+- data/metals_loop.py:3280:        # Check signal flip frequency (>4 flips in last 10 checks)
+- data/metals_loop.py:3516:                            "pct": round(v["accuracy"] * 100, 1),
+- data/metals_loop.py:3695:                underlying_ticker = "XAG-USD"  # fallback
+- data/metals_loop.py:4062:        full pre-cancel snapshot would, which would inflate the
+- data/metals_loop.py:4226:    # alive at the broker, inflating encumbered volume.
+- data/metals_loop.py:5536:    Critical invariant (codex finding): the SUM of resized volumes
+- data/metals_loop.py:5633:         snapshot would exceed the live position size and Avanza would
+- data/metals_loop.py:5714:        # full-volume snapshot would exceed the live position size and
+- data/metals_loop.py:5787:    original stops — would inflate encumbered volume past the position
+- data/metals_loop.py:5821:                    f"Could not cleanly clear resized stops; restore deferred "
+- data/metals_loop.py:5949:        logger.warning("log_invocation: %s write failed tier=%s trigger=%s", INVOCATION_LOG, tier, trigger, exc_info=True)
+- data/metals_loop.py:6185:    # Signal flip detection (all tracked tickers with signals)
+- data/metals_loop.py:6228:                direction = consensus.get("direction", "flat")
+- data/metals_loop.py:6601:                    llm_entry["consensus_conf"] = round(data["consensus"].get("confidence", 0), 2)
+- data/metals_loop.py:6718:            "Read memory/trading_rules.md — follow the mandatory checklist.\n\n"
+- data/metals_loop.py:6724:            "Strategic thesis: Silver bull 2026, target ATH. Bias HOLD. Only sell on structure break.\n\n"
+- data/metals_loop.py:6749:        log_fh.write(f"Model: {tier_cfg['model'] or 'default (sonnet)'} | "
+- data/metals_loop.py:7019:                    # guards (whitelist + per-instrument cap) still apply
+- data/metals_loop.py:7460:                                send_telegram("*METALS LOOP* All positions sold by broker. Stopping.")
+- portfolio/golddigger\signal.py:3:Computes 30-second log-returns, rolling z-scores (60-min window), and a
+- portfolio/golddigger\signal.py:8:Positive S = gold up + USD weak + yields down = bullish for BULL GULD certificate.
+- portfolio/golddigger\signal.py:34:    window_size: int = 0       # current number of samples in rolling window
+- portfolio/golddigger\signal.py:46:    """Compute z-score of value relative to rolling window.
+- portfolio/golddigger\signal.py:62:    z-scores over a configurable rolling window (default 120 = 60 min).
+- portfolio/golddigger\signal.py:121:            state.window_size = 0
+- portfolio/golddigger\signal.py:129:        # Append to rolling windows
+- portfolio/golddigger\signal.py:144:        # Composite score: gold UP, USD DOWN, yields DOWN = bullish
+- portfolio/golddigger\signal.py:162:        state.window_size = len(self._gold_returns)
+- portfolio/mstr_loop\telegram_report.py:146:        # Try fallback: raw send_telegram. Final fallback: log only.
+- portfolio/golddigger\config.py:13:    trade_enabled: bool = True  # False = signal-only mode (live data + Telegrams, no orders)
+- portfolio/golddigger\runner.py:206:                                _send_telegram("_GOLDDIGGER: Failed to place stop-loss!_", config)
+- portfolio/golddigger\runner.py:209:                        _send_telegram("_GOLDDIGGER: Stop-loss placement error!_", config)
+- The shell policy also dislikes the line-numbering PowerShell snippets. I’m switching to inline Python readers for scoped, read-only excerpts so I can keep the citations precise.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 12 "barrier|GRID_MIN_BARRIER_DISTANCE_PCT|tier_reason|too close" portfolio/grid_tiers.py portfolio/grid_fisher.py portfolio/grid_fisher_config.py' in Q:\finance-analyzer
+- 701-    """High-level driver — owns state + session + signal/quote callables.
+- 717-    Signal callables (injected so unit tests can provide deterministic data):
+- 800-        """Invoke an Avanza session method from a persistent worker thread.
+- 805-        from a thread that has a running asyncio event loop raises
+- 809-        its Playwright context to the FIRST thread that initialised it, so
+- 810-        when a later call lands in a different worker thread it raises
+- 811-        "cannot switch to a different thread (which happens to have exited)".
+- 845-        # Best-effort shutdown of the worker thread on GC. The metals
+- 847-        # at process exit.
+- 1084-        # NOTE: stop-loss orders use a DIFFERENT API surface than regular
+- 1403-            # Cancel stop via the stop-loss-specific endpoint when present.
+- portfolio/grid_fisher.py-254-# sell orders time to round-trip. The exact close varies with DST; using
+- portfolio/grid_fisher.py-276-    except Exception:  # noqa: BLE001 — missing tzdata
+- portfolio/grid_fisher_config.py-27-# Probe mode: when True, the tick computes intended placements and writes
+- portfolio/grid_fisher_config.py-44-#   stop loss  = P * (1 - GRID_STOP_PCT/100)
+- portfolio/grid_fisher_config.py-45-# Target must clear courtage (~2 SEK round-trip on 1200 SEK = 0.17%) plus
+- portfolio/grid_fisher.py-563-    inventory at avg entry). Used by the global-cap gate."""
+- portfolio/grid_fisher.py-1222-        for ob, cached, live in reconcile.inventory_drift:
+- portfolio/grid_fisher.py-1223-            self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+- portfolio/fin_snipe.py-46-    """Return all Avanza stop-loss orders for the current session."""
+- portfolio/fin_snipe.py-50-        logger.warning("Failed to fetch Avanza stop-loss orders", exc_info=True)
+- portfolio/fin_snipe_manager.py-101-        # BUG-124: Use load_json instead of raw open/json.load
+- portfolio/fin_snipe_manager.py:106:            logger.warning("Cannot send critical alert — config.json missing or corrupt")
+- portfolio/fin_snipe_manager.py-1500-                            "Stop-loss placed OK but no ID extracted for %s — order will be untracked",
+- portfolio/grid_fisher_config.py-9-``portfolio/grid_tiers.py`` reads from this module only — no magic
+- portfolio/grid_fisher_config.py-19-# 2026-05-11 PM: User confirmed account 1625505
+- portfolio/grid_fisher_config.py-20-# (INVESTERINGSSPARKONTO/ISK) is the intended warrant trading account.
+- portfolio/grid_fisher_config.py-24-# to False so real placements route to the configured account.
+- portfolio/grid_fisher_config.py-80-# placement when signal oscillates near consensus boundary.
+- portfolio/grid_fisher_config.py-90-# Skip tiers whose implied underlying move would land within this fraction
+- portfolio/grid_fisher.py-917-        """Place any missing buy tiers, respecting per-instrument cap and
+- portfolio/grid_fisher.py-920-        Existing ARMED tiers are kept as-is. If a tier index is missing
+- portfolio/grid_fisher.py-924-        placing it would push *aggregate* planned notional across every
+- portfolio/grid_fisher.py-1350-                instr_report["skip"] = "global_cap"
+- portfolio/grid_tiers.py-5-each buy-limit level the grid fisher should place. The math is deliberately
+- portfolio/grid_tiers.py-10-to find buy prices; knockout-proximity skip is done in underlying-price
+- portfolio/grid_tiers.py-126-            whose realised notional would be below ``MIN_LEG_SEK`` are
+- portfolio/grid_tiers.py-133-            If None, knockout safety is skipped (e.g. for certificates with
+- portfolio/grid_tiers.py-136-            knockout (e.g. constant-leverage certs).
+- portfolio/grid_tiers.py-137-        leverage: warrant leverage. None => no knockout check applied.
+- portfolio/grid_tiers.py-141-        knockout or min-size checks are still returned with their
+- portfolio/grid_tiers.py-179-        skip: Optional[str] = None
+- portfolio/grid_tiers.py-181-            skip = f"below_min_order:{notional:.0f}sek"
+- portfolio/grid_tiers.py-183-        if skip is None:
+- portfolio/grid_tiers.py-193-                skip = knockout_skip
+- 254-# sell orders time to round-trip. The exact close varies with DST; using
+- 1142-                Used to gate placement and decide direction. If a ticker is
+- 1143-                missing, that instrument is left alone.
+- 1177-        # Wrapping the read calls in _safe_session_call moves the sync
+- 1178-        # Playwright work onto a worker thread so it doesn't collide with
+- portfolio/golddigger/config.py-45-    # cap already gate weak EU-hours signals — no need to lock out the
+- portfolio/golddigger/bot.py-23-from portfolio.golddigger.signal import CompositeSignal, SignalState
+- portfolio/golddigger/bot.py:35:        # Fallback: assume CET (UTC+1) — close enough for market hours
+- portfolio/golddigger/bot.py-49-    Stateful: maintains signal engine, risk manager, and position state
+- portfolio/elongir/config.py-47-    max_hold_hours: float = 5.0      # max hold 5 hours
+- portfolio/elongir/config.py-102-            lock_file=el.get("lock_file", str(DATA_DIR / "elongir.singleton.lock")),
+- data/metals_loop.py-19-- Multi-level stop-loss (L1 warn / L2 alert / L3 emergency auto-sell)
+- data/metals_loop.py-393-TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
+- data/metals_loop.py-431-# Trade queue (Layer 2 writes intent, Layer 1 executes)
+- data/metals_loop.py-1541-    # Fallback: winter Stockholm schedule
+- data/metals_loop.py-2044-# emitted every 30s when account held a warrant not in KNOWN_WARRANT_OB_IDS
+- data/metals_loop.py-2046-# warn the first time each unknown id appears per process lifetime.
+- data/metals_loop.py-2053-    Fishing positions are intraday only — never hold overnight.
+- data/metals_loop.py-5949-        logger.warning("log_invocation: %s write failed tier=%s trigger=%s", INVOCATION_LOG, tier, trigger, exc_info=True)
+- data/metals_loop.py-5953-    """Write context JSON for Claude Layer 2."""
+- data/metals_loop.py-6263-    """Kill a running Claude process."""
+- portfolio/crypto_precompute.py-4-Fetches shared crypto market data once and writes
+- portfolio/crypto_precompute.py-8-no second HTTP round-trip pays off).
+- portfolio/crypto_precompute.py-98-    """Aggregate crypto deep context into the cached JSON file."""
+- portfolio/oil_precompute.py-335-                signal = -1
+- portfolio/oil_precompute.py-339-                "signal": signal,
+- portfolio/oil_precompute.py-961-        # real-time, yfinance fallback if Binance unavailable).
+- data/oil_loop.py-5-  1. Acquire singleton lock (one process at a time).
+- data/oil_loop.py-7-     real-time, with yfinance fallback).
+- data/oil_loop.py-8-  3. Read the latest Layer 1 signal snapshot from data/agent_summary*.json.
+- data/oil_loop.py:15:into a scheduled task should wait until live warrant discovery has run
+- data/oil_loop.py-59-# CL=F goes Binance FAPI (real-time) with yfinance fallback. Module-level
+- data/oil_loop.py-146-    yfinance fallback. Failures land as missing keys — the caller treats
+- data/oil_loop.py-147-    them as "skip this instrument".
+- data/oil_loop.py-182-    """Read the latest Layer 1 signal snapshot.
+- data/oil_loop.py-185-    to `data/agent_summary.json` if compact is missing or empty.
+- data/oil_loop.py-277-    the loop (matches the pre-migration swallow contract).
+- data/oil_loop.py-302-        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- data/oil_loop.py-316-        signal.signal(signal.SIGINT, _sigterm)
+- data/oil_loop.py-318-            signal.signal(signal.SIGTERM, _sigterm)
+- data/oil_loop.py-357-            # Mop up sub-second drift
+- data/oil_loop.py-359-            if drift > 0:
+- data/oil_loop.py:360:                time.sleep(drift)
+- data/oil_loop.py-362-        release_singleton_lock(lock)
+- data/oil_loop.py-395-        # Just print snapshot of what would happen
+- data/crypto_loop.py-4-  1. Acquire singleton lock (one process at a time).
+- data/crypto_loop.py-6-  3. Read the latest Layer 1 signal snapshot from data/agent_summary*.json.
+- data/crypto_loop.py:13:into a scheduled task should wait until live warrant discovery has run
+- data/crypto_loop.py-136-    Failures land as missing keys — the caller treats them as "skip this
+- data/crypto_loop.py-161-    """Read the latest Layer 1 signal snapshot.
+- data/crypto_loop.py-164-    to `data/agent_summary.json` if compact is missing or empty.
+- data/crypto_loop.py-260-    happens inside the try/except. Pre-fix, a non-dict `extra` (e.g.
+- data/crypto_loop.py-262-    would raise BEFORE the swallow path, regressing the
+- data/crypto_loop.py-289-        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+- data/crypto_loop.py-303-        signal.signal(signal.SIGINT, _sigterm)
+- data/crypto_loop.py-305-            signal.signal(signal.SIGTERM, _sigterm)
+- data/crypto_loop.py-346-            # Mop up sub-second drift
+- data/crypto_loop.py-348-            if drift > 0:
+- data/crypto_loop.py:349:                time.sleep(drift)
+- data/crypto_loop.py-351-        release_singleton_lock(lock)
+- data/crypto_loop.py-384-        # Just print snapshot of what would happen
+- data/metals_loop.py-6-auto-detect holdings, per-signal accuracy, crypto Fear & Greed, on-chain metrics.
+- data/metals_loop.py:10:flush detection.  Replaces the standalone silver_monitor.py process.
+- data/metals_loop.py-46-# log output path in this process before 2026-04-09 afternoon. Fleet v1 added
+- data/metals_loop.py-64-# log output should use pytest's `caplog` with
+- data/metals_loop.py-74-    """StreamHandler with lazy stdout resolution + UnicodeEncodeError fallback.
+- data/metals_loop.py-414-# Stop levels (distance from barrier as % of bid)
+- data/metals_loop.py-450-# Software trailing stop config — momentum-aware (fallback when hardware disabled)
+- data/metals_loop.py-497-# NOT gated on having an active position. When a breakout is detected we write
+- data/metals_loop.py-498-# a momentum candidate to ENTRY_MOMENTUM_STATE_FILE; metals_swing_trader reads
+- data/metals_loop.py-545-    write. Best-effort: never raises, never crashes live trading.
+- data/metals_loop.py-563-    fallback = copy.deepcopy(default)
+- data/metals_loop.py-564-    result = load_json(path, default=fallback)
+- data/metals_loop.py-737-    """Load config.json for the current checkout, with safe import-time fallback."""
+- data/metals_loop.py-783-startup_grace = True      # skip first check to establish baseline
+- data/metals_loop.py-798-# actually hit the network; cache hits don't consume budget.
+- data/metals_loop.py-893-    """Acquire single-instance lock for metals loop (non-blocking).
+- data/metals_loop.py-1032-      detect upside-velocity breakouts and write momentum candidates. Always
+- data/metals_loop.py:1036:    position), we do a simple drift-free sleep and return.
+- data/metals_loop.py-1100-    Updates ``_underlying_prices`` and returns the price, or the cached value
+- data/metals_loop.py-1127-        logger.debug("_gold_fetch_xau: Binance FAPI call failed, using cached XAU-USD", exc_info=True)
+- data/metals_loop.py-1138-# long. When a velocity breakout is detected we write a momentum candidate
+- data/metals_loop.py-1150-            "_load_momentum_state: read failed, starting fresh",
+- data/metals_loop.py:1164:    """Atomically write a momentum candidate for ticker.
+- data/metals_loop.py-1198-    volume_ratio is computed from the signal engine and not exposed in any
+- data/metals_loop.py:1199:    shared module state that the fast-tick can reach without a cycle hit.
+- data/metals_loop.py-1252-         write a momentum candidate and optionally send Telegram.
+- data/metals_loop.py-1254-    The rvol gate is the primary false-positive defense — a velocity breakout
+- data/metals_loop.py-1255-    on thin liquidity (e.g. off-hours spike) would write a candidate without
+- data/metals_loop.py:1256:    it. RVOL is re-fetched per trigger (NOT per tick) because we only hit the
+- data/metals_loop.py-1286-    # Trigger: record dedup, write candidate, notify.
+- data/metals_loop.py-1346-      2. Current XAG-USD price from Binance (fallback for first run)
+- data/metals_loop.py-1368-    # Fallback: current XAG-USD price
+- data/metals_loop.py-1379-    """Write ``underlying_entry`` to the position state file for restart persistence."""
+- data/metals_loop.py-1429-            pass  # outer log gate inside the helper handles repeated failures
+- data/metals_loop.py-1579-    """Read XAG/XAU signal data from the main loop's agent_summary.json.
+- data/metals_loop.py-1581-    2026-04-21 — exposes signal_ts (ISO string from Layer 1's write clock,
+- data/metals_loop.py-1583-    reject stale data without relying on os.path.getmtime (which atomic
+- data/metals_loop.py-1604-        # This is the write-time clock; if it is materially older than now we
+- data/metals_loop.py-1605-        # know the content is stale regardless of what os.path.getmtime claims.
+- data/metals_loop.py-1667-        # 2026-04-09 Stage 3: WARNING — signal read failure. The caller
+- data/metals_loop.py-1671-        # read issues.
+- data/metals_loop.py-1672-        logger.warning("_read_signals: agent_summary_compact read/parse failed", exc_info=True)
+- data/metals_loop.py:1757:# log gate inside _accumulate_orderbook_snapshot_for measures fast-tick
+- data/metals_loop.py:1759:# (incremented once per 60s) would freeze the fast-tick's % 30 check at
+- data/metals_loop.py-1781-    _microstructure_persist_counter — so the throttle gate measures actual
+- data/metals_loop.py-1819-            # a few doesn't break signal computation, just degrades
+- data/metals_loop.py-1836-    """Fetch OHLCV klines from Binance (FAPI for metals, SPOT for crypto). Cached 5 min."""
+- data/metals_loop.py-1841-    if cache and time.time() - cache["ts"] < 300:
+- data/metals_loop.py-1842-        return cache["klines"]
+- data/metals_loop.py-1974-# the legacy POSITIONS dict (which would duplicate trailing-stop /
+- data/metals_loop.py-2042-        logger.debug("Could not propagate FISHING_OB_IDS to swing_trader", exc_info=True)
+- data/metals_loop.py:2044:# emitted every 30s when account held a warrant not in KNOWN_WARRANT_OB_IDS
+- data/metals_loop.py-2282-                # Codex review round 4 P1: fishing instruments must stay
+- data/metals_loop.py-2287-                # Codex review round 5 P1: skip legacy tracking ONLY
+- data/metals_loop.py-2291-                # (fetch_page_positions transiently None, missing
+- data/metals_loop.py-2319-                    # the legacy POSITIONS dict — that would trigger
+- data/metals_loop.py-2375-        # we don't know what we hold, which cascades into wrong exit
+- data/metals_loop.py-2376-        # decisions, wrong stop-loss arming, and mis-sized spike orders.
+- data/metals_loop.py-2434-    # 2026-04-17 adversarial review + codex P1: fetch the live bid
+- data/metals_loop.py-2441-        log(f"  SKIP stop update {key}: fetch_price returned None — "
+- data/metals_loop.py-2562-                            "update_smart_trailing_stops: hardware stop sync failed key=%s — broker stop is stale: %s: %s",
+- data/metals_loop.py:2580:    """Fetch silver/gold news headlines and write summary to data/metals_news_summary.json.
+- data/metals_loop.py-2587-    Writes to data/metals_news_summary.json using atomic I/O.
+- data/metals_loop.py-2736-        return  # no price, skip
+- data/metals_loop.py-2738-    # Read latest signals from agent_summary_compact
+- data/metals_loop.py-2755-    # Read enhanced signals for news/econ
+- data/metals_loop.py-2756-    news_action = "HOLD"
+- data/metals_loop.py-2757-    econ_action = "HOLD"
+- data/metals_loop.py-2765-        news_action = (enh.get("news_event") or {}).get("action", "HOLD")
+- data/metals_loop.py:2773:        logger.debug("_run_fish_engine_tick: enhanced signals parse failed, defaulting news/econ to HOLD", exc_info=True)
+- data/metals_loop.py-2775-    # Read Layer 2 journal for latest XAG-USD context
+- data/metals_loop.py-2779-    layer2_action = 'HOLD'
+- data/metals_loop.py:2811:        logger.debug("_run_fish_engine_tick: layer2_journal.jsonl read failed, defaulting layer2_* to empty", exc_info=True)
+- data/metals_loop.py-2869-        "signal_action": xag_sig.get("action", "HOLD"),
+- data/metals_loop.py-2874-        "metals_action": xag_sig.get("action", "HOLD"),  # same as signal_action
+- data/metals_loop.py:2885:        "velocity": None,  # could hook into silver fast-tick
+- data/metals_loop.py-2888-        "news_spike": False,  # TODO: read from headlines
+- data/metals_loop.py-2911-    if decision["action"] == "HOLD":
+- data/metals_loop.py:2912:        # Log HOLD decisions periodically (every 5th cycle to avoid spam)
+- data/metals_loop.py-2918-            log(f"[fish] HOLD: {reason}")
+- data/metals_loop.py:2931:        logger.warning("_run_fish_engine_tick: post-decision fish_engine_state.json write failed", exc_info=True)
+- data/metals_loop.py-2995-            log("[fish] WARNING: buying power unknown, using 1500 SEK fallback")
+- data/metals_loop.py:2998:            log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
+- data/metals_loop.py-3052-        # session drift). Fish engine stays without a position on failure.
+- data/metals_loop.py-3164-            return  # no prices yet, skip silently
+- data/metals_loop.py:3186:                # Gold rallying but silver lagging => silver should follow up
+- data/metals_loop.py:3194:                # Gold dropping but silver hasn't followed => silver should follow down
+- data/metals_loop.py-3282-        if current_action in ("BUY", "SELL", "HOLD"):
+- data/metals_loop.py-3313-_last_prob_report = {}  # cached probability report
+- data/metals_loop.py-3318-    Combines: signal consensus, Chronos forecasts, Monte Carlo price ranges,
+- data/metals_loop.py-3319-    per-signal accuracy, and momentum analysis.
+- data/metals_loop.py-3339-            entry["signal_action"] = sig.get("action", "HOLD")
+- data/metals_loop.py-3343-            entry["signal_action"] = "HOLD"
+- data/metals_loop.py-3353-        entry["ministral"] = {"action": "HOLD", "confidence": 0}
+- data/metals_loop.py:3374:                    cons = ticker_llm.get("consensus", {})
+- data/metals_loop.py-3386-        # Signal weight (based on accuracy)
+- data/metals_loop.py-3416-        # Crypto-specific: Fear & Greed as contrarian weight
+- data/metals_loop.py-3423-                    w = 0.4  # moderate weight
+- data/metals_loop.py-3507-        # --- Per-signal accuracy ---
+- data/metals_loop.py-3508-        entry["accuracy"] = {}
+- data/metals_loop.py-3515-                        entry["accuracy"][k] = {
+- data/metals_loop.py-3522-        # --- Individual signal votes (from vote_detail) ---
+- data/metals_loop.py:3632:        # Signal detail (for tickers with signals)
+- data/metals_loop.py-3634-            sig = r.get("signal_action", "HOLD")
+- data/metals_loop.py-3684-                bid = pos["entry"]  # fallback
+- data/metals_loop.py-3902-            # not left naked at the broker.
+- data/metals_loop.py-3940-        # this fails the stops may linger locally or at the broker, but the
+- data/metals_loop.py:3941:        # sell itself already succeeded. Next reconcile cycle should pick
+- data/metals_loop.py-3942-        # up any drift. exc_info preserves the stack for diagnosis.
+- data/metals_loop.py-3944-            "_cleanup_stop_orders_for: cleanup failed key=%s — stop state may be stale",
+- data/metals_loop.py-4002-            # 2026-04-09 Stage 3: ERROR — snapshot read is a hard dependency
+- data/metals_loop.py-4005-            # failures (auth drift, Avanza shape change, network). The
+- data/metals_loop.py-4300-            "_sync_local_stop_state_after_rearm: rewrite failed ob_id=%s — local state may be stale",
+- data/metals_loop.py-4377-        # failure risks drift between local tracking and broker reality.
+- data/metals_loop.py-4380-        # miss re-placing needed ones. Stack trace helps diagnose atomic
+- data/metals_loop.py-4381-        # write failures (disk full, permission, race).
+- data/metals_loop.py-4382-        logger.exception("_save_stop_orders: atomic_write_json failed — stop tracking may drift on restart")
+- data/metals_loop.py-4386-# Trade queue — Layer 2 writes intent, Layer 1 executes
+- data/metals_loop.py-4468-                # Compute barrier distance
+- data/metals_loop.py-4470-                barrier = winfo.get("barrier") or 0
+- data/metals_loop.py-4471-                if und > 0 and barrier > 0:
+- data/metals_loop.py-4503-    """Process pending orders from the trade queue file.
+- data/metals_loop.py-4511-      5. On BUY: add to POSITIONS, place hardware stop-loss, log trade
+- data/metals_loop.py-4630-        # would exceed the position). BUYs are unaffected.
+- data/metals_loop.py-4650-        # CODEX-7 finding 2: place_order may raise. Wrap the call in a
+- data/metals_loop.py-4696-                log(f"  Trade log write error: {e}")
+- data/metals_loop.py-4719-            # so the still-held position is not naked at the broker.
+- data/metals_loop.py-4727-    """After a BUY fill: add position to POSITIONS, place hardware stop-loss."""
+- data/metals_loop.py-4770-            "stop": order.get("stop_trigger", exec_price * 0.85),  # fallback: 15% below
+- data/metals_loop.py-5536-    Critical invariant (codex finding): the SUM of resized volumes
+- data/metals_loop.py-6035-    # Account data (buying power) — for trade sizing
+- data/metals_loop.py-6037-        ctx["account"] = cached_account_data
+- data/metals_loop.py-6052-                account=cached_account_data or None,
+- data/metals_loop.py-6089-            "barrier": p.get('barrier'),
+- data/metals_loop.py-6221-    # LLM consensus trigger (high confidence + proven accuracy)
+- data/metals_loop.py-6227-                consensus = data.get("consensus", {})
+- data/metals_loop.py-6228-                direction = consensus.get("direction", "flat")
+- data/metals_loop.py-6229-                confidence = consensus.get("confidence", 0)
+- data/metals_loop.py:6231:                    v.get("total", 0) >= 10 and v.get("accuracy", 0) >= 0.6
+- data/metals_loop.py-6238-            logger.debug("check_triggers: get_llm_signals/accuracy failed, skipping LLM consensus trigger", exc_info=True)
+- data/metals_loop.py-6286-    """Generate an autonomous prediction from signals + LLM for accuracy tracking."""
+- data/metals_loop.py-6287-    directions = []  # (direction, weight)
+- data/metals_loop.py-6290-        action = sig.get("action", "HOLD")
+- data/metals_loop.py-6291-        weight = sig.get("weighted_confidence")
+- data/metals_loop.py-6293-            weight = float(weight)
+- data/metals_loop.py-6295-            weight = None
+- data/metals_loop.py-6296-        if weight is None:
+- data/metals_loop.py-6308-        weight = max(0.0, min(weight, 1.0))
+- data/metals_loop.py-6309-        if weight == 0:
+- data/metals_loop.py-6312-            directions.append(("up", weight))
+- data/metals_loop.py-6314-            directions.append(("down", weight))
+- data/metals_loop.py-6319-        consensus_dir = data.get("consensus")
+- data/metals_loop.py-6431-    # Signal line
+- data/metals_loop.py-6563-    # --- 1. Autonomous prediction (for accuracy tracking) ---
+- data/metals_loop.py-6599-                if data.get("consensus") and isinstance(data["consensus"], dict):
+- data/metals_loop.py-6600-                    llm_entry["consensus"] = data["consensus"].get("weighted_action", "?")
+- data/metals_loop.py-6601-                    llm_entry["consensus_conf"] = round(data["consensus"].get("confidence", 0), 2)
+- data/metals_loop.py-6625-        "action": prediction.get("action", "HOLD"),
+- data/metals_loop.py-6699-    # Read prompt template
+- data/metals_loop.py-6738-        "--allowedTools", "Edit,Read,Bash,Write",
+- data/metals_loop.py:6746:        log_fh.write(f"\n{'='*60}\n")
+- data/metals_loop.py-6749-        log_fh.write(f"Model: {tier_cfg['model'] or 'default (sonnet)'} | "
+- data/metals_loop.py-6752-        log_fh.write(f"Trigger: {reason_str}\n")
+- data/metals_loop.py:6753:        log_fh.write(f"{'='*60}\n")
+- data/metals_loop.py-6828-    # 2026-04-13: wrap raw Playwright Page in ResilientPage so the inevitable
+- data/metals_loop.py-6893-        # Read initial signal data
+- data/metals_loop.py-6903-        # Start local LLM background thread
+- data/metals_loop.py-6919-            log("LLM thread: NOT available (import failed)")
+- data/metals_loop.py-6967-                log(f"  Accuracy: {acc_summary}")
+- data/metals_loop.py-6988-                # sync failures, Avanza session drift.
+- data/metals_loop.py-6999-        # account is a trading-class account, not ISK/pension. Memory
+- data/metals_loop.py-7003-        # live order routes to the wrong account. PF_SKIP_ACCOUNT_CHECK=1
+- data/metals_loop.py:7071:        # Initialize trade queue: fetch account data + warrant catalog
+- data/metals_loop.py-7080-                    log("  Account data: fetch returned None")
+- data/metals_loop.py-7082-                log(f"  Account data fetch error: {e}")
+- data/metals_loop.py-7163-                                        # Freshly detected holdings should start trailing from current bid.
+- data/metals_loop.py-7280-                # Read signal data periodically (every ~2 min)
+- data/metals_loop.py-7292-                        log(f"Account data fetch error: {e}")
+- data/metals_loop.py-7383-                            # needed; the snapshot would only be useful
+- data/metals_loop.py-7516-                        # standalone Brent signal from BZ=F klines so the
+- data/metals_loop.py-7517-                        # grid fisher can arm oil instruments. Cached with
+- data/metals_loop.py-7560-                # L3 EMERGENCY: auto-sell positions near barrier
+- data/metals_loop.py-7716-                        log(f"Signal tracker log error: {e}")
+- data/metals_loop.py-7736-                            log(f"Signal tracker backfill error: {e}")
+- data/metals_loop.py-7741-                # geopolitical headlines) surface to the signal set within one
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n -C 8 \"maybe_precompute|precompute\\(|gold_precompute|silver_precompute|oil_precompute|crypto_precompute|deep_context|stale|last_run_epoch|refresh_state\" data/metals_loop.py data/oil_loop.py data/crypto_loop.py portfolio/gold_precompute.py portfolio/silver_precompute.py portfolio/oil_precompute.py portfolio/crypto_precompute.py" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 8 "process_lock|order_lock|singleton.lock|acquire_lock|release_lock|gpu_lock|gpu_gate|Ministral|Chronos|Qwen|llm" data/metals_loop.py portfolio/grid_fisher.py portfolio/fin_snipe_manager.py portfolio/elongir/runner.py portfolio/golddigger/runner.py portfolio/golddigger/bot.py portfolio/elongir/bot.py portfolio/fish_monitor_smart.py' in Q:\finance-analyzer
+- portfolio/fish_monitor_smart.py-161-        """Load ALL available signal data from both loops.
+- portfolio/fish_monitor_smart.py-164-        - agent_summary_compact.json: 30-signal consensus, MC, focus probs, regime
+- portfolio/fish_monitor_smart.py:236:                    result["llm_consensus"] = llm.get("consensus_action", "HOLD")
+- portfolio/fish_monitor_smart.py-238-                # Also grab metals loop signal
+- portfolio/fish_monitor_smart.py-241-                    result["metals_action"] = metals_sig.get("action", "HOLD")
+- portfolio/fish_monitor_smart.py-584-            if ministral and ministral != "HOLD":
+- portfolio/golddigger/bot.py:256:        # Chronos forecast gate (Phase 4)
+- portfolio/elongir/runner.py-39-    """Load config.json with worktree-aware fallback order."""
+- portfolio/elongir/runner.py:78:    """Acquire the Elongir singleton lock."""
+- portfolio/elongir/runner.py:96:    """Release the singleton lock if held."""
+- portfolio/golddigger/runner.py:40:SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+- portfolio/golddigger/runner.py-46-    """Write loop_health watchdog heartbeat after each successful cycle.
+- portfolio/golddigger/runner.py:99:    """Acquire the GoldDigger singleton lock."""
+- portfolio/golddigger/runner.py:117:    """Release the GoldDigger singleton lock if held."""
+- data/metals_loop.py-10-flush detection.  Replaces the standalone silver_monitor.py process.
+- data/metals_loop.py-249-# --- Optional modules (graceful fallback) ---
+- data/metals_loop.py-890-_signal_action_history = deque(maxlen=10)  # last 10 XAG signal actions for flip detection
+- data/metals_loop.py-933-    """Release single-instance lock if held."""
+- data/metals_loop.py-2811-        logger.debug("_run_fish_engine_tick: layer2_journal.jsonl read failed, defaulting layer2_* to empty", exc_info=True)
+- data/metals_loop.py-6028-    # Signal accuracy tracking
+- data/metals_loop.py-6231-                    v.get("total", 0) >= 10 and v.get("accuracy", 0) >= 0.6
+- data/metals_loop.py:6238:            logger.debug("check_triggers: get_llm_signals/accuracy failed, skipping LLM consensus trigger", exc_info=True)
+- data/metals_loop.py-6387-    action_str = prediction.get("action", "HOLD")
+- data/metals_loop.py:6600:                    llm_entry["consensus"] = data["consensus"].get("weighted_action", "?")
+- data/metals_loop.py-6716-            "Read data/metals_context.json — analyze the trigger and current positions.\n"
+- data/metals_loop.py-6717-            "Read data/metals_decisions.jsonl — check your last 3 decisions for continuity.\n"
+- data/metals_loop.py-6718-            "Read memory/trading_rules.md — follow the mandatory checklist.\n\n"
+- data/metals_loop.py:6721:            "Check `llm_predictions` for model consensus and accuracy.\n"
+- data/metals_loop.py-6723-            "If everything is stable, confirm HOLD with brief reasoning.\n\n"
+- data/metals_loop.py-6724-            "Strategic thesis: Silver bull 2026, target ATH. Bias HOLD. Only sell on structure break.\n\n"
+- data/metals_loop.py-7704-                            log(f"Trade log read error: {e}")
+- data/metals_loop.py-7706-                # --- SIGNAL TRACKER: log snapshot + backfill accuracy ---
+- data/crypto_loop.py-89-    """Try to grab a per-process lock. Returns lock handle or None on conflict.
+- data/crypto_loop.py-99-            os.write(fd, str(os.getpid()).encode())
+- portfolio/crypto_precompute.py-6-the schema mirrors how metals_precompute writes silver/gold separately
+- data/oil_loop.py-72-# Singleton lock (matches metals_loop pattern)
+- data/oil_loop.py-96-    """Try to grab a per-process lock. Returns lock handle or None on conflict.
+- data/oil_loop.py-106-            os.write(fd, str(os.getpid()).encode())
+- data/metals_loop.py-2210-                        # Codex review round 8 P1: reconcile manual
+- data/metals_loop.py-2215-                        # _reconcile_swing_positions both skip known
+- data/metals_loop.py-2243-                    # Stale migration marker — swing no longer tracks it.
+- data/metals_loop.py-2941-    2026-04-13 (Bug 1): reject decisions whose underlying signal is older
+- data/metals_loop.py-2945-    ``fish_engine._evaluate_entry``. A missing field is treated as fresh
+- data/metals_loop.py-2951-        log("[fish] SKIP BUY: _loop_page not initialized yet")
+- data/metals_loop.py-3941-        # sell itself already succeeded. Next reconcile cycle should pick
+- data/metals_loop.py-3951-    """Read the live stop-loss inventory for ``ob_id`` BEFORE any cancel
+- data/metals_loop.py-3955-    cancel-then-sell sequence. Snapshotting AFTER any cancel would miss
+- data/metals_loop.py-3956-    stops that were already removed at the broker, leaving the rollback
+- data/metals_loop.py-3959-    2026-04-13 (Bug 2a): retry once with a fresh Playwright context on
+- data/metals_loop.py-4048-       reflects the broker reality after step 2. Best-effort: any failure
+- data/metals_loop.py-4057-        OR the SL list could not be read reliably.
+- data/metals_loop.py-4235-    code like ``check_stop_order_fills`` and trailing-stop updates would
+- data/metals_loop.py-4236-    poll dead IDs and skip placing replacement stops because the local
+- data/metals_loop.py-4243-    state if reconciliation detects the mismatch.
+- portfolio/golddigger/bot.py-56-        self.signal = CompositeSignal(
+- portfolio/golddigger/bot.py-71-        # Augmented signal gates (volatility, momentum, structure)
+- portfolio/golddigger/bot.py-245-        # Volume gate (Phase 4)
+- portfolio/golddigger/bot.py-274-        # Augmented signal gates (volatility, momentum, structure from 1m klines)
+- portfolio/golddigger/bot.py-286-        # Signal check
+- portfolio/fin_fish.py-7-- Chronos/model drift for directional bias
+- portfolio/fin_fish.py-9-- Avanza warrant barrier safety checks
+- portfolio/fin_fish.py-560-        fp = fill_probability_buy(spot, level, vol, drift, hours, is_24h=True)
+- portfolio/fin_fish.py-596-        fp = fill_probability(spot, level, vol, drift, hours, is_24h=True)
+- portfolio/fin_fish.py-769-                    warrant_price_at_fish = max(0.01, (level - barrier) / parity * fx_rate)
+- portfolio/fin_fish.py-771-                    warrant_price_at_fish = max(0.01, (barrier - level) / parity * fx_rate)
+- portfolio/fin_fish.py-818-                "barrier": barrier,
+- portfolio/grid_fisher.py-314-            # it against the signal direction. Existing inventory + sells
+- portfolio/grid_fisher.py-410-    string fields are scrubbed of cookies/auth headers before write
+- portfolio/grid_fisher.py-619-    For each ARMED tier whose order_id is missing from ``open_order_ids``:
+- portfolio/grid_fisher.py-625-    Also reports inventory drift where the live volume disagrees with
+- portfolio/grid_fisher.py-869-        broker-side rejection leaves the order ARMED in state and the
+- portfolio/grid_fisher.py-1031-        """After a buy fills, place a matching sell limit + stop loss.
+- portfolio/grid_fisher.py-1305-                instr_report["skip"] = "signal_direction_mismatch"
+- portfolio/grid_fisher.py:1313:                instr_report["skip"] = "cooldown"
+- portfolio/grid_fisher.py-1320-            # name (e.g. 'silver_bull'), not orderbook id, so the fallback
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n -C 6 \"get_quote\\(|fetch_price|stale|live quote|underlying_price|bid <= 0|skip\" data/metals_loop.py portfolio/grid_fisher.py portfolio/fin_snipe_manager.py portfolio/fish_instrument_finder.py portfolio/fin_fish.py" in Q:\finance-analyzer
+- portfolio/fin_fish.py-715-        barrier = warrant["barrier"]
+- portfolio/fin_fish.py-717-        is_daily_cert = warrant["api_type"] == "certificate" and barrier == 0
+- portfolio/fin_fish.py-719-        # Dynamic leverage: compute from spot and barrier for warrants.
+- portfolio/fin_fish.py-721-        # Daily certs (no barrier) keep config leverage.
+- portfolio/fin_fish.py-722-        if not is_daily_cert and barrier > 0:
+- portfolio/fin_fish.py-723-            dist = abs(spot - barrier)
+- portfolio/fin_fish.py-728-        # Barrier checks only for MINI warrants (barrier > 0)
+- portfolio/fin_fish.py-729-        if not is_daily_cert and barrier > 0:
+- portfolio/fin_fish.py-730-            if direction == "LONG" and spot <= barrier:
+- portfolio/fin_fish.py-732-            if direction == "SHORT" and spot >= barrier:
+- portfolio/fin_fish.py-733-                # BEAR MINIs get knocked out if underlying goes above barrier
+- portfolio/fin_fish.py-736-            barrier_distance = abs(spot - barrier) / spot * 100
+- portfolio/fin_fish.py-1214-                                acc = data.get("accuracy", 0)
+- portfolio/fish_instrument_finder.py-47-            return result.get("hits", [])
+- portfolio/fish_instrument_finder.py-96-        List of dicts sorted by quality (lowest spread, safest barrier first):
+- portfolio/fish_instrument_finder.py-97-        [{name, ob_id, bid, ask, spread_pct, leverage, barrier,
+- portfolio/fish_instrument_finder.py-134-            # Get warrant details for barrier/leverage
+- portfolio/fish_instrument_finder.py-137-            barrier = None
+- portfolio/fish_instrument_finder.py-142-                barrier = details.get("barrier")
+- portfolio/fish_instrument_finder.py-174-        return (spread, barrier)
+- portfolio/fin_snipe_manager.py:547:            "skip": True,
+- portfolio/fin_snipe_manager.py:556:        "skip": False,
+- portfolio/fin_snipe_manager.py:996:    if not stop_plan or stop_plan.get("skip"):
+- portfolio/fin_snipe_manager.py:1182:        if stop_plan and stop_plan.get("skip"):
+- portfolio/fin_snipe_manager.py:1234:    if stop_plan and not stop_plan.get("skip") and current_bid > 0:
+- portfolio/fin_snipe_manager.py-1240-        # BUG-228: Only save entry_underlying if estimate is valid (> 0).
+- portfolio/fin_snipe_manager.py:1368:        # Pre-execution validation — skip invalid actions instead of crashing
+- portfolio/grid_fisher.py-717-    Signal callables (injected so unit tests can provide deterministic data):
+- portfolio/grid_fisher.py-913-        barrier: Optional[float] = None,
+- portfolio/grid_fisher.py-955-            barrier=barrier,
+- portfolio/grid_fisher.py-1142-                Used to gate placement and decide direction. If a ticker is
+- portfolio/grid_fisher.py-1143-                missing, that instrument is left alone.
+- portfolio/grid_fisher.py-1177-        # Wrapping the read calls in _safe_session_call moves the sync
+- portfolio/grid_fisher.py-1178-        # Playwright work onto a worker thread so it doesn't collide with
+- portfolio/grid_fisher.py-1274-            # No signal or under-confidence => don't ARM new direction, but
+- portfolio/grid_fisher.py:1277:                instr_report["skip"] = "no_direction"
+- portfolio/grid_fisher.py:1281:                instr_report["skip"] = f"low_conf<{self._min_conf}"
+- portfolio/grid_fisher.py:1285:            # Trend filter — high ADX => skip counter-trend placement.
+- portfolio/grid_fisher.py-1287-                # If signal already aligns with the trend direction, allow.
+- portfolio/grid_fisher.py-1289-                # accept the signal at face value — the *signal* is the
+- portfolio/grid_fisher.py-1290-                # consensus, and consensus in a high-ADX regime is
+- portfolio/grid_fisher.py-1296-            # If the signal points the OTHER way, this instrument is on
+- portfolio/grid_fisher.py:1298:            # (don't keep fishing into a moving signal) and skip the
+- portfolio/grid_fisher.py:1305:                instr_report["skip"] = "signal_direction_mismatch"
+- portfolio/grid_fisher.py-1311-            # instrument (signal flipped away then back too quickly).
+- portfolio/grid_fisher.py:1336:                instr_report["skip"] = "no_bid"
+- portfolio/grid_fisher.py-1340-            # Global cap gate — sum planned notional across every
+- portfolio/grid_fisher.py-1358-                barrier=cat.get("barrier") if cat.get("barrier") else None,
+- data/metals_loop.py-694-    # Fallback: just verify prices exist (can't check holdings)
+- data/metals_loop.py-777-prev_signal_actions = {}  # for signal flip detection
+- data/metals_loop.py:783:startup_grace = True      # skip first check to establish baseline
+- data/metals_loop.py-1006-    # - Library import, no setup: no handler → fallback → stdout ✓
+- data/metals_loop.py:1007:    # - External NullHandler on root: skipped → no emitter → fallback ✓
+- data/metals_loop.py-1008-    # - External root StreamHandler(ERROR): level too high → fallback ✓
+- data/metals_loop.py-1112-        logger.debug("_silver_fetch_xag: Binance FAPI call failed, using cached XAG-USD", exc_info=True)
+- data/metals_loop.py-2061-        # Check _fishing flag OR ob_id in FISHING_OB_IDS (handles restart race)
+- data/metals_loop.py:2215:                        # _reconcile_swing_positions both skip known
+- data/metals_loop.py-2273-                # tag on KNOWN_WARRANT_OB_IDS would otherwise leave the
+- data/metals_loop.py:2441:        log(f"  SKIP stop update {key}: fetch_price returned None — "
+- data/metals_loop.py:2736:        return  # no price, skip
+- data/metals_loop.py-2931-        logger.warning("_run_fish_engine_tick: post-decision fish_engine_state.json write failed", exc_info=True)
+- data/metals_loop.py-2976-            log(f"[fish] SKIP BUY: no price data for {ob_id}")
+- data/metals_loop.py-2979-        # Fetch buying power — try cached data, page-based, or fixed fallback
+- data/metals_loop.py-3075-        log("[fish] SKIP SELL: _loop_page not initialized yet")
+- data/metals_loop.py:3164:            return  # no prices yet, skip silently
+- data/metals_loop.py-4233-    CODEX-6 finding 3: re-arm places new stops at the broker but the
+- data/metals_loop.py:4236:    poll dead IDs and skip placing replacement stops because the local
+- data/metals_loop.py-4472-                    entry["barrier_distance_pct"] = round((und - barrier) / und * 100, 1)
+- data/metals_loop.py-5267-    spike volume slice would remain unprotected for the rest of the
+- data/metals_loop.py:5508:    # Could not confirm the spike is gone — alert and skip restore. The
+- data/metals_loop.py-6917-            log("LLM thread: Ministral every 5min, Chronos every 60s")
+- data/metals_loop.py-7284-                # Refresh account data + warrant catalog (every 10th check ~5 min)
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n -C 8 \"orb|open range|lookahead|look-ahead|shift\\(-|rolling|max\\(|min\\(|cummax|cummin|future|next bar|prediction_date|target|label|train|split|leak|same day|entry\" portfolio/orb_predictor.py portfolio/orb_backtest.py portfolio/orb_postmortem.py" in Q:\finance-analyzer
+- portfolio/fish_instrument_finder.py-4-fetches quotes for each, and ranks by spread + barrier distance.
+- portfolio/fish_instrument_finder.py-92-        underlying_price: current underlying price (for barrier distance calc)
+- portfolio/fish_instrument_finder.py-108-        hits = _search_avanza(query, limit=20)
+- portfolio/fish_instrument_finder.py-172-        # Barrier distance: higher is safer, use negative for descending sort
+- portfolio/fish_instrument_finder.py-173-        barrier = -(c["barrier_distance_pct"] or 0)
+- portfolio/fin_snipe_manager.py-106-            logger.warning("Cannot send critical alert — config.json missing or corrupt")
+- portfolio/fin_snipe_manager.py-429-        # magnitude. Fetch the live rate (with the same 15-min cache the
+- portfolio/fin_snipe_manager.py:431:        # API failure (matching fx_rates' own fallback behavior).
+- portfolio/fin_snipe_manager.py-461-        # BUG-228: If estimate returns -1.0 sentinel (invalid inputs),
+- portfolio/fin_snipe_manager.py-485-                drift=0.0,
+- portfolio/fin_fish.py-99-        "barrier": 0,
+- portfolio/fin_fish.py-113-        "barrier": 0,
+- portfolio/fin_fish.py-127-        "barrier": 0,
+- portfolio/fin_fish.py-141-        "barrier": 0,
+- portfolio/fin_fish.py-154-        "barrier": 0,
+- portfolio/fin_fish.py:286:    """Load signal data for a ticker from agent_summary."""
+- portfolio/fin_fish.py-299-        "action": str(entry.get("action") or "HOLD"),
+- portfolio/fin_fish.py-302-        "econ_action": str(extra.get("econ_calendar_action") or "HOLD"),
+- portfolio/fin_fish.py-303-        "news_action": str(extra.get("news_event_action") or "HOLD"),
+- portfolio/fin_fish.py-313-        return 10.0  # fallback
+- portfolio/fin_fish.py-316-def _get_chronos_drift(signal: dict) -> float | None:
+- portfolio/fin_fish.py-317-    """Extract Chronos 24h drift from signal data, or None if unavailable."""
+- portfolio/fin_fish.py-329-    signal: dict,
+- portfolio/fin_fish.py-360-        drift = drift_from_probability(1.0 - p_up, vol)
+- portfolio/fin_fish.py-362-        drift = drift_from_probability(p_up, vol)
+- portfolio/fin_fish.py-364-    # Blend Chronos drift if available
+- portfolio/fin_fish.py-365-    chronos_pct = _get_chronos_drift(signal)
+- portfolio/fin_fish.py-377-def choose_fishing_directions(signal: dict) -> list[dict]:
+- portfolio/fin_fish.py-380-    Uses RSI, Chronos, consensus signal, Fear & Greed, econ calendar,
+- portfolio/fin_fish.py-386-    rsi = signal["rsi"]
+- portfolio/fin_fish.py-387-    chronos_pct = _get_chronos_drift(signal)
+- portfolio/fin_fish.py-460-    signal: dict,
+- portfolio/fin_fish.py-492-    levels = structural_levels(spot, signal["entry"], extra)
+- portfolio/fin_fish.py-503-    signal: dict,
+- portfolio/fin_fish.py-536-    levels = structural_levels(spot, signal["entry"], extra)
+- portfolio/fin_fish.py-548-    drift: float,
+- portfolio/fin_fish.py-583-    drift: float,
+- portfolio/fin_fish.py-634-    signal: dict,
+- portfolio/fin_fish.py:642:    return compute_fishing_levels_bull(ticker, spot, signal, hours, daily_ranges)
+- portfolio/fin_fish.py-879-    signal: dict,
+- portfolio/fin_fish.py-908-    directions = choose_fishing_directions(signal)
+- portfolio/fin_fish.py:917:            levels = compute_fishing_levels_bull(ticker, spot, signal, hours, daily_ranges)
+- portfolio/fin_fish.py:919:            levels = compute_fishing_levels_bear(ticker, spot, signal, hours, daily_ranges)
+- portfolio/fin_fish.py-1004-    signal: dict,
+- portfolio/fin_fish.py-1018-    # Signal boosters line
+- portfolio/fin_fish.py-1019-    fg = signal.get("fear_greed")
+- portfolio/fin_fish.py:1196:                # Show signal reliability ranking for this ticker
+- portfolio/fin_fish.py-1201-                        key=lambda x: x[1].get("accuracy", 0),
+- portfolio/fin_fish.py-1205-                        print("\n  Signal reliability (top 10 / bottom 3):")
+- portfolio/fin_fish.py:1268:        signal = load_signal_data(ticker)
+- portfolio/fin_fish.py:1274:                levels = compute_fishing_levels_bull(ticker, spot, signal, hours, daily_ranges)
+- portfolio/fin_fish.py:1276:                levels = compute_fishing_levels_bear(ticker, spot, signal, hours, daily_ranges)
+- portfolio/fin_fish.py:1293:            plans = compute_fishing_plan(ticker, spot, signal, hours, daily_ranges,
+- portfolio/fin_fish.py:1298:        report = format_report(ticker, sd, signal, daily_ranges, plans,
+- portfolio/fin_fish.py-1307-            "regime": signal["regime"],
+- portfolio/fin_fish.py-1308-            "rsi": signal["rsi"],
+- portfolio/fin_fish.py-1309-            "atr_pct": signal["atr_pct"],
+- portfolio/orb_postmortem.py-4-Tracks prediction accuracy over time, identifies which filters work best,
+- portfolio/orb_postmortem.py-49-    # Target hit analysis
+- portfolio/orb_postmortem.py-78-    # Target hit analysis
+- portfolio/orb_postmortem.py-139-    """Read all past postmortems and return as list of PostmortemResult."""
+- portfolio/orb_postmortem.py-167-    # Overall accuracy
+- portfolio/orb_postmortem.py-175-    # High prediction accuracy
+- portfolio/orb_postmortem.py:240:    Reads today's prediction from orb_predictions_today.json,
+- portfolio/orb_postmortem.py:248:        print("No prediction found for today (data/orb_predictions_today.json missing)")
+- portfolio/orb_backtest.py-265-    # Hit rates
+- portfolio/orb_backtest.py-320-        n: Number of days to hold out per iteration.
+- portfolio/orb_backtest.py-331-        # Pick N random days to hold out (must have enough history before them)
+- portfolio/orb_backtest.py-332-        eligible_indices = list(range(10, len(day_results)))  # skip first 10 for min history
+- portfolio/orb_backtest.py-403-        "--- Prediction Accuracy ---",
+- I’ve isolated the likely defect classes. I’m drilling into ORB now because that’s the one area where “looks reasonable” is not enough; I need to prove whether future-day leakage is actually present.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 8 "def _compute_stop_plan|MIN_STOP_DISTANCE_PCT|barrierLevel|barrier|stop_too_close|HARD_STOP_CERT_PCT|HARD_STOP_SELL_BUFFER_PCT" portfolio/fin_snipe_manager.py' in Q:\finance-analyzer
+- 544-    # Only skip placement of NEW stops when too close.
+- 563-    inventory at avg entry). Used by the global-cap gate."""
+- 619-    For each ARMED tier whose order_id is missing from ``open_order_ids``:
+- 625-    Also reports inventory drift where the live volume disagrees with
+- 640-            # Order is missing from live. Distinguish full fill / partial
+- 641-            # fill / cancel by the live position delta vs cached
+- 652-                # stays honest, and log the drift so an operator can spot
+- 686-        # Final drift check — only used for logging; the caller decides
+- 913-        barrier: Optional[float] = None,
+- 917-        """Place any missing buy tiers, respecting per-instrument cap and
+- 920-        Existing ARMED tiers are kept as-is. If a tier index is missing
+- 924-        placing it would push *aggregate* planned notional across every
+- 1336-                instr_report["skip"] = "no_bid"
+- 1340-            # Global cap gate — sum planned notional across every
+- 1350-                instr_report["skip"] = "global_cap"
+- 1358-                barrier=cat.get("barrier") if cat.get("barrier") else None,
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n -C 12 \"acquire_singleton_lock|release_singleton_lock|PLACE_ORDER_LOCK|order lock|grid_fisher.tick|swing_trader.evaluate_and_execute|place_order\\(|emergency_sell\\(|stoploss|/_api/trading/stoploss/new\" data/metals_loop.py" in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 12 "verify_session|session_healthy|re-auth|reauth|BankID|TargetClosed|silent|retry|warning|exception" data/metals_loop.py portfolio/grid_fisher.py portfolio/golddigger/runner.py portfolio/fin_snipe_manager.py' in Q:\finance-analyzer
+- 1579-    """Read XAG/XAU signal data from the main loop's agent_summary.json.
+- 1581-    2026-04-21 — exposes signal_ts (ISO string from Layer 1's write clock,
+- 5953-    """Write context JSON for Claude Layer 2."""
+- 890-_signal_action_history = deque(maxlen=10)  # last 10 XAG signal actions for flip detection
+- 893-    """Acquire single-instance lock for metals loop (non-blocking).
+- 933-    """Release single-instance lock if held."""
+- 2061-        # Check _fishing flag OR ob_id in FISHING_OB_IDS (handles restart race)
+- 3031-                log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
+- 3096-            log(f"[fish] SELL aborted: could not clear stops for {ob_id}")
+- 3731-        log(f"Decision history read error: {e}")
+- 4650-        # CODEX-7 finding 2: place_order may raise. Wrap the call in a
+- 4809-            # leaves the NEW position without broker-level protection.
+- 4812-            # failures (API shape, stop-loss endpoint auth, etc.).
+- 4990-            # Try stop-loss cancel endpoint first, fall back to regular order cancel
+- 4993-                // Stop-loss cancel endpoint
+- 7460-                                send_telegram("*METALS LOOP* All positions sold by broker. Stopping.")
+- 7474-                # Skip if hardware trailing is active — Avanza manages the trail
+- 7560-                # L3 EMERGENCY: auto-sell positions near barrier
+- 7790-                    print(f"[WARN] LLM thread stop failed: {e}", flush=True)
+- portfolio/golddigger/runner.py-99-    """Acquire the GoldDigger singleton lock."""
+- portfolio/golddigger/runner.py-189-            # Hardware stop-loss after BUY
+- portfolio/golddigger/runner.py-203-                                logger.info("Hardware stop-loss placed: trigger=%.2f, id=%s", stop_price, sl_id)
+- portfolio/golddigger/runner.py-205-                                logger.error("Failed to place hardware stop-loss!")
+- portfolio/golddigger/runner.py-206-                                _send_telegram("_GOLDDIGGER: Failed to place stop-loss!_", config)
+- portfolio/golddigger/runner.py-208-                        logger.error("Hardware stop-loss error: %s", e_sl)
+- portfolio/golddigger/runner.py-209-                        _send_telegram("_GOLDDIGGER: Stop-loss placement error!_", config)
+- portfolio/golddigger/runner.py-249-            mode = "SIGNAL-ONLY"
+- portfolio/grid_fisher.py-336-    """Load state from *state_path*. Returns a fresh state on missing/corrupt/old."""
+- portfolio/grid_fisher.py-805-        from a thread that has a running asyncio event loop raises
+- portfolio/grid_fisher.py-809-        its Playwright context to the FIRST thread that initialised it, so
+- portfolio/grid_fisher.py-810-        when a later call lands in a different worker thread it raises
+- portfolio/grid_fisher.py-811-        "cannot switch to a different thread (which happens to have exited)".
+- portfolio/grid_fisher.py-812-        Solution: one long-lived worker thread for the lifetime of this
+- portfolio/grid_fisher.py-813-        GridFisher — all session calls land on the same thread and the
+- portfolio/grid_fisher.py-814-        cached Playwright context stays bound to it.
+- portfolio/grid_fisher.py-822-        # the instance so process shutdown cleans it up via __del__.
+- portfolio/fin_snipe_manager.py-346-    from an unresolvable failure (BUG-228: previously returned
+- portfolio/fin_snipe_manager.py-359-            "BUG-228: cannot estimate entry_underlying — missing inputs "
+- portfolio/fin_snipe_manager.py-363-        return -1.0  # sentinel: caller should use current_underlying but not save
+- portfolio/fin_snipe_manager.py-370-            "BUG-228: entry_underlying formula degenerate (base=%.4f)", base,
+- portfolio/fin_snipe_manager.py-1234-    if stop_plan and not stop_plan.get("skip") and current_bid > 0:
+- portfolio/fin_snipe_manager.py-1368-        # Pre-execution validation — skip invalid actions instead of crashing
+- portfolio/fin_snipe_manager.py-1380-        # by a place that throws would otherwise leave the position naked.
+- portfolio/fin_snipe_manager.py-1521-                "Failed to process execution result for %s — state may be incomplete",
+- data/metals_loop.py:54:# logger. Doing so (a) silently disables parent-process telemetry —
+- data/metals_loop.py-97-        # 2. Write directly (NOT via super().emit()) so we can catch
+- data/metals_loop.py-100-        #    which would bypass our ASCII sanitization fallback.
+- data/metals_loop.py-103-            self.stream.write(msg + self.terminator)
+- data/metals_loop.py-107-            # Same idea as the old `_safe_print` fallback, now integrated
+- data/metals_loop.py-111-                self.stream.write(safe + self.terminator)
+- data/metals_loop.py-162-    """Walk the logger hierarchy to find a handler that would emit `target_level`.
+- data/metals_loop.py-419-# Cascading stop-loss orders (hardware protection via Avanza limit orders)
+- data/metals_loop.py-623-        # save now means positions may drift between broker reality and
+- data/metals_loop.py:625:        logger.exception("_save_positions: atomic_write_json failed — positions may drift on restart")
+- data/metals_loop.py-632-      - account.id
+- data/metals_loop.py-1007-    # - External NullHandler on root: skipped → no emitter → fallback ✓
+- data/metals_loop.py-1036-    position), we do a simple drift-free sleep and return.
+- data/metals_loop.py-1669-        # gracefully (signal data is stale for one cycle). Stack trace
+- data/metals_loop.py:1672:        logger.warning("_read_signals: agent_summary_compact read/parse failed", exc_info=True)
+- data/metals_loop.py:2121:        logger.warning("_reconcile_fish_engine_position: fish_engine_state.json write failed ob_id=%s", ob_id, exc_info=True)
+- data/metals_loop.py-2129-        f"Reason: stop-loss or manual sell"
+- data/metals_loop.py-2183-                # stop / duplicate sell race the migration was meant
+- data/metals_loop.py-2186-                # Codex review round 6 P1: but ONLY if swing actually
+- data/metals_loop.py-2189-                # PREVIOUS trade; the fresh holding would otherwise be
+- data/metals_loop.py-2998-            log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
+- data/metals_loop.py-3120-            # position is not left naked at the broker.
+- data/metals_loop.py-3133-        # if the success-handling path raised), the position would be left
+- data/metals_loop.py-3142-                # finally means the position is NAKED at the broker.
+- data/metals_loop.py-3152-    """Write data/fish_precomputed.json for the fishing monitor.
+- data/metals_loop.py-3232-        # --- Vol scalar (hourly refresh from signal ATR) ---
+- data/metals_loop.py-3872-                # JS exec'd on the page raised (Playwright session drift
+- data/metals_loop.py-3962-    inside asyncio loop" during a fish-engine sell path. A stale
+- data/metals_loop.py-3971-    Returns ``(False, [])`` on read failure — fail closed: callers MUST
+- data/metals_loop.py-4101-        # drift vs transport). Conservative: return the full snapshot
+- data/metals_loop.py-4195-        # local state file stays stale but broker reality is correct;
+- data/metals_loop.py-4311-    left naked at the broker — a materially worse outcome than the original
+- data/metals_loop.py:4316:    surfaces it for manual intervention rather than going silent.
+- data/metals_loop.py-4319-    file is rewritten with the new broker IDs so downstream code does
+- data/metals_loop.py-4330-        # naked at the broker. This is materially the worst failure mode
+- data/metals_loop.py:4382:        logger.exception("_save_stop_orders: atomic_write_json failed — stop tracking may drift on restart")
+- data/metals_loop.py-4809-            # leaves the NEW position without broker-level protection.
+- data/metals_loop.py-4812-            # failures (API shape, stop-loss endpoint auth, etc.).
+- data/metals_loop.py-4817-    # Legacy cascade stop-loss (only if hardware trailing is OFF)
+- data/metals_loop.py-5023-    """Check if any stop-loss orders were filled. Returns list of filled keys."""
+- data/metals_loop.py-5608-    order/restoration step failed and should be retried on the next
+- data/metals_loop.py-5609-    loop iteration. Callers MUST gate ``spike_state["cancelled"] = True``
+- data/metals_loop.py-5712-        # Step 2: Re-fetch live position volume. The spike could have
+- data/metals_loop.py-5714-        # full-volume snapshot would exceed the live position size and
+- data/metals_loop.py-5715-        # the place_stop_loss would reject with short.sell.not.allowed.
+- data/metals_loop.py-5719-                f"[spike] cannot read live volume for {ob_id}; "
+- data/metals_loop.py-5751-    holding" from "could not read" because they require different
+- data/metals_loop.py-5783-    The "atomic" wording is loose: between the clear and the re-arm there
+- data/metals_loop.py-5787-    original stops — would inflate encumbered volume past the position
+- data/metals_loop.py-5821-                    f"Could not cleanly clear resized stops; restore deferred "
+- data/metals_loop.py-5858-        # to restore the missing protection. Without this, one transient
+- data/metals_loop.py:6646:        # _log_trade/_log_decision in metals_swing_trader.py: silent drop
+- data/metals_loop.py-6652-    is_routine = prediction.get("action") == "HOLD" and thesis_status in ("INTACT", "NEUTRAL")
+- data/metals_loop.py-6871-        # Place cascading stop-loss orders
+- data/metals_loop.py-6874-            log("Placing cascading stop-loss orders...")
+- data/metals_loop.py-7172-                            _silver_reset_session()  # clear stale alert thresholds from prior position
+- data/metals_loop.py-7474-                # Skip if hardware trailing is active — Avanza manages the trail
+- data/metals_loop.py-7692-                            # lock contention, state corruption, or
+- 393-TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
+- 2042-        logger.debug("Could not propagate FISHING_OB_IDS to swing_trader", exc_info=True)
+- 2044-# emitted every 30s when account held a warrant not in KNOWN_WARRANT_OB_IDS
+- 2046-# warn the first time each unknown id appears per process lifetime.
+- 2053-    Fishing positions are intraday only — never hold overnight.
+- 5949-        logger.warning("log_invocation: %s write failed tier=%s trigger=%s", INVOCATION_LOG, tier, trigger, exc_info=True)
+- 6263-    """Kill a running Claude process."""
+- 7172-                            _silver_reset_session()  # clear stale alert thresholds from prior position
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n -C 12 "def _check_session_and_alert|session_healthy|session expired|BankID|re-auth|reauth|renew|silent|retry" data/metals_loop.py' in Q:\finance-analyzer
+- 46-# log output path in this process before 2026-04-09 afternoon. Fleet v1 added
+- 64-# log output should use pytest's `caplog` with
+- 97-        # 2. Write directly (NOT via super().emit()) so we can catch
+- 100-        #    which would bypass our ASCII sanitization fallback.
+- 103-            self.stream.write(msg + self.terminator)
+- 107-            # Same idea as the old `_safe_print` fallback, now integrated
+- 111-                self.stream.write(safe + self.terminator)
+- 162-    """Walk the logger hierarchy to find a handler that would emit `target_level`.
+- 497-# NOT gated on having an active position. When a breakout is detected we write
+- 498-# a momentum candidate to ENTRY_MOMENTUM_STATE_FILE; metals_swing_trader reads
+- 777-prev_signal_actions = {}  # for signal flip detection
+- 783-startup_grace = True      # skip first check to establish baseline
+- 787-cached_account_data = {}      # latest account buying power (refreshed periodically)
+- 798-# actually hit the network; cache hits don't consume budget.
+- 1006-    # - Library import, no setup: no handler → fallback → stdout ✓
+- 1007-    # - External NullHandler on root: skipped → no emitter → fallback ✓
+- 1008-    # - External root StreamHandler(ERROR): level too high → fallback ✓
+- 2183-                # stop / duplicate sell race the migration was meant
+- 2186-                # Codex review round 6 P1: but ONLY if swing actually
+- 2189-                # PREVIOUS trade; the fresh holding would otherwise be
+- 3152-    """Write data/fish_precomputed.json for the fishing monitor.
+- 3232-        # --- Vol scalar (hourly refresh from signal ATR) ---
+- 3951-    """Read the live stop-loss inventory for ``ob_id`` BEFORE any cancel
+- 3955-    cancel-then-sell sequence. Snapshotting AFTER any cancel would miss
+- 3956-    stops that were already removed at the broker, leaving the rollback
+- 3962-    inside asyncio loop" during a fish-engine sell path. A stale
+- 3971-    Returns ``(False, [])`` on read failure — fail closed: callers MUST
+- 4002-            # 2026-04-09 Stage 3: ERROR — snapshot read is a hard dependency
+- 4005-            # failures (auth drift, Avanza shape change, network). The
+- 4311-    left naked at the broker — a materially worse outcome than the original
+- 4319-    file is rewritten with the new broker IDs so downstream code does
+- 4377-        # failure risks drift between local tracking and broker reality.
+- 4380-        # miss re-placing needed ones. Stack trace helps diagnose atomic
+- 4381-        # write failures (disk full, permission, race).
+- 4382-        logger.exception("_save_stop_orders: atomic_write_json failed — stop tracking may drift on restart")
+- 4386-# Trade queue — Layer 2 writes intent, Layer 1 executes
+- 5608-    order/restoration step failed and should be retried on the next
+- 5609-    loop iteration. Callers MUST gate ``spike_state["cancelled"] = True``
+- 5712-        # Step 2: Re-fetch live position volume. The spike could have
+- 5714-        # full-volume snapshot would exceed the live position size and
+- 5715-        # the place_stop_loss would reject with short.sell.not.allowed.
+- 5719-                f"[spike] cannot read live volume for {ob_id}; "
+- 5751-    holding" from "could not read" because they require different
+- 5783-    The "atomic" wording is loose: between the clear and the re-arm there
+- 5787-    original stops — would inflate encumbered volume past the position
+- 5821-                    f"Could not cleanly clear resized stops; restore deferred "
+- 5858-        # to restore the missing protection. Without this, one transient
+- 6652-    is_routine = prediction.get("action") == "HOLD" and thesis_status in ("INTACT", "NEUTRAL")
+- 6828-    # 2026-04-13: wrap raw Playwright Page in ResilientPage so the inevitable
+- 6871-        # Place cascading stop-loss orders
+- 6874-            log("Placing cascading stop-loss orders...")
+- 7383-                            # needed; the snapshot would only be useful
+- 4503-    """Process pending orders from the trade queue file.
+- 4511-      5. On BUY: add to POSITIONS, place hardware stop-loss, log trade
+- 4349-    # Sync local state with the new broker IDs (best effort).
+- 414-# Stop levels (distance from barrier as % of bid)
+- 419-# Cascading stop-loss orders (hardware protection via Avanza limit orders)
+- 431-# Trade queue (Layer 2 writes intent, Layer 1 executes)
+- 445-# This works even if our process crashes. No polling needed.
+- 450-# Software trailing stop config — momentum-aware (fallback when hardware disabled)
+- 464-# Auto-exit override (prevent Claude HOLD paralysis)
+- 4468-                # Compute barrier distance
+- 4470-                barrier = winfo.get("barrier") or 0
+- 4471-                if und > 0 and barrier > 0:
+- 4472-                    entry["barrier_distance_pct"] = round((und - barrier) / und * 100, 1)

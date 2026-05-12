@@ -1,0 +1,166 @@
+# Codex prose extract: 2-orchestration (2026-05-12)
+
+Heuristic extract from `_logs/2-orchestration.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 158 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the orchestration subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- In-scope files (read these and ONLY these):
+- - Layer 2 (Claude CLI subprocess): T1 120s/15 turns, T2 600s/40 turns, T3 900s/40 turns. Layer 2 March-April outage was caused by `claude -p --bare` exiting 0 while printing "Not logged in" — this kind of silent failure mode is the #1 concern.
+- - Atomic I/O via file_utils only. JSONL append-only journals.
+- 1. Subprocess deadlocks / leaks: missing timeout, missing stdout/stderr drains causing pipe full, missing kill on parent exit.
+- 2. Silent-failure modes: exit-0 paths that don't mean success (the `claude -p` "Not logged in" trap).
+- 3. Race conditions on shared state, locks held across IO, GIL-aware concurrency bugs.
+- 4. Trigger detection: hysteresis missing, debounce missing, false-positive cascades.
+- 7. Journal corruption: torn writes mid-rotation, mixing keys across schema versions.
+- 8. LLM prewarmer: GPU lock not released on exception, VRAM leak, runaway prewarm spawning.
+- 9. Health/heartbeat: false-green when loop alive but no work done; heartbeat written from wrong thread.
+- - path:line — short description. Why it bites: ... Fix: ...
+- Reviewing the orchestration files now with an adversarial focus on subprocess handling, concurrency, silent failures, and persistent state. I’ll read the in-scope modules directly, map the control flow across loop, Layer 2, alerts, and journaling, then cite only concrete findings with file/line references.
+- → Read all in-scope orchestration files and identify critical control paths
+- • Produce severity-ranked findings with exact line references and missing tests
+- I’m pulling the files in batches so I can trace the main loop, subprocess wrappers, and persistence paths together instead of reviewing them in isolation. Next I’m checking the Layer 2/Claude path against the known silent-success outage mode and timeout requirements.
+- The parallel read was blocked by the sandbox policy wrapper, so I’m switching to smaller direct reads. I’ll keep it constrained to the exact file list and reconstruct the same control paths manually.
+- - signal_engine.py - 30-signal voting system, generate_signal
+- - telegram_notifications.py - Telegram send/escape/alert
+- _SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+- """Acquire single-instance lock for main loop (non-blocking).
+- "Singleton lock requires msvcrt (Windows) or fcntl (Linux/WSL)"
+- """Release single-instance lock if held."""
+- "MU consensus BUY (79%)" -> "MU"
+- logger.warning("accuracy degradation import failed: %s", e_deg)
+- logger.warning("dashboard accuracy prewarm import failed: %s", e_pw)
+- logger.warning("Signal postmortem failed: %s", e_pm)
+- """Fetch data + generate signals for one ticker. Fully thread-safe."""
+- if "volume_action" in extra and extra["volume_action"] != "HOLD":
+- "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
+- logger.error("BUG-178 phases [%s]: %s", name, phase_str)
+- "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",
+- logger.warning("signal logging failed: %s", e)
+- msg = (f"?? SAFEGUARD: Outcome backfill stale! "
+- f"Entries missing outcomes: {outcome_status['entries_without_outcomes']}/50. "
+- msg = (f"?? SAFEGUARD: Dead signals (100% HOLD in last 20 entries): "
+- f"These signals contribute nothing to consensus.")
+- """Load persisted crash counter. Returns 0 if missing/corrupt."""
+- """Persist crash counter to survive process restarts."""
+- logger.warning("Failed to load fundamentals cache: %s", e)
+- logger.warning("Heartbeat write after initial run failed: %s", e)
+- logger.warning("Heartbeat write failed: %s", e)
+- print("\n=== Signal Decay Check ===")
+- print(f"Signal decay check failed: {e}")
+- I’ve got the main loop open. The next pass is targeted: subprocess APIs, alert send paths, journal writes, and lock usage, so I can validate the exact failure modes you called out instead of skimming large files linearly.
+- portfolio/alert_budget.py:6:    3 = Emergency (bypasses budget — stop-loss, circuit breaker, crash)
+- portfolio/alert_budget.py:22:    """Token-bucket style alert rate limiter with priority bypass."""
+- portfolio/llm_prewarmer.py:4:2026-05-11 Stage 3 Phase 1: minimal in-process prewarmer. Called from
+- portfolio/llm_prewarmer.py:63:# duplicate prewarms across process restarts at the same counter.
+- portfolio/llm_prewarmer.py:107:    file size — every prewarm pays this. We seek to the end and read
+- portfolio/llm_prewarmer.py:154:        logger.warning("llm_prewarmer state read failed: %s", e)
+- portfolio/llm_prewarmer.py:175:        logger.warning("llm_prewarmer state write failed: %s", e)
+- portfolio/llm_prewarmer.py:184:    see Fix A 2026-05-11 in ``prewarm_next_model``.
+- portfolio/llm_prewarmer.py:198:    rather prewarm an already-loaded model than skip a needed prewarm).
+- portfolio/llm_prewarmer.py:223:        # function. We auto-skip when that's present so the real prewarmer
+- portfolio/llm_prewarmer.py:234:            logger.debug("llm_prewarmer skip: pytest detected, no-op")
+- portfolio/llm_prewarmer.py:241:            logger.debug("llm_prewarmer skip: counter=%d not positive", counter)
+- portfolio/llm_prewarmer.py:248:                "llm_prewarmer skip: no server mapping for slot=%s", next_slot,
+- portfolio/llm_prewarmer.py:262:        # the expected slot is still loaded. Any mismatch → force prewarm.
+- portfolio/llm_prewarmer.py:273:                "llm_prewarmer skip: counter=%d slot=%s already prewarmed "
+- portfolio/health.py:99:    Wraps long-blocking work (Layer 2 T2/T3 subprocess, autonomous decision
+- portfolio/health.py:153:    """Check if the loop heartbeat is stale.
+- portfolio/health.py:180:    # Try cached timestamp from health_state first (avoids re-parsing invocations.jsonl)
+- portfolio/health.py:382:    # BUG-122: Use load_jsonl_tail instead of reading the entire 68MB file
+- portfolio/health.py:431:    # BUG-122: Use load_jsonl_tail instead of reading the entire 68MB file
+- portfolio/telegram_poller.py:328:        #      race against an external atomic_write_json rename mid-read on
+- portfolio/gpu_gate.py:6:Uses a threading lock for in-process concurrency (ThreadPoolExecutor workers)
+- portfolio/gpu_gate.py:29:# In-process lock — prevents ThreadPoolExecutor workers from racing
+- portfolio/gpu_gate.py:37:# Stale-lock sweeper daemon (2026-05-03). Module-level singleton so subprocess
+- portfolio/gpu_gate.py:106:    Returns True if the lock was broken (caller can retry acquire), False
+- portfolio/gpu_gate.py:184:    1. threading.Lock for in-process concurrency (ThreadPoolExecutor workers)
+- portfolio/gpu_gate.py:189:        timeout: max seconds to wait for lock
+- portfolio/gpu_gate.py:200:    # Layer 1: In-process thread lock (prevents ThreadPoolExecutor races)
+- portfolio/gpu_gate.py:204:        logger.warning("GPU thread-lock timeout (%ss) for %s", timeout, model_name)
+- portfolio/gpu_gate.py:223:                # Lock file exists — check if same process (re-entry) or stale.
+- portfolio/gpu_gate.py:233:                    continue  # retry atomic create
+- portfolio/gpu_gate.py:239:            logger.warning("GPU file-lock timeout (%ss) — held by %s", timeout, info.get("model", "?"))
+- portfolio/circuit_breaker.py:24:    """Thread-safe circuit breaker for a single data source."""
+- portfolio/circuit_breaker.py:36:        self._lock = threading.Lock()
+- portfolio/circuit_breaker.py:50:                # BUG-245: Reset backoff on successful recovery
+- portfolio/circuit_breaker.py:61:                # BUG-245: Exponential backoff — double timeout on each failed
+- portfolio/decision_outcome_tracker.py:3:Reads data/layer2_decisions.jsonl, checks if enough time has elapsed for
+- portfolio/qwen3_signal.py:61:    """Call Qwen3-8B, preferring persistent llama-server, with subprocess fallback."""
+- portfolio/qwen3_signal.py:76:    # the latter case, the subprocess fallback below would cold-start an 8B
+- portfolio/qwen3_signal.py:87:        logger.warning("qwen3: abstaining — Plex transcoding and VRAM <7168MB; skipping subprocess fallback")
+- portfolio/qwen3_signal.py:90:    # Fallback: subprocess (cold start)
+- portfolio/qwen3_signal.py:175:            logger.warning("GPU gate timeout — returning HOLD")
+- portfolio/claude_gate.py:198:        logger.error("Failed to write critical_errors.jsonl: %s", e)
+- portfolio/claude_gate.py:240:                "value, or ~/.claude/.credentials.json expired/missing. "
+- portfolio/claude_gate.py:285:# the actual claude API client process, etc.). Killing the direct child
+- portfolio/claude_gate.py:290:# Fix: explicitly Popen with a new process group/session so we can kill the
+- portfolio/claude_gate.py:295:    """Return Popen kwargs that allow tree-killing the spawned process."""
+- portfolio/claude_gate.py:302:    """Kill a Popen process and all of its descendants. Best-effort:
+- portfolio/claude_gate.py:360:    On timeout, kills the entire process tree (not just the direct child)
+- portfolio/claude_gate.py:493:        # 8-worker ticker pool / metals fast-tick / signal subprocesses
+- portfolio/claude_gate.py:509:            # 2026-04-13: Silent-failure detector. claude CLI can exit 0 while
+- portfolio/reporting.py:27:# 2026-04-22: escalate persistent silent failures to critical_errors.jsonl.
+- portfolio/bigbet.py:169:        # P2 (2026-04-17): PF_HEADLESS_AGENT=1 so the Claude subprocess skips
+- portfolio/bigbet.py:189:        # critical_errors.jsonl. Escalate first, return safe default if hit.
+- portfolio/multi_agent_layer2.py:150:    # hang asking "How would you like to proceed?" until specialist_timeout_s.
+- portfolio/reflection.py:4:summary stored in data/reflections.jsonl. Layer 2 reads the latest
+- portfolio/llama_server.py:92:_local_proc = None       # Popen if this process started the server
+- portfolio/llama_server.py:311:# bypass query_llama_server (subprocess fallbacks) get identical protection.
+- portfolio/llama_server.py:326:    subprocess that could evict Plex's NVENC context.
+- portfolio/llama_server.py:525:    logger.warning("llama-server file lock timeout (%ds)", timeout)
+- portfolio/llama_server.py:543:    Returns completion text or None (caller should fall back to subprocess).
+- portfolio/llm_outcome_backfill.py:5:and writes the outcome into a companion `data/llm_probability_outcomes.jsonl`
+- portfolio/digest.py:65:    # BUG-190: Use tail read for efficiency (invocations.jsonl grows unbounded)
+- portfolio/digest.py:243:            uptime_str = f"{heartbeat_age / 60:.0f}m stale"
+- portfolio/digest.py:245:            uptime_str = f"{heartbeat_age / 3600:.1f}h stale"
+- portfolio/analyze.py:26:    P2 (2026-04-17): sets PF_HEADLESS_AGENT=1 so the Claude subprocess
+- portfolio/analyze.py:626:    last_claude_actions = {}           # signal actions at last Claude call
+- portfolio/agent_invocation.py:30:# BUG-214: Drawdown circuit breaker thresholds.
+- portfolio/agent_invocation.py:42:# The clamp alone could silently disable the P1B T1 timeout check; this
+- portfolio/agent_invocation.py:336:    Uses efficient tail-read via last_jsonl_entry() (reads last 4KB only).
+- portfolio/agent_invocation.py:396:    P1-3 (2026-05-02 last-followups): the timeout-kill path
+- portfolio/agent_invocation.py:401:    would surface as ``timeout`` (not ``auth_error``) and never land in
+- portfolio/agent_invocation.py:402:    ``critical_errors.jsonl``. That asymmetry is the same class of silent
+- portfolio/agent_invocation.py:460:    so the silent-auth-failure detector covers the timeout path too — not
+- portfolio/agent_invocation.py:505:        _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
+- portfolio/agent_invocation.py:570:    # writing its "timeout" row — exactly the double-log the lock was added
+- portfolio/agent_invocation.py:623:    # BUG-214: Drawdown circuit breaker — first-ever automated risk gate on
+- portfolio/agent_invocation.py:629:    # 50%+ drawdown could continue trading if anything in the check threw
+- portfolio/agent_invocation.py:631:    # on a missing dd dict key). The fail-safe direction for a circuit
+- portfolio/agent_invocation.py:786:    # BUG-214: Append drawdown context so Layer 2 sees current risk levels.
+- portfolio/agent_invocation.py:816:        # silent Layer 2 failures. See portfolio/claude_gate.py
+- portfolio/agent_invocation.py:848:        # P2 (2026-04-17): mark this subprocess as headless so CLAUDE.md's
+- portfolio/agent_invocation.py:852:        # makes it hit the tier timeout with zero work done. The CLAUDE.md
+- portfolio/agent_invocation.py:858:        # Set timing/tier state BEFORE Popen so the watchdog thread never
+- portfolio/agent_invocation.py:859:        # observes a live _agent_proc with stale _agent_start/_agent_timeout
+- portfolio/agent_invocation.py:860:        # from the previous invocation (race: watchdog fires between Popen
+- portfolio/agent_invocation.py:862:        # the freshly spawned process). If Popen fails, _agent_proc stays
+- portfolio/agent_invocation.py:903:            # 2026-04-17 Codex P2: when claude is missing from PATH we fall
+- portfolio/agent_invocation.py:1171:    # BUG-97: _last_jsonl_ts can raise OSError if file is locked on Windows
+- portfolio/agent_invocation.py:1183:    # BUG-97: Same protection for telegram file
+- portfolio/agent_invocation.py:1187:        logger.warning("Failed to read telegram timestamp after agent completion")
+- portfolio/agent_invocation.py:1361:    Codex P2 #4 follow-up (2026-04-17): "timeout" and "auth_error" were
+- portfolio/main.py:13:- telegram_notifications.py — Telegram send/escape/alert
+- portfolio/main.py:317:        logger.warning("dashboard accuracy prewarm import failed: %s", e_pw)
+- portfolio/main.py:564:    # BUG-178: Add timeout to prevent indefinite hangs from stuck tickers.
+- portfolio/main.py:647:            "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
+- portfolio/main.py:831:        # subprocess; autonomous fallback = bounded but not instant) in a
+- portfolio/main.py:832:        # heartbeat keepalive. update_health() (the normal heartbeat write)
+- portfolio/main.py:882:    # Claude gate subprocess (portfolio/iskbets.py:invoke_layer2_gate). With
+- portfolio/main.py:1143:    # Check if previous loop crashed (stale heartbeat)
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'rg -n --no-heading -e "invoke_claude|Popen|subprocess|timeout|send_or_store|send_telegram|atomic_append_jsonl|atomic_write|thread|lock|rate|429|secret|token|chat_id" portfolio/analyze.py portfolio/bigbet.py portfolio/prophecy.py portfolio/qwen3_signal.py portfolio/focus_analysis.py portfolio/reporting.py portfolio/digest.py portfolio/daily_digest.py portfolio/weekly_digest.py portfolio/reflection.py portfolio/regime_alerts.py portfolio/autonomous.py portfolio/market_timing.py portfolio/llm_calibration.py portfolio/llm_outcome_backfill.py portfolio/llm_probability_log.py portfolio/cumulative_tracker.py portfolio/decision_outcome_tracker.py' in Q:\finance-analyzer
+- portfolio/reporting.py:173:            # MACD-improving gate a near-permanent blocker (17/19 flat pairs
+- portfolio/reporting.py:366:    # Signal activation rates (normalized weights for Layer 2 reference)
+- portfolio/reporting.py:869:    """Write a stripped version of agent_summary for Layer 2 (<15K tokens).
+- portfolio/reporting.py:1003:    # Add signal health summary (failure rates for each signal)
+- portfolio/qwen3_signal.py:5:Uses GPU lock to coordinate with Ministral.
+- portfolio/analyze.py:261:        print("No agent_summary.json found. Run --report first to generate signal data.")
+- portfolio/prophecy.py:8:Layer 2 reads these beliefs every invocation to maintain strategic context
+- portfolio/weekly_digest.py:276:        print("ERROR: Telegram config missing token or chat_id")
+- portfolio/llm_calibration.py:6:accuracy logic with thread-locks, TTL caches, and horizon fanout. Mixing
+- portfolio/llm_calibration.py:156:    The `buckets` slot holds a per-chosen-action empirical hit-rate table
+- portfolio/autonomous.py:262:    """Generate prediction from signal data and timeframe alignment."""
+- I’ve found one likely false-green already: the health cache treats “trigger happened” as “Layer 2 invoked,” which can mask a silent or skipped agent path. I’m validating the surrounding code now so I can cite the exact lines and failure chain rather than just the symptom.

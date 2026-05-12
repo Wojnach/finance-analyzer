@@ -1,0 +1,66 @@
+You are doing an ADVERSARIAL code review of the data-external subsystem (data collectors, sentiment, microstructure, fundamentals) of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files:
+- portfolio/data_collector.py
+- portfolio/fear_greed.py
+- portfolio/sentiment.py
+- portfolio/bert_sentiment.py
+- portfolio/alpha_vantage.py
+- portfolio/futures_data.py
+- portfolio/funding_rate.py
+- portfolio/fx_rates.py
+- portfolio/onchain_data.py
+- portfolio/news_keywords.py
+- portfolio/social_sentiment.py
+- portfolio/crypto_macro_data.py
+- portfolio/crypto_scheduler.py
+- portfolio/earnings_calendar.py
+- portfolio/econ_dates.py
+- portfolio/fomc_dates.py
+- portfolio/seasonality.py
+- portfolio/seasonality_updater.py
+- portfolio/session_calendar.py
+- portfolio/price_source.py
+- portfolio/http_retry.py
+- portfolio/api_utils.py
+- portfolio/data_refresh.py
+- portfolio/forecast_signal.py
+- portfolio/indicators.py
+- portfolio/metals_orderbook.py
+- portfolio/microstructure.py
+- portfolio/microstructure_state.py
+- portfolio/metals_cross_assets.py
+- portfolio/tickers.py
+
+Project rules:
+- Sources: Binance spot+FAPI (crypto), Alpaca (US stocks), yfinance/Avanza (metals via FAPI), Alpha Vantage (25/day), NewsAPI (100/day), FRED (treasury yields), BGeometrics (15/day BTC on-chain).
+- HTTP retry: exponential backoff via http_retry.py — bypassing breaks rate-limit handling.
+- Live prices first; cache TTLs must be honored.
+- Atomic I/O via file_utils. JSON state file writes never raw.
+- Binance: 10m candle interval does NOT exist (error -1120). Use 5m.
+- DST-aware market hours.
+
+Adversarial focus:
+1. Rate-limit math: requests-per-day counter not persistent across restarts; multi-process counter race.
+2. Timezone bugs: tz-naive vs tz-aware datetime mixing; market hours wrong for DST transitions.
+3. HTTP retry: backoff too aggressive (DoS source), or too lenient (hangs loop), or swallows 4xx as retryable.
+4. Sentiment: BERT model fallback to wrong tokenizer; sentiment score normalization (0..1 vs -1..+1) inconsistent.
+5. Funding rate sign: shorts pay vs longs pay convention reversed.
+6. fx_rates: stale FX cached > 24h, no validation that rate is sane.
+7. price_source: CL=F → Binance FAPI fallback chain — silent fallback to wrong instrument when primary fails.
+8. Microstructure: OFI/VPIN window bias, depth imbalance sign convention, persistence of rolling state across process restart.
+9. Indicators: pandas-ta vs talib drift; warm-up bars not respected.
+10. Onchain BTC: MVRV / SOPR cache key without timestamp -> stale.
+11. news_keywords / social_sentiment: keyword regex injection from feed content.
+12. tickers.py: ticker normalization (XAG=F vs XAG-USD vs SILVER) inconsistent across modules.
+
+Output format — strict markdown:
+# Codex adversarial review: data-external
+## Summary
+## P0 — Blockers
+## P1 — High
+## P2 — Medium
+## P3 — Low
+## Tests missing
+
+Be concrete. Cite line numbers. No false-positive padding.

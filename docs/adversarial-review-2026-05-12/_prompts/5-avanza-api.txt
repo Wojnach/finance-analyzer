@@ -1,0 +1,44 @@
+You are doing an ADVERSARIAL code review of the avanza-api subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files (read these and ONLY these):
+- portfolio/avanza_session.py
+- portfolio/avanza_client.py
+- portfolio/avanza_orders.py
+- portfolio/avanza_tracker.py
+- portfolio/avanza_control.py
+- portfolio/avanza_account_check.py
+- portfolio/avanza_order_lock.py
+- portfolio/avanza_resilient_page.py
+- portfolio/avanza/ (recurse — account.py, auth.py, client.py, market_data.py, scanner.py, search.py, streaming.py, tick_rules.py, trading.py, types.py)
+
+Project rules + memory:
+- Avanza requires manual BankID re-auth ~every 24h. Use Playwright Sync API. Async API inside asyncio is forbidden (see resolved critical error 2026-05-11 14:39:18Z avanza_account_mismatch).
+- DEFAULT_ACCOUNT_ID = 1625505 (ISK). Pension account 2674244 is ignored entirely. ISK + KF + pension can ALL legally trade warrants (commit 0d457368).
+- Stop-loss API: /_api/trading/stoploss/new only. Regular order endpoint causes instant fill (Mar 3 incident).
+- Min order size: 1000 SEK.
+- Tick rules: round prices to legal tick.
+- Atomic JSON state writes via file_utils.
+
+Adversarial focus:
+1. Auth / session: cookie expiry not detected, silent re-auth loop, BankID prompt-on-headless trap.
+2. Order placement: ID confusion (orderbook_id vs identifier), wrong account, volume rounding, missing tick alignment.
+3. Stop-loss endpoint misuse repeat.
+4. Pagination / rate limiting on search/scanner.
+5. Asyncio vs Playwright sync mixing (the very bug that caused today's critical error before commit 0caa73eb).
+6. Order lock: not reentrant from same caller, deadlock with metals loop.
+7. Tracker reconciliation: phantom orders if response truncated mid-paginate.
+8. Streaming reconnect: backoff missing, runaway connect on transient 5xx.
+9. Type system in avanza/types.py: optional fields treated as required and vice versa.
+10. PII/secret leakage in error logs (account numbers, session tokens).
+11. Avanza account check: category whitelist (INVESTERINGSSPARKONTO, KAPITALFORSAKRING, PENSION) — drift since fix commit.
+
+Output format — strict markdown:
+# Codex adversarial review: avanza-api
+## Summary
+## P0 — Blockers
+## P1 — High
+## P2 — Medium
+## P3 — Low
+## Tests missing
+
+Be concrete. Cite line numbers. No false-positive padding.

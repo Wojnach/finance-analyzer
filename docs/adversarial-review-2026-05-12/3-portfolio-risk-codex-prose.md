@@ -1,0 +1,110 @@
+# Codex prose extract: 3-portfolio-risk (2026-05-12)
+
+Heuristic extract from `_logs/3-portfolio-risk.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 102 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the portfolio-risk subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- In-scope files (read these and ONLY these):
+- - Patient and Bold portfolios start at 500K SEK each. Atomic I/O via file_utils only.
+- - Stop-loss API must use /_api/trading/stoploss/new, NOT the regular order endpoint (Mar 3 incident: regular order endpoint causes instant fill).
+- - User accepts 10-20% knockout risk on 5x certs; only de-risk at 50%+ (per memory/feedback_risk_tolerance.md).
+- - NEVER stop-loss within 3% of MINI warrant barrier (per memory/feedback_mini_stoploss.md).
+- - Live prices first — never use cached/precomputed for risk math (per memory/feedback_live_prices_first.md).
+- 1. Position-sizing bugs: Kelly half/quarter not honored, fixed budget overrides volatility scaling, missing min-order check.
+- 2. Stop-loss math: distance to barrier on MINI warrants not verified, ATR-based stops with wrong horizon.
+- 3. Cost model: spread/fee missing, FX conversion missing for SEK/USD positions, double-counting fees.
+- 4. Equity curve: round-trip P&L wrong on partial fills, NaN propagation from missing closes.
+- 5. Monte Carlo / VaR: look-ahead bias, sample size guard missing, IID assumption on correlated assets.
+- 6. Concurrency: portfolio state race when buy and sell run in parallel, atomic write but non-atomic read-modify-write pair.
+- 7. Drawdown circuit breaker stuck-closed or stuck-open; reset path missing.
+- 9. Warrant leverage/strike math: barrier knockout not detected, gearing mis-computed.
+- 10. Risk classifier: silent fallback to permissive class on missing field.
+- - path:line — Why it bites: ... Fix: ...
+- Reviewing only the portfolio-risk files you listed in `Q:\finance-analyzer`. I’ll map the in-scope files first, then read them for the specific failure modes you called out: sizing, stop-losses, costs, equity/P&L, Monte Carlo/VaR, concurrency, drawdown controls, cooldowns, warrants, and classifier fallbacks.
+- • Assemble severity-ranked review with missing-test coverage
+- The sandbox rejected the first pass before I got file contents. I’m retrying with simpler read-only commands to see what paths are actually accessible, then I’ll continue inside the allowed scope only.
+- portfolio/monte_carlo.py:44: # Volatility & drift estimation from existing system data
+- portfolio/monte_carlo.py:129:     def __init__(self, price: float, volatility: float, drift: float = 0.0,
+- portfolio/monte_carlo_risk.py:229:         6. Transform marginals: apply per-asset drift and volatility
+- portfolio/kelly_sizing.py:170:     system-wide aggregate, distorting Kelly sizing on both. The fallback
+- portfolio/trade_guards.py:58:     an independent strategy state file, and warrants-only activity would
+- portfolio/risk_management.py:5: - ATR-based trailing stop-loss tracking
+- portfolio/risk_management.py:322:     """Compute ATR-based stop-loss levels for all positions.
+- portfolio/risk_management.py:324:     For each holding with shares > 0, calculates stop-loss levels based on
+- portfolio/risk_management.py:373:         # 2x ATR stop-loss — cap ATR at 15% to prevent meaninglessly wide stops for warrants
+- portfolio/risk_management.py:400:     """Compute Monte Carlo probabilistic stop-loss quality for held positions.
+- portfolio/risk_management.py:414:             - expected_hit_time_min: E[time to stop | hit], or None
+- portfolio/risk_management.py:480:         # Stop hit probability
+- portfolio/risk_management.py:484:         # Expected time to hit stop
+- portfolio/risk_management.py:876:     This flags positions that are dangerously close to their stop-loss.
+- portfolio/monte_carlo.py:5: signal probabilities into price quantile bands, stop-loss probabilities,
+- portfolio/monte_carlo.py:34: # Per-asset-class ATR fallbacks when actual ATR is missing from signals.
+- portfolio/portfolio_validator.py:48:         errors.append("Missing required field: cash_sek")
+- portfolio/portfolio_validator.py:51:         errors.append("Missing or null field: total_fees_sek (should be 0 if no fees)")
+- portfolio/portfolio_validator.py:54:         errors.append("Missing required field: initial_value_sek")
+- portfolio/portfolio_validator.py:261:     # from portfolio_mgr.atomic_write_json: a partial write could be read
+- portfolio/equity_curve.py:396:             # P0-6 (2026-05-02): pnl_sek is now NET of buy+sell fees so
+- portfolio/equity_curve.py:447:             - total_pnl_sek: float (sum of round-trip P&L)
+- portfolio/equity_curve.py:468:     gross_profit = sum(t["pnl_sek"] for t in trips if t["pnl_sek"] > 0)
+- portfolio/equity_curve.py:469:     gross_loss = abs(sum(t["pnl_sek"] for t in trips if t["pnl_sek"] < 0))
+- portfolio/portfolio_validator.py:17:     all invariants hold. Returns a list of error messages -- an empty
+- portfolio/risk_management.py:37: # for signal_history.update_history. Lock scope: the entire read-decide-
+- portfolio/risk_management.py:101:         logger.warning("Could not stream history file %s: %s", history_path.name, e)
+- portfolio/risk_management.py:839:     """Check if BUY would add correlated exposure to an existing position.
+- portfolio/monte_carlo_risk.py:110: # Known correlation pairs (fallback when no historical data)
+- portfolio/monte_carlo_risk.py:132:     """Build correlation matrix using historical data with prior fallback.
+- portfolio/portfolio_mgr.py:1: """Portfolio state management — load, save, atomic writes, value calculation."""
+- portfolio/portfolio_mgr.py:29: _state_locks: dict[str, threading.Lock] = {}
+- portfolio/portfolio_mgr.py:35: def _get_lock(path: Path) -> threading.Lock:
+- portfolio/portfolio_mgr.py:36:     """Get or create a per-file lock for concurrency safety (C8)."""
+- portfolio/portfolio_mgr.py:40:             _state_locks[key] = threading.Lock()
+- portfolio/portfolio_mgr.py:109:     """Save state with rolling backup (C7) and lock (C8)."""
+- portfolio/portfolio_mgr.py:110:     lock = _get_lock(path)
+- portfolio/portfolio_mgr.py:111:     with lock:
+- portfolio/portfolio_mgr.py:117:     """Load Patient portfolio state. Returns validated defaults if missing or corrupt."""
+- portfolio/portfolio_mgr.py:127:     """Load Bold portfolio state. Returns validated defaults if missing or corrupt."""
+- portfolio/portfolio_mgr.py:137:     """Atomic read-modify-write for portfolio state (C8).
+- portfolio/portfolio_mgr.py:139:     Holds a lock for the entire read-modify-write cycle to prevent
+- portfolio/portfolio_mgr.py:151:     lock = _get_lock(path)
+- portfolio/portfolio_mgr.py:152:     with lock:
+- portfolio/portfolio_validator.py:260:     # json.load(). The raw path had a TOCTOU race with concurrent saves
+- portfolio/portfolio_validator.py:264:     # decode failures and uses the same atomic-rename window as the writer.
+- portfolio/risk_management.py:128:     SEK valuations by ~10x and could trigger a false drawdown breach
+- portfolio/risk_management.py:257:             # breaker will never trip. Surface the blind spot via
+- portfolio/risk_management.py:593:     # for the false-circuit-breaker bug. Using a missing-fx_rate default lets
+- portfolio/warrant_portfolio.py:234:                 # positions would hard-stop on small underlying drawdowns.
+- portfolio/portfolio_mgr.py:82:     Returns validated defaults only if file AND all backups are missing/corrupt.
+- portfolio/portfolio_mgr.py:88:     # File is missing or corrupt — check if the file exists (corruption vs missing)
+- portfolio/portfolio_mgr.py:102:             "ALL backups corrupt/missing for %s — returning fresh defaults", path.name
+- portfolio/risk_management.py:36: # O(delta) streaming read. Same class of bug as today's commit cdcbbd0f
+- portfolio/risk_management.py:55:     Returns `floor` (typically initial_value) if file missing/empty.
+- portfolio/risk_management.py:116: # Adversarial review 05-01 P1-15 (2026-05-02): persistent fallback for fx_rate.
+- portfolio/risk_management.py:126:     missing/empty/lacking the field — early loop cycle, agent_summary
+- portfolio/risk_management.py:135:          update the disk cache for future fallbacks.
+- portfolio/risk_management.py:137:          in-band. The cache is best-effort: corrupt JSON or missing/invalid
+- portfolio/risk_management.py:153:         # Cache the good rate for future fallback paths.
+- portfolio/risk_management.py:165:     cached = load_json(DATA_DIR / _FX_CACHE_FILENAME, default=None)
+- portfolio/risk_management.py:181:         "fx_rate fallback to hardcoded %.2f — agent_summary missing/invalid "
+- portfolio/risk_management.py:197:     # P1-15 (2026-05-02): use cached fallback chain instead of raw .get(..., 1.0).
+- portfolio/risk_management.py:211:             # Fallback: use avg_cost_usd from holdings if no live price
+- portfolio/risk_management.py:253:             # Fallback: cash only. This is NOT truly conservative —
+- portfolio/risk_management.py:676:     # Use the larger of state fees vs computed fees (handles missing fee_sek fields)
+- portfolio/risk_management.py:752:     # P1-15 (2026-05-02): use cached fallback chain instead of raw .get(..., 1.0).
+- portfolio/risk_management.py:818:         # Missing volume data (None) = unknown, not a mismatch.
+- I have the core guard and classifier code in hand. Next pass is the heavier risk logic: drawdown, ATR stops, Monte Carlo/VaR, and any valuation paths that can mask risk with stale or fallback data.
+- portfolio/exit_optimizer.py:386:     # 4. Underlying session mismatch (warrant still trading but underlying closed)
+- portfolio/exit_optimizer.py:395:     # 6. Stop-loss proximity from MC paths
+- portfolio/exit_optimizer.py:434:             logger.warning("RISK OVERRIDE: Knock-out danger (%.1f%% from barrier), "
+- portfolio/exit_optimizer.py:493:         stop_price_usd: Explicit stop level (for stop-hit probability).
+- portfolio/exit_optimizer.py:639:     # ---- 7. Stop-loss hit probability ----
+- The equity-curve pass already exposed one concrete accounting problem: its round-trip P&L path appears to treat `total_sek` as gross prices and then subtract fees again, even though the validator documents `BUY total_sek` includes fees and `SELL total_sek` is already net. I’m checking the sizing code now to see whether that bad P&L can feed Kelly recommendations.
+- portfolio/warrant_portfolio.py:43:     """Atomically write warrant portfolio state.
+- portfolio/kelly_sizing.py:134:         ticker: Ticker to get accuracy for (used for weighted_confidence fallback).
+- portfolio/kelly_sizing.py:145:     # Fallback: use weighted_confidence from the ticker's signals
+- portfolio/monte_carlo_risk.py:157:     # Fallback: use priors
+- portfolio/exit_optimizer.py:86:         ev_sek: Expected value = fill_prob × pnl + (1-fill_prob) × fallback.
+- portfolio/exit_optimizer.py:560:     # Fallback P&L: what we get if we hold to close (median terminal price)
+- portfolio/exit_optimizer.py:582:         # Expected value: fill_prob × conditional_pnl + (1-fill_prob) × fallback

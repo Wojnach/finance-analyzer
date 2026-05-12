@@ -1,0 +1,76 @@
+You are doing an ADVERSARIAL code review of the orchestration subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files (read these and ONLY these):
+- portfolio/main.py
+- portfolio/agent_invocation.py
+- portfolio/autonomous.py
+- portfolio/trigger.py
+- portfolio/market_timing.py
+- portfolio/claude_gate.py
+- portfolio/gpu_gate.py
+- portfolio/health.py
+- portfolio/alert_budget.py
+- portfolio/llm_prewarmer.py
+- portfolio/llm_calibration.py
+- portfolio/llm_batch.py
+- portfolio/llm_outcome_backfill.py
+- portfolio/llm_probability_log.py
+- portfolio/llama_server.py
+- portfolio/multi_agent_layer2.py
+- portfolio/perception_gate.py
+- portfolio/focus_analysis.py
+- portfolio/reporting.py
+- portfolio/journal.py
+- portfolio/journal_index.py
+- portfolio/telegram_notifications.py
+- portfolio/telegram_poller.py
+- portfolio/digest.py
+- portfolio/daily_digest.py
+- portfolio/weekly_digest.py
+- portfolio/reflection.py
+- portfolio/regime_alerts.py
+- portfolio/analyze.py
+- portfolio/bigbet.py
+- portfolio/prophecy.py
+- portfolio/qwen3_signal.py
+- portfolio/circuit_breaker.py
+- portfolio/cumulative_tracker.py
+- portfolio/decision_outcome_tracker.py
+
+Project rules:
+- 60s loop must not block — parallel ticker processing via ThreadPoolExecutor, 8 workers.
+- Crash recovery: exponential backoff 10s→5min, Telegram alert suppression after 5 crashes.
+- Layer 2 (Claude CLI subprocess): T1 120s/15 turns, T2 600s/40 turns, T3 900s/40 turns. Layer 2 March-April outage was caused by `claude -p --bare` exiting 0 while printing "Not logged in" — this kind of silent failure mode is the #1 concern.
+- CLAUDECODE env var must NOT be inherited by subprocess or `claude -p` fails with "nested session".
+- Atomic I/O via file_utils only. JSONL append-only journals.
+- Telegram alerts: cap 5 to avoid spam.
+- Multi-agent layer2: do not block forever; always set timeout.
+
+Adversarial focus:
+1. Subprocess deadlocks / leaks: missing timeout, missing stdout/stderr drains causing pipe full, missing kill on parent exit.
+2. Silent-failure modes: exit-0 paths that don't mean success (the `claude -p` "Not logged in" trap).
+3. Race conditions on shared state, locks held across IO, GIL-aware concurrency bugs.
+4. Trigger detection: hysteresis missing, debounce missing, false-positive cascades.
+5. Layer 2 invocation: wrong tier escalation, cost-blow-up paths (T1 → T2 → T3 every loop).
+6. Telegram: rate-limit handling, error-on-error infinite loops, secret leakage in messages.
+7. Journal corruption: torn writes mid-rotation, mixing keys across schema versions.
+8. LLM prewarmer: GPU lock not released on exception, VRAM leak, runaway prewarm spawning.
+9. Health/heartbeat: false-green when loop alive but no work done; heartbeat written from wrong thread.
+10. Circuit breaker / drawdown: math off-by-one, persistent stuck state, NEVER reset.
+
+Output format — strict markdown:
+# Codex adversarial review: orchestration
+## Summary
+(2-3 sentence overall verdict)
+## P0 — Blockers
+- path:line — short description. Why it bites: ... Fix: ...
+## P1 — High
+- ...
+## P2 — Medium
+- ...
+## P3 — Low
+- ...
+## Tests missing
+- ...
+
+Be concrete. Cite line numbers. No false-positive padding.

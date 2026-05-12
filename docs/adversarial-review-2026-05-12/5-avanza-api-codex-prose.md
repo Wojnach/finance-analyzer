@@ -1,0 +1,143 @@
+# Codex prose extract: 5-avanza-api (2026-05-12)
+
+Heuristic extract from `_logs/5-avanza-api.log`. Codex narration only — formal P0/P1 enumeration was never reached (turn budget consumed reading files, same pattern as 2026-05-11).
+
+Extracted 135 unique prose lines.
+
+## Narration
+
+- You are doing an ADVERSARIAL code review of the avanza-api subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+- In-scope files (read these and ONLY these):
+- - portfolio/avanza/ (recurse — account.py, auth.py, client.py, market_data.py, scanner.py, search.py, streaming.py, tick_rules.py, trading.py, types.py)
+- - DEFAULT_ACCOUNT_ID = 1625505 (ISK). Pension account 2674244 is ignored entirely. ISK + KF + pension can ALL legally trade warrants (commit 0d457368).
+- - Stop-loss API: /_api/trading/stoploss/new only. Regular order endpoint causes instant fill (Mar 3 incident).
+- - Atomic JSON state writes via file_utils.
+- 1. Auth / session: cookie expiry not detected, silent re-auth loop, BankID prompt-on-headless trap.
+- 2. Order placement: ID confusion (orderbook_id vs identifier), wrong account, volume rounding, missing tick alignment.
+- 3. Stop-loss endpoint misuse repeat.
+- 5. Asyncio vs Playwright sync mixing (the very bug that caused today's critical error before commit 0caa73eb).
+- 6. Order lock: not reentrant from same caller, deadlock with metals loop.
+- 8. Streaming reconnect: backoff missing, runaway connect on transient 5xx.
+- 10. PII/secret leakage in error logs (account numbers, session tokens).
+- 11. Avanza account check: category whitelist (INVESTERINGSSPARKONTO, KAPITALFORSAKRING, PENSION) — drift since fix commit.
+- Reviewing the Avanza subsystem in `Q:\finance-analyzer` within the files you scoped. I’ll read those files, map the auth/order/streaming/control paths against the incidents you flagged, and then write up only concrete findings with line references.
+- The shell sandbox is fussy about some PowerShell constructs, so I’m switching to `rg -n` for numbered reads. That keeps the review bounded to the files you listed and gives stable line references for the findings.
+- I have the first pass on session/client/orders/tracker. I’m now drilling into the control, search/scanner, streaming, lock, and type modules, then I’ll circle back to any suspicious line ranges in `avanza_session.py` and `avanza_trading.py` that need exact confirmation.
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" portfolio/avanza/account.py' in Q:\finance-analyzer
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^def |OrderLockBusyError|deadlock|reentrant|lock|busy|timeout|metals" portfolio/avanza_order_lock.py portfolio/avanza_orders.py portfolio/avanza_control.py' in Q:\finance-analyzer
+- portfolio/avanza_control.py:173:        # 2026-04-13: cross-process order lock (see metals_avanza_helpers.place_order).
+- portfolio/avanza_control.py:221:        # 2026-04-13: cross-process order lock. SL delete is mutating.
+- portfolio/avanza_order_lock.py:1:"""Cross-process advisory file lock guarding Avanza order placement.
+- portfolio/avanza_order_lock.py:8:    t=0.00  metals_loop reads buying_power=6000 SEK
+- portfolio/avanza_order_lock.py:29:  round-trip (~300ms), short enough that a hung peer doesn't block trading.
+- portfolio/avanza_order_lock.py:33:  diagnostics ("which loop hit the busy lock").
+- portfolio/avanza_order_lock.py:49:LOCK_FILE = DATA_DIR / "avanza_order.lock"
+- portfolio/avanza_order_lock.py:55:    """Another process held the lock longer than the configured timeout."""
+- portfolio/avanza_order_lock.py:65:    """Acquire the cross-process Avanza order lock for a short critical section.
+- portfolio/avanza_order_lock.py:67:    Fail-fast after ``timeout_s``. The lock is released automatically on exit.
+- portfolio/avanza_order_lock.py:70:        timeout_s: Seconds to wait for the lock before raising
+- portfolio/avanza_order_lock.py:74:        lock_file: Override the lock path (tests only). Defaults to
+- portfolio/avanza_order_lock.py:75:            ``data/avanza_order.lock``.
+- portfolio/avanza_order_lock.py:78:        OrderLockBusyError: If another process held the lock longer than
+- portfolio/avanza_order_lock.py:83:    lock = filelock.FileLock(str(target), timeout=timeout_s)
+- portfolio/avanza_order_lock.py:85:        lock.acquire()
+- portfolio/avanza_order_lock.py:88:            "avanza_order_lock(%s): busy after %.1fs — another process holds the lock",
+- portfolio/avanza_order_lock.py:94:        yield lock
+- portfolio/avanza_order_lock.py:97:            lock.release()
+- I’ve narrowed the remaining risk surface to the exact hot paths: session validation, `_place_order`/`place_stop_loss`, open-order/position reads, and the typed wrappers that sit on top of the TOTP library. I’m pulling those ranges now so any final finding is tied to the specific branch that can actually fail in production.
+- 589-    # H7: account whitelist guard
+- 599-    # BUG-211: maximum order size guard — prevents full-account exposure from
+- 617-    # 2026-04-13: cross-process lock — metals_loop + golddigger + fin_snipe
+- 618-    # must not race on buying_power. 2s fail-fast; busy peer aborts the order
+- 642-    # 2026-04-13: cross-process order lock — cancel is a mutation, same
+- 649-    """Get all open (unfilled) orders for an account."""
+- 652-        data = api_get(f"/_api/trading/rest/order/account/{aid}")
+- 657-        # Endpoint may vary — fallback to deal endpoint
+- 663-            logger.warning("Could not fetch open orders")
+- 691-        account = entry.get("account", {})
+- 714-            "account_id": account.get("id", ""),
+- 715-            "account_type": account.get("type", ""),
+- 730-    """Place a hardware stop-loss order on Avanza.
+- 736-        trigger_price: Price at which to trigger the stop-loss.
+- 742-        valid_days: Days until the stop-loss expires (default 8).
+- 797-    # 2026-04-13: cross-process order lock. Stop-loss placement is
+- 798-    # especially race-sensitive because cancel-before-place flows are
+- 805-            "Stop-loss placed: %s trigger=%.3f sell=%.3f vol=%d (id=%s)",
+- 810-        logger.warning("Stop-loss failed: %s — %s", status, result)
+- 821-    """Place a hardware trailing stop-loss that Avanza manages automatically.
+- 850-    """Get all active stop-loss orders.
+- 852-    Returns ``[]`` on read failure for backward compatibility with
+- 854-    to distinguish "no stops" from "could not read stops" must use
+- 863-        logger.warning("Could not fetch stop-losses")
+- 868-    """Get all active stop-loss orders, raising on any read failure.
+- 871-    "could not read" must NOT be silently treated as "no stops exist".
+- 872-    A swallowed read error there would let the dependent sell proceed
+- 883-            f"Unexpected stop-loss response shape: {type(data).__name__}"
+- 889-    """Cancel a single stop-loss order by ID.
+- 900-        stop_id: Avanza stop-loss ID (e.g. "A2^1773297348702^1346781").
+- 901-        account_id: Avanza account ID. Defaults to ``DEFAULT_ACCOUNT_ID``.
+- 906-        (network, missing CSRF, etc.) yield ``status="FAILED"`` with
+- 913-        # 2026-04-13: cross-process order lock — SL cancel is mutating.
+- 940-    """Cancel every active stop-loss for ``orderbook_id`` and verify clearance.
+- 949-    **Fail-closed semantics**: if the stop-loss list cannot be read (network
+- 951-    rather than silently treating "could not read" as "no stops exist".
+- 1106-        # broker-acknowledged but NOT verified-cleared. Drop them all to
+- 1131-    - The new stop-loss IDs differ from the originals — Avanza issues
+- 1139-        snapshot: List of stop-loss dicts as returned in
+- 46-# BUG-129: Protected by _pw_lock to prevent concurrent access corruption
+- 48-# wrap their *entire* request flow under the lock — they call
+- 49-# _get_playwright_context() (which itself acquires the lock) inside the
+- 50-# critical section. The previous Lock would deadlock; RLock is reentrant
+- 51-# for the same thread. Without this, Playwright's sync_api was being used
+- 61-    """Raised when session is missing, expired, or invalid."""
+- 71-        AvanzaSessionError: if file missing, unreadable, or expired.
+- 81-        raise AvanzaSessionError(f"Failed to read session file: {SESSION_FILE}")
+- 186-    # A-AV-1: Hold _pw_lock for the entire context+request flow.
+- 187-    # ctx.request.* is NOT thread-safe; concurrent callers must serialize.
+- 250-    # A-AV-1: Hold _pw_lock for the entire request. Playwright's sync_api
+- 251-    # is NOT thread-safe and the metals fast-tick + main 8-worker pool race.
+- 276-    stale context reference after a relaunch. Otherwise acquires the lock
+- 285-    # A-AV-1: ctx.cookies() reads Playwright internal state — needs lock.
+- 306-    # A-AV-1: Hold lock across CSRF read + POST so a concurrent request
+- 308-    # 2026-04-13: Wrapped in _with_browser_recovery. CSRF is read from the
+- 310-    # both places atomically (no stale-CSRF-against-fresh-context mismatch).
+- 333-                "Session returned 403 Forbidden — CSRF token may be stale. "
+- 358-    # A-AV-1: Hold lock across CSRF read + DELETE.
+- 386-    """Get buying power and account value for an account.
+- 388-    2026-04-09 (Bug C7 fix): ported the multi-shape + multi-field-ID fallback
+- 390-    changed the ``/_api/account-overview/overview/categorizedAccounts`` response
+- 395-    accounts), and ``loans``. At the same time, the per-account ID field
+- 400-    the new shape the iteration walked an empty list, then hit ``cats[0]`` on
+- portfolio/avanza_session.py:251:    # is NOT thread-safe and the metals fast-tick + main 8-worker pool race.
+- portfolio/avanza\tick_rules.py:19:# Module-level cache: ob_id -> list of TickEntry
+- portfolio/avanza\tick_rules.py:29:    """Fetch (and cache) the tick-size table for an orderbook.
+- portfolio/avanza\tick_rules.py:49:    logger.debug("get_tick_rules ob_id=%s entries=%d (cached)", ob_id, len(entries))
+- portfolio/avanza\tick_rules.py:69:        ValueError: If no tick rule matches *price*.
+- portfolio/avanza\tick_rules.py:103:    """Clear the module-level tick-rule cache."""
+- portfolio/avanza\tick_rules.py:105:    logger.debug("tick_rules cache cleared")
+- portfolio/avanza_account_check.py:158:    Runs the sync_playwright fetch on a single-worker thread pool so
+- portfolio/avanza_account_check.py:161:    thread's event loop) don't trip ``Playwright Sync API inside the
+- portfolio/avanza_resilient_page.py:7:Python process keeps running but every `page.evaluate()` throws
+- "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"logger\\.(info|warning|error|debug).*token|logger\\.(info|warning|error|debug).*csrf|logger\\.(info|warning|error|debug).*session|logger\\.(info|warning|error|debug).*account|logger\\.(info|warning|error|debug).*customer_id|logger\\.(info|warning|error|debug).*result|logger\\.(info|warning|error|debug).*body\" portfolio/avanza_session.py portfolio/avanza_client.py portfolio/avanza_orders.py portfolio/avanza_tracker.py portfolio/avanza_control.py portfolio/avanza_account_check.py portfolio/avanza_order_lock.py portfolio/avanza_resilient_page.py portfolio/avanza/*.py" in Q:\finance-analyzer
+- portfolio/avanza_control.py:402:            logger.warning("Delete stop-loss returned error for stop %s: %s", stop_id, result)
+- portfolio/avanza_client.py:272:            logger.info("Found whitelisted ISK account: %s", _account_id)
+- portfolio/avanza_client.py:395:    logger.info("Deleting order %s on account %s", order_id, account_id)
+- portfolio/avanza_session.py:810:        logger.warning("Stop-loss failed: %s — %s", status, result)
+- portfolio/avanza_account_check.py:197:        account_id: Account ID to verify. Defaults to
+- portfolio/avanza_account_check.py:275:            f"⚠️ Avanza account {account_id} not found in "
+- portfolio/avanza_account_check.py:280:                f"Account {account_id} not present in Avanza "
+- portfolio/avanza_orders.py:13:P1-10 (2026-05-02): per-order `confirm_token` eliminates three races the
+- portfolio/avanza_orders.py:135:    # Log the token at INFO so an operator reading agent.log can read it
+- portfolio/avanza_orders.py:158:    P1-10 (2026-05-02): a CONFIRM <token> reply confirms ONLY the order
+- portfolio/avanza_orders.py:311:        # P1-10 (2026-05-02): parse "CONFIRM <token>" or bare "CONFIRM".
+- portfolio/avanza_client.py:186:        if str(account.get("accountId", "")) not in ALLOWED_ACCOUNT_IDS:
+- portfolio/avanza_client.py:191:                "account_id": account.get("accountId", ""),
+- portfolio/avanza_client.py:216:        if str(account.get("accountId", "")) not in ALLOWED_ACCOUNT_IDS:
+- portfolio/avanza_client.py:266:        candidate = str(account.get("accountId", ""))
+- portfolio/avanza_session.py:333:                "Session returned 403 Forbidden — CSRF token may be stale. "
+- portfolio/avanza_session.py:415:        account_id: Avanza account ID (default: ``DEFAULT_ACCOUNT_ID``).
+- portfolio/avanza_session.py:714:            "account_id": account.get("id", ""),
+- portfolio/avanza_session.py:901:        account_id: Avanza account ID. Defaults to ``DEFAULT_ACCOUNT_ID``.
+- portfolio/avanza_session.py:960:        account_id: Account filter. ``None`` means accept any account.
+- portfolio/avanza_session.py:1042:        sl_acct = (sl.get("account") or {}).get("id") or account_id
+- portfolio/avanza_session.py:1193:                account_id=account,

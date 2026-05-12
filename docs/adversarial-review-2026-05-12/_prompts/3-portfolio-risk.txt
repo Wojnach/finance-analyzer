@@ -1,0 +1,54 @@
+You are doing an ADVERSARIAL code review of the portfolio-risk subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+In-scope files (read these and ONLY these):
+- portfolio/portfolio_mgr.py
+- portfolio/portfolio_validator.py
+- portfolio/trade_guards.py
+- portfolio/trade_validation.py
+- portfolio/trade_risk_classifier.py
+- portfolio/risk_management.py
+- portfolio/monte_carlo.py
+- portfolio/monte_carlo_risk.py
+- portfolio/equity_curve.py
+- portfolio/exit_optimizer.py
+- portfolio/kelly_sizing.py
+- portfolio/kelly_metals.py
+- portfolio/exposure_coach.py
+- portfolio/warrant_portfolio.py
+- portfolio/cost_model.py
+- portfolio/instrument_profile.py
+- portfolio/stats.py
+- portfolio/strategies/  (recurse)
+
+Project rules:
+- Patient and Bold portfolios start at 500K SEK each. Atomic I/O via file_utils only.
+- Stop-loss API must use /_api/trading/stoploss/new, NOT the regular order endpoint (Mar 3 incident: regular order endpoint causes instant fill).
+- User accepts 10-20% knockout risk on 5x certs; only de-risk at 50%+ (per memory/feedback_risk_tolerance.md).
+- NEVER stop-loss within 3% of MINI warrant barrier (per memory/feedback_mini_stoploss.md).
+- Min order size 1000 SEK (per memory/feedback_min_order_size_1000_sek.md).
+- Drawdown circuit breaker / ATR stops / concentration limits live here.
+- Live prices first — never use cached/precomputed for risk math (per memory/feedback_live_prices_first.md).
+
+Adversarial focus:
+1. Position-sizing bugs: Kelly half/quarter not honored, fixed budget overrides volatility scaling, missing min-order check.
+2. Stop-loss math: distance to barrier on MINI warrants not verified, ATR-based stops with wrong horizon.
+3. Cost model: spread/fee missing, FX conversion missing for SEK/USD positions, double-counting fees.
+4. Equity curve: round-trip P&L wrong on partial fills, NaN propagation from missing closes.
+5. Monte Carlo / VaR: look-ahead bias, sample size guard missing, IID assumption on correlated assets.
+6. Concurrency: portfolio state race when buy and sell run in parallel, atomic write but non-atomic read-modify-write pair.
+7. Drawdown circuit breaker stuck-closed or stuck-open; reset path missing.
+8. Trade guards / cooldowns: bypassable through reload, monotonic clock not used.
+9. Warrant leverage/strike math: barrier knockout not detected, gearing mis-computed.
+10. Risk classifier: silent fallback to permissive class on missing field.
+
+Output format — strict markdown:
+# Codex adversarial review: portfolio-risk
+## Summary
+## P0 — Blockers
+- path:line — Why it bites: ... Fix: ...
+## P1 — High
+## P2 — Medium
+## P3 — Low
+## Tests missing
+
+Be concrete. Cite line numbers. No false-positive padding.
