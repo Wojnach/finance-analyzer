@@ -82,7 +82,7 @@ def get_cet_time():
 
     try:
         r = requests.get(
-            "http://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
+            "https://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
             timeout=3,
         )
         if r.status_code == 200:

@@ -33,7 +33,7 @@ def cooldown_state_file(tmp_path, monkeypatch):
 
 
 def _sha1(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class TestAlertCooldown:

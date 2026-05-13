@@ -340,7 +340,7 @@ class TestAccuracyDegradationDispatcherWire:
 
         state = load_json(state_file, default={}) or {}
         assert "critical_error_dispatch" in state
-        sha1 = hashlib.sha1(v.message.encode("utf-8")).hexdigest()
+        sha1 = hashlib.sha256(v.message.encode("utf-8")).hexdigest()
         per_inv = state["critical_error_dispatch"].get("accuracy_degradation") or {}
         assert per_inv.get("last_message_hash") == sha1
 
