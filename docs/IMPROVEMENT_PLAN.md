@@ -1,128 +1,111 @@
-# Improvement Plan — Auto-Session 2026-05-12
+# Improvement Plan — 2026-05-13
 
-## Date: 2026-05-12 (Tuesday)
-## Branch: improve/auto-session-2026-05-12
+## Scope
 
-## Exploration Summary
+Focused on **highest-impact fixes** from adversarial reviews (2026-05-11, 2026-05-12)
+and deep exploration findings. Prioritized: security > correctness > reliability > quality.
 
-4 parallel agents explored orchestration, signals, portfolio/risk, and infrastructure.
-Direct analysis covered: signal_db, config_validator, auth, file_utils, grid_fisher.
+---
 
-**Codebase health**: Solid. 244 bugs fixed historically, thread-safe caching, atomic I/O,
-proper auth, no security vulnerabilities. Previous auto-session (2026-05-11) addressed
-many items. Several agent "P0" findings were false positives on manual verification.
+## Batch 1: Security & Safety Critical (7 files)
 
-## 1. Bugs & Problems Found
+### 1a. PowerShell command injection (`portfolio/subprocess_utils.py:214-218`)
+- **Bug:** `$pattern` f-spliced into PowerShell `-like` mask. No sanitization.
+- **Fix:** Escape PowerShell wildcards/special chars, or use `-eq` with exact match.
+- **Impact:** Low blast radius (only used for process name matching), but P0 security.
 
-### HIGH — Race Condition
+### 1b. Avanza 1000 SEK floor (3 files)
+- `portfolio/trade_validation.py:32` — min order 500 → 1000 SEK
+- `portfolio/kelly_sizing.py:326` — min order 500 → 1000 SEK
+- `portfolio/kelly_metals.py:44` — min order 500 → 1000 SEK
+- **Fix:** Change literal 500 → 1000 in all three. Grep for other 500 SEK floors.
 
-| # | Issue | File:Line | Impact |
-|---|-------|-----------|--------|
-| B1 | Agent spawn sets `_agent_proc` BEFORE `_agent_start`/`_agent_timeout` — watchdog can see new process with stale start time and kill it instantly | `agent_invocation.py:858-871` | Rare but real: freshly spawned agent killed by watchdog |
+### 1c. CORS headers leak (`dashboard/app.py:52-61`)
+- **Bug:** CORS method/header headers sent even when origin not whitelisted.
+- **Fix:** Move all CORS headers inside the origin-check `if` block.
 
-### HIGH — Platform Deprecation
+### 1d. Confirm token logging (`portfolio/avanza_orders.py:139-142`)
+- **Bug:** Full confirmation token logged at INFO level.
+- **Fix:** Log only first 4 chars + masked remainder.
 
-| # | Issue | File:Line | Impact |
-|---|-------|-----------|--------|
-| B2 | `kill_orphaned_by_cmdline()` uses WMIC which is removed in some Win11 builds | `subprocess_utils.py:216` | Orphan detection fails silently on newer Windows |
+### 1e. NODE_OPTIONS overwrite (2 files)
+- `portfolio/agent_invocation.py:847` — overwrites NODE_OPTIONS
+- `portfolio/multi_agent_layer2.py:145` — overwrites NODE_OPTIONS
+- **Fix:** Append to existing NODE_OPTIONS instead of overwriting.
 
-### MEDIUM — Performance
+---
 
-| # | Issue | File:Line | Impact |
-|---|-------|-----------|--------|
-| B3 | `signal_db.load_entries()` runs per-snapshot SELECT for ticker_signals + outcomes — O(n²) | `signal_db.py:186-222` | Degrades over months as snapshot count grows |
+## Batch 2: Signal System Correctness (2 files, focused edits)
 
-### MEDIUM — Data Integrity
+### 2a. Gate relaxation violates 47% rule (`portfolio/signal_engine.py`)
+- **Bug:** `_GATE_RELAXATION_MAX = 0.06` allows 47% gate to drop to 41%.
+- **Fix:** Reduce to 0.0 (strict 47%). Docs say force-HOLD below 47%.
 
-| # | Issue | File:Line | Impact |
-|---|-------|-----------|--------|
-| B4 | `health.py:check_staleness()` calls `datetime.fromisoformat()` on untrusted health_state data without guard | `health.py:~160` | Dashboard `/api/health` crash on corrupt timestamp |
+### 2b. MIN_VOTERS_METALS = 2 instead of 3 (`portfolio/signal_engine.py`)
+- **Bug:** Metals use 2 minimum voters, violating MIN_VOTERS = 3 rule.
+- **Fix:** Change MIN_VOTERS_METALS to 3.
 
-### LOW — Code Quality
+### 2c. Ticker accuracy SELL inversion (`portfolio/signals/ticker_accuracy.py`)
+- **Bug:** Maps SELL to `1 - accuracy`. 40% SELL → 60% P(up). Forbidden.
+- **Fix:** Remove inversion; use raw accuracy for both BUY and SELL.
 
-| # | Issue | File:Line | Impact |
-|---|-------|-----------|--------|
-| B5 | Dead `oscillator_trend` correlation group in signal_engine — oscillators always HOLD | `signal_engine.py` | Misleading config |
-| B6 | `__import__("json")` inline in metals_cross_asset.py | `signals/metals_cross_asset.py:139` | Code smell |
-| B7 | Equity curve annualization uses 365.25 in one place, 365 in another (0.07% diff) | `equity_curve.py:185 vs :228` | Inconsistent but negligible |
+### 2d. Remove unused _cross_ticker_consensus (`portfolio/signal_engine.py`)
+- Dead dict + lock. Remove.
 
-## 2. Implementation Batches
+---
 
-### Batch 1: Agent Spawn Race Condition (1 file, ~10 lines)
-**Goal:** Fix watchdog-vs-spawn race in agent_invocation.py
+## Batch 3: Infrastructure Reliability (5 files)
 
-**Change:** Move `_agent_start`, `_agent_start_wall`, `_agent_timeout`, `_agent_tier`,
-`_agent_reasons` assignments to BEFORE `subprocess.Popen()` call. If Popen fails,
-`_agent_proc` stays None and stale state is harmless (watchdog skips None proc).
+### 3a. Silent lock creation failure (`portfolio/file_utils.py:237-238`)
+- **Bug:** `except OSError: pass` on sidecar lock creation.
+- **Fix:** Log warning on failure.
 
-**Impact:** Zero behavior change on happy path. Eliminates rare kill-on-spawn race.
-**Risk:** LOW — only reorders assignments within the same function.
+### 3b. Cache timestamp corruption (`portfolio/shared_state.py:124`)
+- **Bug:** Error recovery backdates timestamp, breaking fallback path.
+- **Fix:** Set `time = now` with a flag to retry after cooldown.
 
-### Batch 2: WMIC → PowerShell Migration (1 file, ~20 lines)
-**Goal:** Replace deprecated WMIC with PowerShell Get-CimInstance in subprocess_utils.py
+### 3c. trade_guards.py save outside lock (`portfolio/trade_guards.py:312`)
+- **Bug:** `_save_state()` called after releasing `_state_lock`.
+- **Fix:** Move inside lock block.
 
-**Change:** Rewrite `kill_orphaned_by_cmdline()` to use
-`powershell -NoProfile -Command "Get-CimInstance Win32_Process ..."` instead of WMIC.
+### 3d. Process lock silent flush (`portfolio/process_lock.py:102-104`)
+- **Bug:** `except Exception: pass` swallows write+flush.
+- **Fix:** Log warning on failure.
 
-**Impact:** Orphan detection works on all Win11 builds.
-**Risk:** LOW — PowerShell Get-CimInstance is the documented replacement.
+### 3e. GPU gate fd leak on write failure (`portfolio/gpu_gate.py:217-219`)
+- **Bug:** Corrupt lock file traps subsequent callers.
+- **Fix:** Delete lock file on write failure before re-raising.
 
-### Batch 3: signal_db JOIN Optimization (1 file, ~40 lines)
-**Goal:** Replace O(n²) per-snapshot queries with JOINs in load_entries()
+---
 
-**Change:** Single query with LEFT JOINs across snapshots, ticker_signals, and outcomes.
-Post-process into the same dict structure.
+## Batch 4: Risk & Data Quality (5 files)
 
-**Impact:** Load time goes from O(n²) to O(n). Matters after months of data.
-**Risk:** MEDIUM — query structure change, needs careful testing.
+### 4a. Risk mgmt silent avg_cost fallback (`portfolio/risk_management.py`)
+- **Fix:** Log WARNING when falling back to avg_cost.
 
-### Batch 4: Health Data Guard (1 file, ~5 lines)
-**Goal:** Guard datetime.fromisoformat() against corrupt health_state.json
+### 4b. Grid fisher duplicate EOD close (`portfolio/grid_fisher.py`)
+- **Fix:** Store order_id, decrement inventory after sell.
 
-**Change:** Wrap the fromisoformat call in try/except ValueError, return (True, inf, state)
-on failure (treat corrupt timestamp as stale — safe behavior).
+### 4c. Warrant hours wrong (`portfolio/golddigger.py`, `portfolio/elongir.py`)
+- **Fix:** 08:30-21:30 → 08:15-21:55
 
-**Impact:** Dashboard no longer crashes on corrupt health data.
-**Risk:** LOW — adds a guard, doesn't change happy path.
+### 4d. Signal decay alert raw file access (`portfolio/signal_decay_alert.py`)
+- **Fix:** Replace raw open()/json.load() with file_utils.load_json().
 
-### Batch 5: Dead Code & Quality (2 files, ~10 lines)
-**Goal:** Remove dead oscillator_trend correlation group, fix inline __import__
+---
 
-**Changes:**
-1. `signal_engine.py`: Remove `oscillator_trend` from correlation groups
-2. `signals/metals_cross_asset.py`: Replace `__import__("json")` with module-level import
+## Deferred (TODO: MANUAL REVIEW)
 
-**Impact:** Cleaner code, no behavioral change.
-**Risk:** LOW — dead code removal + import style fix.
+- Dashboard CF-Access JWT bypass — needs Cloudflare integration knowledge
+- Avanza account whitelist — needs live session testing
+- Warrant state non-atomic mutations — architectural redesign
+- Layer 2 child not Job-bound — Windows Job Object integration
+- Forecast horizon contamination — signal already disabled
+- IC computation sort order — needs accuracy data testing
+- LLM prewarmer blocking — risky for loop stability
 
-## 3. Impact Assessment
+---
 
-| Batch | Files | Risk | Testing |
-|-------|-------|------|---------|
-| 1 | agent_invocation.py | LOW | Existing agent tests + new ordering test |
-| 2 | subprocess_utils.py | LOW | Manual verification on Win11 |
-| 3 | signal_db.py | MEDIUM | Existing signal_db tests + new JOIN test |
-| 4 | health.py | LOW | Existing health tests + new corrupt guard test |
-| 5 | signal_engine.py, metals_cross_asset.py | LOW | Existing signal tests |
+## Execution Order
 
-## 4. Dependency Order
-
-Batches are independent — no ordering constraints.
-Implement in numbered order (critical → performance → polish).
-
-## 5. Implementation Results
-
-| Batch | Status | Commit | Notes |
-|-------|--------|--------|-------|
-| 1 | DONE | `339daf15` | Reordered 5 assignments before Popen. 89/89 agent tests pass. |
-| 2 | DONE | `40429468` | PowerShell Get-CimInstance replaces WMIC. Verified on Win11. |
-| 3 | DONE | `228f7cd8` | 3 bulk queries + dict reassembly. 18/18 signal_db tests pass. |
-| 4 | SKIPPED | — | All 3 fromisoformat calls already have try/except guards. |
-| 5 | PARTIAL | `1221ff02` | Fixed `__import__("json")` → module-level import. oscillator_trend verified NOT dead (holds momentum_factors). |
-
-### False Positives Rejected
-
-- **B4**: health.py fromisoformat already guarded at lines 161, 202, 401.
-- **B5a**: oscillator_trend correlation group holds active `momentum_factors` signal and participates in meta-cluster dedup. NOT dead code.
-- **Agent P0**: risk_management concentration `min(total*pct, cash)` correctly caps allocation at available cash.
-- **Agent P1**: grid_fisher `record_fill()` sets `ORDER_FILLED` status, preventing double-count on subsequent iterations.
+Batch 1 → 2 → 3 → 4. Test after each batch. Commit per batch.
