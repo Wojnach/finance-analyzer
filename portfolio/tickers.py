@@ -103,6 +103,7 @@ DISABLED_SIGNALS = {
     "vwap_zscore_mr",  # pending live validation (added 2026-05-10)
     "gold_overnight_bias",  # pending live validation (added 2026-05-11)
     "metals_vrp",  # pending live validation (added 2026-05-12)
+    "breakeven_inflation_momentum",  # pending live validation (added 2026-05-13)
     "calendar",         # 2026-05-09: 29.3% recent accuracy — structural BUY bias
                         # (6/8 sub-signals BUY-only). Actively harmful. Was per-horizon
                         # blacklisted at 1d but still voted at other horizons.

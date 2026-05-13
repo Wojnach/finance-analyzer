@@ -295,6 +295,14 @@ def _register_defaults():
                       "portfolio.signals.metals_vrp",
                       "compute_metals_vrp_signal",
                       requires_context=True, max_confidence=0.7)
+    # Breakeven inflation momentum — FRED T10YIE as inflation expectations proxy
+    # 2026-05-13: ScienceDirect 2025, gold -0.82 corr with real yields.
+    # Rising breakeven = rising inflation expectations = BUY metals/BTC.
+    # Distinct from DFII10 real yield in metals_cross_asset/gold_real_yield_paradox.
+    register_enhanced("breakeven_inflation_momentum",
+                      "portfolio.signals.breakeven_inflation_momentum",
+                      "compute_breakeven_inflation_momentum_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
