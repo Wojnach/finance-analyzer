@@ -332,4 +332,5 @@ SIGNAL_NAMES = [
     "vwap_zscore_mr",
     "btc_proxy",
     "metals_vrp",
+    "breakeven_inflation_momentum",
 ]

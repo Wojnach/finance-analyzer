@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 
 import numpy as np
@@ -49,7 +48,6 @@ _BEI_LEVEL_LOW = 1.5
 _BEI_ACCEL_LOOKBACK = 10
 
 _bei_cache: dict = {}
-_bei_cache_lock = threading.Lock()
 
 
 def _get_fred_key(context: dict | None) -> str:
@@ -68,13 +66,12 @@ def _get_fred_key(context: dict | None) -> str:
 def _fetch_bei_values(fred_api_key: str) -> list[float] | None:
     """Fetch 10Y Breakeven Inflation Rate from FRED. Returns list newest-first."""
     now = time.time()
-    with _bei_cache_lock:
-        if (
-            _bei_cache.get("key") == fred_api_key
-            and _bei_cache.get("data")
-            and now - _bei_cache.get("time", 0) < _CACHE_TTL
-        ):
-            return _bei_cache["data"]
+    if (
+        _bei_cache.get("key") == fred_api_key
+        and _bei_cache.get("data")
+        and now - _bei_cache.get("time", 0) < _CACHE_TTL
+    ):
+        return _bei_cache["data"]
 
     if not fred_api_key:
         logger.debug("No FRED API key — cannot fetch %s", _FRED_SERIES)
@@ -110,10 +107,9 @@ def _fetch_bei_values(fred_api_key: str) -> list[float] | None:
                     continue
 
         if values:
-            with _bei_cache_lock:
-                _bei_cache["key"] = fred_api_key
-                _bei_cache["data"] = values
-                _bei_cache["time"] = now
+            _bei_cache["key"] = fred_api_key
+            _bei_cache["data"] = values
+            _bei_cache["time"] = now
             logger.debug(
                 "FRED %s fetched: %d values, latest=%.3f",
                 _FRED_SERIES, len(values), values[0],
@@ -133,15 +129,14 @@ def _compute_change_zscore(
     if len(values) < need:
         return 0.0
 
-    changes = [
+    changes = np.array([
         values[i] - values[i + change_lookback]
         for i in range(z_window + 1)
-    ]
+    ])
     current_change = changes[0]
     history = changes[1:]
-    mean = sum(history) / len(history)
-    variance = sum((c - mean) ** 2 for c in history) / len(history)
-    std = variance ** 0.5
+    mean = float(np.mean(history))
+    std = float(np.std(history))
     if std < 1e-10:
         return 0.0
     return (current_change - mean) / std

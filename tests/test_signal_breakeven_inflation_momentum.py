@@ -11,6 +11,14 @@ from portfolio.signals.breakeven_inflation_momentum import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clean_cache():
+    """Isolate module-level cache between tests."""
+    _bei_cache.clear()
+    yield
+    _bei_cache.clear()
+
+
 def _make_df(n=100):
     np.random.seed(42)
     close = 2000 + np.cumsum(np.random.randn(n) * 5)
@@ -197,7 +205,6 @@ class TestMathHelpers:
 class TestCacheAndNoKey:
 
     def test_no_fred_key_returns_hold_when_cache_empty(self):
-        _bei_cache.clear()
         df = _make_df()
         ctx = {"ticker": "XAU-USD", "config": {}}
         result = compute_breakeven_inflation_momentum_signal(df, context=ctx)
