@@ -234,8 +234,8 @@ def jsonl_sidecar_lock(path):
             with open(lock_path, "ab") as lf:
                 if lf.tell() == 0:
                     lf.write(b"\0")
-        except OSError:
-            pass  # best-effort; lock open below will retry
+        except OSError as exc:
+            logger.warning("sidecar lock creation failed for %s: %s", path, exc)
 
     with open(lock_path, "rb+") as lock_f:
         lfd = lock_f.fileno()

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
+
+logger = logging.getLogger("portfolio.process_lock")
 
 try:
     import msvcrt  # type: ignore[attr-defined]
@@ -100,5 +103,5 @@ def _write_lock_metadata(
         fh.truncate()
         fh.write(" ".join(f"{key}={value}" for key, value in payload.items()) + "\n")
         fh.flush()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("process lock metadata write failed: %s", exc)
