@@ -35,6 +35,7 @@ from portfolio.file_utils import (
 )
 from portfolio.grid_fisher_config import (
     GRID_ACTIVE_INSTRUMENTS,
+    GRID_CASH_SAFETY_BUFFER_SEK,
     GRID_DECISIONS_LOG,
     GRID_DIRECTION_FLIP_COOLDOWN_MIN,
     GRID_GLOBAL_MAX_SEK,
@@ -735,6 +736,7 @@ class GridFisher:
         state_path: str | Path = GRID_STATE_FILE,
         decisions_path: str | Path = GRID_DECISIONS_LOG,
         now_fn: Optional[callable] = None,
+        account_id: Optional[str] = None,
     ) -> None:
         from portfolio.grid_fisher_config import (
             GRID_FISHER_ENABLED,
@@ -775,6 +777,15 @@ class GridFisher:
         # Rate-limit state — sliding window of last placement timestamps.
         self._recent_places: list[float] = []
 
+        # Live-cash gate. When ``account_id`` is provided the tick consults
+        # ``session.get_buying_power(account_id)`` and clamps the effective
+        # global cap to (buying_power - GRID_CASH_SAFETY_BUFFER_SEK). When
+        # ``None`` (e.g. unit tests with a mock session) the gate is bypassed
+        # and the original hardcoded GRID_GLOBAL_MAX_SEK applies — preserves
+        # previous behaviour for callers that haven't opted in.
+        self.account_id = account_id
+        self._buying_power_cache: Optional[tuple[float, float]] = None  # (mono_ts, value)
+
         self.state = load_state(self.state_path)
         _seed_state_for_active_instruments(self.state, self.catalog)
 
@@ -785,6 +796,117 @@ class GridFisher:
 
     def _persist(self) -> None:
         save_state(self.state, self.state_path)
+
+    def _fetch_buying_power_sek(self) -> Optional[float]:
+        """Pull live buying power from Avanza, with a short in-memory cache.
+
+        Returns the cached value when fresh (< GRID_BUYING_POWER_CACHE_SECS),
+        a stale cached value within GRID_BUYING_POWER_STALE_GRACE_SECS if the
+        fresh fetch fails, or None if no usable reading exists.
+
+        ``self.session`` must expose ``get_buying_power(account_id) -> dict |
+        None`` with key ``buying_power``. Matches the contract from
+        ``portfolio.avanza_session.get_buying_power`` / the unified
+        ``portfolio.avanza.account.get_buying_power``.
+        """
+        if self.account_id is None:
+            return None
+        from portfolio.grid_fisher_config import (
+            GRID_BUYING_POWER_CACHE_SECS,
+            GRID_BUYING_POWER_STALE_GRACE_SECS,
+        )
+        now_mono = time.monotonic()
+        if self._buying_power_cache is not None:
+            cached_ts, cached_val = self._buying_power_cache
+            if now_mono - cached_ts < GRID_BUYING_POWER_CACHE_SECS:
+                return cached_val
+
+        getter = getattr(self.session, "get_buying_power", None)
+        if not callable(getter):
+            self._log("buying_power_unavailable",
+                      reason="session has no get_buying_power")
+            return None
+
+        result = self._safe_session_call(getter, self.account_id, default=None)
+        bp: Optional[float] = None
+        if isinstance(result, dict):
+            raw = result.get("buying_power")
+            if raw is not None:
+                try:
+                    bp = float(raw)
+                except (TypeError, ValueError):
+                    bp = None
+        elif isinstance(result, (int, float)):
+            bp = float(result)
+
+        if bp is not None and bp >= 0:
+            self._buying_power_cache = (now_mono, bp)
+            return bp
+
+        # Fresh fetch failed — fall back to the cached reading if it's
+        # still inside the stale-grace window. Past the grace, return
+        # None so the caller fails-closed instead of trading against
+        # stale balance state (this is what surfaced the 2026-05-13
+        # OLJAB-on-empty-cash incident).
+        if self._buying_power_cache is not None:
+            cached_ts, cached_val = self._buying_power_cache
+            age = now_mono - cached_ts
+            if age < GRID_BUYING_POWER_STALE_GRACE_SECS:
+                self._log("buying_power_stale_reuse",
+                          age_s=round(age, 1),
+                          cached_value=round(cached_val, 0))
+                return cached_val
+            self._log("buying_power_stale_expired",
+                      age_s=round(age, 1))
+        else:
+            self._log("buying_power_fetch_failed",
+                      reason="no cached fallback available")
+        return None
+
+    def _effective_global_cap(self) -> tuple[float, dict[str, Any]]:
+        """Compute the per-tick cap on aggregate planned notional.
+
+        Returns ``(cap_sek, debug_fields)`` where ``cap_sek`` is the lesser
+        of ``GRID_GLOBAL_MAX_SEK`` and ``(buying_power - safety buffer)``.
+        ``debug_fields`` carries the inputs for logging/observability.
+
+        Behaviour:
+        * No ``account_id`` configured → bypass (returns config cap). This
+          preserves the previous behaviour for unit-test callers that pass
+          a mock session.
+        * Fresh / cached buying power available → clamp to live cash.
+        * Buying-power fetch failed AND no fresh-enough cache → return 0
+          (fail-closed). The tick logs ``skip_global_cap`` for every
+          instrument, no orders go out.
+        """
+        # Use module-level constants so monkeypatches on this module
+        # (e.g. tests setting ``gf.GRID_GLOBAL_MAX_SEK = 100``) take
+        # effect. Late-importing from grid_fisher_config would bypass
+        # the patch and surprise callers.
+        cfg_cap = GRID_GLOBAL_MAX_SEK
+        buffer_sek = GRID_CASH_SAFETY_BUFFER_SEK
+        if self.account_id is None:
+            return float(cfg_cap), {
+                "source": "config_only",
+                "config_cap": cfg_cap,
+            }
+        bp = self._fetch_buying_power_sek()
+        if bp is None:
+            return 0.0, {
+                "source": "fail_closed",
+                "config_cap": cfg_cap,
+                "buffer": buffer_sek,
+                "reason": "buying_power_unavailable",
+            }
+        clamped = max(0.0, bp - float(buffer_sek))
+        cap = min(float(cfg_cap), clamped)
+        return cap, {
+            "source": "live_buying_power",
+            "config_cap": cfg_cap,
+            "buffer": buffer_sek,
+            "buying_power": round(bp, 0),
+            "clamped": round(clamped, 0),
+        }
 
     def _rate_limit_ok(self) -> bool:
         """Sliding-window rate limiter — drop placements over the per-minute cap."""
@@ -1338,15 +1460,22 @@ class GridFisher:
                 continue
 
             # Global cap gate — sum planned notional across every
-            # instrument before placing on this one. If the new ladder
-            # would breach GRID_GLOBAL_MAX_SEK, skip placement entirely
-            # to keep total deployed capital inside the user's budget.
+            # instrument before placing on this one. The effective cap is
+            # the lesser of the config max and (live Avanza buying power -
+            # safety buffer); when no account_id was wired in, falls back
+            # to the config max for back-compat. 2026-05-13: previously
+            # this was the raw config constant, which is why grid-fisher
+            # kept attempting OLJAB placements with ~3 097 SEK cash on
+            # account 1625505 — the cap was right for the budget but
+            # never compared against the live balance.
             global_notional = global_planned_notional(self.state)
-            if global_notional >= GRID_GLOBAL_MAX_SEK:
+            effective_cap, cap_debug = self._effective_global_cap()
+            if global_notional >= effective_cap:
                 self._log("skip_global_cap", ob_id=ob_id,
                           ticker=ticker,
                           global_notional=round(global_notional, 0),
-                          cap=GRID_GLOBAL_MAX_SEK)
+                          cap=round(effective_cap, 0),
+                          **cap_debug)
                 instr_report["skip"] = "global_cap"
                 report["instruments"][ob_id] = instr_report
                 continue
@@ -1357,7 +1486,7 @@ class GridFisher:
                 underlying_price=ob_prices.get("underlying_price"),
                 barrier=cat.get("barrier") if cat.get("barrier") else None,
                 leverage=cat.get("leverage"),
-                global_cap_sek=GRID_GLOBAL_MAX_SEK,
+                global_cap_sek=effective_cap,
             )
             report["placements"] += placed
             instr_report["placed"] = placed

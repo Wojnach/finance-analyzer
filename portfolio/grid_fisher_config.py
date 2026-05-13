@@ -69,6 +69,26 @@ GRID_GLOBAL_MAX_SEK = 6500
 # Session loss budget per instrument. Breaching this freezes new
 # placements until the next session.
 GRID_PER_SESSION_LOSS_LIMIT_SEK = 500
+# Reserve held back from the live Avanza buying power before the cap is
+# computed. Covers courtage, FX spread, and rotation legs that haven't
+# rebooked yet. The effective global cap each tick =
+#   min(GRID_GLOBAL_MAX_SEK, max(0, live_buying_power - this buffer)).
+# 2026-05-13: added after grid_fisher attempted OLJAB placements with
+# only ~3 097 SEK available (memory project_avanza_account_mismatch_20260511);
+# previously the cap was hardcoded against a 6 500 SEK budget and never
+# consulted the live account, so insufficient-cash rejections came from
+# Avanza rather than being filtered locally.
+GRID_CASH_SAFETY_BUFFER_SEK = 500
+# Buying-power readings are cached this many seconds so a multi-instrument
+# tick doesn't hit /_api/account-overview six times. Refreshed lazily on
+# the next tick after expiry.
+GRID_BUYING_POWER_CACHE_SECS = 60
+# When a buying-power fetch fails (None) but a recent good reading exists
+# within this many seconds, the cached value is reused. Past that horizon
+# we fail-closed (effective cap = 0) so a stale session can't keep
+# placing orders against unknown cash. Better to skip a cycle than to
+# over-order against a stale balance.
+GRID_BUYING_POWER_STALE_GRACE_SECS = 300
 
 # ---------------------------------------------------------------------------
 # Signal gating

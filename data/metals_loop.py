@@ -7031,9 +7031,15 @@ def main():
             from portfolio import avanza_session as _avanza_rest
             from portfolio.grid_fisher import GridFisher as _GridFisher
             from data.fin_fish_config import WARRANT_CATALOG as _GRID_CATALOG
+            # 2026-05-13: pass ACCOUNT_ID so the fisher consults live
+            # buying power before placing ladders. Without this the cap
+            # is the static config value (6 500 SEK) which is meaningless
+            # when the account holds less cash — see commit message and
+            # `_effective_global_cap` in portfolio/grid_fisher.py.
             grid_fisher = _GridFisher(
                 session=_avanza_rest,
                 catalog=_GRID_CATALOG,
+                account_id=ACCOUNT_ID,
             )
             log(f"Grid fisher: ACTIVE ({len(grid_fisher.state.by_instrument)} instruments, "
                 f"enabled={grid_fisher._enabled})")
