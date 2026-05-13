@@ -173,7 +173,7 @@ def test_invoke_claude_text_overrides_exit0_on_auth_failure(monkeypatch, tmp_pat
 
     monkeypatch.setattr(claude_gate, "_run_with_tree_kill", fake_run)
 
-    text, success, exit_code = claude_gate.invoke_claude_text(
+    text, success, exit_code, _status = claude_gate.invoke_claude_text(
         prompt="hi", caller="test", model="sonnet", timeout=5,
     )
     assert success is False

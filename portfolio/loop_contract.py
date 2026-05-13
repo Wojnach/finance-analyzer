@@ -895,24 +895,59 @@ def check_signal_log_reconciliation_safe() -> list[Violation]:
 
 
 def _check_signal_log_reconciliation() -> list[Violation]:
-    """Compare signal_log.jsonl line count vs signal_log.db snapshot count."""
+    """Compare signal_log.jsonl line count vs signal_log.db snapshot count.
+
+    JSONL is age/size-rotated (30-day window) while the DB is never pruned,
+    so the DB will legitimately have more rows than the JSONL. The check
+    that matters is the opposite direction: if JSONL has significantly MORE
+    entries than the DB, SQLite writes are silently failing.
+
+    To make the comparison apples-to-apples after log rotation we count DB
+    snapshots whose ts falls within the JSONL's time window (first ts ..
+    last ts). That way a rotated JSONL is never a false-positive trigger.
+    """
+    import json
     import sqlite3
 
     if not _SIGNAL_LOG_JSONL.exists() or not _SIGNAL_LOG_DB.exists():
         return []
 
     jsonl_count = 0
+    first_ts = last_ts = None
     with open(_SIGNAL_LOG_JSONL, "rb") as f:
-        for _ in f:
+        for raw in f:
             jsonl_count += 1
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                ts = entry.get("ts")
+                if ts:
+                    if first_ts is None:
+                        first_ts = ts
+                    last_ts = ts
+            except Exception:
+                pass
+
+    if jsonl_count == 0 or first_ts is None:
+        return []
 
     conn = sqlite3.connect(str(_SIGNAL_LOG_DB), timeout=5)
     try:
-        (db_count,) = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
+        if last_ts:
+            (db_count,) = conn.execute(
+                "SELECT COUNT(*) FROM snapshots WHERE ts >= ? AND ts <= ?",
+                (first_ts, last_ts),
+            ).fetchone()
+        else:
+            (db_count,) = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()
     finally:
         conn.close()
 
-    divergence = abs(jsonl_count - db_count)
+    # Only flag when JSONL is ahead of the DB — that means SQLite writes
+    # are failing. DB > JSONL is expected due to log rotation and is fine.
+    divergence = jsonl_count - db_count
     if divergence <= _SIGNAL_LOG_DIVERGENCE_THRESHOLD:
         return []
 
@@ -921,7 +956,8 @@ def _check_signal_log_reconciliation() -> list[Violation]:
         severity="WARNING",
         message=(
             f"signal_log dual-write divergence: JSONL has {jsonl_count} "
-            f"entries but SQLite has {db_count} snapshots "
+            f"entries but SQLite has only {db_count} snapshots in the same "
+            f"window [{first_ts} .. {last_ts}] "
             f"(delta={divergence}, threshold={_SIGNAL_LOG_DIVERGENCE_THRESHOLD}). "
             f"SQLite writes may be silently failing."
         ),
@@ -930,6 +966,8 @@ def _check_signal_log_reconciliation() -> list[Violation]:
             "db_count": db_count,
             "divergence": divergence,
             "threshold": _SIGNAL_LOG_DIVERGENCE_THRESHOLD,
+            "window_start": first_ts,
+            "window_end": last_ts,
         },
     )]
 
@@ -2223,6 +2261,25 @@ def _alert_violations(violations: list[Violation], config: dict,
 def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker,
                        loop_name: str = "main"):
     """Spawn a Claude Code session to diagnose and fix critical violations."""
+    # 2026-05-13: config gate. Default OFF — the 7d audit showed
+    # 47/47 self-heal sessions ended in timeout/error (180s budget vs
+    # sonnet+15-turn diagnostic over Read/Grep/Glob), and the parallel
+    # PF-FixAgentDispatcher scheduled task with proper backoff is what
+    # actually resolves critical_errors.jsonl entries (82 resolutions
+    # observed in the same window). Opt-in via config:
+    #   notification.self_heal_enabled = true
+    try:
+        from portfolio.api_utils import load_config
+        cfg = load_config() or {}
+        if not cfg.get("notification", {}).get("self_heal_enabled", False):
+            logger.debug(
+                "Self-heal disabled in config; PF-FixAgentDispatcher handles resolution"
+            )
+            return
+    except Exception:
+        # Fail-safe: missing config → stay disabled (no spam loop).
+        return
+
     if not tracker.can_self_heal():
         logger.info(
             "Self-heal cooldown active, skipping (last: %.0fs ago)",

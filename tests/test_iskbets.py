@@ -749,27 +749,30 @@ class TestFormatting:
 # ── Tests: Layer 2 Gate ──────────────────────────────────────────────────
 
 
+# 2026-05-13: iskbets now goes through claude_gate.invoke_claude_text.
+# Mock return signature is (text, success, exit_code, status).
+
 class TestLayer2Gate:
-    @patch("portfolio.iskbets.subprocess.run")
-    def test_gate_approved(self, mock_run, tmp_data_dir):
+    @patch("portfolio.claude_gate.invoke_claude_text")
+    def test_gate_approved(self, mock_gate, tmp_data_dir):
         """Claude approves → returns (True, reasoning)."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="DECISION: APPROVE\nREASONING: Clean setup with volume expansion.",
+        mock_gate.return_value = (
+            "DECISION: APPROVE\nREASONING: Clean setup with volume expansion.",
+            True, 0, "invoked",
         )
         approved, reasoning = invoke_layer2_gate(
             "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is True
         assert "Clean setup" in reasoning
-        mock_run.assert_called_once()
+        mock_gate.assert_called_once()
 
-    @patch("portfolio.iskbets.subprocess.run")
-    def test_gate_skipped(self, mock_run, tmp_data_dir):
+    @patch("portfolio.claude_gate.invoke_claude_text")
+    def test_gate_skipped(self, mock_gate, tmp_data_dir):
         """Claude skips → returns (False, reasoning)."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="DECISION: SKIP\nREASONING: All long TFs opposing, chasing.",
+        mock_gate.return_value = (
+            "DECISION: SKIP\nREASONING: All long TFs opposing, chasing.",
+            True, 0, "invoked",
         )
         approved, reasoning = invoke_layer2_gate(
             "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
@@ -777,28 +780,38 @@ class TestLayer2Gate:
         assert approved is False
         assert "opposing" in reasoning
 
-    @patch("portfolio.iskbets.subprocess.run")
-    def test_gate_timeout_fallback(self, mock_run, tmp_data_dir):
-        """Timeout → fallback to approve."""
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
+    @patch("portfolio.claude_gate.invoke_claude_text")
+    def test_gate_timeout_fallback(self, mock_gate, tmp_data_dir):
+        """Timeout → fallback to approve (additive gate, never blocking)."""
+        mock_gate.return_value = ("", False, -1, "timeout")
         approved, reasoning = invoke_layer2_gate(
             "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is True
         assert reasoning == ""
 
-    @patch("portfolio.iskbets.subprocess.run")
-    def test_gate_parse_failure(self, mock_run, tmp_data_dir):
-        """Garbage output → fallback to approve."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="I'm not sure what to do here, this is random text.",
+    @patch("portfolio.claude_gate.invoke_claude_text")
+    def test_gate_parse_failure(self, mock_gate, tmp_data_dir):
+        """Garbage output → parse to default approve."""
+        mock_gate.return_value = (
+            "I'm not sure what to do here, this is random text.",
+            True, 0, "invoked",
         )
         approved, reasoning = invoke_layer2_gate(
             "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is True
         assert reasoning == ""
+
+    @patch("portfolio.claude_gate.invoke_claude_text")
+    def test_gate_auth_error_overrides_to_skip(self, mock_gate, tmp_data_dir):
+        """Auth failure must override default-approve to SKIP (BUG-201 policy)."""
+        mock_gate.return_value = ("", False, 1, "auth_error")
+        approved, reasoning = invoke_layer2_gate(
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
+        )
+        assert approved is False
+        assert "auth" in reasoning.lower()
 
 
 class TestParseGateResponse:

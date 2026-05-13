@@ -646,6 +646,7 @@ class TestCallClaudeCli:
             '{"BTC-USD": {"action": "BUY", "confidence": 0.6}}',
             True,
             0,
+            "invoked",
         )
         result = _call_claude_cli("haiku", "test prompt", timeout=30)
         assert "BTC-USD" in result
@@ -659,21 +660,21 @@ class TestCallClaudeCli:
     @mock.patch("portfolio.claude_gate.invoke_claude_text")
     def test_nonzero_exit_raises(self, mock_gate):
         """Non-zero exit code should raise RuntimeError."""
-        mock_gate.return_value = ("", False, 1)
+        mock_gate.return_value = ("", False, 1, "error")
         with pytest.raises(RuntimeError, match="claude_gate returned exit_code=1"):
             _call_claude_cli("haiku", "test", timeout=30)
 
     @mock.patch("portfolio.claude_gate.invoke_claude_text")
     def test_blocked_raises(self, mock_gate):
         """Blocked invocation (gate returns -1) should raise RuntimeError."""
-        mock_gate.return_value = ("", False, -1)
+        mock_gate.return_value = ("", False, -1, "blocked")
         with pytest.raises(RuntimeError, match="claude_gate returned exit_code=-1"):
             _call_claude_cli("haiku", "test", timeout=30)
 
     @mock.patch("portfolio.claude_gate.invoke_claude_text")
     def test_model_passed_to_gate(self, mock_gate):
         """Model alias should be forwarded to invoke_claude_text."""
-        mock_gate.return_value = ("{}", True, 0)
+        mock_gate.return_value = ("{}", True, 0, "invoked")
         _call_claude_cli("sonnet", "test", timeout=60)
         mock_gate.assert_called_once_with(
             prompt="test",
@@ -685,7 +686,7 @@ class TestCallClaudeCli:
     @mock.patch("portfolio.claude_gate.invoke_claude_text")
     def test_timeout_forwarded(self, mock_gate):
         """Timeout should be forwarded to invoke_claude_text."""
-        mock_gate.return_value = ("{}", True, 0)
+        mock_gate.return_value = ("{}", True, 0, "invoked")
         _call_claude_cli("opus", "test", timeout=180)
         _, kwargs = mock_gate.call_args
         assert kwargs["timeout"] == 180

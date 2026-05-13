@@ -314,40 +314,28 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
     reasoning = ""
 
     try:
-        # P2 (2026-04-17): headless subprocess, skip CLAUDE.md startup-check
-        # "how would you like to proceed?" prompt.
-        import os
-        iskbets_env = os.environ.copy()
-        iskbets_env["PF_HEADLESS_AGENT"] = "1"
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
-            capture_output=True,
-            text=True,
+        # 2026-05-13: routed through claude_gate.invoke_claude_text for
+        # token+cost accounting. The gate returns ``status`` so we can
+        # preserve BUG-201 (2026-04-16) policy: auth failure must override
+        # the default-approve gate to SKIP (otherwise an auth outage silently
+        # approves every warrant trade). Other failure modes (timeout, generic
+        # error) keep the additive-gate default of approved=True.
+        from portfolio.claude_gate import invoke_claude_text
+        output, success, exit_code, status = invoke_claude_text(
+            prompt=prompt,
+            caller=f"iskbets_l2_gate:{ticker}",
+            model="sonnet",
             timeout=30,
-            env=iskbets_env,
         )
         elapsed = time.time() - t0
-        output = result.stdout.strip()
-
-        # BUG-201 (2026-04-16): Route through detect_auth_failure. This gate
-        # defaults to approved=True, so a "Not logged in" stdout would
-        # otherwise be interpreted as gate-approved for a warrant trade.
-        # Auth failure MUST override the default-approve policy.
-        from portfolio.claude_gate import detect_auth_failure
-        scan = f"{output}\n{result.stderr or ''}"
-        if detect_auth_failure(scan, caller="iskbets_l2_gate", context={"ticker": ticker, "price": price}):
-            logger.warning("ISKBETS L2 GATE: auth failure detected for %s — overriding default-approve to SKIP", ticker)
+        output = (output or "").strip()
+        if status == "auth_error":
+            logger.warning("ISKBETS L2 GATE: auth failure for %s — overriding default-approve to SKIP", ticker)
             approved, reasoning = False, "auth failure"
-        elif result.returncode == 0 and output:
+        elif success and output:
             approved, reasoning = _parse_gate_response(output)
         else:
-            logger.warning("ISKBETS L2 GATE: claude returned code %s", result.returncode)
-    except subprocess.TimeoutExpired:
-        elapsed = time.time() - t0
-        logger.warning("ISKBETS L2 GATE: timeout after %.1fs", elapsed)
-    except FileNotFoundError:
-        elapsed = time.time() - t0
-        logger.warning("ISKBETS L2 GATE: claude not found in PATH")
+            logger.warning("ISKBETS L2 GATE: claude failed status=%s exit=%s for %s", status, exit_code, ticker)
     except Exception as e:
         elapsed = time.time() - t0
         logger.warning("ISKBETS L2 GATE: error — %s", e)

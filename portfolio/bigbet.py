@@ -166,43 +166,27 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
     reasoning = ""
 
     try:
-        # P2 (2026-04-17): PF_HEADLESS_AGENT=1 so the Claude subprocess skips
-        # the "ask user about unresolved critical errors" step in CLAUDE.md's
-        # STARTUP CHECK. This path has no interactive stdin.
-        import os
-        bigbet_env = os.environ.copy()
-        bigbet_env["PF_HEADLESS_AGENT"] = "1"
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
-            capture_output=True,
-            text=True,
+        # 2026-05-13: routed through claude_gate.invoke_claude_text so the
+        # invocation is counted in claude_invocations.jsonl with token+cost
+        # accounting (was previously a bypass site, invisible to cost
+        # tracking). invoke_claude_text already handles auth-failure
+        # detection + serialization + tree kill on timeout. PF_HEADLESS_AGENT
+        # is handled inside claude_gate via _clean_env, no env override
+        # needed here.
+        from portfolio.claude_gate import invoke_claude_text
+        output, success, exit_code, _status = invoke_claude_text(
+            prompt=prompt,
+            caller=f"bigbet_layer2:{ticker}:{direction}",
+            model="sonnet",
             timeout=30,
-            env=bigbet_env,
         )
         elapsed = time.time() - t0
-        output = result.stdout.strip()
-
-        # BUG-200 (2026-04-16): Route through detect_auth_failure. This site
-        # bypasses claude_gate's invoke_claude wrapper, so a "Not logged in"
-        # stdout with exit 0 would otherwise be passed to the response parser
-        # (which returns None) without ever escalating the auth failure to
-        # critical_errors.jsonl. Escalate first, return safe default if hit.
-        from portfolio.claude_gate import detect_auth_failure
-        scan = f"{output}\n{result.stderr or ''}"
-        if detect_auth_failure(scan, caller="bigbet_layer2", context={"ticker": ticker, "direction": direction}):
-            logger.warning("BIG BET L2: auth failure detected for %s %s — returning None", ticker, direction)
-            probability, reasoning = None, ""
-        elif result.returncode == 0 and output:
+        output = (output or "").strip()
+        if success and output:
             probability, reasoning = _parse_eval_response(output)
             logger.info("BIG BET L2: %s %s — %s/10 (%.1fs)", ticker, direction, probability, elapsed)
         else:
-            logger.warning("BIG BET L2: claude returned code %s", result.returncode)
-    except subprocess.TimeoutExpired:
-        elapsed = time.time() - t0
-        logger.warning("BIG BET L2: timeout after %.1fs", elapsed)
-    except FileNotFoundError:
-        elapsed = time.time() - t0
-        logger.warning("BIG BET L2: claude not found in PATH")
+            logger.warning("BIG BET L2: claude failed exit=%s for %s %s", exit_code, ticker, direction)
     except Exception as e:
         elapsed = time.time() - t0
         logger.warning("BIG BET L2: error — %s", e)

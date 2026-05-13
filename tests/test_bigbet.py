@@ -78,13 +78,13 @@ def test_eval_parse_clamps_range():
 
 # --- invoke_layer2_eval tests ---
 
-@patch("portfolio.bigbet.subprocess.run")
+@patch("portfolio.claude_gate.invoke_claude_text")
 @patch.dict("os.environ", {}, clear=False)
 def test_invoke_eval_success(mock_run, tmp_path, monkeypatch):
     monkeypatch.setattr("portfolio.bigbet.EVAL_LOG_FILE", tmp_path / "log.jsonl")
-    mock_run.return_value = MagicMock(
-        returncode=0,
-        stdout="PROBABILITY: 7/10\nREASONING: Strong capitulation setup.",
+    mock_run.return_value = (
+        "PROBABILITY: 7/10\nREASONING: Strong capitulation setup.",
+        True, 0, "invoked",
     )
     prob, reason = invoke_layer2_eval(
         "BTC-USD", "BULL", CONDITIONS, _make_signals_orig(), _make_tf_data_orig(), PRICES, CONFIG
@@ -96,11 +96,11 @@ def test_invoke_eval_success(mock_run, tmp_path, monkeypatch):
     assert (tmp_path / "log.jsonl").exists()
 
 
-@patch("portfolio.bigbet.subprocess.run")
+@patch("portfolio.claude_gate.invoke_claude_text")
 @patch.dict("os.environ", {}, clear=False)
 def test_invoke_eval_timeout_fallback(mock_run, tmp_path, monkeypatch):
     monkeypatch.setattr("portfolio.bigbet.EVAL_LOG_FILE", tmp_path / "log.jsonl")
-    mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
+    mock_run.return_value = ("", False, -1, "timeout")
     prob, reason = invoke_layer2_eval(
         "BTC-USD", "BULL", CONDITIONS, _make_signals_orig(), _make_tf_data_orig(), PRICES, CONFIG
     )

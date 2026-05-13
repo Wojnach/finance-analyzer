@@ -499,7 +499,7 @@ def _call_claude_cli(model, prompt, timeout=60):
     """
     from portfolio.claude_gate import invoke_claude_text
 
-    text, success, exit_code = invoke_claude_text(
+    text, success, exit_code, _status = invoke_claude_text(
         prompt=prompt,
         caller=f"claude_fundamental_{model}",
         model=model,

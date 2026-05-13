@@ -73,6 +73,74 @@ _invoke_lock = threading.Lock()
 _DAILY_WARN_THRESHOLD = 50
 
 
+def _parse_claude_json_stdout(stdout: str) -> dict:
+    """Parse ``claude -p --output-format json`` stdout.
+
+    The CLI emits a single JSON object: ``{result, usage{input_tokens,
+    output_tokens, cache_read_input_tokens, cache_creation_input_tokens,
+    server_tool_use{...}}, total_cost_usd, duration_ms, session_id, ...}``.
+
+    Returns a normalised dict with keys: ``result_text, input_tokens,
+    output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd,
+    duration_ms, session_id, parse_ok``. On parse failure returns
+    ``{parse_ok: False, raw_len: <len(stdout)>}`` so the caller can still
+    log something useful.
+    """
+    if not stdout or not stdout.strip():
+        return {"parse_ok": False, "raw_len": 0}
+    try:
+        obj = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        # Some CLI versions emit a trailing line of non-JSON (or a leading
+        # banner). Walk the string from the first '{' and find the
+        # matching closing '}' by counting depth — naive rfind picks the
+        # last brace which is usually a nested usage object and yields a
+        # broken slice like `{"input": 5}}`.
+        obj = None
+        first = stdout.find("{")
+        if first >= 0:
+            depth = 0
+            in_string = False
+            escape = False
+            for k in range(first, len(stdout)):
+                c = stdout[k]
+                if escape:
+                    escape = False
+                    continue
+                if c == "\\" and in_string:
+                    escape = True
+                    continue
+                if c == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            obj = json.loads(stdout[first:k+1])
+                        except (json.JSONDecodeError, ValueError):
+                            obj = None
+                        break
+        if obj is None:
+            return {"parse_ok": False, "raw_len": len(stdout)}
+    usage = obj.get("usage") or {}
+    return {
+        "parse_ok": True,
+        "result_text": obj.get("result", "") or "",
+        "input_tokens": usage.get("input_tokens", 0),
+        "output_tokens": usage.get("output_tokens", 0),
+        "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+        "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
+        "cost_usd": obj.get("total_cost_usd", 0.0),
+        "duration_ms": obj.get("duration_ms", 0),
+        "session_id": obj.get("session_id", ""),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -97,11 +165,15 @@ def _clean_env() -> dict:
     """Return a copy of ``os.environ`` with Claude session markers removed.
 
     Prevents the "nested session" error when invoking ``claude -p`` from a
-    process tree that already has a Claude Code session active.
+    process tree that already has a Claude Code session active. Also sets
+    ``PF_HEADLESS_AGENT=1`` so the spawned Claude skips the interactive
+    "address critical errors first?" prompt described in CLAUDE.md
+    (no stdin available in any gate-spawned subprocess).
     """
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    env["PF_HEADLESS_AGENT"] = "1"
     return env
 
 
@@ -475,18 +547,24 @@ def invoke_claude(
         return False, -1
 
     # --- Build command ---
+    # 2026-05-13: --output-format json so stdout carries the usage + cost
+    # block (input/output/cache tokens, total_cost_usd). Required for the
+    # weekly cost rollup. Callers of invoke_claude don't consume stdout,
+    # so switching format is non-breaking. parse failures are tolerated
+    # (status preserved, parse_ok=False recorded).
     cmd = [
         claude_cmd, "-p", prompt,
         "--allowedTools", allowed_tools,
         "--max-turns", str(max_turns),
         "--model", model,
-        "--output-format", "text",
+        "--output-format", "json",
     ]
 
     # --- Execute ---
     t0 = time.time()
     exit_code = -1
     status = "error"
+    _stdout: str | None = None  # preinit so usage parse below can't UnboundLocal
 
     try:
         # A-IN-3: serialize all in-process Claude invocations so the
@@ -533,6 +611,25 @@ def invoke_claude(
 
     duration = round(time.time() - t0, 2)
 
+    # 2026-05-13: token+cost extraction from json stdout. _stdout exists
+    # only when not timed_out; on timeout we record duration but skip parse.
+    usage_entry: dict = {"prompt_chars": len(prompt or "")}
+    if status not in ("timeout",) and _stdout is not None:
+        try:
+            parsed = _parse_claude_json_stdout(_stdout or "")
+            usage_entry["parse_ok"] = parsed.get("parse_ok", False)
+            if parsed.get("parse_ok"):
+                usage_entry["output_chars"] = len(parsed.get("result_text", ""))
+                usage_entry["input_tokens"] = parsed.get("input_tokens", 0)
+                usage_entry["output_tokens"] = parsed.get("output_tokens", 0)
+                usage_entry["cache_read_tokens"] = parsed.get("cache_read_tokens", 0)
+                usage_entry["cache_creation_tokens"] = parsed.get("cache_creation_tokens", 0)
+                usage_entry["cost_usd"] = parsed.get("cost_usd", 0.0)
+                usage_entry["session_id"] = parsed.get("session_id", "")
+        except Exception as e:
+            logger.debug("usage parse failed caller=%s: %s", caller, e)
+            usage_entry["parse_ok"] = False
+
     _log_invocation({
         "timestamp": now_iso,
         "caller": caller,
@@ -541,11 +638,15 @@ def invoke_claude(
         "max_turns": max_turns,
         "duration_seconds": duration,
         "exit_code": exit_code,
+        **usage_entry,
     })
 
     logger.info(
-        "Claude invocation: caller=%s model=%s status=%s exit=%d duration=%.1fs",
+        "Claude invocation: caller=%s model=%s status=%s exit=%d duration=%.1fs tokens=%s/%s cost=$%s",
         caller, model, status, exit_code, duration,
+        usage_entry.get("input_tokens", "?"),
+        usage_entry.get("output_tokens", "?"),
+        usage_entry.get("cost_usd", "?"),
     )
 
     return status == "invoked", exit_code
@@ -564,7 +665,10 @@ def invoke_claude_text(
     text (e.g., claude_fundamental).
 
     Returns:
-        ``(text, success, exit_code)``
+        ``(text, success, exit_code, status)`` where ``status`` is one of
+        ``"invoked" | "blocked" | "timeout" | "auth_error" | "error"``.
+        Callers that need to distinguish auth failure from other errors
+        (e.g. iskbets safety override) should check ``status``.
     """
     now_iso = datetime.now(UTC).isoformat()
 
@@ -574,17 +678,20 @@ def invoke_claude_text(
             "reason": "disabled", "model": model, "max_turns": 1,
             "duration_seconds": 0, "exit_code": -1,
         })
-        return "", False, -1
+        return "", False, -1, "blocked"
 
     claude_cmd = _find_claude_cmd()
     if not claude_cmd:
         logger.error("claude CLI not found — caller=%s", caller)
-        return "", False, -1
+        return "", False, -1, "error"
 
+    # 2026-05-13: --output-format json for cost tracking. Caller still
+    # gets plain text — we extract the ``result`` field out of the JSON
+    # envelope before returning.
     cmd = [
         claude_cmd, "-p", prompt,
         "--model", model,
-        "--output-format", "text",
+        "--output-format", "json",
         "--max-turns", "1",
         "--allowedTools", "",
     ]
@@ -593,6 +700,7 @@ def invoke_claude_text(
     text = ""
     exit_code = -1
     status = "error"
+    parsed: dict = {}
 
     try:
         # A-IN-3 + A-IN-2: serialized + tree-killing.
@@ -608,7 +716,8 @@ def invoke_claude_text(
             status = "timeout"
         else:
             exit_code = rc
-            text = stdout
+            parsed = _parse_claude_json_stdout(stdout or "")
+            text = parsed.get("result_text", "") if parsed.get("parse_ok") else (stdout or "")
             status = "invoked" if exit_code == 0 else "error"
             # 2026-04-13: Same auth-failure detection as invoke_claude — see
             # the comment there for the full context. Need to scan both
@@ -634,18 +743,34 @@ def invoke_claude_text(
         logger.error("Claude text invocation failed — caller=%s: %s", caller, e)
 
     duration = round(time.time() - t0, 2)
+    usage_entry = {"prompt_chars": len(prompt or ""), "output_chars": len(text or "")}
+    if parsed.get("parse_ok"):
+        usage_entry["parse_ok"] = True
+        usage_entry["input_tokens"] = parsed.get("input_tokens", 0)
+        usage_entry["output_tokens"] = parsed.get("output_tokens", 0)
+        usage_entry["cache_read_tokens"] = parsed.get("cache_read_tokens", 0)
+        usage_entry["cache_creation_tokens"] = parsed.get("cache_creation_tokens", 0)
+        usage_entry["cost_usd"] = parsed.get("cost_usd", 0.0)
+        usage_entry["session_id"] = parsed.get("session_id", "")
+    else:
+        usage_entry["parse_ok"] = False
+
     _log_invocation({
         "timestamp": now_iso, "caller": caller, "status": status,
         "model": model, "max_turns": 1,
         "duration_seconds": duration, "exit_code": exit_code,
+        **usage_entry,
     })
 
     logger.info(
-        "Claude text: caller=%s model=%s status=%s exit=%d duration=%.1fs len=%d",
+        "Claude text: caller=%s model=%s status=%s exit=%d duration=%.1fs len=%d tokens=%s/%s cost=$%s",
         caller, model, status, exit_code, duration, len(text),
+        usage_entry.get("input_tokens", "?"),
+        usage_entry.get("output_tokens", "?"),
+        usage_entry.get("cost_usd", "?"),
     )
 
-    return text, status == "invoked", exit_code
+    return text, status == "invoked", exit_code, status
 
 
 def get_invocation_stats() -> dict:

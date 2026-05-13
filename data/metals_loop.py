@@ -777,6 +777,7 @@ last_signal_data = {}
 prev_signal_actions = {}  # for signal flip detection
 claude_proc = None
 claude_log_fh = None
+claude_log_offset_at_start = 0  # byte offset in metals_agent.log where current invocation's output begins; used by completion handler to extract usage JSON
 claude_start = 0
 claude_timeout = 300
 invoke_count = 0
@@ -6668,6 +6669,7 @@ def invoke_claude(trigger_reasons, tier=2):
     """Invoke Claude Code as Layer 2 trading agent with tier-based model selection."""
     global claude_proc, claude_log_fh, claude_start, claude_timeout
     global invoke_count, last_invoke_times
+    global claude_log_offset_at_start  # set here, read in main_loop's completion handler
 
     # Guard 0: Claude disabled — route everything to autonomous handler
     if not CLAUDE_ENABLED:
@@ -6733,10 +6735,15 @@ def invoke_claude(trigger_reasons, tier=2):
         log("claude not found on PATH!")
         return False
 
+    # 2026-05-13: --output-format json so the log file ends with a parseable
+    # JSON envelope. Lets the completion handler extract tokens + total_cost_usd
+    # into data/claude_invocations.jsonl (was: bypass site, invisible to
+    # weekly cost rollup).
     cmd = [
         claude_cmd, "-p", prompt,
         "--allowedTools", "Edit,Read,Bash,Write",
         "--max-turns", str(tier_cfg["max_turns"]),
+        "--output-format", "json",
     ]
     if tier_cfg["model"]:
         cmd.extend(["--model", tier_cfg["model"]])
@@ -6755,6 +6762,7 @@ def invoke_claude(trigger_reasons, tier=2):
         agent_env = os.environ.copy()
         agent_env.pop("CLAUDECODE", None)
         agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+        agent_env["PF_HEADLESS_AGENT"] = "1"
 
         claude_proc = subprocess.Popen(
             cmd,
@@ -6764,10 +6772,33 @@ def invoke_claude(trigger_reasons, tier=2):
             env=agent_env,
         )
         claude_log_fh = log_fh
+        claude_log_path = str(DATA_DIR / "metals_agent.log")
+        claude_log_offset_at_start = log_fh.tell()
         claude_start = time.time()
         claude_timeout = tier_cfg["timeout"]
         invoke_count += 1
         last_invoke_times[tier] = time.time()
+
+        # 2026-05-13: write start-of-invocation row to the unified cost log
+        # so weekly rollups see this previously-bypass-site call. Completion
+        # row (with tokens + cost from parsed json envelope) is written when
+        # claude_proc.poll() reports done — see the completion branch in
+        # main_loop.
+        with contextlib.suppress(Exception):
+            atomic_append_jsonl(DATA_DIR / "claude_invocations.jsonl", {
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "caller": f"metals_loop_t{tier}",
+                "status": "invoked",
+                "model": tier_cfg["model"] or "sonnet",
+                "max_turns": tier_cfg["max_turns"],
+                "duration_seconds": 0,
+                "exit_code": 0,
+                "prompt_chars": len(prompt),
+                "tier": tier,
+                "trigger": reason_str[:200],
+                "log_path": claude_log_path,
+                "log_offset": claude_log_offset_at_start,
+            })
 
         log(f"Claude T{tier} invoked (pid={claude_proc.pid}, model={tier_cfg['model'] or 'sonnet'}, "
             f"max_turns={tier_cfg['max_turns']}, timeout={tier_cfg['timeout']}s)")
@@ -6793,6 +6824,7 @@ def invoke_claude(trigger_reasons, tier=2):
 def main():
     global check_count, last_signal_data, last_invoke_prices, startup_grace
     global claude_proc, claude_log_fh, claude_start, claude_timeout
+    global claude_log_offset_at_start
     global short_prices, daily_range_stats, _METALS_LOOP_START_TS
     _METALS_LOOP_START_TS = time.time()
 
@@ -7674,6 +7706,42 @@ Positions: {pos_summary}{prob_summary}""")
                     log(f"Claude finished (rc={retcode}, {elapsed:.0f}s)")
                     log_invocation(0, None, "completed", check_count, invoke_count,
                                    elapsed_s=elapsed, rc=retcode)
+                    # 2026-05-13: parse the json envelope appended to
+                    # metals_agent.log (--output-format json) so the weekly
+                    # cost rollup gets tokens + total_cost_usd for this
+                    # invocation. Best-effort: any parse failure is logged
+                    # silently and just records the bare completion event.
+                    try:
+                        from portfolio.claude_gate import _parse_claude_json_stdout
+                        log_path = DATA_DIR / "metals_agent.log"
+                        offset = claude_log_offset_at_start or 0
+                        tail = ""
+                        with contextlib.suppress(OSError):
+                            with open(log_path, encoding="utf-8", errors="replace") as fh:
+                                fh.seek(max(0, offset))
+                                tail = fh.read()
+                        parsed = _parse_claude_json_stdout(tail) if tail else {"parse_ok": False}
+                        entry = {
+                            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                            "caller": "metals_loop_complete",
+                            "status": "invoked" if retcode == 0 else "error",
+                            "model": "sonnet",
+                            "max_turns": 0,
+                            "duration_seconds": round(elapsed, 2),
+                            "exit_code": retcode,
+                            "parse_ok": parsed.get("parse_ok", False),
+                        }
+                        if parsed.get("parse_ok"):
+                            entry["input_tokens"] = parsed.get("input_tokens", 0)
+                            entry["output_tokens"] = parsed.get("output_tokens", 0)
+                            entry["cache_read_tokens"] = parsed.get("cache_read_tokens", 0)
+                            entry["cache_creation_tokens"] = parsed.get("cache_creation_tokens", 0)
+                            entry["cost_usd"] = parsed.get("cost_usd", 0.0)
+                            entry["session_id"] = parsed.get("session_id", "")
+                            entry["output_chars"] = len(parsed.get("result_text", ""))
+                        atomic_append_jsonl(DATA_DIR / "claude_invocations.jsonl", entry)
+                    except Exception:
+                        logger.debug("metals_loop: claude_invocations append failed", exc_info=True)
                     claude_proc = None
                     if claude_log_fh:
                         with contextlib.suppress(OSError):
