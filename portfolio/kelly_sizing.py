@@ -323,7 +323,7 @@ def recommended_size(ticker, portfolio_path=None, agent_summary=None, strategy="
     rec_sek = min(half_kelly * cash_sek * exposure_ceiling, max_alloc)
 
     # Minimum trade size check
-    if rec_sek < 500:
+    if rec_sek < 1000:
         rec_sek = 0  # Below minimum trade size
 
     return {

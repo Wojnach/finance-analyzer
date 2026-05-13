@@ -844,7 +844,10 @@ def invoke_agent(reasons, tier=3):
         agent_env.pop("CLAUDECODE", None)
         agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
         # Increase Node.js stack size to prevent stack overflow in Claude CLI
-        agent_env["NODE_OPTIONS"] = "--stack-size=16384"
+        existing_node_opts = agent_env.get("NODE_OPTIONS", "")
+        agent_env["NODE_OPTIONS"] = (
+            f"{existing_node_opts} --stack-size=16384".strip()
+        )
         # P2 (2026-04-17): mark this subprocess as headless so CLAUDE.md's
         # STARTUP CHECK protocol doesn't ask "How would you like to proceed?"
         # when it finds unresolved critical_errors.jsonl entries. The agent

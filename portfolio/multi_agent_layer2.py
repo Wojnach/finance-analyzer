@@ -142,7 +142,10 @@ def launch_specialists(
     agent_env = os.environ.copy()
     agent_env.pop("CLAUDECODE", None)
     agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
-    agent_env["NODE_OPTIONS"] = "--stack-size=16384"
+    existing_node_opts = agent_env.get("NODE_OPTIONS", "")
+    agent_env["NODE_OPTIONS"] = (
+        f"{existing_node_opts} --stack-size=16384".strip()
+    )
     # P2 follow-up (Codex P1 #1, 2026-04-17): specialists spawn as headless
     # subprocesses with no interactive stdin, same as invoke_agent. Without
     # this, when multi_agent=true fires, three specialist Claude sessions

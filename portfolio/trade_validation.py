@@ -29,7 +29,7 @@ def validate_trade(
     last_known_price: float | None = None,
     max_spread_pct: float = 2.0,
     max_cash_pct: float = 50.0,
-    min_order_sek: float = 500.0,
+    min_order_sek: float = 1000.0,
     max_price_deviation_pct: float = 5.0,
 ) -> ValidationResult:
     """Validate a trade before placing it.

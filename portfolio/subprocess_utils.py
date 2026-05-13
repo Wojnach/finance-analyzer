@@ -211,9 +211,16 @@ def kill_orphaned_by_cmdline(pattern, exclude_pid=None):
     if exclude_pid is not None:
         skip.add(exclude_pid)
 
+    safe_pattern = (
+        pattern.replace("'", "''")
+        .replace("[", "``[")
+        .replace("]", "``]")
+        .replace("*", "``*")
+        .replace("?", "``?")
+    )
     ps_cmd = (
         "Get-CimInstance Win32_Process "
-        f"| Where-Object {{ $_.CommandLine -like '*{pattern}*' }} "
+        f"| Where-Object {{ $_.CommandLine -like '*{safe_pattern}*' }} "
         "| Select-Object -ExpandProperty ProcessId"
     )
     try:

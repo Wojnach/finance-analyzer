@@ -55,9 +55,9 @@ def add_cors_headers(response):
     origin = request.headers.get("Origin", "")
     if origin in _ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
-    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Credentials"] = "false"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Credentials"] = "false"
     return response
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"

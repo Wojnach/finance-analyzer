@@ -41,7 +41,7 @@ _DEFAULT_AVG_LOSS = {"XAG-USD": 2.43, "XAU-USD": 1.80}
 _DEFAULT_WIN_RATE = 0.52
 
 # Conservative sizing limits
-MIN_TRADE_SEK = 500.0
+MIN_TRADE_SEK = 1000.0
 MAX_POSITION_FRACTION = 0.95  # never go above 95% of buying power
 LOSS_REDUCTION_STEP = 0.25    # reduce Kelly by 25% per consecutive loss
 

@@ -58,7 +58,7 @@ class TestValidTrades:
         r = validate_trade(
             action="BUY",
             price=100.0,
-            volume=5.0,
+            volume=10.0,
             cash_available=50_000.0,
             bid=99.5,
             ask=100.0,
@@ -112,21 +112,21 @@ class TestBasicParams:
 # ===================================================================
 class TestMinimumOrder:
     def test_below_minimum(self):
-        """Order value 490 SEK < 500 default minimum."""
-        r = validate_trade(action="BUY", price=49.0, volume=10, cash_available=50_000)
+        """Order value 900 SEK < 1000 default minimum."""
+        r = validate_trade(action="BUY", price=90.0, volume=10, cash_available=50_000)
         assert r.valid is False
         assert "below minimum" in r.reason
 
     def test_at_minimum(self):
-        """Order value exactly 500 SEK should pass."""
-        r = validate_trade(action="BUY", price=50.0, volume=10, cash_available=50_000)
+        """Order value exactly 1000 SEK should pass."""
+        r = validate_trade(action="BUY", price=100.0, volume=10, cash_available=50_000)
         assert r.valid is True
 
     def test_custom_minimum(self):
-        """Custom min_order_sek=1000."""
+        """Custom min_order_sek=2000."""
         r = validate_trade(
-            action="BUY", price=100, volume=5, cash_available=50_000,
-            min_order_sek=1000.0,
+            action="BUY", price=100, volume=10, cash_available=50_000,
+            min_order_sek=2000.0,
         )
         assert r.valid is False
         assert "below minimum" in r.reason
@@ -350,7 +350,7 @@ class TestValidationResult:
 class TestEdgeCases:
     def test_very_small_price(self):
         """Very small price (penny stock) should pass if order value meets minimum."""
-        r = validate_trade(action="BUY", price=0.01, volume=50_000, cash_available=1_000_000)
+        r = validate_trade(action="BUY", price=0.01, volume=100_000, cash_available=1_000_000)
         assert r.valid is True
 
     def test_very_large_order(self):
@@ -395,7 +395,7 @@ class TestEdgeCases:
     def test_negative_price_deviation(self):
         """Price below last known should also be caught by abs()."""
         r = validate_trade(
-            action="BUY", price=80.0, volume=10, cash_available=50_000,
+            action="BUY", price=80.0, volume=20, cash_available=50_000,
             last_known_price=100.0, max_price_deviation_pct=5.0,
         )
         assert r.valid is False

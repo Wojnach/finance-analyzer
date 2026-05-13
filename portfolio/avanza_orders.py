@@ -137,8 +137,9 @@ def request_order(
     # got truncated). The token is per-order, expires in 5 min, and only
     # confirms one specific order — leak surface is minimal.
     logger.info(
-        "Order requested: %s %dx %s @ %.2f SEK (id=%s, confirm_token=%s)",
-        action, volume, instrument_name, price, order["id"], confirm_token,
+        "Order requested: %s %dx %s @ %.2f SEK (id=%s, confirm_token=%s…)",
+        action, volume, instrument_name, price, order["id"],
+        confirm_token[:4] + "****" if confirm_token else "N/A",
     )
     return order
 
