@@ -1,0 +1,51 @@
+You are doing an ADVERSARIAL code review of the {SUBSYSTEM} subsystem of a quantitative trading system at Q:\finance-analyzer. Sandbox: read-only.
+
+The diff against the base branch is the COMPLETE current contents of this subsystem (every file appears as "added"). Review every file. Do not stop early.
+
+Project rules (from CLAUDE.md):
+- Atomic I/O only via file_utils.atomic_write_json / load_json / atomic_append_jsonl. Raw json.loads(open(...).read()) is a defect.
+- MIN_VOTERS = 3 (consensus = active BUY+SELL voters, not total).
+- Accuracy gate: signals <47% accuracy with 30+ samples are force-HOLD (not inverted — inversion causes whiplash).
+- Recency-weighted: 70% recent (7d) + 30% all-time.
+- Regime penalties: ranging 0.75x, high-vol 0.80x confidence multipliers.
+- NEVER commit config.json (symlink to external API keys file).
+- Stop-loss API: use /_api/trading/stoploss/new, NOT regular order API.
+- Min order size: 1000 SEK (Avanza floor).
+- User accepts 10-20% knockout risk on 5x certs; de-risk only at 50%+.
+- Never place stop-loss within 3% of current bid; never place stops near MINI warrant barriers.
+
+Adversarial focus — find these bug classes:
+1. Silent failures: try/except that swallow errors or return default values without surfacing.
+2. Race conditions: shared state, JSONL append/rotate races, threading without locks, mutable defaults.
+3. Float / numeric: division by zero, NaN propagation, off-by-one, integer-vs-float comparisons.
+4. Stale data / cache bugs: TTL not honored, time comparisons in mixed tz, "now" used inconsistently.
+5. Accuracy/weighting math: sample-size guards missing, biased estimators, look-ahead bias.
+6. Signal inversion or weight changes that contradict the rule "never invert sub-50% signals — force HOLD instead".
+7. Atomic I/O violations (raw open() reads / writes on canonical state files).
+8. Resource leaks: open files / sqlite connections / playwright pages not closed.
+9. Security: SQL injection, unsafe deserialization, eval/exec, secrets in logs.
+10. Dead code / unused parameters that mask intent.
+11. Project-rule drift: hardcoded constants that contradict CLAUDE.md.
+12. Stop-loss / barrier proximity bugs (Mar-3 incident class).
+
+Output format — strict markdown:
+# Codex adversarial review: {SUBSYSTEM}
+## Summary
+(2-3 sentence overall verdict)
+
+## P0 — Blockers (production breakage / data loss / silent wrong trades)
+- `path:line` — short description. Why it bites: ... Fix: ...
+
+## P1 — High (will cause incidents)
+- `path:line` — ...
+
+## P2 — Medium (correctness / robustness)
+- `path:line` — ...
+
+## P3 — Low (style / dead code / minor)
+- `path:line` — ...
+
+## Tests missing
+- `path:line` — what scenario isn't covered.
+
+Be concrete. Cite line numbers. No false-positive padding. Skip any subsystem that is clean — say so explicitly.
