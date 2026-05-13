@@ -104,6 +104,18 @@ DISABLED_SIGNALS = {
     "gold_overnight_bias",  # pending live validation (added 2026-05-11)
     "metals_vrp",  # pending live validation (added 2026-05-12)
     "breakeven_inflation_momentum",  # pending live validation (added 2026-05-13)
+    "funding",          # 2026-05-13: 30.8% at 1d (743 sam). BUY-only signal, all wrong.
+                        # 0% activation on all tickers in last 50 entries — phantom voter
+                        # that escapes accuracy gate because it rarely votes. When it does
+                        # vote BUY, it's wrong 69.2% of the time. Horizon-gated to 3h/4h
+                        # per CLAUDE.md but still enabled at other horizons. Full disable.
+    "macro_regime",     # 2026-05-13: 47.0% at 1d (29,626 sam). BUY accuracy 41.3% —
+                        # actively harmful on BUY side. 88% activation on XAG where it
+                        # consistently votes BUY in ranging market. 29K samples confirm
+                        # this is noise, not bad luck. Should be caught by high-sample gate
+                        # (50% for 7K+ sam) but at 47% it sits between the standard 47%
+                        # gate and the 50% high-sample gate. Formal disable to eliminate
+                        # the single biggest noise source in XAG consensus.
     "calendar",         # 2026-05-09: 29.3% recent accuracy — structural BUY bias
                         # (6/8 sub-signals BUY-only). Actively harmful. Was per-horizon
                         # blacklisted at 1d but still voted at other horizons.
