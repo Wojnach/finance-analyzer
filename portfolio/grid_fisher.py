@@ -1435,6 +1435,10 @@ class GridFisher:
                 self._log("eod_market_sell", ob_id=inst.ob_id,
                           ticker=inst.ticker, qty=inst.inventory_units,
                           price=aggressive)
+                # TODO: MANUAL REVIEW — should decrement inst.inventory_units
+                # here to prevent duplicate sells if eod_market_flat() runs
+                # again before the order fills. Current code re-sells full
+                # inventory on each call. See adversarial review P0-9.
                 n += 1
         return n
 

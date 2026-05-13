@@ -208,8 +208,8 @@ def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
             price_usd = signals[ticker].get("price_usd", 0)
             holdings_value += shares * price_usd * fx_rate
         else:
-            # Fallback: use avg_cost_usd from holdings if no live price
             avg_cost = pos.get("avg_cost_usd", 0)
+            logger.warning("No live price for %s — using avg_cost_usd fallback", ticker)
             holdings_value += shares * avg_cost * fx_rate
 
     return float(cash + holdings_value)

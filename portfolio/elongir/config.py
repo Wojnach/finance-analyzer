@@ -50,9 +50,9 @@ class ElongirConfig:
 
     # --- Session window (CET) ---
     session_start_hour: int = 8
-    session_start_minute: int = 30
+    session_start_minute: int = 15
     session_end_hour: int = 21
-    session_end_minute: int = 30
+    session_end_minute: int = 55
 
     # --- Telegram ---
     telegram_report_interval: int = 3600  # hourly report (seconds)
@@ -92,9 +92,9 @@ class ElongirConfig:
             daily_loss_limit_pct=el.get("daily_loss_limit_pct", 3.0),
             max_daily_trades=el.get("max_daily_trades", 6),
             session_start_hour=el.get("session_start_hour", 8),
-            session_start_minute=el.get("session_start_minute", 30),
+            session_start_minute=el.get("session_start_minute", 15),
             session_end_hour=el.get("session_end_hour", 21),
-            session_end_minute=el.get("session_end_minute", 30),
+            session_end_minute=el.get("session_end_minute", 55),
             telegram_report_interval=el.get("telegram_report_interval", 3600),
             state_file=el.get("state_file", str(DATA_DIR / "elongir_state.json")),
             log_file=el.get("log_file", str(DATA_DIR / "elongir_log.jsonl")),

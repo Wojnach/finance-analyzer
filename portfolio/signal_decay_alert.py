@@ -32,9 +32,11 @@ def check_signal_decay(accuracy_cache_path="data/accuracy_cache.json"):
         drop_pp, recent_samples, severity.
     """
     try:
-        with open(accuracy_cache_path, encoding="utf-8") as f:
-            cache = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
+        from portfolio.file_utils import load_json
+        cache = load_json(accuracy_cache_path, default=None)
+        if cache is None:
+            return []
+    except Exception as e:
         logger.warning("Cannot load accuracy cache: %s", e)
         return []
 

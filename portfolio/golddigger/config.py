@@ -45,9 +45,9 @@ class GolddiggerConfig:
     # cap already gate weak EU-hours signals — no need to lock out the
     # whole pre-US window at the session level.
     session_start_hour: int = 8
-    session_start_minute: int = 30
+    session_start_minute: int = 15
     session_end_hour: int = 21
-    session_end_minute: int = 30
+    session_end_minute: int = 55
 
     # --- Avanza instrument ---
     bull_orderbook_id: str = ""   # BULL GULD X20 AVA orderbook ID
