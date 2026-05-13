@@ -1107,11 +1107,19 @@ class TestRecordNewTrades:
 
 class TestDrawdownFailSafe:
 
-    def _setup_invoke_path(self, monkeypatch):
+    def _setup_invoke_path(self, monkeypatch, tmp_path=None):
         """Mock everything before/after the drawdown check so we can exercise it."""
         # Reset module-level state
         ai._agent_proc = None
         ai._consecutive_stack_overflows = 0
+        # 2026-05-13: isolate auth-error cooldown check from real
+        # data/invocations.jsonl (which may contain recent auth_error rows
+        # that would short-circuit the cooldown gate before the drawdown /
+        # trade-guards logic runs).
+        import tempfile, pathlib
+        empty = pathlib.Path(tempfile.mkdtemp()) / "inv.jsonl"
+        empty.write_text("", encoding="utf-8")
+        monkeypatch.setattr(ai, "INVOCATIONS_FILE", empty)
         # Make perception_gate always pass-through
         monkeypatch.setattr(
             "portfolio.perception_gate.should_invoke",
@@ -1253,6 +1261,12 @@ class TestTradeGuardsBlockGate:
         """Mock the early-return paths so we exercise the trade-guards gate."""
         ai._agent_proc = None
         ai._consecutive_stack_overflows = 0
+        # 2026-05-13: isolate auth-error cooldown check from real
+        # data/invocations.jsonl — see same comment in TestDrawdownFailSafe.
+        import tempfile, pathlib
+        empty = pathlib.Path(tempfile.mkdtemp()) / "inv.jsonl"
+        empty.write_text("", encoding="utf-8")
+        monkeypatch.setattr(ai, "INVOCATIONS_FILE", empty)
         monkeypatch.setattr(
             "portfolio.perception_gate.should_invoke",
             lambda r, t: (True, "ok"),

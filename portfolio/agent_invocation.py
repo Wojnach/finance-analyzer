@@ -549,6 +549,43 @@ def invoke_agent(reasons, tier=3):
         _log_trigger(reasons, "skipped_stack_overflow", tier=tier)
         return False
 
+    # 2026-05-13: Auth-error cooldown. If the previous invocation status was
+    # ``auth_error`` within the last 30 minutes, skip spawning. Otherwise
+    # every loop crash-restart re-fires the "startup" trigger and burns a
+    # fresh Layer 2 subprocess that exits in <1s after printing
+    # "Not logged in" (20 such bursts observed 2026-05-03→2026-05-10, eight
+    # within 30 minutes on 2026-05-10 alone). The fix-agent dispatcher
+    # already handles the auth_failure entry in critical_errors.jsonl; this
+    # gate just stops the storm of doomed spawns in the meantime.
+    try:
+        recent = load_jsonl(INVOCATIONS_FILE)
+        # Walk backwards to find the most recent non-skip status.
+        for entry in reversed(recent[-50:]):
+            status = entry.get("status", "")
+            if status.startswith("skipped"):
+                continue
+            ts = entry.get("ts", "")
+            if status == "auth_error" and ts:
+                try:
+                    last = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    age = (datetime.now(UTC) - last).total_seconds()
+                    if age < 1800:
+                        logger.warning(
+                            "Layer 2 skipped: auth_error cooldown (%.0fs since last, 1800s budget)",
+                            age,
+                        )
+                        _log_trigger(reasons, "skipped_auth_cooldown", tier=tier)
+                        return False
+                except (ValueError, TypeError):
+                    pass
+            break
+    except Exception as e:
+        # Cooldown lookup is best-effort. If invocations.jsonl is unreadable
+        # for any reason, fall through and let the normal path handle the
+        # invocation. Better to attempt and fail loudly than silently skip
+        # all Layer 2 work.
+        logger.debug("auth cooldown lookup failed: %s", e)
+
     # Check if Layer 2 is enabled — allows running data loop without Claude quota
     try:
         config = _load_config()
@@ -872,6 +909,7 @@ def invoke_agent(reasons, tier=3):
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
+            stdin=subprocess.DEVNULL,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             env=agent_env,

@@ -148,8 +148,13 @@ class TestKillOverrunHelper:
 class TestInvokeAgentReusesHelper:
     """try_invoke_agent must still honor the same kill path on timeout."""
 
-    def test_invoke_agent_times_out_and_kills(self, monkeypatch):
+    def test_invoke_agent_times_out_and_kills(self, monkeypatch, tmp_path):
         _reset_state()
+        # 2026-05-13: auth-error cooldown reads INVOCATIONS_FILE — point at
+        # tmp_path so the test isn't sensitive to real auth_error rows.
+        empty = tmp_path / "inv.jsonl"
+        empty.write_text("", encoding="utf-8")
+        monkeypatch.setattr(ai, "INVOCATIONS_FILE", empty)
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
         mock_proc.pid = 77777
