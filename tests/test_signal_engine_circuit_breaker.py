@@ -27,8 +27,8 @@ class TestCircuitBreakerConstants:
     def test_relaxation_step_at_2pp(self):
         assert pytest.approx(0.02) == _GATE_RELAXATION_STEP
 
-    def test_relaxation_max_at_6pp(self):
-        assert pytest.approx(0.06) == _GATE_RELAXATION_MAX
+    def test_relaxation_max_at_2pp(self):
+        assert pytest.approx(0.02) == _GATE_RELAXATION_MAX
 
     def test_max_is_multiple_of_step(self):
         """Step must divide max cleanly so iteration reaches the exact cap.
@@ -392,24 +392,14 @@ class TestComputeGateRelaxation:
         )
 
     def test_partial_recovery_when_one_signal_unrecoverable(self):
-        """Codex P2 (2026-04-16 follow-up): a single irrecoverable outlier
-        must NOT veto relaxation for the rest. Previously best_possible<floor
-        short-circuited to 0.0, suppressing the recovery of 4 valid voters.
-
-        Scenario: 4 BUY signals at 0.42 (recoverable at relaxation>=0.06)
-        + 1 SELL signal at 0.30 (unrecoverable). best_possible=4<5=floor,
-        but relaxation still recovers those 4 vs baseline of 0. Should
-        return max relaxation to preserve partial recovery.
+        """A single irrecoverable outlier must NOT veto relaxation for the
+        rest. Scenario: 4 BUY signals at 0.46 (recoverable at relaxation
+        >=0.02) + 1 SELL signal at 0.30 (unrecoverable).
         """
         votes = {f"s{i}": "BUY" for i in range(4)}
         votes["s4"] = "SELL"
-        accuracy = {f"s{i}": self._make_stats(0.42) for i in range(4)}
-        # s4 is directionally gated (buy_acc irrelevant for SELL vote) - use
-        # overall=0.30 to also fail the overall gate. With sell_acc=0.30, the
-        # directional gate (threshold 0.40) fires on SELL direction too.
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(4)}
         accuracy["s4"] = self._make_stats(0.30)
-        # Regime-aware: in trending-up the dynamic_min=3 quorum allows bp=4
-        # recovery (4 >= 3). In ranging this would be blocked (4 < 5).
         rel = _compute_gate_relaxation(
             votes, accuracy, set(), set(), 0.47, regime="trending-up",
         )
@@ -437,22 +427,16 @@ class TestComputeGateRelaxation:
         )
         assert rel == 0.0  # 6 signals all pass; no relaxation needed
 
-    def test_intermediate_step_relaxation(self):
-        """2026-04-16 review (Reviewer 3 P2-5): explicit test for the 0.04
-        intermediate step. Previous tests only checked step 0 (no-op), step 1
-        (0.02), and max (0.06). A loop off-by-one that made step 2 land at
-        0.06 would slip through. 4 passing + 3 borderline at 0.44 requires
-        exactly 0.04 relaxation.
+    def test_single_step_relaxation_recovers_borderline(self):
+        """With max relaxation=0.02 (1 step), signals at 0.46 (just below
+        0.47 gate) are recoverable. 4 passing + 3 at 0.46 → relaxation of
+        0.02 brings gate to 0.45, recovering the 0.46 signals.
         """
-        # 4 signals that pass any gate + 3 at 0.44 (below 0.45 relaxed gate
-        # but above 0.43). Floor of 5 requires 1 of the 0.44 signals.
         votes = {f"s{i}": "BUY" for i in range(7)}
         accuracy = {f"s{i}": self._make_stats(0.60) for i in range(4)}
-        accuracy.update({f"s{i}": self._make_stats(0.44) for i in range(4, 7)})
+        accuracy.update({f"s{i}": self._make_stats(0.46) for i in range(4, 7)})
         rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        # Effective gate after relaxation = 0.47 - rel. Need 0.44 > 0.47 - rel,
-        # i.e. rel > 0.03. Smallest step meeting this: 0.04.
-        assert rel == pytest.approx(0.04)
+        assert rel == pytest.approx(0.02)
 
 
 class TestCircuitBreakerHighSampleInteraction:
