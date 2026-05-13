@@ -1895,7 +1895,7 @@ def _hash_violation_message(message: str) -> str:
     handful of call sites that genuinely have only the message.
     """
     stripped = _ESCALATED_PREFIX_RE.sub("", message or "", count=1)
-    return hashlib.sha1(stripped.encode("utf-8")).hexdigest()
+    return hashlib.sha256(stripped.encode("utf-8")).hexdigest()
 
 
 def violation_identity_payload(
@@ -1971,7 +1971,7 @@ def _hash_violation_identity(violation: "Violation") -> str:
     payload = violation_identity_payload(
         violation.invariant, msg, violation.details
     )
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _normalize_recent_hashes(prior: dict) -> list[dict]:

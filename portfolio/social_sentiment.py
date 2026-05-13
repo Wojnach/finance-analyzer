@@ -3,10 +3,10 @@
 Uses Reddit's public JSON API, no authentication needed.
 """
 
-import json
-import urllib.parse
-import urllib.request
 from datetime import UTC, datetime
+from urllib.parse import quote
+
+import requests
 
 USER_AGENT = "finance-analyzer/1.0 (portfolio intelligence bot)"
 
@@ -29,9 +29,9 @@ TICKER_KEYWORDS = {
 def _fetch_subreddit(sub, keywords, dedicated, per_sub):
     posts = []
     url = f"https://www.reddit.com/r/{sub}/hot.json?limit={per_sub + 5}&raw_json=1"
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read())
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
     for child in data.get("data", {}).get("children", []):
         post = child.get("data", {})
         title = post.get("title", "").strip()
@@ -57,14 +57,14 @@ def _fetch_subreddit(sub, keywords, dedicated, per_sub):
 
 
 def _search_subreddit(sub, keywords, limit=10):
-    query = urllib.parse.quote(" OR ".join(keywords))
+    query = quote(" OR ".join(keywords))
     url = (
         f"https://www.reddit.com/r/{sub}/search.json"
         f"?q={query}&sort=new&restrict_sr=on&limit={limit}&raw_json=1"
     )
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read())
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
     posts = []
     for child in data.get("data", {}).get("children", []):
         post = child.get("data", {})

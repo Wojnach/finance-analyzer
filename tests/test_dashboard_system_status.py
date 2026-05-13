@@ -820,7 +820,7 @@ class TestDashboardSourceIdentityEquivalence:
         # mirror, then hash by the same SHA-1 algorithm.
         entry = self._entry_from_violation(v)
         dash_payload = ss._identity_key_for_dict(entry)
-        dash_hash = hashlib.sha1(dash_payload.encode("utf-8")).hexdigest()
+        dash_hash = hashlib.sha256(dash_payload.encode("utf-8")).hexdigest()
         assert dash_hash == source_hash, (
             f"Dashboard identity drifted from source for {invariant!r}: "
             f"dashboard payload={dash_payload!r} → {dash_hash}, "
@@ -880,6 +880,6 @@ class TestDashboardSourceIdentityEquivalence:
             "resolution": None,
         }
         ce_payload = ss._identity_key_for_dict(ce_entry)
-        ce_hash = hashlib.sha1(ce_payload.encode("utf-8")).hexdigest()
+        ce_hash = hashlib.sha256(ce_payload.encode("utf-8")).hexdigest()
         assert ce_hash == source_hash
 
