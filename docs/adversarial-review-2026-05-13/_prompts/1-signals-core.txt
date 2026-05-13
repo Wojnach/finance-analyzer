@@ -1,0 +1,89 @@
+You are doing an ADVERSARIAL code review of the **signals-core** subsystem of finance-analyzer (a quantitative trading system at Q:\fa-adv-2026-05-13).
+
+Sandbox: read-only. Do NOT modify any files. Read each file fully.
+
+**Files in scope** (review these and ONLY these):
+- portfolio/signal_engine.py
+- portfolio/signal_registry.py
+- portfolio/signal_utils.py
+- portfolio/signal_weights.py
+- portfolio/signal_weight_optimizer.py
+- portfolio/signal_history.py
+- portfolio/signal_state_since.py
+- portfolio/signal_decay_alert.py
+- portfolio/signal_postmortem.py
+- portfolio/signal_db.py
+- portfolio/accuracy_stats.py
+- portfolio/accuracy_degradation.py
+- portfolio/ticker_accuracy.py
+- portfolio/outcome_tracker.py
+- portfolio/forecast_accuracy.py
+- portfolio/ic_computation.py
+- portfolio/train_signal_weights.py
+- portfolio/linear_factor.py
+- portfolio/feature_normalizer.py
+- portfolio/short_horizon.py
+
+**Project rules from CLAUDE.md**:
+- Atomic I/O only via `file_utils.atomic_write_json` / `load_json` / `atomic_append_jsonl`. Raw `json.loads(open(...).read())` is a defect.
+- MIN_VOTERS = 3 (consensus = active BUY+SELL voters, not total).
+- Accuracy gate: signals <47% accuracy with 30+ samples are force-HOLD (NOT inverted — inversion causes whiplash).
+- Recency-weighted: 70% recent (7d) + 30% all-time.
+- Regime penalties: ranging 0.75x, high-vol 0.80x confidence multipliers.
+- NEVER commit config.json (symlink to external API keys file).
+- Stop-loss API: use `/_api/trading/stoploss/new`, NOT regular order API (Mar-3 incident).
+- Min order size: 1000 SEK (Avanza floor).
+- User accepts 10-20% knockout risk on 5x certs; de-risk only at 50%+.
+- Never place stop-loss within 3% of current bid; never near MINI warrant barriers.
+- Layer 2 invocation must go through `claude_gate` (auth-scan, tree-kill, CLAUDECODE cleanup).
+- CLAUDECODE env var must be cleared before invoking `claude -p` (caused 34h outage Feb 18-19).
+
+**Adversarial bug classes — hunt for ALL of these:**
+1. Silent failures: try/except that swallow errors or return defaults without logging/alerting.
+2. Race conditions: shared state across threads/processes, JSONL append/rotate races, missing locks, mutable defaults, single sqlite connection shared.
+3. Float / numeric: division by zero, NaN propagation, off-by-one, integer-vs-float comparison, log/sqrt of 0/negative, pct_change on length-1.
+4. Stale data / cache: TTL not honored, mixed-tz time math, "now" inconsistent across modules.
+5. Accuracy/weighting math: sample-size guards missing, biased estimators, mixing horizons, look-ahead bias, survivorship bias.
+6. Signal-inversion or weight rule violations (no inverting <50% — force HOLD instead).
+7. Atomic I/O violations (raw open() on canonical state files).
+8. Resource leaks: open files / sqlite connections / playwright pages not closed.
+9. Security: SQL injection, unsafe deserialization, eval/exec, secrets in logs, dashboard auth bypass.
+10. Dead code / unused parameters masking intent.
+11. Project-rule drift: hardcoded constants contradicting CLAUDE.md.
+12. Stop-loss / barrier-proximity bugs (Mar-3 class).
+13. Subprocess management: tree-kill failure, orphan grandchildren, stdin not closed (deadlock), env var clobber.
+14. Telegram message delivery: dedup race, markdown 400 lost, formatting injection.
+
+**Output format — STRICT MARKDOWN. This is your final deliverable; everything else is scratch:**
+
+# Codex adversarial review: signals-core
+
+## Summary
+(2-3 sentence overall verdict)
+
+## P0 — Blockers (production breakage / data loss / silent wrong trades)
+- `path:line` — short description. Why it bites: ... Fix: ...
+
+## P1 — High (will cause incidents)
+- `path:line` — ...
+
+## P2 — Medium (correctness / robustness)
+- `path:line` — ...
+
+## P3 — Low (style / dead code / minor)
+- `path:line` — ...
+
+## Tests missing
+- `path:line` — what scenario isn't covered.
+
+## Cross-cutting observations
+- patterns spanning multiple files
+
+**Rules:**
+- Cite exact file paths and line numbers — no vague claims.
+- No false-positive padding. If uncertain, label as "(uncertain)".
+- Read full files; don't pad with grep snippets.
+- If a subsystem area is clean, say so explicitly — don't invent findings.
+- Quality > quantity. ~20-40 real findings is typical.
+
+Spend your full token budget reading and analysing. Emit the final markdown report as your final agent message — do NOT print it earlier as a tool call.
