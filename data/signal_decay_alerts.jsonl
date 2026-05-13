@@ -1,2 +1,0 @@
-{"ts": "2026-05-13T08:19:19.139823+00:00", "alert_count": 1, "critical_count": 0, "alerts": [{"signal": "rsi", "horizon": "3h", "alltime_acc": 70.0, "recent_acc": 55.0, "drop_pp": 15.0, "recent_samples": 60, "alltime_samples": 200, "severity": "warning"}]}
-{"ts": "2026-05-13T08:19:19.142853+00:00", "alert_count": 1, "critical_count": 0, "alerts": [{"signal": "rsi", "horizon": "3h", "alltime_acc": 70.0, "recent_acc": 55.0, "drop_pp": 15.0, "recent_samples": 60, "alltime_samples": 200, "severity": "warning"}]}

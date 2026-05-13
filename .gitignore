@@ -189,6 +189,15 @@ models/*.joblib
 # Daily audit reports written by scripts/audit_accuracy_drops.py
 data/accuracy_audit_*.md
 
+# Runtime state files that should not be tracked
+data/fear_greed_streak.json
+data/fx_rate_cache.json
+data/headlines_latest.json
+data/llm_probability_log.jsonl
+data/market_health_state.json
+data/regime_accuracy_cache.json
+data/signal_decay_alerts.jsonl
+
 # LoRA training artifacts
 training/lora/output/
 training/lora/training_data.jsonl
