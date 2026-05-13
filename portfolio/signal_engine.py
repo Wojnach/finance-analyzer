@@ -693,7 +693,7 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 # only the overall accuracy gate is relaxed.
 _MIN_ACTIVE_VOTERS_SOFT = 5
 _GATE_RELAXATION_STEP = 0.02  # relax by 2pp per step
-_GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
+_GATE_RELAXATION_MAX = 0.02   # cap at 2pp below base gate (0.47 -> 0.45)
 
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.

@@ -127,7 +127,9 @@ def direction_probability(ticker, current_votes, horizon="1d", days=7, min_sampl
         accuracy = sig_acc["accuracy"]
         samples = sig_acc["samples"]
 
-        # Compute P(up) based on vote direction and accuracy
+        if accuracy < 0.50:
+            continue
+
         if vote == "BUY":
             p_up = accuracy
         else:  # SELL

@@ -313,10 +313,10 @@ class TestDirectionProbability:
         r = direction_probability("XAG-USD", {"rsi": "BUY"})
         assert r["direction"] == "up"
 
-        # p_up = 0.47 → down (below 0.48 threshold)
+        # accuracy 0.47 → sub-50% signals filtered out → neutral
         mock_acc.return_value = {"rsi": {"accuracy": 0.47, "samples": 100, "correct": 47}}
         r = direction_probability("XAG-USD", {"rsi": "BUY"})
-        assert r["direction"] == "down"
+        assert r["direction"] == "neutral"
 
     @patch("portfolio.ticker_accuracy.accuracy_by_ticker_signal")
     def test_signal_details_populated(self, mock_acc):
