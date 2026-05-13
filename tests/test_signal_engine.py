@@ -480,11 +480,11 @@ class TestFundingRateHorizonGating:
         gate_4h = REGIME_GATED_SIGNALS["ranging"].get("4h", frozenset())
         assert "funding" not in gate_4h
 
-    def test_funding_not_in_disabled_signals(self):
-        """funding was removed from DISABLED_SIGNALS (re-enabled 2026-04-09)."""
+    def test_funding_in_disabled_signals(self):
+        """funding added to DISABLED_SIGNALS 2026-05-13: 30.8% at 1d (743 sam)."""
         from portfolio.tickers import DISABLED_SIGNALS
 
-        assert "funding" not in DISABLED_SIGNALS
+        assert "funding" in DISABLED_SIGNALS
 
 
 # ---------------------------------------------------------------------------
