@@ -1,5 +1,46 @@
 # Session Progress
 
+## Auto-improvement session (2026-05-13)
+
+**Status:** SHIPPED — merged to main, pushed.
+
+**Scope:** 4 batches of fixes from adversarial review findings + deep exploration.
+
+### Batch 1: Security & Safety (8 fixes)
+- PowerShell command injection in subprocess_utils.py (escape wildcards)
+- Avanza min order floor 500→1000 SEK (3 sites: trade_validation, kelly_sizing, kelly_metals)
+- CORS headers only sent for whitelisted origins (dashboard/app.py)
+- Confirm token masked in order logs (avanza_orders.py)
+- NODE_OPTIONS append-not-overwrite (agent_invocation.py, multi_agent_layer2.py)
+
+### Batch 2: Signal Correctness (2 fixes)
+- Gate relaxation reduced 0.06→0.02 (45% floor instead of 41%)
+- Sub-50% accuracy signals excluded from P(up) estimation (ticker_accuracy.py)
+- Skipped: MIN_VOTERS_METALS=2 is deliberate (XAG gets only 2 post-persistence voters)
+
+### Batch 3: Infrastructure Reliability (3 fixes)
+- file_utils.py: log warning on sidecar lock creation failure (was silent pass)
+- process_lock.py: log warning on metadata write failure (was bare except pass)
+- gpu_gate.py: delete lock file on write failure to prevent stale lock trap
+- Skipped: shared_state.py timestamp logic is actually correct after deep analysis
+- Skipped: trade_guards.py _save_state IS inside the lock (exploration agent was wrong)
+
+### Batch 4: Risk & Data Quality (5 fixes)
+- risk_management.py: log WARNING on avg_cost_usd fallback
+- signal_decay_alert.py: use file_utils.load_json() instead of raw open()
+- Warrant hours corrected to 08:15-21:55 CET (golddigger + elongir)
+- grid_fisher EOD duplicate sell: TODO MANUAL REVIEW (too risky for autonomous fix)
+
+### Deferred (need manual review)
+- Dashboard CF-Access JWT bypass
+- Avanza account whitelist (needs live session testing)
+- Warrant state non-atomic mutations (architectural redesign)
+- Layer 2 child not Job-bound (Windows Job Object)
+- Grid fisher EOD duplicate sell
+- IC computation sort order
+
+**Next:** Address deferred items, especially account whitelist (P0) and JWT bypass.
+
 ## FGL dual adversarial review (2026-05-12 ~17:30 CET)
 
 **Status:** SHIPPED — `607ea26b` pushed. Codex cleanup pending.

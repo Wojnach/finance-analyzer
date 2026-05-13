@@ -1,5 +1,7 @@
 # Improvement Plan — 2026-05-13
 
+**Status:** COMPLETE — 18 fixes shipped across 4 batches. 7 items deferred.
+
 ## Scope
 
 Focused on **highest-impact fixes** from adversarial reviews (2026-05-11, 2026-05-12)
