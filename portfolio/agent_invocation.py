@@ -192,11 +192,20 @@ def _build_tier_prompt(tier, reasons):
     playbook = "docs/TRADING_PLAYBOOK.md"
 
     if tier == 1:
+        # 2026-05-14: collapse 3 sequential Read tool calls into one Bash
+        # cat. The 3 files together are ~19KB total — well under any
+        # context-budget concern — but each Read tool call is a full model
+        # roundtrip (~10-15s on Sonnet). T1 duration audit (3d, n=45)
+        # showed p50=114s sitting right on the old 120s budget; ~25-30s of
+        # that was sequential file-read overhead. Bash cat in one turn
+        # eliminates two of those roundtrips. Agent still must reason +
+        # write journal + send Telegram afterwards.
         return (
             "You are the Layer 2 trading agent (QUICK CHECK). "
             f"Trigger: {reason_str}. "
-            f"Read {playbook} for trading rules, then data/layer2_context.md "
-            "then data/agent_context_t1.json. "
+            "Run this exact Bash command once to pull all your context in a single tool turn: "
+            f"`cat {playbook} data/layer2_context.md data/agent_context_t1.json`. "
+            "Do NOT call Read on those files individually. "
             "This is a routine check. Confirm held positions are OK (check ATR stops). "
             "If no positions are held, briefly assess macro state. "
             "Write a brief journal entry and send a short Telegram message. "
