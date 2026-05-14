@@ -305,6 +305,12 @@ def _register_defaults():
                       "portfolio.signals.breakeven_inflation_momentum",
                       "compute_breakeven_inflation_momentum_signal",
                       requires_context=True, max_confidence=0.7)
+    # Trend Slope Momentum — EMA-smoothed log-price slope z-score + 50d momentum
+    # 2026-05-14: arxiv 2511.08571 (Forecast-to-Fill). Continuous probability,
+    # not binary crossover. 60/40 trend/momentum blend.
+    register_enhanced("trend_slope_momentum",
+                      "portfolio.signals.trend_slope_momentum",
+                      "compute_trend_slope_momentum_signal")
 
 
 _register_defaults()

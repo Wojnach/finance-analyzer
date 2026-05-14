@@ -104,6 +104,7 @@ DISABLED_SIGNALS = {
     "gold_overnight_bias",  # pending live validation (added 2026-05-11)
     "metals_vrp",  # pending live validation (added 2026-05-12)
     "breakeven_inflation_momentum",  # pending live validation (added 2026-05-13)
+    "trend_slope_momentum",  # pending live validation (added 2026-05-14)
     "funding",          # 2026-05-13: 30.8% at 1d (743 sam). BUY-only signal, all wrong.
                         # 0% activation on all tickers in last 50 entries — phantom voter
                         # that escapes accuracy gate because it rarely votes. When it does
@@ -345,4 +346,5 @@ SIGNAL_NAMES = [
     "btc_proxy",
     "metals_vrp",
     "breakeven_inflation_momentum",
+    "trend_slope_momentum",
 ]
