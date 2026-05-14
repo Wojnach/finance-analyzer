@@ -203,9 +203,8 @@ def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
         shares = pos.get("shares", 0)
         if shares <= 0:
             continue
-        # Try to get current price from agent_summary signals
-        if ticker in signals:
-            price_usd = signals[ticker].get("price_usd", 0)
+        price_usd = signals.get(ticker, {}).get("price_usd")
+        if price_usd and price_usd > 0:
             holdings_value += shares * price_usd * fx_rate
         else:
             avg_cost = pos.get("avg_cost_usd", 0)

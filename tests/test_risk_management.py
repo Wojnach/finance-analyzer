@@ -97,6 +97,81 @@ class TestComputePortfolioValue:
         summary = _make_summary()
         assert _compute_portfolio_value(pf, summary) == 100_000
 
+    def test_price_usd_zero_falls_through_to_avg_cost(self):
+        """B1: If signal entry exists but price_usd=0, use avg_cost fallback."""
+        pf = _make_portfolio(cash=100_000, holdings={
+            "BTC-USD": {"shares": 2, "avg_cost_usd": 50_000},
+        })
+        summary = _make_summary(
+            signals={"BTC-USD": {"price_usd": 0}},
+            fx_rate=10.0,
+        )
+        # Should use avg_cost 50_000, not price 0
+        assert _compute_portfolio_value(pf, summary) == 100_000 + 2 * 50_000 * 10
+
+    def test_price_usd_missing_key_falls_through(self):
+        """Signal entry exists but has no price_usd key at all."""
+        pf = _make_portfolio(cash=100_000, holdings={
+            "BTC-USD": {"shares": 2, "avg_cost_usd": 50_000},
+        })
+        summary = _make_summary(
+            signals={"BTC-USD": {"action": "BUY"}},
+            fx_rate=10.0,
+        )
+        assert _compute_portfolio_value(pf, summary) == 100_000 + 2 * 50_000 * 10
+
+    def test_price_usd_none_falls_through(self):
+        """Signal entry has price_usd=None (explicit null from API)."""
+        pf = _make_portfolio(cash=100_000, holdings={
+            "BTC-USD": {"shares": 2, "avg_cost_usd": 50_000},
+        })
+        summary = _make_summary(
+            signals={"BTC-USD": {"price_usd": None}},
+            fx_rate=10.0,
+        )
+        assert _compute_portfolio_value(pf, summary) == 100_000 + 2 * 50_000 * 10
+
+
+# ===================================================================
+# check_concentration_risk
+# ===================================================================
+
+class TestCheckConcentrationRisk:
+    def test_no_concentration_issue(self):
+        from portfolio.risk_management import check_concentration_risk
+        portfolio = _make_portfolio(
+            cash=400_000,
+            holdings={"BTC-USD": {"shares": 100, "avg_cost_usd": 100}},
+        )
+        summary = _make_summary(
+            signals={"BTC-USD": {"price_usd": 100}},
+            fx_rate=10.0,
+        )
+        result = check_concentration_risk("BTC-USD", "BUY", portfolio, summary, "patient")
+        assert result is None
+
+    def test_concentration_too_high(self):
+        from portfolio.risk_management import check_concentration_risk
+        portfolio = _make_portfolio(
+            cash=50_000,
+            holdings={"BTC-USD": {"shares": 5, "avg_cost_usd": 90_000}},
+        )
+        summary = _make_summary(
+            signals={"BTC-USD": {"price_usd": 90_000}},
+            fx_rate=10.0,
+        )
+        result = check_concentration_risk("BTC-USD", "BUY", portfolio, summary, "bold")
+        assert result is not None
+        assert result["flag"] == "concentration"
+        assert result["concentration_pct"] > 40
+
+    def test_zero_total_value_returns_none(self):
+        from portfolio.risk_management import check_concentration_risk
+        portfolio = _make_portfolio(cash=0, holdings={})
+        summary = _make_summary()
+        result = check_concentration_risk("BTC-USD", "BUY", portfolio, summary, "patient")
+        assert result is None
+
 
 # ===================================================================
 # check_drawdown

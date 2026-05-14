@@ -187,6 +187,12 @@ def check_pending_orders(config: dict) -> list[dict]:
         expires = datetime.fromisoformat(order["expires"])
         order_token = order.get("confirm_token", "")
 
+        if now > expires:
+            order["status"] = "expired"
+            acted_on.append(order)
+            _notify_expired(order, config)
+            continue
+
         # P1-10: matching rules.
         # 1. Order has a token AND that token is in confirmed_tokens → confirm.
         # 2. Order has NO token (legacy in-flight order) AND bare CONFIRM
@@ -199,18 +205,11 @@ def check_pending_orders(config: dict) -> list[dict]:
         if confirmed_by_token or confirmed_legacy:
             order["status"] = "confirmed"
             acted_on.append(order)
-            # Remove the matched token so the same CONFIRM can't double-fire
-            # against another order in the same cycle.
             if confirmed_by_token:
                 confirmed_tokens.discard(order_token)
             else:
-                # Legacy bare CONFIRM only matches one legacy order per cycle.
                 confirmed_tokens.discard("")
             _execute_confirmed_order(order, config)
-        elif now > expires:
-            order["status"] = "expired"
-            acted_on.append(order)
-            _notify_expired(order, config)
 
     _save_pending(pending)
     return acted_on

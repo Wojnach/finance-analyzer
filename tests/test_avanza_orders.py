@@ -969,3 +969,33 @@ class TestCheckPendingOrdersTokenMatching:
         assert len(acted) == 1
         assert acted[0]["status"] == "expired"
         mock_notify.assert_called_once()
+
+    def test_expired_order_not_confirmed_even_with_matching_token(self, tmp_data_dir):
+        """B2: Expired order must expire even if CONFIRM token arrives."""
+        config = {"telegram": {"token": "fake-token", "chat_id": "123456"}}
+        now = datetime.now(UTC)
+        order = {
+            "id": "late-confirm-1",
+            "timestamp": (now - timedelta(minutes=10)).isoformat(),
+            "action": "BUY",
+            "orderbook_id": "5533",
+            "instrument_name": "SAAB B",
+            "config_key": "SAAB-B",
+            "volume": 50,
+            "price": 245.0,
+            "total_sek": 12250.0,
+            "status": "pending_confirmation",
+            "expires": (now - timedelta(minutes=1)).isoformat(),
+            "confirm_token": "abcdef",
+        }
+        mod._save_pending([order])
+
+        with patch.object(mod, "_check_telegram_confirm", return_value={"abcdef"}), \
+             patch.object(mod, "_execute_confirmed_order") as mock_exec, \
+             patch.object(mod, "_notify_expired") as mock_notify:
+            acted = mod.check_pending_orders(config)
+
+        assert len(acted) == 1
+        assert acted[0]["status"] == "expired"
+        mock_exec.assert_not_called()
+        mock_notify.assert_called_once()

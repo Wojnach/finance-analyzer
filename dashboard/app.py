@@ -1271,7 +1271,7 @@ def api_metals_accuracy():
     """Return metals loop signal accuracy (1h/3h horizons)."""
     data = _read_json(DATA_DIR / "metals_signal_accuracy.json")
     if not data:
-        return jsonify({"error": "no data", "stats": {}})
+        return jsonify({"error": "no data", "stats": {}}), 404
     return jsonify(data)
 
 
