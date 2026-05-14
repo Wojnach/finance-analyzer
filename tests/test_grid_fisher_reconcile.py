@@ -617,6 +617,61 @@ class TestTick:
         sell_calls = [s for s in fake_session.placed_sells
                       if s["ob_id"] == "1650161"]
         assert len(sell_calls) >= 1
+        # The placed sell's order id is recorded on the instrument so a
+        # follow-up tick inside the same EOD window won't stack a duplicate
+        # sell on the still-resting first one (P0-9 fix, 2026-05-14).
+        assert inst.eod_sell_order_id is not None
+
+    def test_eod_market_flat_idempotent_within_window(
+        self, fisher, fake_session,
+    ):
+        """Two ticks inside the EOD market-sell window should place ONE
+        sell, not two. This is the regression test for the duplicate-sell
+        bug surfaced by the 2026-05-12 adversarial review (P0-9).
+        """
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        inst.inventory_units = 24
+        inst.avg_entry_price = 42.50
+        # First tick — should place an aggressive sell.
+        fisher.tick(signal_data={}, eod_minutes_remaining=2.0)
+        first_count = len(fake_session.placed_sells)
+        assert first_count >= 1
+        assert inst.eod_sell_order_id is not None
+        # Second tick before the fill returns — must NOT place another.
+        # Inventory hasn't moved on the fake (no reconciler fill yet),
+        # so the production code path that previously double-sold is
+        # the exact one exercised here.
+        fisher.tick(signal_data={}, eod_minutes_remaining=1.5)
+        assert len(fake_session.placed_sells) == first_count
+
+    def test_eod_market_flat_retries_on_session_failure(
+        self, fisher, fake_session, monkeypatch,
+    ):
+        """If place_sell_order returns None (transient Avanza error), the
+        eod_sell_order_id stays unset so the next tick can retry the
+        sweep. Without this, a single failed call would skip exit for
+        the whole instrument."""
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        inst.inventory_units = 24
+        inst.avg_entry_price = 42.50
+
+        original = fake_session.place_sell_order
+        calls = {"n": 0}
+
+        def flaky_place(ob, price, vol):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None  # simulate Avanza glitch on first try
+            return original(ob, price, vol)
+
+        monkeypatch.setattr(fake_session, "place_sell_order", flaky_place)
+        fisher.tick(signal_data={}, eod_minutes_remaining=2.0)
+        assert inst.eod_sell_order_id is None  # retry path armed
+        fisher.tick(signal_data={}, eod_minutes_remaining=1.5)
+        # Second tick should have succeeded.
+        assert inst.eod_sell_order_id is not None
 
 
 # ---------------------------------------------------------------------------
