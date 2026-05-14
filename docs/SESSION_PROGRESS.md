@@ -1,5 +1,47 @@
 # Session Progress
 
+## Auto-improvement session (2026-05-14)
+
+**Status:** SHIPPED — merged to main, pushed.
+
+**Scope:** Deep exploration + 3 batches of validated fixes.
+
+### Methodology
+- Deployed 4 parallel exploration agents (signals, infra, dashboard, trading)
+- Agents reported ~80 findings; manual validation rejected ~60% as false positives
+- Common false positive patterns: misreading control flow, hallucinated line numbers,
+  flagging intentional design choices (e.g., Easter algorithm, atexit registration)
+
+### Bugs Fixed
+1. **risk_management.py**: price_usd=0 no longer zeros positions (falls through to avg_cost)
+2. **avanza_orders.py**: Expired orders now checked before confirmation matching
+3. **dashboard/app.py**: metals-accuracy endpoint returns 404 on empty data
+4. **signal_engine.py**: Persistence filter condition clarified (`min_cycles <= 1`)
+5. **signal_engine.py**: ADX cache eviction comment corrected (was "LRU", is FIFO)
+6. **risk_management.py**: Concentration risk logging improved for zero-price edge case
+
+### Tests Added (15 total)
+- 3 tests: _compute_portfolio_value with price_usd=0/None/missing
+- 3 tests: check_concentration_risk (basic, high, zero)
+- 5 tests: compute_all_risk_flags end-to-end
+- 1 test: expired-but-confirmed order scenario
+- 3 tests: existing fixtures validated by new code paths
+
+### Next Session
+- Address phantom voter problem (signals at HOLD 100% shouldn't count for MIN_VOTERS)
+- claude_fundamental re-enable with stricter bias detection
+- Regime-adaptive signal subsets (design session needed)
+
+---
+
+## After-hours research session (2026-05-13 evening)
+
+**Status:** SHIPPED — merged to main, pushed.
+
+**Scope:** Daily research (Phases 0-8) + signal audit + 2 signal disables.
+
+---
+
 ## Auto-improvement session (2026-05-13)
 
 **Status:** SHIPPED — merged to main, pushed.
