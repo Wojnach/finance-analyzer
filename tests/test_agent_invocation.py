@@ -214,13 +214,44 @@ class TestBuildTierPrompt:
 
     def test_tier2_prompt_keeps_trading_insights_optional(self):
         """The optional trading_insights.md must use a guarded `[ -f X ]`
-        pattern so the cat chain doesn't abort on missing file."""
+        pattern, and the guard must precede the required-files cat so a
+        missing optional file doesn't abort the chain."""
         prompt = _build_tier_prompt(2, ["trigger"])
-        assert "[ -f data/trading_insights.md ]" in prompt
+        guard_pos = prompt.find("[ -f data/trading_insights.md ]")
+        playbook_pos = prompt.find("docs/TRADING_PLAYBOOK.md")
+        assert guard_pos >= 0
+        assert playbook_pos >= 0
+        assert guard_pos < playbook_pos, "guard must precede required-files cat"
 
     def test_tier3_prompt_keeps_trading_insights_optional(self):
         prompt = _build_tier_prompt(3, ["trigger"])
-        assert "[ -f data/trading_insights.md ]" in prompt
+        guard_pos = prompt.find("[ -f data/trading_insights.md ]")
+        playbook_pos = prompt.find("docs/TRADING_PLAYBOOK.md")
+        assert guard_pos >= 0
+        assert playbook_pos >= 0
+        assert guard_pos < playbook_pos, "guard must precede required-files cat"
+
+    def test_required_files_cat_does_not_mask_stderr(self):
+        """Review P2: only the OPTIONAL trading_insights.md cat may have
+        `2>/dev/null`. The required-files cat must NOT, so a missing
+        portfolio_state.json or agent_context_t2.json surfaces in
+        agent.log instead of silently producing truncated context (which
+        would let the agent reason over a blank portfolio and produce
+        bad-sized trade decisions)."""
+        for tier in (2, 3):
+            prompt = _build_tier_prompt(tier, ["trigger"])
+            # The string "data/portfolio_state.json" appears in the
+            # required-files cat. Anything between that and the closing
+            # backtick must NOT contain `2>/dev/null`.
+            ps_pos = prompt.find("data/portfolio_state.json")
+            assert ps_pos >= 0, f"T{tier} prompt missing portfolio_state.json"
+            tail = prompt[ps_pos:]
+            close_backtick = tail.find("`")
+            tail_block = tail[:close_backtick] if close_backtick >= 0 else tail
+            assert "2>/dev/null" not in tail_block, (
+                f"T{tier} required-files cat must not mask stderr — would "
+                f"hide missing required files. tail_block={tail_block!r}"
+            )
 
     def test_prompt_truncates_reasons_to_five(self):
         """Prompt includes at most 5 reasons."""

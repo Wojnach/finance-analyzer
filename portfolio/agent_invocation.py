@@ -213,36 +213,44 @@ def _build_tier_prompt(tier, reasons):
             "Do NOT analyze all tickers — focus only on held positions and macro headline."
         )
     elif tier == 2:
-        # 2026-05-14: same Bash-cat collapse pattern as T1 — replaces 4-5
-        # sequential Read tool calls with a single Bash command. The
-        # `[ -f X ] && cat X || true` pattern keeps the optional
-        # trading_insights.md read genuinely optional (no error if
-        # missing, no abort on the cat chain). All other files are
-        # always-present invariants of the system.
+        # 2026-05-14: same Bash-cat collapse pattern as T1 — replaces 5-6
+        # sequential Read tool calls with a single Bash command.
+        #
+        # Stderr handling (review P2 fix): only the OPTIONAL
+        # trading_insights.md read silences stderr (`2>/dev/null` on its
+        # own cat). The required-files cat does NOT mask stderr — if
+        # portfolio_state.json is missing because of an atomic-write race
+        # or genuine state loss, the cat error surfaces in agent.log and
+        # the agent sees the failure rather than reasoning over truncated
+        # context. Without this, a missing portfolio_state could silently
+        # produce a bad-sized trade decision.
         return (
             "You are the Layer 2 trading agent (SIGNAL ANALYSIS). "
             f"Trigger: {reason_str}. "
             "Run this exact Bash command once to pull all your context in a single tool turn: "
-            f"`([ -f data/trading_insights.md ] && cat data/trading_insights.md ; cat {playbook} "
-            "data/layer2_context.md data/agent_context_t2.json "
-            "data/portfolio_state.json data/portfolio_state_bold.json) 2>/dev/null`. "
+            f"`[ -f data/trading_insights.md ] && cat data/trading_insights.md 2>/dev/null ; "
+            f"cat {playbook} data/layer2_context.md data/agent_context_t2.json "
+            "data/portfolio_state.json data/portfolio_state_bold.json`. "
             "Do NOT call Read on those files individually. "
             "Analyze triggered tickers and held positions. Decide for BOTH strategies. "
             "Write journal entry and send Telegram per the playbook instructions."
         )
     else:
         # Tier 3 — full review
-        # 2026-05-14: Bash-cat collapse for T3's 5-file read sweep. The
-        # agent_summary_compact.json file is ~64KB — well within a single
-        # Bash tool result. Optional trading_insights.md guarded by
-        # `[ -f X ] && cat X || true` so the cat chain doesn't abort if
-        # it's missing.
+        # 2026-05-14: Bash-cat collapse for T3's 6-file read sweep (5
+        # required + 1 optional). The agent_summary_compact.json file
+        # is ~64KB — well within a single Bash tool result. Optional
+        # trading_insights.md guarded by `[ -f X ] && cat X` so its
+        # absence doesn't abort the chain. Stderr suppression scoped to
+        # the optional file only (P2 review fix) so missing required
+        # files surface as errors in agent.log instead of silent
+        # truncated context.
         return (
             "You are the Layer 2 trading agent (FULL REVIEW). "
             "Run this exact Bash command once to pull all your context in a single tool turn: "
-            f"`([ -f data/trading_insights.md ] && cat data/trading_insights.md ; cat {playbook} "
-            "data/layer2_context.md data/agent_summary_compact.json "
-            "data/portfolio_state.json data/portfolio_state_bold.json) 2>/dev/null`. "
+            f"`[ -f data/trading_insights.md ] && cat data/trading_insights.md 2>/dev/null ; "
+            f"cat {playbook} data/layer2_context.md data/agent_summary_compact.json "
+            "data/portfolio_state.json data/portfolio_state_bold.json`. "
             "Do NOT call Read on those files individually. "
             "Follow the playbook to analyze, decide, and act for BOTH strategies independently. "
             "Compare your previous theses and prices with current data — were you right? "
