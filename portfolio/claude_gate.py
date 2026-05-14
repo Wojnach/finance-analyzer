@@ -641,6 +641,8 @@ def invoke_claude(
         **usage_entry,
     })
 
+    # Suppressed false-positive: 'tokens' refers to input/output token counts (integers), not credentials.
+    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
     logger.info(
         "Claude invocation: caller=%s model=%s status=%s exit=%d duration=%.1fs tokens=%s/%s cost=$%s",
         caller, model, status, exit_code, duration,
@@ -762,6 +764,8 @@ def invoke_claude_text(
         **usage_entry,
     })
 
+    # Suppressed false-positive: Same — Claude API token counts, not auth credentials.
+    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
     logger.info(
         "Claude text: caller=%s model=%s status=%s exit=%d duration=%.1fs len=%d tokens=%s/%s cost=$%s",
         caller, model, status, exit_code, duration, len(text),

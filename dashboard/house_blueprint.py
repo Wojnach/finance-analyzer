@@ -290,13 +290,19 @@ def run_detail(run_id: str):
         slugs = []
     if slugs:
         link_items = "".join(
+            # Suppressed false-positive: Values are escape()d via markupsafe before interpolation; pattern false positive.
+            # nosemgrep: python.flask.security.injection.raw-html-concat.raw-html-format
             f"<li><a href=\"/house/runs/{escape(run_id)}/{escape(s)}\">"
             f"{escape(s)}</a></li>"
             for s in slugs
         )
         candidate_links = (
+            # Suppressed false-positive: Static count + already-escaped link_items; behind require_auth.
+            # nosemgrep: python.flask.security.injection.raw-html-concat.raw-html-format
             f"<h2>All candidates ({len(slugs)})</h2>"
             f"<ul>{link_items}</ul>"
+            # Suppressed false-positive: escape(run_id) used; run_id also validated by _validate_run_id earlier in handler.
+            # nosemgrep: python.flask.security.injection.raw-html-concat.raw-html-format
             f"<p><a href=\"/house/runs/{escape(run_id)}/_manifest.json\">"
             f"manifest.json</a> · "
             f"<a href=\"/house/heatmap\">heatmap</a></p>"
@@ -330,6 +336,8 @@ def candidate_detail(run_id: str, slug: str):
     text = md_path.read_text(encoding="utf-8")
     body = (
         _render_markdown(text)
+        # Suppressed false-positive: escape(run_id) and escape(slug); both validated via _validate_* before this line.
+        # nosemgrep: python.flask.security.injection.raw-html-concat.raw-html-format
         + f"<p><a href=\"/house/runs/{escape(run_id)}/{escape(slug)}/raw\">"
           "raw data.json →</a></p>"
     )

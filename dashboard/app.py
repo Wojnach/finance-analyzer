@@ -2077,6 +2077,8 @@ def _serve_dual_stack(port: int = 5055) -> None:
     # Build the dual-stack listening socket explicitly. IPV6_V6ONLY=0
     # enables IPv4 mapping (::ffff:127.0.0.1 etc.), so a single AF_INET6
     # socket accepts both IPv4 and IPv6 clients.
+    # Suppressed false-positive: Intentional dual-stack IPv6/IPv4 bind; Cloudflare Access fronts public exposure (CLAUDE.md dashboard section).
+    # nosemgrep: python.lang.security.audit.network.bind.avoid-bind-to-all-interfaces
     sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

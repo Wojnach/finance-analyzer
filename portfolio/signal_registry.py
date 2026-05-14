@@ -77,6 +77,8 @@ def load_signal_func(entry: dict) -> Callable | None:
     if cached is _FAILED_IMPORT_SENTINEL and time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
         return None
     try:
+        # Suppressed false-positive: module_path comes from internal SignalSpec registry, not external input.
+        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
         mod = importlib.import_module(entry["module_path"])
         func = getattr(mod, entry["func_name"])
         entry["func"] = func

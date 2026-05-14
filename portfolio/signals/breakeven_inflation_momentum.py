@@ -74,6 +74,8 @@ def _fetch_bei_values(fred_api_key: str) -> list[float] | None:
         return _bei_cache["data"]
 
     if not fred_api_key:
+        # Suppressed false-positive: Logs FRED series id, not API key — branch entered when key is missing.
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.debug("No FRED API key — cannot fetch %s", _FRED_SERIES)
         return _bei_cache.get("data")
 

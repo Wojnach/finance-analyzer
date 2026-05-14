@@ -30,6 +30,8 @@ def load_enabled_strategies() -> list["Strategy"]:
         if not enabled:
             continue
         try:
+            # Suppressed false-positive: key sourced from config.STRATEGY_TOGGLES (repo-controlled dict), not external input.
+            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             mod = importlib.import_module(f"portfolio.mstr_loop.strategies.{key}")
             strat = getattr(mod, "STRATEGY", None)
             if strat is None:
