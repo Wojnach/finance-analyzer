@@ -1,3 +1,72 @@
+# Improvement Plan — 2026-05-14
+
+**Status:** IN PROGRESS
+
+## Session: 2026-05-14 — Deep Validation + Safety Fixes
+
+### Methodology
+
+Deployed 4 parallel exploration agents (signals, infra, dashboard, trading).
+Raw reports contained ~80 findings. Manual validation against actual source code
+**rejected ~60% as false positives** (agents hallucinated line numbers, misread
+control flow, or flagged intentional design choices as bugs).
+
+### Validated Bugs
+
+#### B1: risk_management.py:208 — price_usd=0 falsely zeros position value [CRITICAL]
+- `signals[ticker].get("price_usd", 0)` — if entry exists but price is 0,
+  position valued at $0 instead of falling through to avg_cost
+- Impact: false drawdown circuit breaker trip during data collection failures
+
+#### B2: avanza_orders.py:199-210 — Expired orders can still be confirmed [MEDIUM]
+- Confirmation check runs before expiry check (`elif` means expiry skipped on confirm)
+- A CONFIRM arriving after 5-min window still executes
+
+#### B3: dashboard/app.py:1274 — metals-accuracy returns HTTP 200 on no data [LOW]
+- Missing `, 404` status code; only endpoint with this inconsistency
+
+#### B4: signal_engine.py:613 — Persistence filter condition inverted [LOW]
+- `if 1 >= min_cycles:` works by accident; should be `if min_cycles <= 1:`
+
+#### B5: signal_engine.py:2799 — ADX cache eviction comment wrong [LOW]
+- Says "LRU" but does insertion-order FIFO eviction
+
+#### B6: risk_management.py:762 — concentration check silently disabled on zero prices [MEDIUM]
+- All prices 0 → total_value=0 → returns None (no risk flag)
+
+### Test Coverage Gaps
+- `_compute_portfolio_value` with price_usd=0 — NOT TESTED
+- `check_concentration_risk` — ZERO tests
+- `compute_all_risk_flags` — ZERO tests
+- avanza_orders expired-but-confirmed — NOT TESTED
+
+### Implementation Batches
+
+**Batch 1: Safety fixes + tests** (5 files)
+1. Fix B1: price_usd guard in _compute_portfolio_value
+2. Fix B2: expiry check before confirmation
+3. Fix B3: 404 on metals-accuracy no-data
+4. Test: price_usd=0, concentration_risk, expired-confirmed order
+
+**Batch 2: Code clarity** (1 file)
+1. Fix B4: persistence filter condition
+2. Fix B5: ADX cache comment
+
+**Batch 3: Risk test coverage** (1 file)
+1. Test: compute_all_risk_flags end-to-end
+
+### Rejected Findings (Agent False Positives)
+- portfolio_mgr._get_lock race — return IS inside `with` block
+- Easter day+1 off-by-one — standard Gregorian algorithm
+- US DST calculation errors — verified 2024-2030
+- Singleton lock not released — registered via atexit
+- file_utils sidecar lock race — benign
+- Accuracy stats null inflation — correctly excluded
+- Grid fisher cooldown not enforced — cooldown_until works
+- ThreadPoolExecutor shutdown — intentional (OR-I-001)
+
+---
+
 # Improvement Plan — 2026-05-13
 
 **Status:** COMPLETE — 18 fixes shipped across 4 batches. 7 items deferred.
