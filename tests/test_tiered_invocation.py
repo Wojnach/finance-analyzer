@@ -520,7 +520,10 @@ class TestTierConfig:
     def test_tier1_config(self):
         cfg = TIER_CONFIG[1]
         assert cfg["max_turns"] == 15
-        assert cfg["timeout"] == 120
+        # T1 timeout history: 120 → 150 → 180 (2026-05-14 after duration
+        # audit + Bash-cat prompt collapse). See commit history on
+        # TIER_CONFIG for the per-bump rationale.
+        assert cfg["timeout"] == 180
         assert cfg["label"] == "QUICK CHECK"
 
     def test_tier2_config(self):
