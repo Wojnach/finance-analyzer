@@ -1262,3 +1262,71 @@ class TestPeakCacheLock:
         # Floor=0 — cache invalidation should pick up the new (smaller) max.
         result = _streaming_max(history, "value", floor=0)
         assert result == 5
+
+
+# ===========================================================================
+# compute_all_risk_flags (end-to-end)
+# ===========================================================================
+
+class TestComputeAllRiskFlags:
+    def test_all_clear_on_hold_signals(self):
+        from portfolio.risk_management import compute_all_risk_flags
+        signals = {"BTC-USD": {"action": "HOLD"}}
+        patient = _make_portfolio()
+        bold = _make_portfolio()
+        summary = _make_summary()
+        result = compute_all_risk_flags(signals, patient, bold, summary)
+        assert result["summary"] == "All clear"
+        assert result["flags"] == []
+
+    def test_disabled_by_config(self):
+        from portfolio.risk_management import compute_all_risk_flags
+        signals = {"BTC-USD": {"action": "BUY"}}
+        patient = _make_portfolio()
+        bold = _make_portfolio()
+        summary = _make_summary()
+        result = compute_all_risk_flags(
+            signals, patient, bold, summary,
+            config={"risk_audit": {"enabled": False}},
+        )
+        assert result["summary"] == "Risk audit disabled"
+
+    def test_regime_mismatch_flagged(self):
+        from portfolio.risk_management import compute_all_risk_flags
+        signals = {"BTC-USD": {"action": "BUY"}}
+        patient = _make_portfolio()
+        bold = _make_portfolio()
+        summary = _make_summary(signals={
+            "BTC-USD": {
+                "price_usd": 60_000,
+                "regime": "trending-down",
+                "extra": {"volume_ratio": 0.5},
+            },
+        })
+        result = compute_all_risk_flags(signals, patient, bold, summary)
+        regime_flags = [f for f in result["flags"] if f["flag"] == "regime_mismatch"]
+        assert len(regime_flags) == 1
+        assert "regime_mismatch" in result["summary"]
+
+    def test_concentration_flagged(self):
+        from portfolio.risk_management import compute_all_risk_flags
+        signals = {"BTC-USD": {"action": "BUY"}}
+        patient = _make_portfolio(
+            cash=50_000,
+            holdings={"BTC-USD": {"shares": 5, "avg_cost_usd": 90_000}},
+        )
+        bold = _make_portfolio()
+        summary = _make_summary(
+            signals={"BTC-USD": {"price_usd": 90_000}},
+            fx_rate=10.0,
+        )
+        result = compute_all_risk_flags(signals, patient, bold, summary)
+        conc_flags = [f for f in result["flags"] if f["flag"] == "concentration"]
+        assert len(conc_flags) >= 1
+
+    def test_empty_signals(self):
+        from portfolio.risk_management import compute_all_risk_flags
+        result = compute_all_risk_flags({}, _make_portfolio(), _make_portfolio(),
+                                        _make_summary())
+        assert result["summary"] == "All clear"
+        assert result["flags"] == []
