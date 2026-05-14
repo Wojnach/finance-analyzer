@@ -126,6 +126,13 @@ class InstrumentState:
     consecutive_losses: int = 0
     cooldown_until: Optional[str] = None
     last_direction_flip_ts: Optional[str] = None
+    # 2026-05-14 (P0-9 grid-fisher EOD duplicate-sell fix): order id of the
+    # EOD market-sell once placed this session. ``eod_market_flat`` checks
+    # this before placing a sell so a 60s tick window that fires inside
+    # GRID_EOD_MARKET_SELL_MINUTES_BEFORE doesn't queue a second full-size
+    # sell on top of the still-resting first one. Cleared by
+    # ``roll_session_if_new_day``.
+    eod_sell_order_id: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,6 +151,7 @@ class InstrumentState:
             "consecutive_losses": self.consecutive_losses,
             "cooldown_until": self.cooldown_until,
             "last_direction_flip_ts": self.last_direction_flip_ts,
+            "eod_sell_order_id": self.eod_sell_order_id,
         }
 
     @classmethod
@@ -164,6 +172,7 @@ class InstrumentState:
             consecutive_losses=int(d.get("consecutive_losses", 0) or 0),
             cooldown_until=d.get("cooldown_until"),
             last_direction_flip_ts=d.get("last_direction_flip_ts"),
+            eod_sell_order_id=d.get("eod_sell_order_id"),
         )
 
     # ---- queries -----------------------------------------------------------
@@ -451,6 +460,11 @@ def roll_session_if_new_day(state: GridFisherState) -> bool:
     for inst in state.by_instrument.values():
         inst.session_pnl_sek = 0.0
         inst.fills_this_session = 0
+        # Clear the EOD-sell flag so the new session can re-arm sweeps on
+        # any remaining inventory (e.g. partial fills carried over). The
+        # corresponding order is from yesterday's session; either it filled
+        # (inventory already 0) or it expired/got cancelled overnight.
+        inst.eod_sell_order_id = None
     return True
 
 
@@ -1521,6 +1535,21 @@ class GridFisher:
         for inst in self.state.by_instrument.values():
             if inst.inventory_units <= 0:
                 continue
+            # 2026-05-14 (P0-9 fix): if an EOD sell was already placed this
+            # session, do NOT queue another one. The tick window is 60s but
+            # warrant fills can lag for several minutes during illiquid
+            # close auctions; without this guard, every subsequent tick
+            # inside GRID_EOD_MARKET_SELL_MINUTES_BEFORE would stack a
+            # fresh full-inventory sell on top of the still-resting one,
+            # eventually short-selling the position once they fill.
+            if inst.eod_sell_order_id is not None:
+                self._log(
+                    "eod_market_sell_skip_in_flight",
+                    ob_id=inst.ob_id, ticker=inst.ticker,
+                    eod_sell_order_id=inst.eod_sell_order_id,
+                    inventory_units=inst.inventory_units,
+                )
+                continue
             # Cancel any armed sell tiers (don't double-up volume).
             for tier in list(inst.sell_ladder):
                 if tier.status == ORDER_ARMED and tier.order_id:
@@ -1560,15 +1589,26 @@ class GridFisher:
                 self._log("eod_market_sell_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker,
                           error="session_call returned None")
-            else:
-                self._log("eod_market_sell", ob_id=inst.ob_id,
-                          ticker=inst.ticker, qty=inst.inventory_units,
+                # Leave eod_sell_order_id unset so a future tick can retry
+                # once the session call recovers. Without this, a single
+                # transient Avanza error would skip the sweep entirely.
+                continue
+            status = (result or {}).get("orderRequestStatus", "UNKNOWN")
+            order_id = (result or {}).get("orderId")
+            if status != "SUCCESS" or not order_id:
+                self._log("eod_market_sell_rejected", ob_id=inst.ob_id,
+                          ticker=inst.ticker,
+                          status=status,
+                          qty=inst.inventory_units,
                           price=aggressive)
-                # TODO: MANUAL REVIEW — should decrement inst.inventory_units
-                # here to prevent duplicate sells if eod_market_flat() runs
-                # again before the order fills. Current code re-sells full
-                # inventory on each call. See adversarial review P0-9.
-                n += 1
+                # Avanza rejected (e.g. trading halt, instrument suspended).
+                # Same retry-next-tick rationale as the None branch.
+                continue
+            inst.eod_sell_order_id = str(order_id)
+            self._log("eod_market_sell", ob_id=inst.ob_id,
+                      ticker=inst.ticker, qty=inst.inventory_units,
+                      price=aggressive, order_id=str(order_id))
+            n += 1
         return n
 
     # ---- direction handling -----------------------------------------------
