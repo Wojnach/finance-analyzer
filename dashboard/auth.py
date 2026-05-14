@@ -122,19 +122,34 @@ def require_auth(f):
         if expected is None:
             return f(*args, **kwargs)
 
-        # 0. Cloudflare Access — added 2026-05-02. CF strips inbound
-        # Cf-Access-* headers at its edge and re-injects them only after
-        # successful Access policy evaluation. Require BOTH the email
-        # header AND the JWT assertion header — CF Access always sends
-        # both, but a LAN attacker spoofing headers would need to know
-        # about and forge both. Without the JWT check, any LAN client
-        # could set the email header and bypass auth entirely.
+        # 0. Cloudflare Access — added 2026-05-02, JWT-verified 2026-05-14.
+        # CF strips inbound Cf-Access-* headers at its edge and re-injects
+        # them only after successful Access policy evaluation. BUT the
+        # 2026-05-02 implementation trusted those headers based on
+        # presence alone — anything on the LAN or Tailscale could spoof
+        # both headers and bypass auth (P0 in 2026-05-13 adversarial
+        # review). The JWT assertion is now verified against CF's
+        # published JWKs via dashboard.cf_access.verify_cf_jwt; on any
+        # failure (missing config, bad signature, wrong aud, expired,
+        # email/claim mismatch) we fall through to the cookie / query /
+        # bearer paths so a misconfigured deployment doesn't lock the
+        # operator out.
         cf_email = request.headers.get("Cf-Access-Authenticated-User-Email")
         cf_jwt = request.headers.get("Cf-Access-Jwt-Assertion")
         if cf_email and cf_jwt:
-            # Suppressed false-positive: CF-Access path wraps already-rendered Flask response to refresh auth cookie; no untrusted content injected.
-            # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
-            return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
+            from dashboard.cf_access import verify_cf_jwt  # local — keeps PyJWT optional at import time
+            cfg = _get_config()
+            claims = verify_cf_jwt(
+                cf_jwt,
+                cf_email,
+                team_domain=cfg.get("cf_access_team_domain") or None,
+                aud_tag=cfg.get("cf_access_aud_tag") or None,
+            )
+            if claims is not None:
+                # Suppressed false-positive: CF-Access path wraps already-rendered Flask response to refresh auth cookie; no untrusted content injected.
+                # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
+                return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
+            # Otherwise: don't trust the header, fall through.
 
         # 1. Cookie
         cookie_token = request.cookies.get(COOKIE_NAME)
