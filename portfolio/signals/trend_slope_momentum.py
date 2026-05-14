@@ -95,8 +95,15 @@ def compute_trend_slope_momentum_signal(
     p_trend = (z_clipped + Z_CLIP) / (2.0 * Z_CLIP)
 
     current_price = float(close.iloc[-1])
-    past_price = float(close.iloc[-MOMENTUM_LOOKBACK])
-    momentum = 1.0 if current_price / past_price > 1.0 else 0.0
+    raw_close = df["close"].ffill().bfill()
+    past_price = float(raw_close.iloc[-MOMENTUM_LOOKBACK])
+    mom_ratio = current_price / past_price
+    if mom_ratio > 1.005:
+        momentum = 1.0
+    elif mom_ratio < 0.995:
+        momentum = 0.0
+    else:
+        momentum = 0.5
 
     p_bull = TREND_WEIGHT * p_trend + MOMENTUM_WEIGHT * momentum
     p_bear = 1.0 - p_bull
@@ -114,11 +121,13 @@ def compute_trend_slope_momentum_signal(
         trend_vote = "HOLD"
     votes.append(trend_vote)
 
-    # Sub-signal 2: 50-day momentum
+    # Sub-signal 2: 50-day momentum (dead-band: ±0.5%)
     if momentum > 0.5:
         mom_vote = "BUY"
-    else:
+    elif momentum < 0.5:
         mom_vote = "SELL"
+    else:
+        mom_vote = "HOLD"
     votes.append(mom_vote)
 
     # Sub-signal 3: Probability threshold
@@ -149,7 +158,7 @@ def compute_trend_slope_momentum_signal(
         prob_strength = min((p_bear - 0.5) * 4.0, 1.0)
     else:
         prob_strength = 0.0
-    confidence = max(0.0, min(confidence * max(prob_strength, 0.3), 1.0))
+    confidence = max(0.0, min(confidence * prob_strength, 1.0))
 
     return {
         "action": action,
@@ -165,6 +174,6 @@ def compute_trend_slope_momentum_signal(
             "p_trend": safe_float(p_trend),
             "p_bull": safe_float(p_bull),
             "slope": safe_float(current_slope),
-            "momentum_ratio": safe_float(current_price / past_price),
+            "momentum_ratio": safe_float(mom_ratio),
         },
     }

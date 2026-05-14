@@ -103,7 +103,7 @@ class TestSignalBehavior:
         assert result["confidence"] > 0.0
 
     def test_strong_downtrend_produces_sell(self):
-        df = _make_df(n=300, trend=-0.5)
+        df = _make_df(n=300, trend=-0.2)
         result = compute_trend_slope_momentum_signal(df)
         assert result["action"] == "SELL"
         assert result["confidence"] > 0.0

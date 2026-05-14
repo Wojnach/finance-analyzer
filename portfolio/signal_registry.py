@@ -310,7 +310,8 @@ def _register_defaults():
     # not binary crossover. 60/40 trend/momentum blend.
     register_enhanced("trend_slope_momentum",
                       "portfolio.signals.trend_slope_momentum",
-                      "compute_trend_slope_momentum_signal")
+                      "compute_trend_slope_momentum_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
