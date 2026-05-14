@@ -203,6 +203,7 @@ function _unresolvedList(errs, cvs) {
       ts: e.ts || e.timestamp || "",
       label: e.category || e.caller || "error",
       msg: e.message || e.msg || "",
+      raw: e,
     });
   }
   for (const v of cvs) {
@@ -211,6 +212,7 @@ function _unresolvedList(errs, cvs) {
       ts: v.ts || v.timestamp || "",
       label: v.invariant || "violation",
       msg: v.message || v.msg || "",
+      raw: v,
     });
   }
   items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
@@ -221,11 +223,25 @@ function _unresolvedList(errs, cvs) {
   wrap.style.borderRadius = "var(--rad-md)";
   for (const it of items.slice(0, 30)) {
     const row = document.createElement("div");
-    row.style.padding = "var(--sp-2) var(--sp-3)";
     row.style.borderBottom = "1px solid var(--bdr)";
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.style.display = "block";
+    head.style.width = "100%";
+    head.style.textAlign = "left";
+    head.style.background = "transparent";
+    head.style.border = "0";
+    head.style.color = "inherit";
+    head.style.padding = "var(--sp-2) var(--sp-3)";
+    head.style.minHeight = "var(--tap-min)";
+    head.style.cursor = "pointer";
+
     const top = document.createElement("div");
     top.style.display = "flex";
     top.style.justifyContent = "space-between";
+    top.style.alignItems = "center";
+    top.style.gap = "var(--sp-2)";
     top.style.fontSize = "var(--ty-xs)";
     const left = document.createElement("span");
     left.style.color = it.kind === "cv" ? "var(--yel)" : "var(--red)";
@@ -233,14 +249,50 @@ function _unresolvedList(errs, cvs) {
     left.textContent = it.label;
     const right = document.createElement("span");
     right.style.color = "var(--txm)";
-    right.textContent = ftFull(it.ts);
+    right.style.display = "flex";
+    right.style.alignItems = "center";
+    right.style.gap = "var(--sp-1)";
+    const tsSpan = document.createElement("span");
+    tsSpan.textContent = ftFull(it.ts);
+    const chev = document.createElement("span");
+    chev.textContent = "›";
+    chev.style.transition = "transform 120ms";
+    right.append(tsSpan, chev);
     top.append(left, right);
+
     const msg = document.createElement("div");
     msg.style.fontSize = "var(--ty-sm)";
     msg.style.marginTop = "2px";
     msg.style.color = "var(--tx)";
     msg.textContent = it.msg;
-    row.append(top, msg);
+
+    head.append(top, msg);
+
+    const detail = document.createElement("pre");
+    detail.style.display = "none";
+    detail.style.margin = "0";
+    detail.style.padding = "var(--sp-2) var(--sp-3)";
+    detail.style.borderTop = "1px solid var(--bdr)";
+    detail.style.background = "var(--bg)";
+    detail.style.fontSize = "var(--ty-xs)";
+    detail.style.color = "var(--txm)";
+    detail.style.whiteSpace = "pre-wrap";
+    detail.style.wordBreak = "break-word";
+    detail.style.overflow = "auto";
+    detail.style.maxHeight = "60vh";
+    try {
+      detail.textContent = JSON.stringify(it.raw, null, 2);
+    } catch (_) {
+      detail.textContent = String(it.msg || "");
+    }
+
+    head.addEventListener("click", () => {
+      const open = detail.style.display !== "none";
+      detail.style.display = open ? "none" : "block";
+      chev.style.transform = open ? "rotate(0deg)" : "rotate(90deg)";
+    });
+
+    row.append(head, detail);
     wrap.append(row);
   }
   return wrap;
