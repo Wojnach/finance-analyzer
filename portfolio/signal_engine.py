@@ -2053,7 +2053,7 @@ def _get_ic_data(horizon: str) -> dict | None:
                 _ic_data_cache[horizon] = cache
             return cast(dict[Any, Any], cache)
     except Exception:
-        logger.debug("IC data unavailable for %s", horizon, exc_info=True)
+        logger.info("IC data unavailable for horizon=%s — signals will use default 1.0x weight", horizon)
     return None
 
 
