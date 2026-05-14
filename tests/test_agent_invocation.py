@@ -95,11 +95,13 @@ class TestTierConfig:
         """TIER_CONFIG has entries for tiers 1, 2, and 3."""
         assert set(TIER_CONFIG.keys()) == {1, 2, 3}
 
-    def test_tier1_timeout_is_150(self):
-        """Tier 1 (Quick Check) has 150s timeout (bumped 120 → 150 on 2026-05-14
-        after 3d audit showed median 114s / p95 139s / 42% of runs in 120-150s
-        bucket — 120s was kicking the watchdog mid-write on healthy runs)."""
-        assert TIER_CONFIG[1]["timeout"] == 150
+    def test_tier1_timeout_is_180(self):
+        """Tier 1 (Quick Check) has 180s timeout. History: 120 → 150 (2026-05-14
+        after 3d audit showed p50=114, p95=139, 42% of runs in 120-150s bucket
+        — 120s was kicking the watchdog mid-write on healthy runs); then
+        150 → 180 same day to add headroom on top of the Bash-cat prompt
+        collapse (commit 9991a0e5) so genuine outliers still fit the budget."""
+        assert TIER_CONFIG[1]["timeout"] == 180
 
     def test_tier2_timeout_is_600(self):
         """Tier 2 (Signal Analysis) has 600s timeout."""
@@ -185,6 +187,40 @@ class TestBuildTierPrompt:
         """Prompt includes the trigger reason text."""
         prompt = _build_tier_prompt(2, ["consensus BTC-USD BUY", "price move +3%"])
         assert "consensus BTC-USD BUY" in prompt
+
+    # 2026-05-14: regression tests for the Bash-cat collapse (cuts ~25-30s
+    # per invocation by replacing N sequential Read tool calls with one
+    # Bash command). If a future edit re-introduces the per-file Read
+    # pattern, these tests fail and surface the regression at test time
+    # rather than as silent slow-down in production.
+
+    def test_tier1_prompt_uses_bash_cat_not_reads(self):
+        prompt = _build_tier_prompt(1, ["startup"])
+        assert "cat " in prompt
+        assert "single tool turn" in prompt
+        assert "Do NOT call Read" in prompt
+
+    def test_tier2_prompt_uses_bash_cat_not_reads(self):
+        prompt = _build_tier_prompt(2, ["consensus BTC-USD BUY"])
+        assert "cat " in prompt
+        assert "single tool turn" in prompt
+        assert "Do NOT call Read" in prompt
+
+    def test_tier3_prompt_uses_bash_cat_not_reads(self):
+        prompt = _build_tier_prompt(3, ["full review"])
+        assert "cat " in prompt
+        assert "single tool turn" in prompt
+        assert "Do NOT call Read" in prompt
+
+    def test_tier2_prompt_keeps_trading_insights_optional(self):
+        """The optional trading_insights.md must use a guarded `[ -f X ]`
+        pattern so the cat chain doesn't abort on missing file."""
+        prompt = _build_tier_prompt(2, ["trigger"])
+        assert "[ -f data/trading_insights.md ]" in prompt
+
+    def test_tier3_prompt_keeps_trading_insights_optional(self):
+        prompt = _build_tier_prompt(3, ["trigger"])
+        assert "[ -f data/trading_insights.md ]" in prompt
 
     def test_prompt_truncates_reasons_to_five(self):
         """Prompt includes at most 5 reasons."""
@@ -324,7 +360,7 @@ class TestInvokeAgentHappyPath:
              patch("builtins.open", mock_open()):
             invoke_agent(["test"], tier=1)
 
-        assert ai._agent_timeout == 150
+        assert ai._agent_timeout == 180
 
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
