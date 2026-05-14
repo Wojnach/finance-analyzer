@@ -95,11 +95,13 @@ class TestTierConfig:
         """TIER_CONFIG has entries for tiers 1, 2, and 3."""
         assert set(TIER_CONFIG.keys()) == {1, 2, 3}
 
-    def test_tier1_timeout_is_150(self):
-        """Tier 1 (Quick Check) has 150s timeout (bumped 120 → 150 on 2026-05-14
-        after 3d audit showed median 114s / p95 139s / 42% of runs in 120-150s
-        bucket — 120s was kicking the watchdog mid-write on healthy runs)."""
-        assert TIER_CONFIG[1]["timeout"] == 150
+    def test_tier1_timeout_is_180(self):
+        """Tier 1 (Quick Check) has 180s timeout. History: 120 → 150 (2026-05-14
+        after 3d audit showed p50=114, p95=139, 42% of runs in 120-150s bucket
+        — 120s was kicking the watchdog mid-write on healthy runs); then
+        150 → 180 same day to add headroom on top of the Bash-cat prompt
+        collapse (commit 9991a0e5) so genuine outliers still fit the budget."""
+        assert TIER_CONFIG[1]["timeout"] == 180
 
     def test_tier2_timeout_is_600(self):
         """Tier 2 (Signal Analysis) has 600s timeout."""
@@ -185,6 +187,71 @@ class TestBuildTierPrompt:
         """Prompt includes the trigger reason text."""
         prompt = _build_tier_prompt(2, ["consensus BTC-USD BUY", "price move +3%"])
         assert "consensus BTC-USD BUY" in prompt
+
+    # 2026-05-14: regression tests for the Bash-cat collapse (cuts ~25-30s
+    # per invocation by replacing N sequential Read tool calls with one
+    # Bash command). If a future edit re-introduces the per-file Read
+    # pattern, these tests fail and surface the regression at test time
+    # rather than as silent slow-down in production.
+
+    def test_tier1_prompt_uses_bash_cat_not_reads(self):
+        prompt = _build_tier_prompt(1, ["startup"])
+        assert "cat " in prompt
+        assert "single tool turn" in prompt
+        assert "Do NOT call Read" in prompt
+
+    def test_tier2_prompt_uses_bash_cat_not_reads(self):
+        prompt = _build_tier_prompt(2, ["consensus BTC-USD BUY"])
+        assert "cat " in prompt
+        assert "single tool turn" in prompt
+        assert "Do NOT call Read" in prompt
+
+    def test_tier3_prompt_uses_bash_cat_not_reads(self):
+        prompt = _build_tier_prompt(3, ["full review"])
+        assert "cat " in prompt
+        assert "single tool turn" in prompt
+        assert "Do NOT call Read" in prompt
+
+    def test_tier2_prompt_keeps_trading_insights_optional(self):
+        """The optional trading_insights.md must use a guarded `[ -f X ]`
+        pattern, and the guard must precede the required-files cat so a
+        missing optional file doesn't abort the chain."""
+        prompt = _build_tier_prompt(2, ["trigger"])
+        guard_pos = prompt.find("[ -f data/trading_insights.md ]")
+        playbook_pos = prompt.find("docs/TRADING_PLAYBOOK.md")
+        assert guard_pos >= 0
+        assert playbook_pos >= 0
+        assert guard_pos < playbook_pos, "guard must precede required-files cat"
+
+    def test_tier3_prompt_keeps_trading_insights_optional(self):
+        prompt = _build_tier_prompt(3, ["trigger"])
+        guard_pos = prompt.find("[ -f data/trading_insights.md ]")
+        playbook_pos = prompt.find("docs/TRADING_PLAYBOOK.md")
+        assert guard_pos >= 0
+        assert playbook_pos >= 0
+        assert guard_pos < playbook_pos, "guard must precede required-files cat"
+
+    def test_required_files_cat_does_not_mask_stderr(self):
+        """Review P2: only the OPTIONAL trading_insights.md cat may have
+        `2>/dev/null`. The required-files cat must NOT, so a missing
+        portfolio_state.json or agent_context_t2.json surfaces in
+        agent.log instead of silently producing truncated context (which
+        would let the agent reason over a blank portfolio and produce
+        bad-sized trade decisions)."""
+        for tier in (2, 3):
+            prompt = _build_tier_prompt(tier, ["trigger"])
+            # The string "data/portfolio_state.json" appears in the
+            # required-files cat. Anything between that and the closing
+            # backtick must NOT contain `2>/dev/null`.
+            ps_pos = prompt.find("data/portfolio_state.json")
+            assert ps_pos >= 0, f"T{tier} prompt missing portfolio_state.json"
+            tail = prompt[ps_pos:]
+            close_backtick = tail.find("`")
+            tail_block = tail[:close_backtick] if close_backtick >= 0 else tail
+            assert "2>/dev/null" not in tail_block, (
+                f"T{tier} required-files cat must not mask stderr — would "
+                f"hide missing required files. tail_block={tail_block!r}"
+            )
 
     def test_prompt_truncates_reasons_to_five(self):
         """Prompt includes at most 5 reasons."""
@@ -324,7 +391,7 @@ class TestInvokeAgentHappyPath:
              patch("builtins.open", mock_open()):
             invoke_agent(["test"], tier=1)
 
-        assert ai._agent_timeout == 150
+        assert ai._agent_timeout == 180
 
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
