@@ -610,7 +610,7 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
                 # appearing non-HOLD vote already meets the threshold and
                 # should be passed through immediately. Stocks keep the
                 # original 2-cycle confirmation requirement.
-                if 1 >= min_cycles:
+                if min_cycles <= 1:
                     filtered[sig] = vote
                 else:
                     filtered[sig] = "HOLD"
@@ -2796,7 +2796,7 @@ def _compute_adx(df, period=14):
         val = adx.iloc[-1]
         result = float(val) if pd.notna(val) and np.isfinite(val) else None
         # BUG-86: Thread-safe cache write with eviction
-        # BUG-180: LRU eviction — keep newest 50% instead of clearing all
+        # BUG-180: Insertion-order eviction — drop oldest 50% instead of clearing all
         with _adx_lock:
             if len(_adx_cache) >= _ADX_CACHE_MAX:
                 keys = list(_adx_cache.keys())
