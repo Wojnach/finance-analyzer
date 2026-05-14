@@ -85,6 +85,8 @@ def _load_config_token():
         token = config.get("bgeometrics", {}).get("api_token", "")
         return token if token else None
     except Exception as e:
+        # Suppressed false-positive: Logs exception only; token never reaches this branch because line before assigns it.
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.warning("BGeometrics token load failed: %s", e, exc_info=True)
         return None
 

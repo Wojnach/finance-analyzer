@@ -136,6 +136,8 @@ def request_order(
     # if they need to confirm out-of-band (e.g. the agent's Telegram message
     # got truncated). The token is per-order, expires in 5 min, and only
     # confirms one specific order — leak surface is minimal.
+    # Suppressed false-positive: Token truncated to 4 chars + '****' before logging; line above documents trade-off.
+    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
     logger.info(
         "Order requested: %s %dx %s @ %.2f SEK (id=%s, confirm_token=%s…)",
         action, volume, instrument_name, price, order["id"],

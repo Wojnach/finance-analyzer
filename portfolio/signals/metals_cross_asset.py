@@ -116,6 +116,8 @@ def _fetch_fred_values(
             return cache["data"]
 
     if not fred_api_key:
+        # Suppressed false-positive: Same as breakeven_inflation_momentum: logs series_id when API key absent.
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         logger.debug("No FRED API key — cannot fetch %s", series_id)
         return cache.get("data")
 

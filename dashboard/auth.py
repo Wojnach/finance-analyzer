@@ -132,16 +132,22 @@ def require_auth(f):
         cf_email = request.headers.get("Cf-Access-Authenticated-User-Email")
         cf_jwt = request.headers.get("Cf-Access-Jwt-Assertion")
         if cf_email and cf_jwt:
+            # Suppressed false-positive: CF-Access path wraps already-rendered Flask response to refresh auth cookie; no untrusted content injected.
+            # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
             return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
 
         # 1. Cookie
         cookie_token = request.cookies.get(COOKIE_NAME)
         if cookie_token and hmac.compare_digest(cookie_token, expected):
+            # Suppressed false-positive: Cookie auth path: same wrap-and-refresh, cookie comparison uses hmac.compare_digest.
+            # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
             return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
 
         # 2. Query param
         token = request.args.get("token")
         if token and hmac.compare_digest(token, expected):
+            # Suppressed false-positive: Query-param auth: hmac.compare_digest gate before refresh; no user content rendered here.
+            # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
             return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
 
         # 3. Authorization: Bearer (CLI / script clients — no cookie set
