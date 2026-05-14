@@ -817,10 +817,10 @@ class TestApiMetalsAccuracy:
         data = resp.get_json()
         assert data["stats"]["xag"]["1h"]["accuracy"] == 0.6
 
-    def test_returns_empty_shape_when_missing(self, client, tmp_data):
+    def test_returns_404_when_missing(self, client, tmp_data):
         with _no_auth():
             resp = client.get("/api/metals-accuracy")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
         data = resp.get_json()
         assert data["error"] == "no data"
         assert data["stats"] == {}
