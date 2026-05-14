@@ -171,8 +171,15 @@ def _save_stack_overflow_counter(count: int) -> None:
 _consecutive_stack_overflows = _load_stack_overflow_counter()
 
 # Per-tier configuration
+# 2026-05-14: T1 timeout bumped 120 → 150s. 3d audit showed median T1
+# duration 114s and p95 139s; 42% of T1 invocations were landing in the
+# 120-150s bucket and the 120s budget was kicking the completion
+# watchdog mid-write. T1 work is reasonably bounded by max_turns=15 +
+# the QUICK-CHECK prompt (4-5 file reads + journal write + telegram
+# send), so 150s preserves the "kill if hung" intent without falsely
+# timing out healthy invocations. Investigation notes in commit msg.
 TIER_CONFIG = {
-    1: {"max_turns": 15, "timeout": 120, "label": "QUICK CHECK"},
+    1: {"max_turns": 15, "timeout": 150, "label": "QUICK CHECK"},
     2: {"max_turns": 40, "timeout": 600, "label": "SIGNAL ANALYSIS"},
     3: {"max_turns": 40, "timeout": 900, "label": "FULL REVIEW"},
 }

@@ -95,9 +95,11 @@ class TestTierConfig:
         """TIER_CONFIG has entries for tiers 1, 2, and 3."""
         assert set(TIER_CONFIG.keys()) == {1, 2, 3}
 
-    def test_tier1_timeout_is_120(self):
-        """Tier 1 (Quick Check) has 120s timeout."""
-        assert TIER_CONFIG[1]["timeout"] == 120
+    def test_tier1_timeout_is_150(self):
+        """Tier 1 (Quick Check) has 150s timeout (bumped 120 → 150 on 2026-05-14
+        after 3d audit showed median 114s / p95 139s / 42% of runs in 120-150s
+        bucket — 120s was kicking the watchdog mid-write on healthy runs)."""
+        assert TIER_CONFIG[1]["timeout"] == 150
 
     def test_tier2_timeout_is_600(self):
         """Tier 2 (Signal Analysis) has 600s timeout."""
@@ -322,7 +324,7 @@ class TestInvokeAgentHappyPath:
              patch("builtins.open", mock_open()):
             invoke_agent(["test"], tier=1)
 
-        assert ai._agent_timeout == 120
+        assert ai._agent_timeout == 150
 
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
