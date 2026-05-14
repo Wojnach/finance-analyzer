@@ -1,185 +1,119 @@
 {
-  "date": "2026-05-07",
-  "generated_at": "2026-05-07T12:00:00+00:00",
+  "date": "2026-05-13",
   "research_topics": [
-    "Signal combination: IC-weighted, Max-IR portfolio, bounded regression",
-    "Adaptive weighting: EWMA decay, VIX-adaptive Kelly, walk-forward rebalancing",
-    "Regime detection: dynamic-transition HMM for crypto, ensemble-HMM voting",
-    "Metals prediction: silver ML predictability study, gold-silver ratio velocity",
-    "BTC prediction: on-chain feature selection (Boruta+CNN-LSTM), multimodal fusion",
-    "LLM agents: TradingAgents v0.2.3 debate architecture, bull/bear researcher roles",
-    "Position sizing: VIX-adaptive fractional Kelly, hybrid Kelly-volatility targeting"
+    "IC-based signal weighting",
+    "Regime-adaptive signal selection (HMM)",
+    "Walk-forward optimization",
+    "Multi-agent LLM debate (TradingAgents)",
+    "Silver/metals ML prediction",
+    "BTC on-chain feature importance",
+    "IC-based portfolio construction"
   ],
   "findings": [
     {
-      "topic": "Signal combination: Max-IR signal weighting framework",
-      "finding": "GSAM (Goldman Sachs Asset Management) white paper and FactSet 2025 research show the Max Information Ratio (Max-IR) approach outperforms equal-weight and risk-parity for multi-signal combination. Method: (1) estimate each signal's historical IR = IC * sqrt(breadth), (2) estimate pairwise signal correlations, (3) solve for weights that maximize portfolio IR subject to constraints. Key insight from FactSet: bounded regression that caps individual signal contributions at 15-20% prevents any single signal from dominating, even if its recent IC is highest. This is critical when IC estimates are noisy (our situation with 30-200 sample sizes per signal).",
-      "relevance_to_us": "DIRECTLY APPLICABLE as an evolution beyond the IC-weighted voting proposed on May 3. Our current system has no cap on individual signal contribution — a signal with 60% accuracy and high activation rate can dominate consensus. Max-IR with bounded weights (max 15% per signal) would prevent econ_calendar (60.6%) or qwen3 (60.2%) from overpowering a genuine multi-signal consensus. Implementation: estimate per-signal IR from accuracy_cache.json, compute signal correlation matrix from signal_log.db, optimize weights via scipy.optimize.minimize with bounds=[0, 0.15].",
+      "topic": "IC-based signal weighting",
+      "finding": "Max IR approach outperforms equal weighting over 13yr backtest. Recalibrate monthly using 36-month rolling IC. IR = IC * sqrt(N). Diverse signal families monotonically improve performance.",
+      "relevance_to_us": "HIGH. Our system uses equal voting. IC-weighted voting would amplify high-accuracy signals and suppress noise.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://www.gsam.com/content/dam/gsam/pdfs/institutions/en/articles/2018/Combining_Investment_Signals_in_LongShort_Strategies.pdf"
+      "source": "https://insight.factset.com/a-practical-approach-to-weighting-signals"
     },
     {
-      "topic": "Signal combination: Ensemble methods for crypto trading (ICAIF 2024)",
-      "finding": "ACM ICAIF FinRL contest results (arxiv 2501.10709, Jan 2025) show ensemble approaches combining RL agents with traditional signal-based agents outperform individual systems. Winner used dynamic rebalancing: compute rolling 20-bar Sharpe per sub-strategy, allocate capital proportionally. Critical finding: ensembles with 5-8 diverse strategies hit diminishing returns — adding more strategies beyond 8 increases correlation without improving returns. The diversity metric (negative pairwise return correlation) matters more than individual strategy quality. Ensemble of 5 mediocre but uncorrelated strategies beats ensemble of 3 excellent but correlated strategies.",
-      "relevance_to_us": "VALIDATES the effective-N concern from May 3. With 33 active signals, many are correlated (RSI/stochRSI/williams_r in momentum cluster, MACD/EMA/trend in trend cluster). If effective independent signals = 8-12, we're near the diversity saturation point. The actionable insight: STOP adding new signals and START deduplicating. Our 12 recently degraded signals likely include redundant ones — removing them might not hurt consensus quality at all. Compute pairwise signal return correlations from signal_log.db to identify true effective-N.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/html/2501.10709v1"
-    },
-    {
-      "topic": "Adaptive weighting: VIX-Rank adaptive Kelly sizing",
-      "finding": "May 2026 paper (arxiv 2508.16598) proposes dynamic Kelly criterion that scales position size by VIX-Rank. In low-vol regimes (VIX-Rank < 0.3), allocate up to full fractional-Kelly; in high-vol regimes (VIX-Rank > 0.7), reduce to 25-40% Kelly. Backtested on S&P 500 options: reduced max drawdown by 38% while retaining 82% of full-Kelly returns. Key formula: f_dynamic = f_kelly * (1 - alpha * VIX_Rank) where alpha=0.6-0.8 gives best risk-adjusted results. The approach naturally solves the over-sizing problem in volatile markets that destroys half-Kelly implementations.",
-      "relevance_to_us": "HIGHLY ACTIONABLE for our position sizing. Our system doesn't currently use Kelly for sizing — decisions are BUY/SELL/HOLD with position sizes determined by playbook rules. Integrating VIX-adaptive Kelly would give Layer 2 a mathematical framework for sizing. For metals: substitute GVZ (gold VIX) for VIX. For crypto: substitute realized volatility percentile. This directly addresses our warrant trading where fixed-size positions during high-vol periods cause outsized losses.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://arxiv.org/html/2508.16598v1"
-    },
-    {
-      "topic": "Adaptive weighting: Walk-forward double-OOS update for crypto",
-      "finding": "The Feb 2026 double-OOS walk-forward paper (arxiv 2602.10785) now has a GitHub repo with full implementation. Applied to BTCUSD specifically, the method demonstrates a statistically significant edge that survives the 2025-2026 price decline. Key practical detail: the authors parameterize BOTH training window length AND test window length, searching over (60d/30d, 90d/30d, 120d/60d) ratios. The 90d training / 30d test window showed best stability for crypto. Walk-Forward Efficiency (WFE) above 0.7 was required for strategy deployment.",
-      "relevance_to_us": "ACTIONABLE REFINEMENT of the WFE metric proposed on May 3. Our proposed 7d/30d ratio is too short for proper WFE — the research suggests 90d/30d as the crypto-appropriate window. Update: compute WFE = (30d_accuracy / 90d_accuracy) per signal. This gives more stable estimates and properly captures regime-length degradation patterns. For our 12 degraded signals, compute 30d/90d WFE to distinguish temporary noise from genuine regime breaks.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/abs/2602.10785"
-    },
-    {
-      "topic": "Regime detection: Dynamic-transition HMM for crypto 2024-2026",
-      "finding": "March 2026 preprint (preprints.org 202603.0831) specifically addresses the limitation of constant-transition-probability HMMs for crypto: traditional HMMs assume fixed regime transition rates, but crypto regime shifts are driven by identifiable catalysts (halving, regulatory announcements, macro shocks). Dynamic HMMs with time-varying transition probabilities achieve significantly higher regime classification accuracy. Key predictor for transition probability: realized volatility ratio (short/long) — when 5d realized vol exceeds 30d realized vol by >1.5x, regime transition probability spikes.",
-      "relevance_to_us": "CRITICAL IMPROVEMENT over the static HMM proposed on May 3. Our volatility ratio is already computed in multiple signals (volatility squeeze, ATR expansion). The insight: feed volatility_ratio = vol_5d / vol_30d as a covariate to the HMM transition matrix. When ratio > 1.5, the model becomes more willing to switch states, catching regime transitions faster. For our XAG trading where whipsaws during transitions cause the largest losses, faster regime detection = fewer bad entries.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://www.preprints.org/manuscript/202603.0831"
-    },
-    {
-      "topic": "Regime detection: Ensemble-HMM with tree-based models for regime shift detection",
-      "finding": "The aimspress.com ensemble-HMM paper (cited May 3) has been further validated by 2026 implementations. The hybrid approach combines: (1) HMM for probabilistic state estimation, (2) Random Forest/XGBoost for feature-based regime classification, (3) majority vote across classifiers. Key finding on 'regime flickering': standalone HMM switches states too frequently (5-10 flips per month in crypto), while the ensemble reduces this to 2-3 genuine transitions by requiring agreement across classifiers. The ensemble also handles the HMM initialization sensitivity problem — different random seeds produce different regime labels, but the ensemble is robust to this.",
-      "relevance_to_us": "ADDRESSES a practical problem we'd hit implementing standalone HMM. Our macro_regime signal already has regime flickering issues (the 0.75x/0.80x penalties flip frequently). Requiring HMM + at least one tree-based classifier to agree before declaring a regime shift would eliminate noise transitions. Implementation: (1) fit GaussianHMM(n=3) on returns+vol, (2) fit RandomForestClassifier on same features with HMM labels as targets, (3) only accept regime change when both agree for 2+ consecutive periods.",
+      "topic": "Regime-adaptive trading with HMM",
+      "finding": "Regime-aware LightGBM + rolling HMM won IIT KGP Quant Games 2026 (Sharpe 2.276). Route between MR and TF per regime.",
+      "relevance_to_us": "HIGH. We detect regimes but use static multipliers, not signal-subset selection.",
       "implementation_difficulty": "hard",
       "expected_impact": "high",
-      "source": "https://www.aimspress.com/article/id/69045d2fba35de34708adb5d"
+      "source": "https://github.com/Aditya26189/regime-adaptive-quantitative-trading"
     },
     {
-      "topic": "Silver prediction: ML study confirms predictability with caveats",
-      "finding": "April 2026 study (IJSR, paperid SR26404180625) analyzing daily silver prices 2000-2025 found ARIMA achieved lowest prediction errors for short-term dynamics, while ML models (LSTM, XGBoost) captured general trends but accuracy degraded significantly during high-volatility periods. The gold-silver ratio remains the strongest single predictor for silver direction — when GSR exceeds 85, silver outperforms gold over next 3 months in 78% of cases. Currently (May 2026), GSR is near historical lows around 65-70 after silver's 144% surge — this is actually a bearish signal for relative silver performance.",
-      "relevance_to_us": "IMPORTANT NUANCE for our $120 silver prophecy. The GSR at 65-70 is historically low, meaning silver has already outperformed significantly. The 78% hit rate for GSR>85 is strong, but we're on the wrong side of that signal now. Our metals_cross_asset signal tracks gold-silver ratio velocity — it should incorporate GSR level thresholds: GSR<70 = reduced bullish conviction for XAG, GSR>85 = strong bullish signal. Also validates using ARIMA as a baseline — if ARIMA beats LSTM/XGBoost on silver, our Chronos-2 regression on XAG (54.5%) is expected.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://www.ijsr.net/getabstract.php?paperid=SR26404180625"
-    },
-    {
-      "topic": "Silver prediction: Supply deficit structural thesis update",
-      "finding": "Silver is in its 7th consecutive deficit year (67M oz projected 2026). Spot has surged 144% since early 2024, surpassing $66. Solar PV silver demand dropped 19% due to efficiency gains (thinner silver loading per panel), partially offsetting the supply deficit narrative. 72% of silver is co-product mining — silver price alone cannot incentivize new supply. Analyst consensus for end-2026: $70-80 range. AI/algorithm forecasts more bullish: $72-99 depending on model. The deficit thesis is intact but the easy gains may be behind us.",
-      "relevance_to_us": "RECALIBRATE our metals trading stance. Silver at $66+ vs our $120 prophecy (0.8 conviction) — the remaining upside requires catalysts beyond the structural deficit (monetary crisis, industrial demand spike, or severe mine disruptions). For our intraday warrant trading, the thesis still supports buying dips, but the risk/reward has shifted. Our prophecy.json conviction should probably decrease from 0.8 to 0.6 given current price levels. The PV demand drop is a genuine headwind for the 'exponential demand' narrative.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "low",
-      "source": "https://goldsilver.com/industry-news/article/silver-price-forecast-predictions/"
-    },
-    {
-      "topic": "BTC prediction: Boruta feature selection + CNN-LSTM achieves 82% directional accuracy",
-      "finding": "2025-2026 ScienceDirect paper uses Boruta feature selection algorithm with CNN-LSTM for next-day BTC price direction. Achieves 82.03% accuracy. Key finding: on-chain features in the 'realized value' and 'unrealized value' categories have highest predictive power — specifically MVRV, SOPR, and adjusted SOPR. The Boruta algorithm automatically identifies the 15-20 most informative features from 50+ candidates, pruning noise features. Another 2026 paper (ACM HCAIE, multimodal framework) confirms that combining on-chain + technical + sentiment in a unified model significantly outperforms any single modality.",
-      "relevance_to_us": "VALIDATES our on-chain BTC signal's feature choices (MVRV, SOPR, NUPL) and our multi-signal approach. 82% for next-day is impressive but likely uses daily close-to-close which maps to our 1d timeframe. Our BTC 1d accuracy across signals is lower — the gap suggests our signal combination method (majority vote) is suboptimal vs a learned combination (CNN-LSTM). The Boruta feature selection approach could identify which of our 33 signals actually contribute predictive power for each ticker — automated feature importance ranking.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://www.sciencedirect.com/science/article/pii/S266682702500057X"
-    },
-    {
-      "topic": "BTC prediction: Attention-based deep learning with MACD integration",
-      "finding": "Frontiers in AI (2025) shows Attention-GRU and Attention-LSTM models with MACD integration significantly improve BTC prediction vs vanilla deep learning. Specifically: MACD as an input feature to attention-based models boosts accuracy, despite MACD as a standalone signal having mediocre accuracy. The attention mechanism learns WHEN to weight MACD heavily (during trending periods) and when to ignore it (during ranging). This is an implicit regime-conditional signal weighting learned end-to-end.",
-      "relevance_to_us": "EXPLAINS why our MACD signal has 44.2% standalone accuracy but might still contribute to ensemble performance. MACD's value is conditional on regime — it's useful in trends, harmful in ranges. An attention mechanism that learns when to use each signal is functionally equivalent to our proposed regime-conditional weighting, but learned rather than hand-crafted. For practical implementation: rather than training a full attention model, we can approximate by multiplying MACD weight by ADX/25 (high ADX = trending = weight MACD up, low ADX = ranging = weight MACD down).",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1519805/full"
-    },
-    {
-      "topic": "LLM agents: TradingAgents v0.2.3 architecture and debate mechanism",
-      "finding": "TradingAgents (UCLA/MIT, arxiv 2412.20138) v0.2.3 (March 2026) implements a structured multi-agent debate system. Architecture: Analyst team (4 agents: fundamental, sentiment, news, technical) produces independent reports concurrently. Researcher team (bull + bear agents) then debates the analyst outputs over 2-3 rounds, explicitly arguing for and against the trade. Trader agent synthesizes the debate, Risk Manager validates against risk rules, Fund Manager approves. In backtests on AAPL/GOOGL/AMZN: 24.9% annual return, Sharpe 5.60. Key insight: the debate mechanism between bull and bear researchers is what prevents the LLM bullish bias found in StockBench — forcing adversarial analysis counteracts the default optimism.",
-      "relevance_to_us": "DIRECTLY RELEVANT to our Layer 2 architecture. Our current Layer 2 is a single Claude invocation that reads signals and decides. TradingAgents shows that structured adversarial debate (bull vs bear) significantly improves LLM trading decisions. We could implement a lightweight version: have Layer 2 generate both a bull case and bear case for each position, then evaluate which has stronger signal support. This doesn't require multiple agents — a single Claude invocation with structured prompting ('first argue bull, then argue bear, then decide') approximates the debate mechanism.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/abs/2412.20138"
-    },
-    {
-      "topic": "LLM agents: Multi-provider model coverage and risk management",
-      "finding": "TradingAgents v0.2.2-v0.2.3 added multi-provider support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and a five-tier rating scale. The Risk Manager agent specifically checks: position concentration limits, correlation to existing portfolio, maximum drawdown threshold, and current regime compatibility. In the framework, different LLM providers can be assigned to different agent roles — e.g., Claude for fundamental analysis, GPT for sentiment — leveraging each model's strengths.",
-      "relevance_to_us": "LOW PRIORITY but architecturally interesting. Our system already uses Claude for Layer 2 and local LLMs (Ministral, Qwen3) for signals. The multi-provider idea could eventually let us use different models for different signal types. More immediately relevant: the risk manager pattern — having a dedicated 'risk check' step in Layer 2 that explicitly evaluates regime compatibility and concentration before executing any trade. Our trade_guards.py does some of this but isn't LLM-enhanced.",
+      "topic": "Walk-forward validation",
+      "finding": "Aggregate stats mask regime-dependent heterogeneity. Strict OOS testing critical.",
+      "relevance_to_us": "MEDIUM. Our accuracy is all-time + 7d-recent. No formal walk-forward validation.",
       "implementation_difficulty": "hard",
-      "expected_impact": "low",
+      "expected_impact": "medium",
+      "source": "https://arxiv.org/html/2512.12924v1"
+    },
+    {
+      "topic": "Multi-agent LLM debate",
+      "finding": "Bull vs Bear agents + risk oversight significantly improves Sharpe vs single-agent.",
+      "relevance_to_us": "MEDIUM. Layer 2 is single-agent. Could add but latency cost in tight tier windows.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "medium",
       "source": "https://github.com/TauricResearch/TradingAgents"
     },
     {
-      "topic": "Position sizing: Fractional Kelly with estimation uncertainty",
-      "finding": "Practical Kelly implementation research (Alpha Theory, Astute Investors Calculus) converges on key rules: (1) half-Kelly retains 75% of theoretical growth while cutting volatility in half, (2) when probability and payoff estimates contain uncertainty, Kelly over-allocates — use Kelly fraction = confidence_in_estimate * half_kelly, (3) for correlated positions, must use multivariate Kelly which accounts for portfolio-level interaction, (4) Kelly is a CEILING not a target — real portfolios should size below Kelly. For crypto specifically: signal accuracy of 55% with 2:1 reward/risk gives Kelly fraction = (0.55*2 - 0.45)/2 = 0.325, half-Kelly = 0.1625 (16.25% of capital).",
-      "relevance_to_us": "CONCRETE FORMULA for our system. With best signal accuracy ~60% and typical crypto reward/risk of 1.5:1, Kelly fraction = (0.60*1.5 - 0.40)/1.5 = 0.333, half-Kelly = 16.7%. But our signal accuracy has high estimation uncertainty (small samples), so confidence-adjusted Kelly might be 8-12%. This gives a mathematical basis for our position sizing rather than the current fixed-percentage playbook rules. For warrants with 5x leverage: Kelly fraction on the underlying, then divide by leverage.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://www.alphatheory.com/blog/kelly-criterion-in-practice-1"
+      "topic": "Silver ML prediction",
+      "finding": "GRU outperforms LSTM for sub-3yr silver. CNN+LSTM hybrid MAPE <3%.",
+      "relevance_to_us": "MEDIUM. Chronos-2 regressed on XAG. Dedicated GRU model could help.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "medium",
+      "source": "https://www.sciencedirect.com/science/article/pii/S0301420724004070"
     },
     {
-      "topic": "Position sizing: Volatility targeting for portfolio-level risk",
-      "finding": "Volatility targeting sets portfolio allocation to achieve a target realized volatility (e.g., 15% annualized). Formula: position_weight = target_vol / (instrument_vol * sqrt(252)). During low-vol periods, leverage increases; during high-vol periods, it decreases. Combined with Kelly: use Kelly for signal-based sizing (how much edge justifies), use vol-targeting for risk-based sizing (how much risk to take), take the MINIMUM of both. This prevents over-sizing in low-vol environments where Kelly says 'bet big' but a vol spike would be catastrophic.",
-      "relevance_to_us": "COMPLEMENTARY to Kelly and our existing ATR-based risk management. Our risk_management.py uses ATR for stop placement but not for position sizing. Vol-targeting would dynamically scale warrant positions: when XAG implied vol is low (ATR compressed), size up; when vol spikes (ATR expanding), size down. Combined Kelly-vol-target: min(kelly_size, vol_target_size) gives mathematically grounded position sizing that respects both edge quality and risk environment.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://astuteinvestorscalculus.com/the-kelly-criterion/"
+      "topic": "BTC on-chain features",
+      "finding": "MVRV Z-Score identifies cycle peaks within 2 weeks. On-chain outperforms price/vol by 15-20%.",
+      "relevance_to_us": "HIGH. On-chain at 60% (45 sam) promising but undersampled.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://www.altcointrading.net/bitcoin-price-forecasting-with-ml-models/"
+    },
+    {
+      "topic": "Inflationary regime commodity strategy",
+      "finding": "Trend-following + momentum works best in inflationary supply-shock regime.",
+      "relevance_to_us": "MEDIUM. Current environment. Could boost momentum weight in inflation regimes.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://quantpedia.com/commodity-portfolio-strategy-for-a-potential-2026-inflationary-and-supply-shock-regime/"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Max-IR bounded signal weighting with correlation constraints",
-      "description": "Upgrade from IC-weighted voting to full Max-IR optimization. Steps: (1) compute per-signal IR = (accuracy - 0.5) * sqrt(sample_size) from accuracy_cache.json, (2) compute rolling 30d pairwise signal correlation matrix from signal_log.db, (3) solve max-IR portfolio via scipy.optimize.minimize with per-signal weight cap at 15% and non-negativity constraint. This subsumes accuracy gating (zero-weight signals naturally get zero weight), deduplication (correlated signals share weight budget), and recency weighting (use recent IR estimates). Falls back to equal-weight when optimization is ill-conditioned (sparse data).",
+      "title": "IC-weighted signal voting",
+      "description": "Replace equal-weight with IC-weighted voting. Signal vote weight = rolling 30d IC.",
       "priority": 1,
-      "effort_days": 4,
-      "files_affected": ["portfolio/signal_engine.py", "portfolio/ic_computation.py", "portfolio/accuracy_stats.py"]
-    },
-    {
-      "title": "VIX-adaptive Kelly criterion position sizing",
-      "description": "Implement dynamic Kelly position sizing: f_dynamic = half_kelly * (1 - 0.7 * vol_rank) where half_kelly = (accuracy * reward_risk - (1-accuracy)) / (2 * reward_risk) and vol_rank = percentile of current realized vol in 90d window. For metals use GVZ, for crypto use realized vol percentile. Output sizing recommendation as part of Layer 2 context (agent_context_t2.json). This replaces fixed-percentage playbook sizing with mathematically grounded, regime-adaptive sizing. Min position = 2% of capital, max = min(kelly_size, vol_target_size, 15%).",
-      "priority": 2,
       "effort_days": 3,
-      "files_affected": ["portfolio/risk_management.py", "portfolio/signal_engine.py", "portfolio/reporting.py", "docs/TRADING_PLAYBOOK.md"]
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
     },
     {
-      "title": "Dynamic-transition HMM regime detection",
-      "description": "Implement 3-state GaussianHMM (bull/bear/sideways) with time-varying transition probabilities. Features: [returns_5d, vol_5d/vol_30d, volume_ratio]. When vol_ratio > 1.5, increase transition probability (regime more likely to change). Output: regime probabilities per ticker, updated each cycle. Use regime probabilities to modulate signal weights: trending regime upweights momentum/trend signals, ranging regime upweights mean_reversion/RSI. Uncertain regime (max_prob < 0.6) reduces all signal weights by max_prob. Fire Layer 2 trigger when regime probability shifts > 0.3.",
+      "title": "Per-ticker signal gating",
+      "description": "If signal X has <45% accuracy on ticker Y (30+ samples), force HOLD for that pair.",
+      "priority": 2,
+      "effort_days": 2,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "title": "Fix funding rate horizon gate",
+      "description": "Funding rate at 30.8% (1d) is harmful. Verify horizon gate enforced.",
       "priority": 3,
-      "effort_days": 5,
-      "files_affected": ["portfolio/signals/macro_regime.py", "portfolio/signal_engine.py", "portfolio/trigger.py"]
-    },
-    {
-      "title": "ADX-conditional MACD weighting (quick win)",
-      "description": "Multiply MACD signal weight by min(ADX/25, 1.5). When ADX > 25 (trending), MACD gets full or boosted weight. When ADX < 15 (ranging), MACD weight drops to 0.6x. This approximates the attention mechanism's learned regime-conditional weighting from the Frontiers AI paper. Same approach applicable to EMA and trend signals. Trivial implementation: 5 lines in signal_engine.py where signal weights are computed.",
-      "priority": 4,
       "effort_days": 0.5,
-      "files_affected": ["portfolio/signal_engine.py"]
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
     },
     {
-      "title": "Bull/Bear adversarial debate in Layer 2 prompt",
-      "description": "Restructure Layer 2 prompt to require explicit bull and bear cases before any trade decision. Prompt template: 'For [ticker]: (1) Present the BULL case citing supporting signals, (2) Present the BEAR case citing opposing signals, (3) Rate each case 1-5 on signal strength, (4) Decide based on which case has stronger quantitative support.' This counteracts the LLM bullish bias identified in StockBench without requiring multi-agent infrastructure. Pure prompt engineering change.",
+      "title": "Regime-adaptive signal subsets",
+      "description": "Select signal subsets per regime instead of static penalties.",
+      "priority": 4,
+      "effort_days": 4,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Horizon-optimized signal weights",
+      "description": "XAG better at 3d (57.4%) than 1d (49.7%). Use horizon-specific weights.",
       "priority": 5,
-      "effort_days": 1,
-      "files_affected": ["portfolio/agent_invocation.py", "docs/TRADING_PLAYBOOK.md"]
-    },
-    {
-      "title": "Effective-N diversity audit and signal pruning",
-      "description": "Compute pairwise return correlations for all 33 active signals from signal_log.db over last 90 days. Cluster signals with correlation > 0.6. Report effective-N (number of independent clusters). If effective-N < 15, identify redundant signals for removal. Per ICAIF research, 5-8 diverse strategies hit diminishing returns — our 33 signals with effective-N of ~10 may already be over-diversified in some clusters while under-represented in others. Goal: trim to 20-25 signals with effective-N > 12.",
-      "priority": 6,
-      "effort_days": 2,
-      "files_affected": ["portfolio/signal_engine.py", "portfolio/accuracy_stats.py", "portfolio/reporting.py"]
-    },
-    {
-      "title": "Gold-silver ratio level threshold in metals_cross_asset",
-      "description": "Add GSR level thresholds to metals_cross_asset signal. GSR > 85: strong bullish silver signal (78% hit rate over 3 months). GSR < 70: reduced silver bullish conviction (historical mean reversion zone). Current GSR ~65-70 should dampen XAG BUY confidence. Implementation: fetch current GSR (already computed in metals_cross_asset.py), add level-based modifier to signal output. This gives our silver trading a historically validated mean-reversion overlay.",
-      "priority": 7,
-      "effort_days": 1,
-      "files_affected": ["portfolio/signals/metals_cross_asset.py"]
-    },
-    {
-      "title": "WFE metric with proper 30d/90d window (update from May 3)",
-      "description": "Compute Walk-Forward Efficiency = 30d_accuracy / 90d_accuracy per signal per ticker (updated from the 7d/30d proposed May 3, per crypto-specific research showing 90d training is optimal). WFE < 0.7 = flag as degrading. WFE > 1.3 = flag as suspiciously improving (possible lucky streak). Add to /api/accuracy endpoint and accuracy report. The 12 recently degraded signals should show WFE < 0.6, confirming regime break vs noise.",
-      "priority": 8,
-      "effort_days": 2,
-      "files_affected": ["portfolio/accuracy_stats.py", "dashboard/app.py", "portfolio/reporting.py"]
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
     }
   ]
 }

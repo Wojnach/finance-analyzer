@@ -34,6 +34,7 @@ import "./views/decisions.js"; // also imports decision-detail.js internally
 import "./views/signals.js";
 import "./views/more.js";
 import "./views/health.js";
+import "./views/cost.js";
 import "./views/messages.js";
 import "./views/settings.js";
 import "./views/equity.js";

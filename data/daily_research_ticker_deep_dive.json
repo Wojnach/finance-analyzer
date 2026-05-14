@@ -1,109 +1,103 @@
 {
-  "date": "2026-05-07",
+  "date": "2026-05-13",
   "tickers_analyzed": [
-    "MSTR",
-    "XAG-USD"
+    "XAG-USD",
+    "BTC-USD"
   ],
+  "rationale": "XAG-USD consensus 49.7% at 1d (below coin flip for primary focus). BTC-USD 53% marginal. Both had heavy flip-flopping today.",
   "deep_dives": [
     {
-      "ticker": "MSTR",
-      "todays_performance": "-3.9% (85.47 to 78.16)",
+      "ticker": "XAG-USD",
       "key_predictive_features": [
-        "BTC price (primary driver, ~0.9 correlation in bull, ~0.7 in bear)",
-        "BTC premium/discount to NAV (currently trading at premium)",
-        "Options IV/skew (high IV = leveraged BTC bet)",
-        "ETF flow momentum (MSTR competes with spot BTC ETFs)",
-        "Treasury size changes (818K BTC, any sales = negative signal)"
+        "Gold-silver ratio velocity (mean-reversion when >2 std from 60)",
+        "DXY inverse correlation (-0.7 to -0.85)",
+        "COT speculative positioning (contrarian at extremes)",
+        "Real yield differential (10Y TIPS vs silver carry)",
+        "Industrial demand proxies: copper, solar installs, EV production",
+        "Central bank gold buying rate (silver follows with 2-3x beta)",
+        "India physical demand (tariff changes, e.g. today 6%->15%)",
+        "ETF flow direction (global silver ETF AUM changes)"
       ],
       "fundamental_drivers": [
-        "Q1 2026: 2.54B loss reported (mark-to-market BTC accounting)",
-        "STRC preferred dividend may force BTC sales - shift from never-sell policy",
-        "Analyst range: BTIG 50, Benchmark 70 vs current 78",
-        "Saylor strategy: keep buying BTC with debt/equity issuance",
-        "Key risk: if BTC drops below average cost basis (~8K), NAV goes negative"
+        "Industrial demand: 50%+ of silver is industrial (solar, electronics, EVs)",
+        "Mine supply declining while demand rising - structural deficit",
+        "Gold-silver ratio compression thesis (currently ~53, target 50)",
+        "Central bank gold buying at record pace - silver follows",
+        "Iran war premium on commodities"
       ],
       "cross_asset_correlations": {
-        "BTC_USD": "Very high (0.85-0.95) - primary driver",
-        "QQQ": "Moderate (0.5-0.6) - tech/risk sentiment",
-        "VIX": "Inverse moderate (-0.4 to -0.5)",
-        "DXY": "Weak inverse (-0.2 to -0.3)"
+        "XAU-USD": "Very high positive (0.85+)",
+        "DXY": "Strong negative (-0.7 to -0.85)",
+        "US_10Y": "Moderate negative, weakening in 2026",
+        "Copper": "Moderate positive (0.5-0.6)",
+        "Oil": "Moderate positive in Iran-war regime",
+        "VIX": "Low, but spikes cause liquidation selling"
       },
       "seasonal_patterns": [
-        "BTC halving cycle: peak 12-18 months post-halving (Apr 2024), window: Q2-Q4 2025 extending into 2026",
-        "January effect: MSTR tends to rally in Q1 with BTC",
-        "Tax-loss selling: December weakness",
-        "Options expiry: monthly expiry weeks see elevated MSTR volatility"
+        "Rally Jan-Mar (Indian wedding season)",
+        "Summer doldrums Jul-Aug",
+        "Q4 rally (jewelry + rebalancing)",
+        "FOMC week: range-bound before, breakout after"
+      ],
+      "papers_and_models": [
+        "CNN+LSTM hybrid: MAPE <3% on 3yr silver data",
+        "GRU outperforms LSTM for sub-3yr prediction",
+        "SVR with RSI+MACD+BB+Vol: reasonable baseline"
       ],
       "recommended_new_signals": [
-        "BTC premium/NAV ratio signal - buy when discount >10%, sell when premium >50%",
-        "MSTR options put/call ratio as sentiment indicator",
-        "Monitor Saylor/MSTR BTC purchase announcements as catalyst events",
-        "Track STRC dividend coverage ratio - forced BTC sales would be very bearish"
+        "India physical demand proxy (tariff-adjusted import volume)",
+        "Silver ETF flow momentum (rate of change of AUM)",
+        "Gold-silver ratio velocity (rate of change, not just level)",
+        "Mine production disruption index",
+        "Solar installation rate momentum"
       ],
-      "implementation_notes": "MSTR is essentially a leveraged BTC bet. The BTC correlation signal should have highest weight. The STRC dividend risk is new and should be monitored. Consider adding a MSTR-specific signal that tracks the BTC NAV premium/discount."
+      "implementation_notes": "XAG 1d at 49.7% = no edge. 3d at 57.4% = medium-term works. Daily noise is the problem. Fix: (1) Disable/downweight intraday flippers (structure 48.7%, heikin_ashi 49.1%, ema 49.9%). (2) Weight 3d signals higher for XAG. (3) Add gold-silver ratio velocity. (4) Per-ticker signal weighting."
     },
     {
-      "ticker": "XAG-USD",
-      "todays_performance": "-3.0% (1.53 to 9.11) - RSI 34.8 oversold",
+      "ticker": "BTC-USD",
       "key_predictive_features": [
-        "Gold/Silver ratio (currently 62:1, lowest since 2013 - compression thesis playing out)",
-        "DXY inverse correlation (strong USD = weak silver)",
-        "Real yields (TIPS yield) - inverse correlation",
-        "Industrial demand proxy: copper price, PMI data",
-        "COT commercial/speculative positioning",
-        "COMEX inventory levels and delivery notices",
-        "Central bank gold buying (silver follows with leverage)"
+        "MVRV Z-Score (84.3% macro cycle accuracy)",
+        "SOPR (profit-taking behavior)",
+        "Exchange netflow (sustained outflows = accumulation)",
+        "Funding rate trend (direction > level)",
+        "Hash ribbons (miner capitulation signals)",
+        "ETF flow momentum (daily flow direction + magnitude)",
+        "Options skew (put/call ratio, 25-delta RR)",
+        "Whale wallet tracking (>1000 BTC addresses)"
       ],
       "fundamental_drivers": [
-        "Supply: mine output declining globally, no major new mines",
-        "Industrial demand: solar panels (14% of demand), EVs, AI data centers",
-        "Investment demand: ETF flows, coin/bar demand",
-        "Iran deal: de-escalation reduces safe-haven bid (todays catalyst)",
-        "Gold/silver ratio compression from 90 to 62 since Feb - still room to ~50",
-        "Silver prophecy: 20 target, 0.8 conviction, 0 checkpoint triggered"
+        "Post-halving cycle: Apr 2024, peaks 12-18 months after",
+        "ETF institutional demand floor",
+        "MSTR treasury 818K BTC (may sell for dividends now)",
+        "Fed rate policy: delayed cuts = headwind",
+        "Trump-Xi summit: trade deal progress = risk-on"
       ],
       "cross_asset_correlations": {
-        "XAU_USD": "Very high (0.85-0.90) - gold leads, silver follows with beta",
-        "DXY": "Inverse moderate (-0.5 to -0.6)",
-        "copper": "Moderate (0.4-0.5) - industrial demand overlap",
-        "US_10Y_yield": "Inverse moderate (-0.4 to -0.5)",
-        "VIX": "Weak positive (0.1-0.2) in risk-off, negative in risk-on"
+        "MSTR": "Very high (0.9+)",
+        "Nasdaq": "Moderate positive (0.5-0.7) risk-on",
+        "DXY": "Moderate negative (-0.4 to -0.6)",
+        "Gold": "Low-moderate positive (anti-fiat)",
+        "VIX": "Negative (-0.3 to -0.5)"
       },
       "seasonal_patterns": [
-        "September-January historically strongest (Indian wedding season demand)",
-        "July-August seasonal weakness (summer doldrums)",
-        "FOMC meeting weeks: risk-off bid pre-meeting, relief post",
-        "Quad witching months (Mar, Jun, Sep, Dec): elevated vol from options expiry",
-        "Gold/silver ratio tends to compress in H2 of year"
+        "Q1 rally (institutional allocation)",
+        "Post-halving year bullish H2",
+        "Weekend lower volume, Monday gaps",
+        "FOMC weeks: range before, break after"
       ],
-      "metals_specific_analysis": {
-        "current_position": "Patient holds 12.3 shares at ~8.80 entry (+0.4%)",
-        "silver_bull_thesis": "20 target, checkpoints through 0 triggered",
-        "key_levels": {
-          "support": [
-            78.0,
-            75.0,
-            72.0
-          ],
-          "resistance": [
-            82.0,
-            85.0,
-            90.0
-          ]
-        },
-        "chronos_accuracy": "51.2% at 1h (1836 sam), 42.0% at 3h (1603 sam) - models poor at silver",
-        "llm_accuracy": "51.2% at 1h, 42.0% at 3h - no edge",
-        "best_signals_for_xag": "econ_calendar (FOMC proximity), calendar (day-of-week), mean_reversion (oversold bounces)",
-        "worst_signals_for_xag": "trend (all trend followers fail in XAG ranging periods), macro_regime"
-      },
+      "papers_and_models": [
+        "Temporal Fusion Transformer + on-chain: best multi-horizon BTC predictor",
+        "MVRV Z-Score: cycle peaks within 2 weeks historically",
+        "On-chain features outperform price/vol-only by 15-20%"
+      ],
       "recommended_new_signals": [
-        "Gold/silver ratio velocity signal - rapid compression = bullish silver",
-        "COMEX delivery notice momentum - unusual deliveries signal physical demand",
-        "India import premium as demand proxy",
-        "Solar panel installation rate as leading industrial demand indicator",
-        "Mine supply disruption monitor (Peru, Mexico, China are top producers)"
+        "ETF daily flow momentum (acceleration, not just level)",
+        "MSTR premium/discount to NAV",
+        "Options term structure slope",
+        "Stablecoin supply ratio (USDT+USDC cap vs BTC)",
+        "Exchange reserve momentum (rate of change)"
       ],
-      "implementation_notes": "XAG is dominated by gold correlation + industrial demand. The Chronos/LLM models perform poorly on silver (42-51% accuracy). Focus should be on cross-asset signals (gold, DXY, copper) and fundamental drivers (COT, ETF flows) rather than pure technicals. The oversold RSI (34.8) today suggests a bounce is likely, but the Iran de-escalation narrative could keep pressure on safe-haven metals."
+      "implementation_notes": "BTC 1d consensus 53% - marginal. On-chain at 60% is best but only 45 samples. Fix: (1) Increase on-chain weight for BTC. (2) Add ETF flow momentum. (3) Horizon-gate: BTC signals better at 3h-4h than 1d. (4) Consider MSTR-BTC spread signal."
     }
   ]
 }

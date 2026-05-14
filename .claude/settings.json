@@ -25,5 +25,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "caveman@caveman": true
   }
 }

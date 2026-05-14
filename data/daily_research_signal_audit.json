@@ -1,83 +1,144 @@
 {
-  "date": "2026-05-07",
+  "date": "2026-05-13",
   "top_signals": [
-    {"signal": "econ_calendar", "accuracy_1d": 60.6, "accuracy_3h": 59.9, "samples": 5981, "notes": "Best active signal. Consistent across horizons. FOMC/CPI proximity correctly drives risk-off."},
-    {"signal": "qwen3", "accuracy_1d": 60.2, "accuracy_3h": 59.4, "samples": 3763, "notes": "Best LLM signal. Low activation (2.2% XAG) but high quality."},
-    {"signal": "fear_greed", "accuracy_1d": 58.6, "accuracy_3h": 53.9, "samples": 10232, "notes": "Solid contrarian at 1d, degrades at 3h."},
-    {"signal": "ministral", "accuracy_1d": 58.5, "accuracy_3h": 52.3, "samples": 6119, "notes": "Good at 1d, average at 3h."},
-    {"signal": "calendar", "accuracy_1d": 56.8, "accuracy_3h": 67.9, "samples": 8867, "notes": "MUCH better at 3h. Day-of-week effects real short-term."},
-    {"signal": "funding", "accuracy_3h": 74.2, "accuracy_1d": 31.2, "samples": 735, "notes": "Best at 3h (74.2%) but terrible at 1d. Correctly horizon-gated."}
+    {
+      "signal": "econ_calendar",
+      "accuracy_1d": 61.4,
+      "samples": 6619,
+      "note": "Best enabled signal. 100% activation. BUY acc 69.1%, always-SELL on XAG though."
+    },
+    {
+      "signal": "qwen3",
+      "accuracy_1d": 60.1,
+      "samples": 3791,
+      "note": "SELL accuracy 73.7% is extraordinary. But 0% activation on XAG/BTC recently = phantom voter."
+    },
+    {
+      "signal": "fear_greed",
+      "accuracy_1d": 58.6,
+      "samples": 10232,
+      "note": "BUY-only signal (contrarian). 0% activation on all tickers in last 50 entries = phantom voter."
+    },
+    {
+      "signal": "ministral",
+      "accuracy_1d": 58.2,
+      "samples": 6248,
+      "note": "Good overall. SELL acc 59.3%. Low activation on XAG (14%) and BTC (6%)."
+    },
+    {
+      "signal": "crypto_macro",
+      "accuracy_1d": 57.0,
+      "samples": 3932,
+      "note": "Balanced BUY/SELL accuracy (57.1%/55.7%). But 0% activation on XAG, 40% on BTC."
+    },
+    {
+      "signal": "claude_fundamental",
+      "accuracy_1d": 57.9,
+      "samples": 11581,
+      "note": "DISABLED but high accuracy. BUY acc 60.5%. Should re-enable."
+    },
+    {
+      "signal": "calendar",
+      "accuracy_1d": 56.8,
+      "samples": 8867,
+      "note": "DISABLED but 56.8%. BUY acc 57.5%. SELL acc only 29.3% - enable BUY-side only?"
+    }
   ],
   "worst_signals": [
-    {"signal": "futures_flow", "accuracy_1d": 38.3, "samples": 2168, "notes": "ACTIVELY HARMFUL. 12pp worse than random. Must be force-HOLD."},
-    {"signal": "macd", "accuracy_1d": 44.2, "accuracy_3h": 43.7, "samples": 6136, "notes": "Consistently bad. Only 5.3% activation on XAG."},
-    {"signal": "trend", "accuracy_1d": 46.1, "accuracy_3h": 40.3, "samples": 17880, "notes": "Bad with massive sample. WORSE at 3h. 92-100% correlated with ema/macro_regime."},
-    {"signal": "volatility_sig", "accuracy_1d": 46.3, "accuracy_3h": 47.2, "samples": 7353, "notes": "Below threshold. 92% correlated with ema."},
-    {"signal": "macro_regime", "accuracy_1d": 47.0, "accuracy_3h": 45.1, "samples": 29028, "notes": "At threshold. 92% correlated with trend. Redundant."},
-    {"signal": "forecast", "accuracy_1d": 47.7, "accuracy_3h": 47.2, "samples": 6756, "notes": "Chronos regressed to noise."},
-    {"signal": "heikin_ashi", "accuracy_1d": 49.3, "accuracy_3h": 48.3, "samples": 26620, "notes": "Noise. 100% correlated with ema."},
-    {"signal": "structure", "accuracy_1d": 48.6, "accuracy_3h": 50.0, "samples": 15917, "notes": "99% correlated with claude_fundamental."}
+    {
+      "signal": "funding",
+      "accuracy_1d": 30.8,
+      "samples": 743,
+      "note": "CRITICALLY BAD. ENABLED. 0% activation on all tickers recently. BUY-only, all wrong at 1d. MUST DISABLE."
+    },
+    {
+      "signal": "macro_regime",
+      "accuracy_1d": 47.0,
+      "samples": 29626,
+      "note": "ENABLED. 29K samples confirm it's noise. BUY acc 41.3% = actively harmful on BUY side. 88% activation on XAG."
+    },
+    {
+      "signal": "structure",
+      "accuracy_1d": 48.7,
+      "samples": 16450,
+      "note": "ENABLED. Below coin flip. 0% activation on XAG, 84% on BTC. Mixed."
+    },
+    {
+      "signal": "heikin_ashi",
+      "accuracy_1d": 49.1,
+      "samples": 27325,
+      "note": "ENABLED. Below coin flip. 96% activation on XAG (heavily voting). 0% on BTC."
+    },
+    {
+      "signal": "ema",
+      "accuracy_1d": 49.9,
+      "samples": 17500,
+      "note": "ENABLED. Coin flip. 100% activation everywhere. Adds noise on every consensus."
+    },
+    {
+      "signal": "news_event",
+      "accuracy_1d": 50.2,
+      "samples": 9008,
+      "note": "ENABLED. Coin flip. BUY acc 20.5% is terrible. SELL acc 50.4% = marginal."
+    }
   ],
   "correlation_clusters": [
     {
-      "name": "Trend Followers",
-      "signals": ["ema", "heikin_ashi", "macro_regime", "trend", "shannon_entropy", "momentum_factors", "oscillators", "volatility_sig"],
-      "agreement_rate": "92-100%",
-      "effective_votes": 1,
-      "actual_votes": 8,
-      "issue": "8 signals = 1 independent viewpoint. Trend following overweighted 8x in consensus."
+      "cluster": "All-HOLD phantom voters on XAG",
+      "signals": [
+        "fear_greed",
+        "qwen3",
+        "structure",
+        "metals_cross_asset",
+        "credit_spread_risk",
+        "funding",
+        "crypto_macro",
+        "onchain",
+        "heikin_ashi (BTC)"
+      ],
+      "note": "100% agreement because they all output HOLD. They don't vote BUY/SELL but count as 'active voters'. This inflates the voter count without adding information."
     },
     {
-      "name": "Mean Reversion",
-      "signals": ["bb", "mean_reversion", "rsi", "momentum"],
-      "agreement_rate": "93-100%",
-      "effective_votes": 1,
-      "actual_votes": 4,
-      "issue": "4 signals nearly always agree. Low activation (10-15% on XAG)."
+      "cluster": "High-activation BUY-biased on XAG",
+      "signals": [
+        "ema",
+        "volume_flow",
+        "heikin_ashi",
+        "macro_regime",
+        "momentum_factors"
+      ],
+      "note": "All >86% activation, all BUY-biased on XAG. Creating a persistent BUY echo chamber. volume_flow 92% activation, 84% BUY = major BUY bias source."
     },
     {
-      "name": "Fundamental/Calendar",
-      "signals": ["calendar", "claude_fundamental", "structure"],
-      "agreement_rate": "99-100%",
-      "effective_votes": 1,
-      "actual_votes": 3,
-      "issue": "structure 99.1% correlated with claude_fundamental. Redundant."
-    },
-    {
-      "name": "Permanent BUY (BTC)",
-      "signals": ["crypto_macro", "sentiment", "credit_spread_risk", "claude_fundamental"],
-      "direction_bias": "99-100% BUY when active",
-      "issue": "CRITICAL: Always vote BUY on BTC. Zero predictive value. Add 4 permanent BUY votes creating systemic bullish bias."
-    },
-    {
-      "name": "Permanent SELL (BTC)",
-      "signals": ["news_event"],
-      "direction_bias": "100% SELL when active on BTC",
-      "issue": "Only fires SELL. Permanent bearish bias."
+      "cluster": "Always-SELL signals",
+      "signals": [
+        "econ_calendar"
+      ],
+      "note": "econ_calendar outputs SELL on every entry for all tickers in recent data. It has 61.4% accuracy overall but may be regime-specific (FOMC proximity)."
     }
   ],
   "regime_performance": {
-    "observation": "Current regime: range-bound. Trend cluster (8 signals) performs worst in ranging markets, explaining mass accuracy degradation.",
-    "trending_favors": ["ema", "trend", "macro_regime", "heikin_ashi", "momentum_factors"],
-    "ranging_favors": ["mean_reversion", "bb", "rsi", "calendar", "econ_calendar"],
-    "regime_agnostic": ["qwen3", "ministral", "fear_greed", "funding"]
-  },
-  "unidirectional_bias_problem": {
-    "description": "Multiple signals show >90% directional bias on specific tickers, meaning they always vote one direction regardless of market conditions.",
-    "affected_signals_btc": {
-      "crypto_macro": "99% BUY (492/499)",
-      "sentiment": "100% BUY (158/158 active)",
-      "credit_spread_risk": "100% BUY (107/107 active)",
-      "claude_fundamental": "100% BUY (141/141 active)",
-      "news_event": "100% SELL (98/98 active)"
+    "XAG_trending_up": {
+      "active_voters": "9 of 22 enabled signals actually vote",
+      "buy_bias": "Strong BUY bias from ema, volume_flow, heikin_ashi, macro_regime, momentum_factors",
+      "sell_bias": "SELL bias from econ_calendar, mean_reversion, momentum, rsi, bb",
+      "consensus_oscillation": "6 BUY/SELL/HOLD flips today = high noise"
     },
-    "impact": "These 5 signals add a net +3 permanent BUY bias to BTC consensus. This is not prediction, it is noise."
+    "BTC_trending_down": {
+      "active_voters": "12 of 22 enabled signals vote",
+      "key_issue": "ema always-on SELL, econ_calendar always SELL. volume_flow 74% SELL. Creates persistent SELL pressure that conflicts with on-chain/fundamental BUY signals.",
+      "consensus_oscillation": "BUY/HOLD oscillation throughout day"
+    }
   },
   "recommendations": [
-    {"priority": 1, "action": "Disable futures_flow (38.3% accuracy)", "effort": "trivial"},
-    {"priority": 2, "action": "Disable macd (44.2%), trend (46.1%), heikin_ashi (49.3%)", "effort": "easy"},
-    {"priority": 3, "action": "Add unidirectional bias gate: exclude signals >90% same-direction over 500+ samples", "effort": "medium"},
-    {"priority": 4, "action": "Implement correlation-cluster voting: group >85% correlated signals, 1 vote per cluster", "effort": "hard"},
-    {"priority": 5, "action": "Regime-conditional signal gating: different weights for trending vs ranging", "effort": "hard"}
+    "IMMEDIATE: Disable funding signal globally (30.8% at 1d, 0% activation, pure noise)",
+    "IMMEDIATE: Disable macro_regime signal (47% at 1d, 29K samples, BUY acc 41.3%, massive noise generator with 88% activation on XAG)",
+    "HIGH: Re-enable claude_fundamental (57.9%, 11.5K samples, disabled but high BUY accuracy 60.5%)",
+    "HIGH: Re-enable calendar signal BUY-side only (56.8%, 8.8K samples, SELL accuracy too low at 29.3%)",
+    "MEDIUM: Address phantom voter problem - signals that output HOLD 100% of the time for a ticker shouldn't count toward MIN_VOTERS quorum",
+    "MEDIUM: Consider disabling ema (49.9%, 17.5K samples, always-on, adds noise to every consensus)",
+    "MEDIUM: Consider disabling heikin_ashi (49.1%, 27.3K samples, below coin flip, 96% activation on XAG = major noise source)",
+    "MEDIUM: Disable news_event BUY-side (20.5% accuracy on BUY, terrible)",
+    "LOW: Monitor econ_calendar always-SELL pattern - may be correct in current FOMC/inflation regime but will need revisiting"
   ]
 }

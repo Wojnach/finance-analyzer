@@ -1666,6 +1666,32 @@ def api_market_health():
             if "earnings_proximity" in summary:
                 result["earnings_proximity"] = summary["earnings_proximity"]
 
+        # 2026-05-14: Swedish bank-holiday flag so the dashboard surfaces
+        # "Avanza closed today" without users guessing from a stale
+        # last-update timestamp. Source: portfolio.market_timing
+        # swedish_market_holidays() — 14 SE bank holidays / year, e.g.
+        # Ascension (today, 2026-05-14), Midsummer Eve, Christmas Eve.
+        try:
+            from datetime import date
+            from portfolio.market_timing import (
+                is_swedish_market_holiday,
+                swedish_market_holidays,
+            )
+            today = date.today()
+            today_holiday = is_swedish_market_holiday()
+            year_holidays = sorted(swedish_market_holidays(today.year))
+            next_holiday = next((d for d in year_holidays if d >= today), None)
+            se_info = {
+                "today_is_holiday": today_holiday,
+                "today": today.isoformat(),
+            }
+            if next_holiday is not None:
+                se_info["next_holiday"] = next_holiday.isoformat()
+                se_info["days_until_next"] = (next_holiday - today).days
+            result["swedish_market"] = se_info
+        except Exception:
+            logger.debug("swedish_market enrichment failed", exc_info=True)
+
         return jsonify(result)
     except Exception:
         logger.exception("mstr endpoint error")
@@ -2010,6 +2036,45 @@ def api_system_status():
         _SYSTEM_STATUS_CACHE["value"] = payload
         _SYSTEM_STATUS_CACHE["at"] = time.monotonic()
         return jsonify(payload)
+
+
+@app.route("/api/claude_cost")
+@require_auth
+def api_claude_cost():
+    """Claude CLI cost + token rollup over the last N days.
+
+    Wraps ``scripts/claude_cost_report.collect`` + ``summarise``. Reads
+    ``data/claude_invocations.jsonl`` (gate rows with usage envelope) and
+    ``data/invocations.jsonl`` (Layer 2 wrapper rows, no tokens). Returns
+    the same shape as ``scripts/claude_cost_report.py --json``.
+
+    Query params:
+      - days (int, default 7, max 90)
+    """
+    import sys as _sys
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    if repo_root not in _sys.path:
+        _sys.path.insert(0, repo_root)
+    try:
+        from scripts import claude_cost_report as _ccr
+    except Exception:
+        logger.exception("claude_cost_report import failed")
+        return jsonify({"error": "import_failed"}), 500
+
+    try:
+        days = int(request.args.get("days", "7"))
+    except (TypeError, ValueError):
+        days = 7
+    days = max(1, min(days, 90))
+
+    try:
+        bundle = _ccr.collect(days)
+        summary = _ccr.summarise(bundle)
+        summary["days"] = days
+        return jsonify(summary)
+    except Exception:
+        logger.exception("claude_cost endpoint error")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/api/trading_status")

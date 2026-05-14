@@ -509,6 +509,12 @@ def _layer2_24h(dd: Path) -> dict[str, Any]:
             "success_pct": None,
             "latest": None,
             "spark_24h": [0] * 24,
+            "cost_usd_24h": 0.0,
+            "input_tokens_24h": 0,
+            "output_tokens_24h": 0,
+            "cache_read_tokens_24h": 0,
+            "cache_creation_tokens_24h": 0,
+            "parsed_24h": 0,
             "error": f"invocations load: {type(e).__name__}: {e}",
         }
     try:
@@ -533,6 +539,28 @@ def _layer2_24h(dd: Path) -> dict[str, Any]:
         pct = round(100.0 * success / len(triggers), 1) if triggers else None
         latest_entry = triggers[-1][1] if triggers else None
 
+        # Cost + token rollup. Only parse_ok rows have meaningful numbers;
+        # rows without ``cost_usd`` contribute nothing. Mirrors the logic in
+        # scripts/claude_cost_report.summarise so dashboard and CLI agree.
+        cost_usd = 0.0
+        input_tokens = 0
+        output_tokens = 0
+        cache_read_tokens = 0
+        cache_creation_tokens = 0
+        parsed = 0
+        for _, e in triggers:
+            if not e.get("parse_ok"):
+                continue
+            parsed += 1
+            try:
+                cost_usd += float(e.get("cost_usd") or 0)
+                input_tokens += int(e.get("input_tokens") or 0)
+                output_tokens += int(e.get("output_tokens") or 0)
+                cache_read_tokens += int(e.get("cache_read_tokens") or 0)
+                cache_creation_tokens += int(e.get("cache_creation_tokens") or 0)
+            except (TypeError, ValueError):
+                continue
+
         now = datetime.now(UTC)
         buckets = [0] * 24
         for ts, _ in triggers:
@@ -556,6 +584,12 @@ def _layer2_24h(dd: Path) -> dict[str, Any]:
             "success_pct": pct,
             "latest": latest_payload,
             "spark_24h": buckets,
+            "cost_usd_24h": round(cost_usd, 4),
+            "input_tokens_24h": input_tokens,
+            "output_tokens_24h": output_tokens,
+            "cache_read_tokens_24h": cache_read_tokens,
+            "cache_creation_tokens_24h": cache_creation_tokens,
+            "parsed_24h": parsed,
         }
     except Exception as e:
         return {
@@ -564,6 +598,12 @@ def _layer2_24h(dd: Path) -> dict[str, Any]:
             "success_pct": None,
             "latest": None,
             "spark_24h": [0] * 24,
+            "cost_usd_24h": 0.0,
+            "input_tokens_24h": 0,
+            "output_tokens_24h": 0,
+            "cache_read_tokens_24h": 0,
+            "cache_creation_tokens_24h": 0,
+            "parsed_24h": 0,
             "error": f"layer2 aggregate: {type(e).__name__}: {e}",
         }
 

@@ -26,12 +26,15 @@ export const view = {
 
     _unsubs.push(state.subscribe(state.Slots.HEALTH, _renderBody));
     _unsubs.push(state.subscribe(state.Slots.LOOP_HEALTH, _renderBody));
+    _unsubs.push(state.subscribe(state.Slots.SYSTEM_STATUS, _renderBody));
 
     polling.register(POLL_KEY, 60_000, async () => {
       const h = await fj("/api/health");
       if (h) state.set(state.Slots.HEALTH, h);
       const lh = await fj("/api/loop_health");
       if (lh) state.set(state.Slots.LOOP_HEALTH, lh);
+      const ss = await fj("/api/system_status");
+      if (ss) state.set(state.Slots.SYSTEM_STATUS, ss);
     });
   },
   unmount() {
@@ -76,6 +79,21 @@ function _renderBody() {
     }
     if (Array.isArray(h.recent_errors) && h.recent_errors.length) {
       slot.append(_section("Recent errors", _errorList(h.recent_errors)));
+    }
+  }
+
+  // Unresolved critical_errors + contract_violations (mirrors home page widget tally).
+  const ss = state.get(state.Slots.SYSTEM_STATUS);
+  if (ss) {
+    const errs = ss.errors || {};
+    const cvs = ss.contract_violations || {};
+    const errRecent = Array.isArray(errs.recent) ? errs.recent : [];
+    const cvRecent = Array.isArray(cvs.recent) ? cvs.recent : [];
+    if (errRecent.length || cvRecent.length) {
+      slot.append(_section(
+        `Unresolved (${errs.unresolved ?? 0} err · ${cvs.unresolved ?? 0} cv, 24h)`,
+        _unresolvedList(errRecent, cvRecent),
+      ));
     }
   }
 
@@ -171,6 +189,57 @@ function _errorList(items) {
     msg.style.marginTop = "2px";
     msg.style.color = "var(--tx)";
     msg.textContent = item?.message || item?.msg || JSON.stringify(item);
+    row.append(top, msg);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function _unresolvedList(errs, cvs) {
+  const items = [];
+  for (const e of errs) {
+    items.push({
+      kind: "err",
+      ts: e.ts || e.timestamp || "",
+      label: e.category || e.caller || "error",
+      msg: e.message || e.msg || "",
+    });
+  }
+  for (const v of cvs) {
+    items.push({
+      kind: "cv",
+      ts: v.ts || v.timestamp || "",
+      label: v.invariant || "violation",
+      msg: v.message || v.msg || "",
+    });
+  }
+  items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+
+  const wrap = document.createElement("div");
+  wrap.style.background = "var(--card)";
+  wrap.style.border = "1px solid var(--bdr)";
+  wrap.style.borderRadius = "var(--rad-md)";
+  for (const it of items.slice(0, 30)) {
+    const row = document.createElement("div");
+    row.style.padding = "var(--sp-2) var(--sp-3)";
+    row.style.borderBottom = "1px solid var(--bdr)";
+    const top = document.createElement("div");
+    top.style.display = "flex";
+    top.style.justifyContent = "space-between";
+    top.style.fontSize = "var(--ty-xs)";
+    const left = document.createElement("span");
+    left.style.color = it.kind === "cv" ? "var(--yel)" : "var(--red)";
+    left.style.fontWeight = "600";
+    left.textContent = it.label;
+    const right = document.createElement("span");
+    right.style.color = "var(--txm)";
+    right.textContent = ftFull(it.ts);
+    top.append(left, right);
+    const msg = document.createElement("div");
+    msg.style.fontSize = "var(--ty-sm)";
+    msg.style.marginTop = "2px";
+    msg.style.color = "var(--tx)";
+    msg.textContent = it.msg;
     row.append(top, msg);
     wrap.append(row);
   }

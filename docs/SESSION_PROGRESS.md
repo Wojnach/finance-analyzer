@@ -1,44 +1,43 @@
 # Session Progress
 
-## Auto-improvement session (2026-05-14)
-
-**Status:** SHIPPED — merged to main, pushed.
-
-**Scope:** Deep exploration + 3 batches of validated fixes.
-
-### Methodology
-- Deployed 4 parallel exploration agents (signals, infra, dashboard, trading)
-- Agents reported ~80 findings; manual validation rejected ~60% as false positives
-- Common false positive patterns: misreading control flow, hallucinated line numbers,
-  flagging intentional design choices (e.g., Easter algorithm, atexit registration)
-
-### Bugs Fixed
-1. **risk_management.py**: price_usd=0 no longer zeros positions (falls through to avg_cost)
-2. **avanza_orders.py**: Expired orders now checked before confirmation matching
-3. **dashboard/app.py**: metals-accuracy endpoint returns 404 on empty data
-4. **signal_engine.py**: Persistence filter condition clarified (`min_cycles <= 1`)
-5. **signal_engine.py**: ADX cache eviction comment corrected (was "LRU", is FIFO)
-6. **risk_management.py**: Concentration risk logging improved for zero-price edge case
-
-### Tests Added (15 total)
-- 3 tests: _compute_portfolio_value with price_usd=0/None/missing
-- 3 tests: check_concentration_risk (basic, high, zero)
-- 5 tests: compute_all_risk_flags end-to-end
-- 1 test: expired-but-confirmed order scenario
-- 3 tests: existing fixtures validated by new code paths
-
-### Next Session
-- Address phantom voter problem (signals at HOLD 100% shouldn't count for MIN_VOTERS)
-- claude_fundamental re-enable with stricter bias detection
-- Regime-adaptive signal subsets (design session needed)
-
----
-
 ## After-hours research session (2026-05-13 evening)
 
 **Status:** SHIPPED — merged to main, pushed.
 
 **Scope:** Daily research (Phases 0-8) + signal audit + 2 signal disables.
+
+### Research Findings
+- 28 Layer 2 invocations today, ALL HOLD. System showed correct restraint.
+- PPI surged 6% YoY (Iran war). Trump-Xi summit May 14-15. Rate cuts killed.
+- XAG $89 trending-up, BTC $80K trending-down, gold $4,690 ranging.
+- 12 signals dropped >15pp accuracy (critical error logged).
+
+### Signal Audit Results
+- **funding** at 30.8% (743 sam) — DISABLED. BUY-only, all wrong.
+- **macro_regime** at 47.0% (29,626 sam) — DISABLED. BUY acc 41.3%, biggest XAG noise source.
+- Verified news_event BUY directional gate working (20.5% < 40% threshold).
+- Phantom voter problem identified: 13/22 "enabled" signals output HOLD 100% on XAG.
+- claude_fundamental (57.9%) left disabled: LLM BUY bias root cause unfixed.
+- IC-weighted voting, per-ticker gating, directional gates all confirmed working.
+
+### Code Changes
+1. `portfolio/tickers.py`: Added funding + macro_regime to DISABLED_SIGNALS
+2. `tests/test_signal_engine.py`: Updated funding test to expect disabled state
+
+### Deliverables Written
+- `data/daily_research_review.json` — Phase 0 system review
+- `data/daily_research_macro.json` — Phase 1 macro research
+- `data/daily_research_quant.json` — Phase 2 quant research
+- `data/daily_research_ticker_deep_dive.json` — XAG-USD + BTC-USD deep dives
+- `data/daily_research_signal_audit.json` — Phase 3 signal audit
+- `data/morning_briefing.json` — Phase 8 morning briefing
+- `docs/RESEARCH_PLAN.md` — Updated implementation plan
+
+### Next Session
+- Address phantom voter problem (signals at HOLD 100% shouldn't count for MIN_VOTERS)
+- Evaluate claude_fundamental re-enable with stricter bias detection
+- Consider horizon-optimized signal weights (XAG better at 3d than 1d)
+- Regime-adaptive signal subsets (needs dedicated design session)
 
 ---
 
@@ -3841,3 +3840,40 @@ that were already fixed by commits 0caa73eb + 0d457368 but had no resolution jou
 
 **Cleanup:** worktree `Q:/fa-adv-2026-05-11` and the eight `review/baseline-*` branches
 removed after the synthesis was committed and pushed.
+
+### 2026-05-13 13:49 UTC | fix/grid-fisher-buying-power
+dffb62f3 fix(grid_fisher): consult live Avanza buying power before placement
+data/metals_loop.py
+portfolio/grid_fisher.py
+portfolio/grid_fisher_config.py
+tests/test_grid_fisher_budget.py
+
+### 2026-05-13 17:58 UTC | main
+89aa6f68 feat(cost-tracking): log Claude CLI tokens+cost, close bypass sites, disable failing self-heal
+data/metals_loop.py
+portfolio/bigbet.py
+portfolio/claude_gate.py
+portfolio/iskbets.py
+portfolio/loop_contract.py
+portfolio/signals/claude_fundamental.py
+scripts/claude_cost_report.py
+tests/test_bigbet.py
+tests/test_claude_auth_detection.py
+tests/test_iskbets.py
+tests/test_signals_claude_fundamental.py
+
+### 2026-05-13 19:07 UTC | fix/semgrep-findings
+da8a3784 fix(security): address semgrep findings — HTTPS, requests, SHA-256
+data/metals_shared.py
+portfolio/loop_contract.py
+portfolio/social_sentiment.py
+tests/test_dashboard_system_status.py
+tests/test_loop_contract_accuracy_dispatcher.py
+tests/test_loop_contract_alert_cooldown.py
+
+### 2026-05-13 19:08 UTC | main
+aec5ad19 fix(layer2): stdin=DEVNULL on agent Popen + auth-error cooldown gate
+portfolio/agent_invocation.py
+tests/test_agent_invocation.py
+tests/test_agent_timeout_enforcement.py
+tests/test_auth_failure_bypass.py

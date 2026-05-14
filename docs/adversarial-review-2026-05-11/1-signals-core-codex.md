@@ -10447,3 +10447,68 @@ js_repl in Q:\fa-adv-2026-05-11
 1396:             ratio = max(_DYNAMIC_HORIZON_CLAMP_LOW, min(_DYNAMIC_HORIZON_CLAMP_HIGH, ratio))
 1398:             if abs(ratio - 1.0) > _DYNAMIC_HORIZON_DEADBAND:
 1421:     weights = _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL,
+codex
+# Codex adversarial review: signals-core
+## Summary
+The consensus path has a lot of defensive code, but the data/label pipeline still has blocker-class defects. The biggest problems are silent source-of-truth divergence, horizon-misaligned outcome labels, and a forecast backfill that can truncate its own dataset; those invalidate downstream accuracy, IC, and gating decisions.
+
+## P0 — Blockers (production breakage / data loss / silent wrong trades)
+- `portfolio/forecast_accuracy.py:322` — `backfill_forecast_outcomes()` breaks once `updated >= max_entries`, then `_write_predictions(modified_entries, path)` overwrites the whole JSONL with only the processed prefix. Why it bites: the default `max_entries=500` can silently delete every later prediction row on the first sizeable backfill. Fix: keep the full list for persistence and only limit the subset you mutate.
+- `portfolio/outcome_tracker.py:214` — `_fetch_historical_price()` labels outcomes with future prices. Why it bites: the Binance branches ask 1h klines with `startTime=target_ts`, which rounds non-hour-aligned targets up to the next candle, and the YF branch at line 262 falls back to target-date daily closes; both inject look-ahead / off-by-hours error into the ground truth feeding every accuracy metric. Fix: fetch intraday bars and take the last price at or before `target_ts`, never the next candle or end-of-day close.
+- `portfolio/accuracy_stats.py:146` — `load_entries()` prefers SQLite whenever it has any rows, even though `portfolio/outcome_tracker.py:165` explicitly tolerates SQLite write failures and `portfolio/signal_db.py:163` silently refuses outcome updates for missing snapshot rows. Why it bites: one dual-write failure can leave JSONL advancing while accuracy/IC/regime logic reads a permanently stale SQLite subset. Fix: compare DB `max(ts)` to the JSONL tail or maintain a dual-write health marker and fall back/reconcile when SQLite lags.
+
+## P1 — High (will cause incidents)
+- `portfolio/signal_engine.py:1817` — `_count_active_voters_at_gate()` drops every signal below the overall gate, but `_weighted_consensus()` later rescues some of those votes via strong directional accuracy at lines 2477-2495. Why it bites: the circuit breaker undercounts baseline voters, over-relaxes the gate, and can admit extra weak signals that were never needed to meet quorum. Fix: mirror the directional-rescue logic inside the gate-count helper.
+- `portfolio/ticker_accuracy.py:124` — probability mode only requires 5 samples and then turns a weak SELL signal into `p_up = 1 - accuracy` at lines 130-135. Why it bites: sub-47% signals become contrarian probability boosters instead of being force-HOLD, violating the “never invert sub-50% signals” rule and corrupting Mode B sizing/alerts. Fix: enforce the same 47%/30-sample hold gate before probability aggregation and drop ungated signals entirely.
+- `portfolio/accuracy_stats.py:1923` — `ticker_signal_accuracy_cache.json` uses one shared `time` key for every horizon. Why it bites: a fresh 1d write at line 1942 makes stale 3h/4h data look fresh, and `portfolio/signal_engine.py:3705` then uses that stale horizon data for per-ticker regime exemptions. Fix: store per-horizon timestamps the same way `accuracy_cache.json` already does.
+
+## P2 — Medium (correctness / robustness)
+- `portfolio/signal_engine.py:3978` — when `signals.use_best_horizon` is enabled, live `accuracy_data` gets overwritten with whichever historical horizon scored best in `signal_best_horizon_accuracy()`. Why it bites: this mixes horizons and uses an in-sample winner to override the current horizon’s gate/weights, which is classic look-ahead bias. Fix: keep best-horizon analysis offline only; live gating must stay horizon-local.
+- `portfolio/signal_engine.py:947` — `MIN_VOTERS_METALS = 2` is wired into the primary consensus gates at lines 3802-3806 and 4037. Why it bites: it violates the stated `MIN_VOTERS = 3` invariant at the base decision layer; Stage 4 only masks it if confidence penalties stay enabled. Fix: restore the floor to 3 and address metals sparsity with signal selection, not quorum drift.
+- `portfolio/signal_engine.py:1351` — `_compute_dynamic_horizon_weights()` reads `accuracy_cache.json` directly and never checks the per-horizon TTLs. Why it bites: expired cache files can keep driving live horizon multipliers until some other path rewrites them. Fix: source those numbers through `load_cached_accuracy()` / get-or-compute helpers and reject expired data.
+
+## P3 — Low (style / dead code / minor)
+- `portfolio/signal_decay_alert.py:27` — decay checks still use relative `"data/..."` paths with raw `open`/`json.load`, and line 146 appends to another relative path. Why it bites: under a non-repo CWD the job reads/writes the wrong files or returns `[]`, and it violates the project’s atomic-I/O rule. Fix: use absolute `DATA_DIR` paths plus `load_json` / `atomic_append_jsonl`.
+
+## Tests missing
+- `portfolio/forecast_accuracy.py:254` — no test that `backfill_forecast_outcomes(max_entries < len(file))` preserves untouched tail rows.
+- `portfolio/outcome_tracker.py:211` — no test that outcome backfill uses the last price at or before `target_ts` for non-hour-aligned crypto snapshots and intraday stock horizons.
+- `portfolio/accuracy_stats.py:144` — no test that `load_entries()` falls back from SQLite when dual-write misses the latest snapshot.
+- `portfolio/signal_engine.py:1779` — no test that circuit-breaker voter counts include directionally rescued votes before relaxing the gate.
+- `portfolio/ticker_accuracy.py:85` — no test enforcing the 47% / 30-sample HOLD rule in probability mode.
+- `portfolio/accuracy_stats.py:1914` — no test that ticker-accuracy cache expiry is tracked independently per horizon.
+- `portfolio/signal_engine.py:3978` — no test preventing cross-horizon “best horizon” data from overriding live current-horizon gating.
+- `portfolio/signal_decay_alert.py:27` — no test that decay checks work under a non-repo working directory and only use atomic JSON helpers.
+tokens used
+246,901
+# Codex adversarial review: signals-core
+## Summary
+The consensus path has a lot of defensive code, but the data/label pipeline still has blocker-class defects. The biggest problems are silent source-of-truth divergence, horizon-misaligned outcome labels, and a forecast backfill that can truncate its own dataset; those invalidate downstream accuracy, IC, and gating decisions.
+
+## P0 — Blockers (production breakage / data loss / silent wrong trades)
+- `portfolio/forecast_accuracy.py:322` — `backfill_forecast_outcomes()` breaks once `updated >= max_entries`, then `_write_predictions(modified_entries, path)` overwrites the whole JSONL with only the processed prefix. Why it bites: the default `max_entries=500` can silently delete every later prediction row on the first sizeable backfill. Fix: keep the full list for persistence and only limit the subset you mutate.
+- `portfolio/outcome_tracker.py:214` — `_fetch_historical_price()` labels outcomes with future prices. Why it bites: the Binance branches ask 1h klines with `startTime=target_ts`, which rounds non-hour-aligned targets up to the next candle, and the YF branch at line 262 falls back to target-date daily closes; both inject look-ahead / off-by-hours error into the ground truth feeding every accuracy metric. Fix: fetch intraday bars and take the last price at or before `target_ts`, never the next candle or end-of-day close.
+- `portfolio/accuracy_stats.py:146` — `load_entries()` prefers SQLite whenever it has any rows, even though `portfolio/outcome_tracker.py:165` explicitly tolerates SQLite write failures and `portfolio/signal_db.py:163` silently refuses outcome updates for missing snapshot rows. Why it bites: one dual-write failure can leave JSONL advancing while accuracy/IC/regime logic reads a permanently stale SQLite subset. Fix: compare DB `max(ts)` to the JSONL tail or maintain a dual-write health marker and fall back/reconcile when SQLite lags.
+
+## P1 — High (will cause incidents)
+- `portfolio/signal_engine.py:1817` — `_count_active_voters_at_gate()` drops every signal below the overall gate, but `_weighted_consensus()` later rescues some of those votes via strong directional accuracy at lines 2477-2495. Why it bites: the circuit breaker undercounts baseline voters, over-relaxes the gate, and can admit extra weak signals that were never needed to meet quorum. Fix: mirror the directional-rescue logic inside the gate-count helper.
+- `portfolio/ticker_accuracy.py:124` — probability mode only requires 5 samples and then turns a weak SELL signal into `p_up = 1 - accuracy` at lines 130-135. Why it bites: sub-47% signals become contrarian probability boosters instead of being force-HOLD, violating the “never invert sub-50% signals” rule and corrupting Mode B sizing/alerts. Fix: enforce the same 47%/30-sample hold gate before probability aggregation and drop ungated signals entirely.
+- `portfolio/accuracy_stats.py:1923` — `ticker_signal_accuracy_cache.json` uses one shared `time` key for every horizon. Why it bites: a fresh 1d write at line 1942 makes stale 3h/4h data look fresh, and `portfolio/signal_engine.py:3705` then uses that stale horizon data for per-ticker regime exemptions. Fix: store per-horizon timestamps the same way `accuracy_cache.json` already does.
+
+## P2 — Medium (correctness / robustness)
+- `portfolio/signal_engine.py:3978` — when `signals.use_best_horizon` is enabled, live `accuracy_data` gets overwritten with whichever historical horizon scored best in `signal_best_horizon_accuracy()`. Why it bites: this mixes horizons and uses an in-sample winner to override the current horizon’s gate/weights, which is classic look-ahead bias. Fix: keep best-horizon analysis offline only; live gating must stay horizon-local.
+- `portfolio/signal_engine.py:947` — `MIN_VOTERS_METALS = 2` is wired into the primary consensus gates at lines 3802-3806 and 4037. Why it bites: it violates the stated `MIN_VOTERS = 3` invariant at the base decision layer; Stage 4 only masks it if confidence penalties stay enabled. Fix: restore the floor to 3 and address metals sparsity with signal selection, not quorum drift.
+- `portfolio/signal_engine.py:1351` — `_compute_dynamic_horizon_weights()` reads `accuracy_cache.json` directly and never checks the per-horizon TTLs. Why it bites: expired cache files can keep driving live horizon multipliers until some other path rewrites them. Fix: source those numbers through `load_cached_accuracy()` / get-or-compute helpers and reject expired data.
+
+## P3 — Low (style / dead code / minor)
+- `portfolio/signal_decay_alert.py:27` — decay checks still use relative `"data/..."` paths with raw `open`/`json.load`, and line 146 appends to another relative path. Why it bites: under a non-repo CWD the job reads/writes the wrong files or returns `[]`, and it violates the project’s atomic-I/O rule. Fix: use absolute `DATA_DIR` paths plus `load_json` / `atomic_append_jsonl`.
+
+## Tests missing
+- `portfolio/forecast_accuracy.py:254` — no test that `backfill_forecast_outcomes(max_entries < len(file))` preserves untouched tail rows.
+- `portfolio/outcome_tracker.py:211` — no test that outcome backfill uses the last price at or before `target_ts` for non-hour-aligned crypto snapshots and intraday stock horizons.
+- `portfolio/accuracy_stats.py:144` — no test that `load_entries()` falls back from SQLite when dual-write misses the latest snapshot.
+- `portfolio/signal_engine.py:1779` — no test that circuit-breaker voter counts include directionally rescued votes before relaxing the gate.
+- `portfolio/ticker_accuracy.py:85` — no test enforcing the 47% / 30-sample HOLD rule in probability mode.
+- `portfolio/accuracy_stats.py:1914` — no test that ticker-accuracy cache expiry is tracked independently per horizon.
+- `portfolio/signal_engine.py:3978` — no test preventing cross-horizon “best horizon” data from overriding live current-horizon gating.
+- `portfolio/signal_decay_alert.py:27` — no test that decay checks work under a non-repo working directory and only use atomic JSON helpers.

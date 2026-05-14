@@ -9993,3 +9993,60 @@ exec
   ✓ Inspect in-scope files and map data-external call paths
   ✓ Validate adversarial focus areas against concrete code and line numbers
   → Draft severity-ordered review with missing-test gaps
+codex
+# Codex adversarial review: data-external
+## Summary
+- I found 6 concrete issues.
+- The highest-risk defect is in `price_source`: on primary-source failure it can silently switch the underlying instrument while preserving the same OHLCV interface.
+- I did not find evidence of the suspected funding-rate sign inversion, `news_keywords` regex injection, or live Binance `10m` interval use in the current code.
+
+## P0 — Blockers
+- `price_source.fetch_klines()` silently changes instruments on failover. `resolve_source()` routes `GC=F`/`SI=F` to Binance perps (`XAUUSDT`/`XAGUSDT`), but the exception path always falls back to `_fetch_yfinance(ticker, ...)` with the original alias and never checks `is_yfinance_allowed()`. The same call can therefore return Binance perps on a healthy cycle and Yahoo front-month futures / spot proxies on an outage cycle, with no source marker in the returned DataFrame. This is an active path: `metals_cross_assets` calls `GC=F` and `SI=F` for daily and intraday ratio features. `price_source.py:41-45, 168-185, 214-255`; `metals_cross_assets.py:55-60, 139-140, 243-244`.
+
+## P1 — High
+- `econ_dates` hard-codes every macro release to `14:00 UTC`, even though the file comments already document CPI/NFP as `08:30 AM ET`. All four helpers reuse that same timestamp (`next_event`, `events_within_hours`, `recent_high_impact_events`, `is_macro_window`), so blackout/gating windows are off by hours and shift incorrectly across US DST. That is large enough to miss or prematurely trigger FOMC/CPI/NFP protection. `econ_dates.py:20, 54, 154-156, 180-181, 224-225, 272-280`.
+- `fx_rates.fetch_usd_sek()` has no max-age cutoff before reusing stale data. Anything fresher than 15 minutes is returned immediately; after that, a failed refresh falls back to any cached rate indefinitely, and after 2 hours it only logs/alerts. If there is no cache, it returns the hardcoded `10.50`. For a valuation input used broadly, that means stale FX can survive for days if the process stays up during an upstream outage. `fx_rates.py:31-34, 56-71`.
+
+## P2 — Medium
+- Quota accounting is not request-accurate. `sentiment._fetch_newsapi_with_tracking()` only increments the daily counter when articles are returned, but NewsAPI charges per request, not per non-empty result. On quiet metals days, the local counter can stay artificially low and keep issuing calls. Alpha Vantage has the same class of problem: the budget is process-local and only increments on successful overview normalization, while the earnings path explicitly bypasses it. Current AV blast radius is limited because `STOCK_SYMBOLS` is only `MSTR`. `sentiment.py:184-194`; `alpha_vantage.py:31-32, 49-55, 157-168, 279-281`; `earnings_calendar.py:48-53`; `tickers.py:33`.
+- `social_sentiment` bypasses `http_retry.py` entirely. Both Reddit fetch paths use raw `urllib.request.urlopen(...)` with no shared retry/backoff policy, no rate-limit coordination, and no cache. Under 429s or transient network faults, the social sentiment leg fails outside the subsystem’s retry contract. `social_sentiment.py:29-34, 59-67, 102-122`.
+
+## P3 — Low
+- Microstructure “persistence” only writes the current derived snapshot, not the rolling buffers that OFI z-score and multiscale OFI actually depend on. After any restart, `_snapshot_buffers`, `_spread_buffers`, and `_ofi_history` are empty again, so `get_ofi_zscore()` stays `0.0` until 10 fresh observations and multiscale OFI warms up from scratch. Current trading impact is muted because `orderbook_flow` is disabled. `microstructure_state.py:40-42, 103-124, 127-158, 205-229`; `tickers.py:126`.
+
+## Tests missing
+- A failover identity test for `fetch_klines("GC=F")`, `fetch_klines("SI=F")`, and `fetch_klines("XAG-USD")` that asserts the fallback cannot silently change the underlying instrument.
+- DST-aware macro-calendar tests that pin FOMC vs CPI/NFP UTC timestamps across EST/EDT boundaries.
+- An FX staleness test that refuses cached USD/SEK beyond a hard max age and exercises the hardcoded fallback path explicitly.
+- Quota-accounting tests for empty NewsAPI responses, Alpha Vantage restart behavior, and shared earnings/fundamentals daily-budget consumption.
+- A social-sentiment transport test that proves Reddit fetches go through the shared retry layer.
+- A microstructure restart test that persists and restores rolling OFI/spread history rather than only the latest summary.
+tokens used
+253,336
+# Codex adversarial review: data-external
+## Summary
+- I found 6 concrete issues.
+- The highest-risk defect is in `price_source`: on primary-source failure it can silently switch the underlying instrument while preserving the same OHLCV interface.
+- I did not find evidence of the suspected funding-rate sign inversion, `news_keywords` regex injection, or live Binance `10m` interval use in the current code.
+
+## P0 — Blockers
+- `price_source.fetch_klines()` silently changes instruments on failover. `resolve_source()` routes `GC=F`/`SI=F` to Binance perps (`XAUUSDT`/`XAGUSDT`), but the exception path always falls back to `_fetch_yfinance(ticker, ...)` with the original alias and never checks `is_yfinance_allowed()`. The same call can therefore return Binance perps on a healthy cycle and Yahoo front-month futures / spot proxies on an outage cycle, with no source marker in the returned DataFrame. This is an active path: `metals_cross_assets` calls `GC=F` and `SI=F` for daily and intraday ratio features. `price_source.py:41-45, 168-185, 214-255`; `metals_cross_assets.py:55-60, 139-140, 243-244`.
+
+## P1 — High
+- `econ_dates` hard-codes every macro release to `14:00 UTC`, even though the file comments already document CPI/NFP as `08:30 AM ET`. All four helpers reuse that same timestamp (`next_event`, `events_within_hours`, `recent_high_impact_events`, `is_macro_window`), so blackout/gating windows are off by hours and shift incorrectly across US DST. That is large enough to miss or prematurely trigger FOMC/CPI/NFP protection. `econ_dates.py:20, 54, 154-156, 180-181, 224-225, 272-280`.
+- `fx_rates.fetch_usd_sek()` has no max-age cutoff before reusing stale data. Anything fresher than 15 minutes is returned immediately; after that, a failed refresh falls back to any cached rate indefinitely, and after 2 hours it only logs/alerts. If there is no cache, it returns the hardcoded `10.50`. For a valuation input used broadly, that means stale FX can survive for days if the process stays up during an upstream outage. `fx_rates.py:31-34, 56-71`.
+
+## P2 — Medium
+- Quota accounting is not request-accurate. `sentiment._fetch_newsapi_with_tracking()` only increments the daily counter when articles are returned, but NewsAPI charges per request, not per non-empty result. On quiet metals days, the local counter can stay artificially low and keep issuing calls. Alpha Vantage has the same class of problem: the budget is process-local and only increments on successful overview normalization, while the earnings path explicitly bypasses it. Current AV blast radius is limited because `STOCK_SYMBOLS` is only `MSTR`. `sentiment.py:184-194`; `alpha_vantage.py:31-32, 49-55, 157-168, 279-281`; `earnings_calendar.py:48-53`; `tickers.py:33`.
+- `social_sentiment` bypasses `http_retry.py` entirely. Both Reddit fetch paths use raw `urllib.request.urlopen(...)` with no shared retry/backoff policy, no rate-limit coordination, and no cache. Under 429s or transient network faults, the social sentiment leg fails outside the subsystem’s retry contract. `social_sentiment.py:29-34, 59-67, 102-122`.
+
+## P3 — Low
+- Microstructure “persistence” only writes the current derived snapshot, not the rolling buffers that OFI z-score and multiscale OFI actually depend on. After any restart, `_snapshot_buffers`, `_spread_buffers`, and `_ofi_history` are empty again, so `get_ofi_zscore()` stays `0.0` until 10 fresh observations and multiscale OFI warms up from scratch. Current trading impact is muted because `orderbook_flow` is disabled. `microstructure_state.py:40-42, 103-124, 127-158, 205-229`; `tickers.py:126`.
+
+## Tests missing
+- A failover identity test for `fetch_klines("GC=F")`, `fetch_klines("SI=F")`, and `fetch_klines("XAG-USD")` that asserts the fallback cannot silently change the underlying instrument.
+- DST-aware macro-calendar tests that pin FOMC vs CPI/NFP UTC timestamps across EST/EDT boundaries.
+- An FX staleness test that refuses cached USD/SEK beyond a hard max age and exercises the hardcoded fallback path explicitly.
+- Quota-accounting tests for empty NewsAPI responses, Alpha Vantage restart behavior, and shared earnings/fundamentals daily-budget consumption.
+- A social-sentiment transport test that proves Reddit fetches go through the shared retry layer.
+- A microstructure restart test that persists and restores rolling OFI/spread history rather than only the latest summary.

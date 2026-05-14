@@ -95,6 +95,7 @@ export const Slots = Object.freeze({
   MARKET_HEALTH:    "marketHealth",
   SYSTEM_STATUS:    "systemStatus",
   TRADING_STATUS:   "tradingStatus",
+  CLAUDE_COST:      "claudeCost",
 
   // UI state
   ROUTE:            "ui.route",

@@ -50,6 +50,21 @@ export function layer2ActivityCard(layer2Payload) {
 
   card.append(_sparkBars(layer2Payload?.spark_24h));
 
+  const cost = layer2Payload?.cost_usd_24h;
+  const inTok = layer2Payload?.input_tokens_24h;
+  const outTok = layer2Payload?.output_tokens_24h;
+  const cacheRead = layer2Payload?.cache_read_tokens_24h;
+  if (Number.isFinite(cost) || Number.isFinite(inTok) || Number.isFinite(outTok)) {
+    const costRow = document.createElement("div");
+    costRow.style.marginTop = "var(--sp-2)";
+    costRow.style.fontSize = "var(--ty-sm)";
+    costRow.style.color = "var(--tx)";
+    const totalTok = (Number(inTok) || 0) + (Number(outTok) || 0);
+    const cachePart = Number(cacheRead) > 0 ? ` · cache ${_fmtTok(cacheRead)}` : "";
+    costRow.textContent = `$${(cost || 0).toFixed(2)} · ${_fmtTok(totalTok)} tok${cachePart}`;
+    card.append(costRow);
+  }
+
   const latest = layer2Payload?.latest;
   if (latest) {
     const summary = document.createElement("div");
@@ -90,6 +105,13 @@ function _sparkBars(values) {
     wrap.append(bar);
   }
   return wrap;
+}
+
+function _fmtTok(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
 }
 
 function _colorForPct(pct, triggers) {

@@ -15679,3 +15679,72 @@ exec
 606-            )
 [31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
 
+codex
+# Codex adversarial review: infrastructure
+## Summary
+I found 2 auth blockers and 5 high-severity reliability defects across JSONL rewriting, dispatcher backoff durability, subprocess orphan handling, shadow-registry concurrency, and the 7-day critical-error startup check. Cookie `Secure`/`HttpOnly` flags are correct, and I did not find a stale `process_lock.py` lock bug, a PF-FixAgentDispatcher tool-allowlist drift, or a user-derived shell-injection path.
+
+## P0 — Blockers
+- `dashboard/auth.py:60-67, 81-83, 121-123` fails open. If `config.json` is unreadable, malformed, or a broken/permission-denied symlink target, `_read_config_uncached()` returns `{}`, `_get_dashboard_token()` returns `None`, and `require_auth()` grants access to everyone.
+- `dashboard/auth.py:132-145, 90-99` trusts the mere presence of `Cf-Access-Authenticated-User-Email` and `Cf-Access-Jwt-Assertion`, never validates the JWT, and then issues a 1-year cookie containing the shared `dashboard_token`. Because `dashboard/app.py:2080-2084` binds the server on all interfaces, any client that can reach port `5055` can spoof those headers and mint a replayable dashboard cookie.
+
+## P1 — High
+- `portfolio/file_utils.py:222-227` says all target-file mutations must stay inside `jsonl_sidecar_lock`, but `atomic_write_jsonl()` at `287-305` and `prune_jsonl()` at `349-391` rewrite JSONL without that lock. A concurrent `atomic_append_jsonl()` writer can still lose rows during rewrite, so the append-vs-rotation race is still reproducible through sibling helpers.
+- `scripts/fix_agent_dispatcher.py:364-443` only persists cooldown/backoff state once, after the whole category loop. If the task dies after handling an early category, that category’s updated `blocked_until` and `consecutive_failures` are lost and the next scheduler tick can respawn it immediately. `scripts/win/install-fix-agent-task.ps1:28-36` makes this realistic by capping runtime at 20 minutes while each agent attempt can run 15 minutes (`scripts/fix_agent_dispatcher.py:54-58`).
+- `scripts/check_critical_errors.py:31-35, 59-60, 81-83` mixes naive and aware datetimes. A naive `ts` parsed by `datetime.fromisoformat()` is compared against an aware UTC cutoff, which raises `TypeError` and kills the rolling 7-day startup check instead of surfacing unresolved critical errors.
+- `portfolio/subprocess_utils.py:129-133` and `168-176` start the child before `AssignProcessToJobObject()`. If the parent dies in that window, the child is never attached to the job and survives, violating the module’s orphan-kill guarantee for both `run_safe()` and `popen_in_job()`.
+- `portfolio/shadow_registry.py:93-104` and `118-126` do unlocked load-modify-write updates. Two producers adding/resolving different shadows concurrently will last-writer-wins each other’s changes; `atomic_write_json()` preserves file integrity, but not both updates.
+
+## P2 — Medium
+- The canonical I/O rule is still violated on live paths: `dashboard/app.py:898-914` (`/api/mstr_loop`), `dashboard/house_blueprint.py:107-109, 287-289, 386-389`, `scripts/check_critical_errors.py:38-50`, `scripts/fix_agent_dispatcher.py:80-92, 110-112`, and `portfolio/vector_memory.py:267-281` all use raw `open()/read_text()/json.load[s]()` instead of `file_utils`. That drops the codebase’s standard UTF-8/OSError/corruption handling and violates the explicit project rule.
+- `portfolio/vector_memory.py:41-54, 131-155, 242-245, 267-281` is unbounded on the hot path: the singleton ignores later `collection_name` values, every query rereads the entire journal, and every embed pass calls `collection.get()` to materialize the full existing ID set. As `layer2_journal.jsonl` grows, retrieval latency and memory use scale linearly.
+- `dashboard/export_static.py:12-20, 58-81, 105-113` still defaults to exporting authenticated API snapshots into `dashboard/static/api-data/`, which Flask serves without auth. The docstring correctly calls that a leak, but the default code path still recreates it.
+- `scripts/win/install-rc-server-task.ps1:12-14, 38-40`, `install-rc-keepalive-task.ps1:17-23`, `install-loop-resume-task.ps1:14-16`, and `install-rc-watchdog-task.ps1:12-14` bake `-ExecutionPolicy Bypass` into recurring task actions. `scripts/win/rc-watchdog.ps1:14`, `rc-keepalive.ps1:28`, and `rc-server-ensure.ps1:32` also hardcode a user-specific config path, making the ops surface policy-agnostic and host-specific.
+
+## P3 — Low
+- `dashboard/app.py:777-801` makes logout a GET that mutates auth state by clearing the cookie. I did not find data-mutating GET API endpoints, but `/logout` is still CSRFable and should be POST-only.
+
+## Tests missing
+- A dashboard auth test where `config.json` is unreadable/corrupt must assert fail-closed, not fail-open.
+- A dashboard auth test must prove spoofed `Cf-Access-*` headers do not bypass local auth or mint a `pf_dashboard_token` cookie.
+- `file_utils` needs a concurrent append-vs-`atomic_write_jsonl`/`prune_jsonl` test, not just append-vs-rotation.
+- `fix_agent_dispatcher` needs a crash/timeout persistence test that kills the run after the first category and verifies the next run still honors that category’s backoff.
+- `check_critical_errors` needs mixed naive/aware timestamp coverage on the rolling 7-day filter.
+- `subprocess_utils` needs a regression test or redesign that closes the pre-job-assignment orphan window.
+- `shadow_registry` needs concurrent writer coverage.
+- `vector_memory` needs per-collection isolation and bounded-growth coverage.
+tokens used
+241,696
+# Codex adversarial review: infrastructure
+## Summary
+I found 2 auth blockers and 5 high-severity reliability defects across JSONL rewriting, dispatcher backoff durability, subprocess orphan handling, shadow-registry concurrency, and the 7-day critical-error startup check. Cookie `Secure`/`HttpOnly` flags are correct, and I did not find a stale `process_lock.py` lock bug, a PF-FixAgentDispatcher tool-allowlist drift, or a user-derived shell-injection path.
+
+## P0 — Blockers
+- `dashboard/auth.py:60-67, 81-83, 121-123` fails open. If `config.json` is unreadable, malformed, or a broken/permission-denied symlink target, `_read_config_uncached()` returns `{}`, `_get_dashboard_token()` returns `None`, and `require_auth()` grants access to everyone.
+- `dashboard/auth.py:132-145, 90-99` trusts the mere presence of `Cf-Access-Authenticated-User-Email` and `Cf-Access-Jwt-Assertion`, never validates the JWT, and then issues a 1-year cookie containing the shared `dashboard_token`. Because `dashboard/app.py:2080-2084` binds the server on all interfaces, any client that can reach port `5055` can spoof those headers and mint a replayable dashboard cookie.
+
+## P1 — High
+- `portfolio/file_utils.py:222-227` says all target-file mutations must stay inside `jsonl_sidecar_lock`, but `atomic_write_jsonl()` at `287-305` and `prune_jsonl()` at `349-391` rewrite JSONL without that lock. A concurrent `atomic_append_jsonl()` writer can still lose rows during rewrite, so the append-vs-rotation race is still reproducible through sibling helpers.
+- `scripts/fix_agent_dispatcher.py:364-443` only persists cooldown/backoff state once, after the whole category loop. If the task dies after handling an early category, that category’s updated `blocked_until` and `consecutive_failures` are lost and the next scheduler tick can respawn it immediately. `scripts/win/install-fix-agent-task.ps1:28-36` makes this realistic by capping runtime at 20 minutes while each agent attempt can run 15 minutes (`scripts/fix_agent_dispatcher.py:54-58`).
+- `scripts/check_critical_errors.py:31-35, 59-60, 81-83` mixes naive and aware datetimes. A naive `ts` parsed by `datetime.fromisoformat()` is compared against an aware UTC cutoff, which raises `TypeError` and kills the rolling 7-day startup check instead of surfacing unresolved critical errors.
+- `portfolio/subprocess_utils.py:129-133` and `168-176` start the child before `AssignProcessToJobObject()`. If the parent dies in that window, the child is never attached to the job and survives, violating the module’s orphan-kill guarantee for both `run_safe()` and `popen_in_job()`.
+- `portfolio/shadow_registry.py:93-104` and `118-126` do unlocked load-modify-write updates. Two producers adding/resolving different shadows concurrently will last-writer-wins each other’s changes; `atomic_write_json()` preserves file integrity, but not both updates.
+
+## P2 — Medium
+- The canonical I/O rule is still violated on live paths: `dashboard/app.py:898-914` (`/api/mstr_loop`), `dashboard/house_blueprint.py:107-109, 287-289, 386-389`, `scripts/check_critical_errors.py:38-50`, `scripts/fix_agent_dispatcher.py:80-92, 110-112`, and `portfolio/vector_memory.py:267-281` all use raw `open()/read_text()/json.load[s]()` instead of `file_utils`. That drops the codebase’s standard UTF-8/OSError/corruption handling and violates the explicit project rule.
+- `portfolio/vector_memory.py:41-54, 131-155, 242-245, 267-281` is unbounded on the hot path: the singleton ignores later `collection_name` values, every query rereads the entire journal, and every embed pass calls `collection.get()` to materialize the full existing ID set. As `layer2_journal.jsonl` grows, retrieval latency and memory use scale linearly.
+- `dashboard/export_static.py:12-20, 58-81, 105-113` still defaults to exporting authenticated API snapshots into `dashboard/static/api-data/`, which Flask serves without auth. The docstring correctly calls that a leak, but the default code path still recreates it.
+- `scripts/win/install-rc-server-task.ps1:12-14, 38-40`, `install-rc-keepalive-task.ps1:17-23`, `install-loop-resume-task.ps1:14-16`, and `install-rc-watchdog-task.ps1:12-14` bake `-ExecutionPolicy Bypass` into recurring task actions. `scripts/win/rc-watchdog.ps1:14`, `rc-keepalive.ps1:28`, and `rc-server-ensure.ps1:32` also hardcode a user-specific config path, making the ops surface policy-agnostic and host-specific.
+
+## P3 — Low
+- `dashboard/app.py:777-801` makes logout a GET that mutates auth state by clearing the cookie. I did not find data-mutating GET API endpoints, but `/logout` is still CSRFable and should be POST-only.
+
+## Tests missing
+- A dashboard auth test where `config.json` is unreadable/corrupt must assert fail-closed, not fail-open.
+- A dashboard auth test must prove spoofed `Cf-Access-*` headers do not bypass local auth or mint a `pf_dashboard_token` cookie.
+- `file_utils` needs a concurrent append-vs-`atomic_write_jsonl`/`prune_jsonl` test, not just append-vs-rotation.
+- `fix_agent_dispatcher` needs a crash/timeout persistence test that kills the run after the first category and verifies the next run still honors that category’s backoff.
+- `check_critical_errors` needs mixed naive/aware timestamp coverage on the rolling 7-day filter.
+- `subprocess_utils` needs a regression test or redesign that closes the pre-job-assignment orphan window.
+- `shadow_registry` needs concurrent writer coverage.
+- `vector_memory` needs per-collection isolation and bounded-growth coverage.

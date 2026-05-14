@@ -1,65 +1,82 @@
 {
-  "date": "2026-05-08",
-  "generated_at": "2026-05-07T21:45:00+00:00",
+  "date": "2026-05-14",
+  "generated_at": "2026-05-13T21:46:37.956575+00:00",
   "market_outlook": "neutral",
   "confidence": 0.55,
-  "headline": "NFP Friday + Iran Binary Risk. Range-bound with asymmetric downside.",
+  "summary": "Mixed macro: PPI hot (6% YoY), rate cuts killed, but Trump-Xi summit (Day 1 today) could be positive catalyst. XAG trending-up but signals noisy (49.7% 1d consensus). BTC consolidating at $80K with marginal 53% edge. Oil steady $102-107 with Iran ceasefire fragile. Overnight: disabled 2 harmful signals (funding 30.8%, macro_regime 47% with 29K samples). System showed correct restraint yesterday (28 invocations, 0 trades).",
   "key_levels": {
-    "XAG-USD": {"support": 78.0, "resistance": 82.0, "current": 79.11, "rsi": 34.8, "note": "Oversold, bounce likely but Iran de-escalation pressuring safe-haven metals"},
-    "XAU-USD": {"support": 4650.0, "resistance": 4720.0, "current": 4706.28, "note": "Consolidating near $4700. Iran deal would deflate 5-8%"},
-    "BTC-USD": {"support": 78000.0, "resistance": 82000.0, "current": 79980.0, "note": "9-day ETF inflow streak ($2.7B). $76K support critical per Tom Lee"},
-    "ETH-USD": {"support": 2250.0, "resistance": 2400.0, "current": 2290.87, "note": "Failing at $2400. Weak relative to BTC. EF selling pressure"},
-    "MSTR": {"support": 170.0, "resistance": 190.0, "current": 178.16, "note": "Q1 $12.54B loss, STRC dividend sustainability questioned"}
+    "XAG-USD": {
+      "support": 85.0,
+      "resistance": 92.0,
+      "current": 89.33,
+      "regime": "trending-up"
+    },
+    "XAU-USD": {
+      "support": 4600,
+      "resistance": 4750,
+      "current": 4698,
+      "regime": "ranging"
+    },
+    "BTC-USD": {
+      "support": 78000,
+      "resistance": 84000,
+      "current": 80500,
+      "regime": "trending-down"
+    },
+    "ETH-USD": {
+      "support": 2150,
+      "resistance": 2400,
+      "current": 2250,
+      "regime": "trending-down"
+    },
+    "MSTR": {
+      "support": 170,
+      "resistance": 190,
+      "current": 178.7,
+      "regime": "trending-down"
+    }
   },
   "trade_ideas": [
     {
       "instrument": "XAG-USD",
-      "direction": "HOLD (Patient position)",
-      "rationale": "RSI 34.8 oversold suggests bounce, but NFP risk + Iran deal binary risk make new entries premature. Patient holds 12.3sh at $78.80 (+0.4%). Stop at $78.15 (2x ATR). Gold/silver ratio at 62:1 (lowest since 2013) supports long-term thesis. Wait for NFP resolution.",
-      "entry_zone": "N/A (already in position)",
-      "target": "$82.00 short-term, $120 thesis",
-      "stop": "$78.15",
-      "confidence": 0.5
-    },
-    {
-      "instrument": "BTC-USD",
-      "direction": "HOLD (Bold position)",
-      "rationale": "Bold holds 0.2sh BTC at $75,928 (+5.3%). ETF flows extremely strong. $76K is the bull/bear line per Tom Lee. Three technical signals pointing to $85K. Hold through NFP — hot print is modest negative, cold print is strong positive for crypto.",
-      "entry_zone": "N/A (already in position)",
-      "target": "$85,000",
-      "stop": "$79,532 (2x ATR)",
+      "direction": "LONG",
+      "rationale": "Trending-up regime. $120 target prophecy intact (0.8 conviction). All checkpoints through $80 triggered. 3d consensus accuracy 57.4% supports medium-term thesis. Short-term (1d) noisy at 49.7% \u2014 wait for clear signal.",
+      "entry_zone": "85.00-86.50 (support retest)",
+      "target": "92.00 (near-term), 120.00 (prophecy)",
+      "stop": "82.50 (below prior support)",
       "confidence": 0.6
     },
     {
-      "instrument": "ETH-USD",
-      "direction": "HOLD (Patient position)",
-      "rationale": "Patient holds 0.4sh at $2,307 (-0.7%). ETH weak relative to BTC, failing at $2,400. EF selling $55M OTC. The $2,500 prophecy checkpoint still pending. No reason to add here. Stop at $2,275.",
-      "entry_zone": "N/A",
-      "target": "$2,500",
-      "stop": "$2,275",
-      "confidence": 0.4
+      "instrument": "BTC-USD",
+      "direction": "LONG",
+      "rationale": "RSI 30.5 oversold. Inverse H&S targeting $84K. Post-halving cycle historically bullish. $75K checkpoint triggered. On-chain signal 60% accuracy. But trending-down regime = caution. Wait for $81K confirmation.",
+      "entry_zone": "78000-79000 (oversold bounce zone)",
+      "target": "84000 (H&S target), 100000 (prophecy)",
+      "stop": "76000 (below recent swing low)",
+      "confidence": 0.5
     }
   ],
   "system_improvements_proposed": [
-    "TONIGHT: Disable futures_flow (38.3%), add macd/trend/heikin_ashi to DISABLED_SIGNALS",
-    "TONIGHT: Add unidirectional bias gate — exclude signals with >90% same-direction over 500+ samples",
-    "TONIGHT: Resolve accuracy_degradation critical errors",
-    "BACKLOG: Implement correlation-cluster voting (hard, deferred)",
-    "BACKLOG: Regime-conditional signal gating (hard, deferred)",
-    "BACKLOG: Max-IR bounded signal weighting from quant research"
+    "IMPLEMENTED: Disabled funding signal (30.8% accuracy) \u2014 was polluting consensus with wrong BUY calls",
+    "IMPLEMENTED: Disabled macro_regime signal (47%, 29K samples, BUY acc 41.3%) \u2014 biggest XAG noise source",
+    "VERIFIED: news_event BUY directional gate working correctly (20.5% < 40% threshold)",
+    "DEFERRED: IC-weighted voting already implemented. Per-ticker gating already at 45%.",
+    "DEFERRED: Phantom voter problem, regime-adaptive signal subsets, horizon-optimized weights"
   ],
   "risk_warnings": [
-    "NFP FRIDAY 08:30 ET: April nonfarm payrolls. Prior was massive beat (178K vs 60K). Hot print = stronger USD, metals/crypto down. This is the week's major macro event.",
-    "IRAN BINARY RISK: Tehran reviewing one-page MOU. Deal = oil $80-85, gold -5-8%. Collapse = oil $130+, gold spikes. Response expected 'within days'. Trump threatened 'much higher level' bombing.",
-    "POWELL-WARSH TRANSITION May 15 (8 days): Warsh is more hawkish. Regime change risk for all risk assets.",
-    "MSTR STRC DIVIDEND: Potential forced BTC sales to fund dividend — structural change from never-sell policy.",
-    "12 SIGNALS DEGRADED >15pp: Accuracy degradation detected today. Root cause: range-bound market where trend-following signals (8 of the 12) are failing."
+    "Trump-Xi summit headlines could whipsaw markets \u2014 any Iran mediation news or tariff surprise",
+    "PPI at 6% \u2014 rate cuts priced out. Rising rates = headwind for gold/crypto",
+    "India raised gold/silver import tariffs to 15% from 6% \u2014 demand dampener",
+    "Iran ceasefire 'on massive life support' \u2014 Strait of Hormuz disruption risk",
+    "Avanza session expired (May 12) \u2014 needs manual BankID login for warrant trading",
+    "12 signals dropped >15pp accuracy (May 13 critical error) \u2014 accuracy degradation accelerating"
   ],
   "research_highlights": [
-    "Signal correlation analysis: 33 active signals are really ~12 independent viewpoints. Trend cluster (8 signals) votes as one. Mean reversion cluster (4) votes as one.",
-    "BTC has 4 permanent-BUY signals (crypto_macro 99% BUY, sentiment 100% BUY, credit_spread_risk 100% BUY, claude_fundamental 100% BUY) creating systemic bullish bias.",
-    "Quant research: VIX-adaptive Kelly sizing reduces drawdown 38%. ADX-conditional MACD weighting improves accuracy during trends.",
-    "Gold/silver ratio at 62:1 (lowest since 2013) — silver outperformance thesis intact.",
-    "Silver structural deficit: 67M oz annual shortfall, 7th consecutive year. China imports hit ATH March 2026."
+    "IC-weighted signal voting via Max IR approach (already implemented in our system)",
+    "Regime-aware LightGBM + HMM won IIT KGP Quant Games 2026 (Sharpe 2.276)",
+    "MVRV Z-Score identifies BTC cycle peaks within 2 weeks \u2014 our on-chain at 60% but only 45 samples",
+    "GRU outperforms LSTM for sub-3yr silver prediction \u2014 potential Chronos-2 replacement",
+    "Multi-agent LLM debate (TradingAgents framework) improves Sharpe but adds latency",
+    "Key finding: many 'enabled' signals are phantom voters (HOLD 100%) on XAG, diluting real consensus"
   ]
 }
