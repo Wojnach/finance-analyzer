@@ -1,6 +1,7 @@
 """Tests for alert budgeting system."""
 from __future__ import annotations
 
+import threading
 import time
 
 
@@ -59,3 +60,44 @@ class TestAlertBudget:
         assert budget.buffer_size == 2
         budget.flush_buffer()
         assert budget.buffer_size == 0
+
+    def test_thread_safety_concurrent_sends(self):
+        from portfolio.alert_budget import AlertBudget
+        budget = AlertBudget(max_per_hour=50, window_seconds=60)
+        results = []
+        barrier = threading.Barrier(10)
+
+        def sender():
+            barrier.wait()
+            for i in range(20):
+                results.append(budget.should_send(f"msg-{i}", priority=1))
+
+        threads = [threading.Thread(target=sender) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        sent_count = sum(1 for r in results if r is True)
+        assert sent_count == 50
+        assert budget.buffer_size == 150
+
+    def test_thread_safety_concurrent_flush(self):
+        from portfolio.alert_budget import AlertBudget
+        budget = AlertBudget(max_per_hour=1)
+        budget.should_send("sent", priority=1)
+        for i in range(100):
+            budget.should_send(f"buf-{i}", priority=1)
+        flushed = []
+        barrier = threading.Barrier(5)
+
+        def flusher():
+            barrier.wait()
+            flushed.append(budget.flush_buffer())
+
+        threads = [threading.Thread(target=flusher) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        total = sum(len(f) for f in flushed)
+        assert total == 100

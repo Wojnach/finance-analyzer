@@ -634,15 +634,18 @@ class TestCollectTimeframes:
 
     @patch("portfolio.data_collector._fetch_klines")
     @patch("portfolio.data_collector.compute_indicators")
-    def test_insufficient_data_skips_timeframe(self, mock_ci, mock_fk):
-        """When compute_indicators returns None (insufficient data), the timeframe is skipped."""
+    def test_insufficient_data_returns_error_tuples(self, mock_ci, mock_fk):
+        """B6: When compute_indicators returns None, return error tuples not None."""
         mock_fk.return_value = pd.DataFrame({"close": [1.0, 2.0]})  # too few rows
         mock_ci.return_value = None  # insufficient data
 
         results = collect_timeframes({"binance": "BTCUSDT"})
 
-        # All timeframes should be skipped (none in results)
-        assert len(results) == 0
+        # All timeframes should be present as error tuples
+        assert len(results) > 0
+        for label, data in results:
+            assert isinstance(data, dict)
+            assert "error" in data
 
     @patch("portfolio.data_collector._fetch_klines")
     @patch("portfolio.data_collector.compute_indicators")

@@ -473,3 +473,47 @@ class TestTriggerConstants:
 
     def test_sustained_checks_is_3(self):
         assert SUSTAINED_CHECKS == 3
+
+
+# ---------------------------------------------------------------------------
+# Test: Clock skew guard (B3)
+# ---------------------------------------------------------------------------
+
+class TestClockSkewGuard:
+    def _suppress_cooldown(self):
+        import portfolio.trigger as trig
+        state = trig._load_state()
+        state["last_trigger_time"] = time.time() + 9999
+        trig._save_state(state)
+
+    def test_negative_elapsed_does_not_suppress_forever(self):
+        """B3: NTP backwards jump should NOT suppress flip triggers permanently."""
+        import portfolio.trigger as trig
+        sigs_hold = _make_signals(["BTC-USD"], "HOLD")
+        sigs_buy = _make_signals(["BTC-USD"], "BUY")
+        prices = {"BTC-USD": 69000}
+
+        # Seed with HOLD, then trigger BUY consensus
+        check_triggers(sigs_hold, prices, {}, {})
+        check_triggers(sigs_buy, prices, {}, {})
+
+        self._suppress_cooldown()
+
+        # Set flip_cooldowns to a FUTURE timestamp (simulates clock going backwards)
+        state = trig._load_state()
+        state["flip_cooldowns"] = {"BTC-USD": time.time() + 5000}
+        state["signals"] = {"BTC-USD": {"action": "BUY"}}
+        trig._save_state(state)
+
+        # Now try SELL sustained for 3 cycles
+        sigs_sell = _make_signals(["BTC-USD"], "SELL")
+        for _ in range(SUSTAINED_CHECKS):
+            self._suppress_cooldown()
+            check_triggers(sigs_sell, prices, {}, {})
+
+        # The clock-skew guard should have reset the cooldown,
+        # and the sustained flip should fire after cooldown period
+        # At minimum, flip_cooldowns should NOT still contain the future timestamp
+        state = trig._load_state()
+        fc_ts = state.get("flip_cooldowns", {}).get("BTC-USD", 0)
+        assert fc_ts <= time.time() + 1

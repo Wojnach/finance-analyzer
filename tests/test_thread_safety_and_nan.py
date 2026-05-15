@@ -217,3 +217,34 @@ class TestADXCacheThreadSafety:
             se._adx_cache.clear()
             se._adx_cache.update(original_cache)
             se._ADX_CACHE_MAX = original_max
+
+    def test_adx_cache_uses_content_key_not_id(self):
+        """B2: Cache key must be content-based, not id(df)-based.
+
+        Two DataFrames with different content but hypothetically the same
+        memory address must produce different cache keys.
+        """
+        from portfolio import signal_engine as se
+        original_cache = se._adx_cache.copy()
+        try:
+            se._adx_cache.clear()
+            rng = np.random.default_rng(42)
+            df1 = pd.DataFrame({
+                "high": rng.random(50) * 100 + 100,
+                "low": rng.random(50) * 100 + 90,
+                "close": rng.random(50) * 100 + 95,
+            })
+            adx1 = se._compute_adx(df1)
+
+            df2 = pd.DataFrame({
+                "high": rng.random(50) * 100 + 200,
+                "low": rng.random(50) * 100 + 190,
+                "close": rng.random(50) * 100 + 195,
+            })
+            adx2 = se._compute_adx(df2)
+
+            assert adx1 != adx2, "Different DataFrames should produce different ADX"
+            assert len(se._adx_cache) == 2
+        finally:
+            se._adx_cache.clear()
+            se._adx_cache.update(original_cache)
