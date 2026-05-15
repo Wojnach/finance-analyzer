@@ -3539,6 +3539,27 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             if skip_gpu and sig_name in GPU_SIGNALS:
                 votes[sig_name] = "HOLD"
                 continue
+            # 2026-05-15 LLM shadow-enrollment: cycle-modulo throttle for
+            # shadow signals. Expensive shadow LLMs (forecast, meta_trader,
+            # finance_llama, etc.) declare cycle_modulo in shadow_registry
+            # so we only compute them every Nth cycle and the cycle budget
+            # stays near 60s. Counter is UTC epoch minute — stateless, so
+            # a loop restart picks up the right phase automatically. Only
+            # skipped signals get force-HOLD here; signals not in shadow
+            # status fall through unchanged.
+            try:
+                from portfolio.shadow_registry import (
+                    cycle_count_now,
+                    get_status,
+                    should_run_this_cycle,
+                )
+                if get_status(sig_name) == "shadow":
+                    if not should_run_this_cycle(sig_name, cycle_count_now()):
+                        votes[sig_name] = "HOLD"
+                        extra_info[f"{sig_name}_throttled"] = True
+                        continue
+            except Exception:
+                logger.debug("shadow-throttle check failed for %s", sig_name, exc_info=True)
             try:
                 _sig_t0 = time.monotonic()
                 compute_fn = load_signal_func(entry)

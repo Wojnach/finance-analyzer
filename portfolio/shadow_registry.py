@@ -170,6 +170,90 @@ def stale_shadows(*, stale_days: int = _STALE_DAYS,
     return sorted(stale, key=lambda x: -x["days_in_shadow"])
 
 
+def get_status(signal: str, *, path: Path | str | None = None) -> str | None:
+    """Return the status string for `signal` or None if not registered.
+
+    Convenience accessor — callers don't need to crack the registry
+    dict themselves just to gate on `status == "shadow"`. Returns
+    None for unregistered signals so callers can treat them as
+    "not shadow" without special-casing missing keys.
+    """
+    reg = load_registry(path=path)
+    entry = reg["shadows"].get(signal)
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("status")
+
+
+def should_run_this_cycle(
+    signal: str,
+    cycle_count: int,
+    *,
+    path: Path | str | None = None,
+) -> bool:
+    """Cycle-modulo throttle for shadow signals.
+
+    Each registry entry may declare `cycle_modulo` (default 1) and
+    `cycle_phase` (default 0). The signal is permitted to run on
+    cycles where `cycle_count % cycle_modulo == cycle_phase`.
+
+    Rationale: GGUF 8B models cost 3-5 seconds per cycle on this
+    hardware. Running every shadow LLM every 60s cycle would blow
+    the budget. Throttling lets cheap CPU shadows (modulo=1) run
+    every cycle while the expensive Qwen2-36L meta-trader (modulo=5)
+    runs at most every 5 minutes.
+
+    Behavior for unknown signals: returns True. Non-shadow signals
+    have no entry; we don't want this helper to mistakenly throttle
+    them. Callers should only invoke this for signals known to be
+    in shadow status — but defaulting to True keeps the safe side
+    when used carelessly.
+
+    Behavior for malformed entries: returns True. A corrupt modulo
+    value should never silently silence a signal forever — we'd
+    rather over-run than under-measure.
+
+    Cycle counter: derived externally and passed in. Recommended
+    counter is the UTC epoch minute (`int(time.time()) // 60`) — a
+    monotonic integer with no persisted state, so a restarted loop
+    immediately picks up the right phase without bookkeeping. Tests
+    can pass a deterministic value.
+    """
+    if not isinstance(cycle_count, int) or cycle_count < 0:
+        return True
+
+    reg = load_registry(path=path)
+    entry = reg["shadows"].get(signal)
+    if not isinstance(entry, dict):
+        return True
+
+    try:
+        modulo = int(entry.get("cycle_modulo", 1))
+        phase = int(entry.get("cycle_phase", 0))
+    except (TypeError, ValueError):
+        return True
+
+    if modulo <= 0:
+        return True
+    if phase < 0 or phase >= modulo:
+        # Phase out of range — surface the mismatch through row counts
+        # instead of silencing the signal forever.
+        return True
+
+    return cycle_count % modulo == phase
+
+
+def cycle_count_now() -> int:
+    """Return the current cycle counter (UTC epoch minute).
+
+    Recommended input to `should_run_this_cycle()`. Stateless —
+    derived from the wall clock so a loop restart immediately picks
+    up the right phase without persisted state.
+    """
+    import time
+    return int(time.time()) // 60
+
+
 def seed_defaults(path: Path | str | None = None) -> None:
     """Idempotent one-time seeding for the 2026-04-21 LLM-health audit.
     Only adds entries that don't already exist — safe to re-run."""
