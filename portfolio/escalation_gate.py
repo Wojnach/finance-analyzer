@@ -196,8 +196,23 @@ def should_escalate(
 
     prompt = _build_prompt(reasons_list, tier, signals or {}, held_positions or {}, tickers)
     call = runner or _default_runner
+    # 2026-05-15: explicit 10s wall-clock budget. Ministral is supposed
+    # to be fast (~1-2s); if it hangs we fail open rather than block
+    # the entire trigger pipeline.
+    import concurrent.futures as _cf
+    _ex = _cf.ThreadPoolExecutor(max_workers=1)
     try:
-        raw = call(prompt)
+        _fut = _ex.submit(call, prompt)
+        try:
+            raw = _fut.result(timeout=10)
+        except _cf.TimeoutError:
+            logger.warning("escalation_gate: runner timed out (>10s) — failing open")
+            _log_decision(lp, reasons_list, tier, True, 0.0, "runner_timeout", tickers)
+            # Don't wait for the hung thread on shutdown.
+            _ex.shutdown(wait=False, cancel_futures=True)
+            return True, 0.0, "ministral_unavailable"
+        finally:
+            _ex.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
         logger.warning("escalation_gate: runner raised %s — failing open", e)
         _log_decision(lp, reasons_list, tier, True, 0.0, f"runner_error:{type(e).__name__}", tickers)

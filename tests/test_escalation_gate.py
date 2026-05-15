@@ -206,3 +206,29 @@ def test_missing_escalate_key_fails_open(tmp_path):
     assert esc is True
     assert conf == 0.0
     assert why == "ministral_unavailable"
+
+
+def test_runner_timeout_fails_open(tmp_path):
+    """2026-05-15: hanging runner triggers 10s timeout, gate fails open."""
+    import time as _t
+    log = str(tmp_path / "gate.jsonl")
+
+    def hang(_prompt):
+        _t.sleep(30)
+        return "{}"
+
+    t0 = _t.monotonic()
+    esc, conf, why = escalation_gate.should_escalate(
+        ["BTC-USD foo"],
+        tier=1,
+        signals={},
+        prices={},
+        held_positions={},
+        runner=hang,
+        log_path=log,
+    )
+    elapsed = _t.monotonic() - t0
+    assert esc is True
+    assert conf == 0.0
+    assert why == "ministral_unavailable"
+    assert elapsed < 12, f"gate did not time out promptly: {elapsed:.1f}s"
