@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,20 +33,24 @@ SIGNAL_STATE_SINCE_FILE = DATA_DIR / "signal_state_since.json"
 # pattern instead of operators needing to grep log tails.
 _module_failure_streaks: dict[str, int] = {}
 _module_escalated: set[str] = set()
+_module_lock = threading.Lock()
 _FAILURE_STREAK_THRESHOLD = 10  # ~10 minutes at 60s cycles
 
 
 def _track_module_outcome(name: str, ok: bool, exc: BaseException | None = None) -> None:
     """Track consecutive failures for a reporting submodule. Escalate once
     per streak when the threshold is crossed. Resets on success."""
-    if ok:
-        _module_failure_streaks.pop(name, None)
-        _module_escalated.discard(name)
-        return
-    streak = _module_failure_streaks.get(name, 0) + 1
-    _module_failure_streaks[name] = streak
-    if streak >= _FAILURE_STREAK_THRESHOLD and name not in _module_escalated:
-        _module_escalated.add(name)
+    with _module_lock:
+        if ok:
+            _module_failure_streaks.pop(name, None)
+            _module_escalated.discard(name)
+            return
+        streak = _module_failure_streaks.get(name, 0) + 1
+        _module_failure_streaks[name] = streak
+        should_escalate = streak >= _FAILURE_STREAK_THRESHOLD and name not in _module_escalated
+        if should_escalate:
+            _module_escalated.add(name)
+    if should_escalate:
         try:
             from portfolio.claude_gate import record_critical_error
             record_critical_error(

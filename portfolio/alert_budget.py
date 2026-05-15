@@ -8,6 +8,7 @@ Priority levels:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import deque
 
@@ -26,6 +27,7 @@ class AlertBudget:
         self.window_seconds = window_seconds
         self._sent_timestamps: deque[float] = deque()
         self._buffer: list[str] = []
+        self._lock = threading.Lock()
 
     def _prune_old(self) -> None:
         """Remove timestamps outside the current window."""
@@ -35,27 +37,31 @@ class AlertBudget:
 
     def should_send(self, message: str, priority: int = PRIORITY_NORMAL) -> bool:
         """Check if an alert should be sent or buffered."""
-        if priority >= PRIORITY_EMERGENCY:
-            self._sent_timestamps.append(time.time())
-            return True
-        self._prune_old()
-        if len(self._sent_timestamps) < self.max_per_hour:
-            self._sent_timestamps.append(time.time())
-            return True
-        self._buffer.append(message)
-        return False
+        with self._lock:
+            if priority >= PRIORITY_EMERGENCY:
+                self._sent_timestamps.append(time.time())
+                return True
+            self._prune_old()
+            if len(self._sent_timestamps) < self.max_per_hour:
+                self._sent_timestamps.append(time.time())
+                return True
+            self._buffer.append(message)
+            return False
 
     def flush_buffer(self) -> list[str]:
         """Return and clear buffered messages."""
-        buffered = self._buffer.copy()
-        self._buffer.clear()
-        return buffered
+        with self._lock:
+            buffered = self._buffer.copy()
+            self._buffer.clear()
+            return buffered
 
     @property
     def remaining_budget(self) -> int:
-        self._prune_old()
-        return max(0, self.max_per_hour - len(self._sent_timestamps))
+        with self._lock:
+            self._prune_old()
+            return max(0, self.max_per_hour - len(self._sent_timestamps))
 
     @property
     def buffer_size(self) -> int:
-        return len(self._buffer)
+        with self._lock:
+            return len(self._buffer)

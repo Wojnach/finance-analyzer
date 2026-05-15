@@ -268,11 +268,16 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
         triggered_action = prev_triggered.get(ticker, {}).get("action")
         if triggered_action and current_action != triggered_action and (count_ok or duration_ok):
             last_flip_ts = flip_cooldowns.get(ticker, 0)
-            if (_flip_now_ts - last_flip_ts) < FLIP_COOLDOWN_S:
+            elapsed = _flip_now_ts - last_flip_ts
+            if elapsed < 0:
+                flip_cooldowns[ticker] = _flip_now_ts
+                elapsed = 0
+                logger.warning("Clock skew detected for %s flip cooldown, resetting", ticker)
+            if elapsed < FLIP_COOLDOWN_S:
                 logger.info(
                     "Flip cooldown: %s %s->%s suppressed (%.0fs remaining)",
                     ticker, triggered_action, current_action,
-                    FLIP_COOLDOWN_S - (_flip_now_ts - last_flip_ts),
+                    FLIP_COOLDOWN_S - elapsed,
                 )
                 continue
             flip_cooldowns[ticker] = _flip_now_ts
