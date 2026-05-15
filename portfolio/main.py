@@ -805,9 +805,40 @@ def run(force_report=False, active_symbols=None):
             sentiments[name] = extra["sentiment"]
 
     triggered, reasons = check_triggers(signals, prices_usd, fear_greeds, sentiments)
+    reasons_list = list(reasons) if reasons else []
+
+    # Batch C / item 4: 5-min trigger buffer for noise collapse.
+    # Default batch_window_s=0 -> disabled (no-op pass-through).
+    # When >0, buffer accumulates reasons and only emits on window
+    # expiry or escalation force-flush (see portfolio/trigger_buffer.py).
+    try:
+        _budget_cfg = (config.get("claude_budget") or {}) if isinstance(config, dict) else {}
+        _batch_window = int(_budget_cfg.get("batch_window_s", 0) or 0)
+    except Exception:
+        _batch_window = 0
+    if triggered and _batch_window > 0 and not force_report:
+        try:
+            from portfolio import trigger_buffer
+            trigger_buffer.add(reasons_list, time.time())
+            flushed = trigger_buffer.flush_due(time.time(), window_s=_batch_window)
+            if not flushed:
+                logger.info(
+                    "trigger_buffer: %d reason(s) buffered, deferring",
+                    len(reasons_list),
+                )
+                triggered = False
+                reasons_list = []
+            else:
+                reasons_list = flushed
+                logger.info(
+                    "trigger_buffer: flushed %d merged reason(s)", len(flushed)
+                )
+        except Exception as e:
+            logger.warning("trigger_buffer: error (%s), pass-through", e)
 
     if triggered or force_report:
-        reasons_list = reasons if reasons else ["startup"]
+        if not reasons_list:
+            reasons_list = ["startup"]
         summary = write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
         report.summary_written = True
         logger.info("Trigger: %s", ', '.join(reasons_list))
@@ -839,9 +870,105 @@ def run(force_report=False, active_symbols=None):
         from portfolio.health import heartbeat_keepalive
 
         layer2_cfg = config.get("layer2", {})
+        budget_cfg = config.get("claude_budget", {}) or {}
         if os.environ.get("NO_TELEGRAM"):
             logger.info("[NO_TELEGRAM] Skipping agent invocation")
             _log_trigger(reasons_list, "skipped_test", tier=tier)
+        elif layer2_cfg.get("enabled", True) and budget_cfg.get("autonomous_first_enabled", False):
+            # Batch D / item 6: autonomous-first routing. Default to
+            # autonomous_decision() and only spawn Claude when escalation
+            # criteria match. See portfolio/escalation_router.py.
+            from portfolio.escalation_router import (
+                should_escalate_to_claude,
+                record_decision_snapshot,
+            )
+            # Compute current drawdown for both strategies (cheap — reads
+            # portfolio state + agent_summary, no network).
+            dd_patient = 0.0
+            dd_bold = 0.0
+            try:
+                from portfolio.risk_management import check_drawdown
+                dd_patient = check_drawdown(
+                    str(STATE_FILE),
+                    max_drawdown_pct=100.0,  # we want the number, not the breach
+                ).get("current_drawdown_pct", 0.0)
+                bold_path = STATE_FILE.parent / "portfolio_state_bold.json"
+                if bold_path.exists():
+                    dd_bold = check_drawdown(
+                        str(bold_path),
+                        max_drawdown_pct=100.0,
+                    ).get("current_drawdown_pct", 0.0)
+            except Exception as e:
+                logger.warning("escalation_router: drawdown calc failed: %s", e)
+
+            escalate, why = should_escalate_to_claude(
+                reasons_list, tier, signals,
+                escalate_drawdown_pct=float(budget_cfg.get("escalate_drawdown_pct", 5.0)),
+                current_drawdown_patient=dd_patient,
+                current_drawdown_bold=dd_bold,
+            )
+
+            # Batch E / item 7: optional Ministral pre-gate. After the
+            # router approves an escalation, run a cheap classifier; if
+            # it is confidently "not escalate", route back to autonomous.
+            if escalate and budget_cfg.get("ministral_pregate_enabled", False):
+                try:
+                    from portfolio import escalation_gate
+                    held_positions = {"patient": [], "bold": []}
+                    try:
+                        p_state = load_json(str(STATE_FILE), default={}) or {}
+                        held_positions["patient"] = [
+                            t for t, h in (p_state.get("holdings") or {}).items()
+                            if isinstance(h, dict) and (h.get("shares") or 0) > 0
+                        ]
+                        bold_path = STATE_FILE.parent / "portfolio_state_bold.json"
+                        if bold_path.exists():
+                            b_state = load_json(str(bold_path), default={}) or {}
+                            held_positions["bold"] = [
+                                t for t, h in (b_state.get("holdings") or {}).items()
+                                if isinstance(h, dict) and (h.get("shares") or 0) > 0
+                            ]
+                    except Exception as e:
+                        logger.warning("escalation_gate: held-pos collect failed: %s", e)
+                    m_escalate, m_conf, m_why = escalation_gate.should_escalate(
+                        reasons_list, tier, signals, prices_usd, held_positions,
+                    )
+                    min_score = float(budget_cfg.get("ministral_pregate_min_score", 0.5))
+                    if not m_escalate and m_conf >= min_score:
+                        logger.info(
+                            "escalation_gate: Ministral overrides → autonomous (%s, conf %.2f)",
+                            m_why, m_conf,
+                        )
+                        escalate = False
+                        why = f"ministral_override:{m_why}"
+                except Exception as e:
+                    logger.warning("escalation_gate: pregate failed (fail-open): %s", e)
+
+            if escalate and _is_agent_window():
+                logger.info("escalation_router: escalating to claude (%s)", why)
+                with heartbeat_keepalive():
+                    result = invoke_agent(reasons_list, tier=tier)
+                _log_trigger(reasons_list, f"invoked_{why}" if result else f"skipped_busy_{why}", tier=tier)
+            else:
+                if escalate:
+                    logger.info(
+                        "escalation_router: escalate=%s but outside agent window — autonomous (%s)",
+                        why, why,
+                    )
+                else:
+                    logger.info("escalation_router: autonomous handles (%s)", why)
+                from portfolio.autonomous import autonomous_decision
+                with heartbeat_keepalive():
+                    autonomous_decision(
+                        config, signals, prices_usd, fx_rate, state,
+                        reasons_list, tf_data, tier, triggered_tickers,
+                    )
+                _log_trigger(reasons_list, f"autonomous_{why}", tier=tier)
+            # Snapshot drawdown for next escalation comparison regardless of path.
+            try:
+                record_decision_snapshot(dd_patient, dd_bold)
+            except Exception as e:
+                logger.warning("escalation_router: snapshot failed: %s", e)
         elif layer2_cfg.get("enabled", True):
             if _is_agent_window():
                 with heartbeat_keepalive():

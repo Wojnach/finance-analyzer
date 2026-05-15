@@ -26,6 +26,64 @@ from portfolio.file_utils import atomic_write_json, load_json
 
 logger = logging.getLogger("portfolio.trigger")
 
+
+# ---------------------------------------------------------------------------
+# claude_budget config gates (Batch A — items 1, 4, 5 of docs/PLAN.md)
+# Added 2026-05-15. All defaults are no-ops; behavior unchanged unless
+# config.claude_budget overrides are set.
+# ---------------------------------------------------------------------------
+_CLAUDE_BUDGET_DEFAULTS = {
+    "consensus_min_pct": 0,             # item 1: drop low-confidence consensus
+    "sustained_checks_low_density": 3,  # item 4: same as SUSTAINED_CHECKS = no-op
+    "sustained_density_threshold": 0.0, # item 4: density gate disabled
+    "min_weighted_confidence": 0.0,     # item 5: confidence floor disabled
+    "min_atr_multiple": 0.0,            # item 5: ATR floor disabled
+}
+
+
+def _load_claude_budget():
+    """Read claude_budget section from config with safe defaults.
+
+    Cheap to call per check_triggers — load_config() is mtime-cached.
+    Falls back to defaults on any config load error (worktrees often
+    lack the config.json symlink — see memory/reference_worktree_symlinks).
+    """
+    cfg = {}
+    try:
+        from portfolio.api_utils import load_config
+        cfg = (load_config() or {}).get("claude_budget", {}) or {}
+    except Exception:
+        pass
+    return {k: cfg.get(k, v) for k, v in _CLAUDE_BUDGET_DEFAULTS.items()}
+
+
+# Reason types exempt from confidence/ATR floor (item 5). These are
+# operational triggers that must always fire.
+_FLOOR_EXEMPT_REASON_TYPES = {
+    "first_of_day", "periodic_review", "F&G_extreme",
+    "post_trade",
+    # price_move removed 2026-05-15: a 2% move in a 3% ATR ranging tape
+    # is low-quality. atr_mult floor (default 1.5) already protects
+    # genuine breakouts (2% / 0.5% ATR = 4x passes).
+}
+
+
+def _reason_type(reason: str) -> str:
+    """Classify a reason string to a reason_type for the floor exemption."""
+    if "post-trade" in reason:
+        return "post_trade"
+    if "F&G crossed" in reason:
+        return "F&G_extreme"
+    if "moved" in reason:
+        return "price_move"
+    if "consensus" in reason:
+        return "consensus"
+    if "flipped" in reason:
+        return "sustained_flip"
+    if "sentiment" in reason:
+        return "sentiment"
+    return "other"
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
 PORTFOLIO_FILE = BASE_DIR / "data" / "portfolio_state.json"
@@ -203,6 +261,13 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     sustained = state.get("sustained_counts", {})
     reasons = []
 
+    # claude_budget gates (items 1, 4, 5)
+    budget = _load_claude_budget()
+    # candidate reasons accumulate as (reason, weighted_conf, atr_mult) tuples
+    # for the item-5 floor; we append to `reasons` immediately for exempt
+    # reason types and defer floor-eligible ones until after collection.
+    _floor_candidates: list[tuple[str, float, float]] = []
+
     # 0. Trade reset — if Layer 2 made a trade, trigger reassessment
     if _check_recent_trade(state):
         state["last_trigger_time"] = 0
@@ -238,8 +303,23 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 # Still update baseline so we don't re-trigger next cycle
                 triggered_consensus[ticker] = action
                 continue
-            # New consensus from HOLD — trigger
-            reasons.append(f"{ticker} consensus {action} ({conf:.0%})")
+            # Item 1 (2026-05-15): claude_budget consensus floor.
+            # Drop sub-min_pct consensus crossings entirely. Still update
+            # the baseline so we don't re-trigger next cycle when conf
+            # eventually crosses the floor (matches existing dampening
+            # behavior at line 239).
+            min_pct = budget["consensus_min_pct"]
+            if min_pct > 0 and (conf * 100) < min_pct:
+                logger.info(
+                    "claude_budget: %s consensus %s (%.0f%%) suppressed "
+                    "(min %d%%)",
+                    ticker, action, conf * 100, min_pct,
+                )
+                triggered_consensus[ticker] = action
+                continue
+            # New consensus from HOLD — trigger (deferred to floor gate)
+            _reason_str = f"{ticker} consensus {action} ({conf:.0%})"
+            _floor_candidates.append((_reason_str, conf, 0.0))
             triggered_consensus[ticker] = action
         elif action == "HOLD" and last_tc != "HOLD":
             # Consensus cleared — reset so next BUY/SELL is "new"
@@ -265,6 +345,24 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             sustained, ticker, current_action, _flip_now_ts,
         )
 
+        # Item 4 (2026-05-15): for low-density tickers (few active voters
+        # vs total applicable signals), require MORE consecutive ticks
+        # before firing the sustained flip. High-density flips keep the
+        # default SUSTAINED_CHECKS. The duration_ok path is unchanged.
+        extra = sig.get("extra") or {}
+        active_voters = extra.get("_voters_post_filter", extra.get("_voters", 0)) or 0
+        total_applicable = extra.get("_total_applicable", 0) or 0
+        density = (active_voters / total_applicable) if total_applicable > 0 else 1.0
+        density_threshold = budget["sustained_density_threshold"]
+        low_density_required = budget["sustained_checks_low_density"]
+        if (
+            density_threshold > 0
+            and density < density_threshold
+            and low_density_required > SUSTAINED_CHECKS
+        ):
+            tick_count = sustained.get(ticker, {}).get("count", 0)
+            count_ok = tick_count >= low_density_required
+
         triggered_action = prev_triggered.get(ticker, {}).get("action")
         if triggered_action and current_action != triggered_action and (count_ok or duration_ok):
             last_flip_ts = flip_cooldowns.get(ticker, 0)
@@ -281,9 +379,19 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 )
                 continue
             flip_cooldowns[ticker] = _flip_now_ts
-            reasons.append(
+            # Item 5: route through floor gate with weighted_conf + atr_mult.
+            _flip_reason = (
                 f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
             )
+            _flip_conf = sig.get("confidence", 0) or 0
+            _flip_atr_pct = extra.get("atr_pct") or sig.get("atr_pct") or 0
+            prev_price = prev.get("prices", {}).get(ticker)
+            cur_price = prices_usd.get(ticker)
+            _flip_atr_mult = 0.0
+            if prev_price and cur_price and _flip_atr_pct and _flip_atr_pct > 0:
+                pct_move = abs(cur_price - prev_price) / prev_price * 100
+                _flip_atr_mult = pct_move / _flip_atr_pct
+            _floor_candidates.append((_flip_reason, _flip_conf, _flip_atr_mult))
     state["flip_cooldowns"] = flip_cooldowns
 
     # 3. Price move >2% since last trigger
@@ -294,7 +402,22 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             pct = abs(price - old_price) / old_price
             if pct >= PRICE_THRESHOLD:
                 direction = "up" if price > old_price else "down"
-                reasons.append(f"{ticker} moved {pct:.1%} {direction}")
+                _pm_reason = f"{ticker} moved {pct:.1%} {direction}"
+                # 2026-05-15: route price_move through floor gate.
+                # A 2% move in a 3% ATR ranging tape is low-quality;
+                # the atr_mult floor (default 1.5) filters it. Floor
+                # is OR-gated with weighted_conf so high-conviction
+                # moves still pass.
+                _pm_sig = signals.get(ticker, {}) or {}
+                _pm_extra = _pm_sig.get("extra", {}) or {}
+                _pm_conf = _pm_sig.get("confidence", 0) or 0
+                _pm_atr_pct = (
+                    _pm_extra.get("atr_pct") or _pm_sig.get("atr_pct") or 0
+                )
+                _pm_atr_mult = 0.0
+                if _pm_atr_pct and _pm_atr_pct > 0:
+                    _pm_atr_mult = (pct * 100.0) / _pm_atr_pct
+                _floor_candidates.append((_pm_reason, _pm_conf, _pm_atr_mult))
 
     # 4. Fear & Greed crossed threshold
     prev_fg = prev.get("fear_greeds", {})
@@ -332,6 +455,29 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             stable_sent[ticker] = sent
     state["sustained_sentiment"] = sustained_sent
     state["stable_sentiment"] = stable_sent
+
+    # Item 5 (2026-05-15): apply weighted-conf + ATR floor to deferred
+    # candidates (consensus crossings and sustained flips). Emit only if
+    # confidence ≥ min_weighted_confidence OR atr_mult ≥ min_atr_multiple
+    # OR reason_type is in the exempt set. Defaults are 0.0 (no-op).
+    min_conf = budget["min_weighted_confidence"]
+    min_atr = budget["min_atr_multiple"]
+    for reason_str, weighted_conf, atr_mult in _floor_candidates:
+        rt = _reason_type(reason_str)
+        if rt in _FLOOR_EXEMPT_REASON_TYPES:
+            reasons.append(reason_str)
+            continue
+        if min_conf <= 0 and min_atr <= 0:
+            reasons.append(reason_str)
+            continue
+        if weighted_conf >= min_conf or atr_mult >= min_atr:
+            reasons.append(reason_str)
+        else:
+            logger.info(
+                "claude_budget floor: suppressed '%s' (conf=%.2f < %.2f, "
+                "atr_mult=%.2f < %.2f)",
+                reason_str, weighted_conf, min_conf, atr_mult, min_atr,
+            )
 
     triggered = len(reasons) > 0
 

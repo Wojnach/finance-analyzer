@@ -1519,3 +1519,267 @@ class TestFlipCooldown:
         )
         btc_reasons = [r for r in reasons if "BTC-USD" in r]
         assert len(btc_reasons) >= 1, "BTC-USD should trigger despite MSTR cooldown"
+
+
+# ---------------------------------------------------------------------------
+# Batch A (2026-05-15): claude_budget gates (items 1, 4, 5 of docs/PLAN.md)
+# ---------------------------------------------------------------------------
+
+class TestClaudeBudgetGates:
+    """Verify the three new gates: consensus pct, sustained density, conf/ATR floor."""
+
+    def _patch_budget(self, monkeypatch, **overrides):
+        defaults = dict(trigger_mod._CLAUDE_BUDGET_DEFAULTS)
+        defaults.update(overrides)
+        monkeypatch.setattr(trigger_mod, "_load_claude_budget", lambda: defaults)
+
+    def test_default_config_preserves_existing_behavior(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """Empty claude_budget section → all old triggers still fire."""
+        # Simulate missing config — _load_claude_budget falls back to defaults
+        monkeypatch.setattr(trigger_mod, "_load_claude_budget",
+                            lambda: dict(trigger_mod._CLAUDE_BUDGET_DEFAULTS))
+        prices = {"BTC-USD": 68000}
+        check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
+        _suppress_cooldown(isolate_state_files["state_file"])
+        triggered, reasons = check_triggers(
+            {"BTC-USD": _sig("BUY", 0.30)}, prices, {}, {},
+        )
+        assert triggered
+        assert any("consensus" in r and "BUY" in r for r in reasons)
+
+    def test_consensus_gate_suppresses_low_confidence(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """consensus_min_pct=40 → BUY at 30% is suppressed; baseline updated."""
+        self._patch_budget(monkeypatch, consensus_min_pct=40)
+        prices = {"BTC-USD": 68000}
+        check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
+        _suppress_cooldown(isolate_state_files["state_file"])
+        triggered, reasons = check_triggers(
+            {"BTC-USD": _sig("BUY", 0.30)}, prices, {}, {},
+        )
+        # No consensus reason fired
+        assert not any("consensus" in r for r in reasons)
+
+    def test_consensus_gate_allows_strong_confidence(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """consensus_min_pct=40 → BUY at 50% still fires."""
+        self._patch_budget(monkeypatch, consensus_min_pct=40)
+        prices = {"BTC-USD": 68000}
+        check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
+        _suppress_cooldown(isolate_state_files["state_file"])
+        triggered, reasons = check_triggers(
+            {"BTC-USD": _sig("BUY", 0.50)}, prices, {}, {},
+        )
+        assert triggered
+        assert any("consensus" in r and "BUY" in r for r in reasons)
+
+    def test_sustained_density_low_requires_more_ticks(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """Low-density flip needs sustained_checks_low_density=5 ticks."""
+        self._patch_budget(
+            monkeypatch,
+            sustained_density_threshold=0.40,
+            sustained_checks_low_density=5,
+        )
+        sf = isolate_state_files["state_file"]
+        prices = {"BTC-USD": 68000}
+
+        def low_density_sig(action, confidence=0.7):
+            # density = 2/10 = 0.20 < 0.40 → low density
+            return {
+                "action": action,
+                "confidence": confidence,
+                "extra": {"_voters": 2, "_total_applicable": 10, "atr_pct": 1.0},
+            }
+
+        # Seed BUY as last triggered action
+        check_triggers({"BTC-USD": low_density_sig("BUY")}, prices, {}, {})
+        # Force baseline by triggering once via HOLD->BUY consensus then suppress
+        _suppress_cooldown(sf)
+
+        # 3 SELL ticks — would fire under default SUSTAINED_CHECKS=3 but
+        # should NOT fire under low-density requirement of 5
+        for _ in range(3):
+            _suppress_cooldown(sf)
+            triggered, reasons = check_triggers(
+                {"BTC-USD": low_density_sig("SELL")}, prices, {}, {},
+            )
+            flip_reasons = [r for r in reasons if "flipped" in r]
+            assert not flip_reasons, "low-density flip suppressed before 5 ticks"
+
+        # 2 more SELL ticks (total 5) → flip should now fire
+        _suppress_cooldown(sf)
+        check_triggers({"BTC-USD": low_density_sig("SELL")}, prices, {}, {})
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers(
+            {"BTC-USD": low_density_sig("SELL")}, prices, {}, {},
+        )
+        assert any("flipped" in r for r in reasons)
+
+    def test_sustained_density_high_uses_default_checks(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """High-density flip fires at default SUSTAINED_CHECKS=3."""
+        self._patch_budget(
+            monkeypatch,
+            sustained_density_threshold=0.40,
+            sustained_checks_low_density=5,
+        )
+        sf = isolate_state_files["state_file"]
+        prices = {"BTC-USD": 68000}
+
+        def high_density_sig(action, confidence=0.7):
+            # density = 8/10 = 0.80 > 0.40 → high density
+            return {
+                "action": action,
+                "confidence": confidence,
+                "extra": {"_voters": 8, "_total_applicable": 10, "atr_pct": 1.0},
+            }
+
+        check_triggers({"BTC-USD": high_density_sig("BUY")}, prices, {}, {})
+        _suppress_cooldown(sf)
+
+        # 3 SELL ticks should be enough for high-density
+        for _ in range(2):
+            _suppress_cooldown(sf)
+            check_triggers({"BTC-USD": high_density_sig("SELL")}, prices, {}, {})
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers(
+            {"BTC-USD": high_density_sig("SELL")}, prices, {}, {},
+        )
+        assert any("flipped" in r for r in reasons)
+
+    def test_confidence_floor_suppresses_weak_flip(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """Weak-confidence flip with small move → suppressed by floor."""
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        sf = isolate_state_files["state_file"]
+        prices = {"BTC-USD": 68000}
+
+        def weak_sig(action):
+            return {
+                "action": action,
+                "confidence": 0.30,  # below floor
+                "extra": {"_voters": 8, "_total_applicable": 10, "atr_pct": 5.0},
+            }
+
+        check_triggers({"BTC-USD": weak_sig("BUY")}, prices, {}, {})
+        _suppress_cooldown(sf)
+        for _ in range(2):
+            _suppress_cooldown(sf)
+            check_triggers({"BTC-USD": weak_sig("SELL")}, prices, {}, {})
+        _suppress_cooldown(sf)
+        # Same price → atr_mult = 0; conf 0.30 < 0.55 → suppress
+        triggered, reasons = check_triggers(
+            {"BTC-USD": weak_sig("SELL")}, prices, {}, {},
+        )
+        assert not any("flipped" in r for r in reasons)
+
+    def test_confidence_floor_allows_big_atr_move(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """Same weak-conf flip but with large ATR-relative move → emitted."""
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        sf = isolate_state_files["state_file"]
+
+        def weak_sig(action):
+            return {
+                "action": action,
+                "confidence": 0.30,
+                "extra": {"_voters": 8, "_total_applicable": 10, "atr_pct": 1.0},
+            }
+
+        # Seed state directly: previous trigger was BUY at 68000; sustained
+        # counter primed to SELL count=5 so a SELL signal fires a flip.
+        import os as _os
+        _seed_state(sf, {
+            "last_loop_pid": _os.getpid(),
+            "last": {
+                "signals": {"BTC-USD": {"action": "BUY", "confidence": 0.30}},
+                "prices": {"BTC-USD": 68000},
+                "fear_greeds": {},
+                "sentiments": {},
+                "time": time.time(),
+            },
+            "triggered_consensus": {"BTC-USD": "BUY"},
+            "sustained_counts": {
+                "BTC-USD": {
+                    "value": "SELL",
+                    "count": 5,
+                    "_mono_start": time.monotonic() - 1000,
+                },
+            },
+            "last_trigger_time": time.time() + 99999,
+        })
+        trigger_mod._startup_grace_active = False
+        # New price: 5% move with atr_pct=1.0 → atr_mult = 5.0 > 1.5 → pass
+        triggered, reasons = check_triggers(
+            {"BTC-USD": weak_sig("SELL")}, {"BTC-USD": 71400}, {}, {},
+        )
+        flip_reasons = [r for r in reasons if "flipped" in r]
+        assert flip_reasons, f"expected flip emitted via ATR override, got: {reasons}"
+
+    def test_price_move_suppressed_when_low_conf_and_low_atr_mult(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """2026-05-15: price_move no longer floor-exempt. A 2% move with
+        low weighted-conf AND atr_mult <1.5 (high-ATR ranging tape)
+        should be suppressed."""
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        prices_initial = {"BTC-USD": 68000}
+        # Seed baseline with a BUY to populate state["last"].prices.
+        weak_extra = {"atr_pct": 3.0}
+        check_triggers(
+            {"BTC-USD": {"action": "BUY", "confidence": 0.80, "extra": weak_extra}},
+            prices_initial, {}, {},
+        )
+        _suppress_cooldown(isolate_state_files["state_file"])
+        prices_moved = {"BTC-USD": 69360}  # +2%, atr_pct=3% -> atr_mult=0.67 <1.5
+        triggered, reasons = check_triggers(
+            {"BTC-USD": {"action": "HOLD", "confidence": 0.30, "extra": weak_extra}},
+            prices_moved, {}, {},
+        )
+        moved = [r for r in reasons if "moved" in r]
+        assert not moved, f"expected price_move suppressed, got: {reasons}"
+
+    def test_price_move_passes_when_low_atr_breakout(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """Same 2% move but in 0.5% ATR (breakout) -> atr_mult=4 -> pass."""
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        prices_initial = {"BTC-USD": 68000}
+        weak_extra = {"atr_pct": 0.5}
+        check_triggers(
+            {"BTC-USD": {"action": "BUY", "confidence": 0.80, "extra": weak_extra}},
+            prices_initial, {}, {},
+        )
+        _suppress_cooldown(isolate_state_files["state_file"])
+        prices_moved = {"BTC-USD": 69360}  # +2%, atr_pct=0.5% -> atr_mult=4.0 >=1.5
+        triggered, reasons = check_triggers(
+            {"BTC-USD": {"action": "HOLD", "confidence": 0.30, "extra": weak_extra}},
+            prices_moved, {}, {},
+        )
+        moved = [r for r in reasons if "moved" in r]
+        assert moved, f"expected price_move emitted via ATR override, got: {reasons}"
