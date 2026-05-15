@@ -645,6 +645,25 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
 # network_momentum, ovx_metals_spillover, xtrend_equity_spillover,
 # orderbook_flow) are NOT shadow-safe — they do
 # yfinance/FRED/Binance calls that would blow the 60s cycle budget.
+# 2026-05-15 LLM shadow-enrollment: static fallback list of shadow LLMs.
+# Used ONLY when the dynamic shadow_registry call path fails (file
+# missing / corrupt / import error). The throttle check at the dispatch
+# site fails CLOSED for these names so expensive GGUF / Claude-CLI calls
+# can't run every cycle if registry telemetry is broken.
+#
+# Keep in sync with the "shadow"-status entries in
+# data/shadow_registry.json that point at expensive compute (modulo > 1).
+# Adding a name here costs nothing but mis-omitting one risks blowing
+# the cycle budget when the registry is unavailable.
+_KNOWN_SHADOW_LLMS = frozenset({
+    "forecast",
+    "claude_fundamental",
+    "finance_llama",
+    "cryptotrader_lm",
+    "meta_trader",
+})
+
+
 _SHADOW_SAFE_SIGNALS = frozenset({
     "hurst_regime",
     "shannon_entropy",
@@ -3547,19 +3566,41 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # a loop restart picks up the right phase automatically. Only
             # skipped signals get force-HOLD here; signals not in shadow
             # status fall through unchanged.
+            #
+            # 2026-05-15 review fix: throttle failure is FAIL-CLOSED for
+            # shadow signals. Original implementation fell through on
+            # exception, which let expensive shadows (meta_trader Qwen2-36L,
+            # forecast Chronos) run every cycle if shadow_registry import
+            # or load failed — exactly the cycle-budget blowout the
+            # throttle was designed to prevent. We now treat any throttle
+            # error as "skip this cycle" so the loop budget is protected;
+            # the signal will reappear on the next cycle when the registry
+            # call succeeds. Non-shadow signals are unaffected because the
+            # get_status() != 'shadow' branch falls through without
+            # touching votes[sig_name].
+            _throttle_skip = False
             try:
                 from portfolio.shadow_registry import (
                     cycle_count_now,
                     get_status,
                     should_run_this_cycle,
                 )
-                if get_status(sig_name) == "shadow":
+                _sig_status = get_status(sig_name)
+                if _sig_status == "shadow":
                     if not should_run_this_cycle(sig_name, cycle_count_now()):
-                        votes[sig_name] = "HOLD"
-                        extra_info[f"{sig_name}_throttled"] = True
-                        continue
+                        _throttle_skip = True
             except Exception:
                 logger.debug("shadow-throttle check failed for %s", sig_name, exc_info=True)
+                # Fail-closed for known shadow signals only. We can't
+                # consult get_status() because that's what just failed,
+                # so use a static name list seeded from the registry JSON
+                # at write time — any LLM scaffold or shadow-LLM voter.
+                if sig_name in _KNOWN_SHADOW_LLMS:
+                    _throttle_skip = True
+            if _throttle_skip:
+                votes[sig_name] = "HOLD"
+                extra_info[f"{sig_name}_throttled"] = True
+                continue
             try:
                 _sig_t0 = time.monotonic()
                 compute_fn = load_signal_func(entry)
