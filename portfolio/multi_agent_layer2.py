@@ -162,6 +162,7 @@ def launch_specialists(
         # removed 2026-04-13 after confirming it broke all specialist runs.
         cmd = [
             claude_cmd, "-p", prompt,
+            "--model", "claude-sonnet-4-6",
             "--allowedTools", "Read,Write",
             "--max-turns", str(spec["max_turns"]),
         ]

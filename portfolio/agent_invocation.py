@@ -889,8 +889,12 @@ def invoke_agent(reasons, tier=3):
         # added it on 2026-03-27; removed on 2026-04-13 after 3 weeks of
         # silent Layer 2 failures. See portfolio/claude_gate.py
         # (detect_auth_failure) for the runtime guard.
+        # 2026-05-15: pin Sonnet 4.6 to keep Layer 2 cost predictable —
+        # CLI default is whatever model the local `claude` resolves to
+        # (Opus 4.7 on this box). Sonnet is sufficient for trade reasoning.
         cmd = [
             claude_cmd, "-p", prompt,
+            "--model", "claude-sonnet-4-6",
             "--allowedTools", "Edit,Read,Bash,Write",
             "--max-turns", str(max_turns),
         ]
