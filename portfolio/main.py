@@ -876,6 +876,43 @@ def run(force_report=False, active_symbols=None):
                 current_drawdown_patient=dd_patient,
                 current_drawdown_bold=dd_bold,
             )
+
+            # Batch E / item 7: optional Ministral pre-gate. After the
+            # router approves an escalation, run a cheap classifier; if
+            # it is confidently "not escalate", route back to autonomous.
+            if escalate and budget_cfg.get("ministral_pregate_enabled", False):
+                try:
+                    from portfolio import escalation_gate
+                    held_positions = {"patient": [], "bold": []}
+                    try:
+                        p_state = load_json(str(STATE_FILE), default={}) or {}
+                        held_positions["patient"] = [
+                            t for t, h in (p_state.get("holdings") or {}).items()
+                            if isinstance(h, dict) and (h.get("shares") or 0) > 0
+                        ]
+                        bold_path = STATE_FILE.parent / "portfolio_state_bold.json"
+                        if bold_path.exists():
+                            b_state = load_json(str(bold_path), default={}) or {}
+                            held_positions["bold"] = [
+                                t for t, h in (b_state.get("holdings") or {}).items()
+                                if isinstance(h, dict) and (h.get("shares") or 0) > 0
+                            ]
+                    except Exception as e:
+                        logger.warning("escalation_gate: held-pos collect failed: %s", e)
+                    m_escalate, m_conf, m_why = escalation_gate.should_escalate(
+                        reasons_list, tier, signals, prices_usd, held_positions,
+                    )
+                    min_score = float(budget_cfg.get("ministral_pregate_min_score", 0.5))
+                    if not m_escalate and m_conf >= min_score:
+                        logger.info(
+                            "escalation_gate: Ministral overrides → autonomous (%s, conf %.2f)",
+                            m_why, m_conf,
+                        )
+                        escalate = False
+                        why = f"ministral_override:{m_why}"
+                except Exception as e:
+                    logger.warning("escalation_gate: pregate failed (fail-open): %s", e)
+
             if escalate and _is_agent_window():
                 logger.info("escalation_router: escalating to claude (%s)", why)
                 with heartbeat_keepalive():
