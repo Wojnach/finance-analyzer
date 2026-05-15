@@ -1864,3 +1864,135 @@ class TestDecisionFeedback:
             result = ai._build_decision_feedback("MSTR")
         assert "?" in result
         assert "MSTR" in result
+
+
+# ===========================================================================
+# _no_position_skip — Item 2 of docs/PLAN.md (reduce-claude-invocations)
+# ===========================================================================
+
+class TestNoPositionSkip:
+    """Gate that skips Claude when no position is held and no entry-strong signal."""
+
+    def _write_state(self, path, holdings=None):
+        import json
+        state = {"holdings": holdings or {}, "cash": 100000}
+        path.write_text(json.dumps(state))
+
+    def _write_ctx(self, path, signals=None):
+        import json
+        path.write_text(json.dumps({"signals": signals or {}}))
+
+    def _enabled_cfg(self, threshold=0.65):
+        return {"claude_budget": {"no_position_skip_enabled": True,
+                                  "entry_confidence_threshold": threshold}}
+
+    def test_held_patient_does_not_skip(self, tmp_path, monkeypatch):
+        patient = tmp_path / "patient.json"
+        bold = tmp_path / "bold.json"
+        ctx = tmp_path / "agent_context_t1.json"
+        self._write_state(patient, {"BTC-USD": {"shares": 1.0}})
+        self._write_state(bold)
+        self._write_ctx(ctx, {"BTC-USD": {"weighted_confidence": 0.10}})
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+        from portfolio import portfolio_mgr
+        monkeypatch.setattr(portfolio_mgr, "STATE_FILE", patient)
+        monkeypatch.setattr(portfolio_mgr, "BOLD_STATE_FILE", bold)
+        with patch("portfolio.agent_invocation._load_config", return_value=self._enabled_cfg()):
+            skip, reason = ai._no_position_skip(["BTC-USD flipped HOLD->BUY"])
+        assert skip is False
+        assert reason == ""
+
+    def test_held_bold_does_not_skip(self, tmp_path, monkeypatch):
+        patient = tmp_path / "patient.json"
+        bold = tmp_path / "bold.json"
+        ctx = tmp_path / "agent_context_t1.json"
+        self._write_state(patient)
+        self._write_state(bold, {"ETH-USD": {"shares": 2.0}})
+        self._write_ctx(ctx, {"ETH-USD": {"weighted_confidence": 0.10}})
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+        from portfolio import portfolio_mgr
+        monkeypatch.setattr(portfolio_mgr, "STATE_FILE", patient)
+        monkeypatch.setattr(portfolio_mgr, "BOLD_STATE_FILE", bold)
+        with patch("portfolio.agent_invocation._load_config", return_value=self._enabled_cfg()):
+            skip, reason = ai._no_position_skip(["ETH-USD flipped HOLD->BUY"])
+        assert skip is False
+
+    def test_unheld_low_confidence_skips(self, tmp_path, monkeypatch):
+        patient = tmp_path / "patient.json"
+        bold = tmp_path / "bold.json"
+        ctx = tmp_path / "agent_context_t1.json"
+        self._write_state(patient)
+        self._write_state(bold)
+        self._write_ctx(ctx, {"MSTR": {"weighted_confidence": 0.40}})
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+        from portfolio import portfolio_mgr
+        monkeypatch.setattr(portfolio_mgr, "STATE_FILE", patient)
+        monkeypatch.setattr(portfolio_mgr, "BOLD_STATE_FILE", bold)
+        with patch("portfolio.agent_invocation._load_config", return_value=self._enabled_cfg()):
+            skip, reason = ai._no_position_skip(["MSTR flipped HOLD->BUY"])
+        assert skip is True
+        assert reason == "no_position_no_entry"
+
+    def test_unheld_high_confidence_does_not_skip(self, tmp_path, monkeypatch):
+        patient = tmp_path / "patient.json"
+        bold = tmp_path / "bold.json"
+        ctx = tmp_path / "agent_context_t1.json"
+        self._write_state(patient)
+        self._write_state(bold)
+        self._write_ctx(ctx, {"MSTR": {"weighted_confidence": 0.70}})
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+        from portfolio import portfolio_mgr
+        monkeypatch.setattr(portfolio_mgr, "STATE_FILE", patient)
+        monkeypatch.setattr(portfolio_mgr, "BOLD_STATE_FILE", bold)
+        with patch("portfolio.agent_invocation._load_config", return_value=self._enabled_cfg()):
+            skip, reason = ai._no_position_skip(["MSTR flipped HOLD->BUY"])
+        assert skip is False
+
+    def test_mixed_one_held_does_not_skip(self, tmp_path, monkeypatch):
+        patient = tmp_path / "patient.json"
+        bold = tmp_path / "bold.json"
+        ctx = tmp_path / "agent_context_t1.json"
+        self._write_state(patient, {"BTC-USD": {"shares": 0.5}})
+        self._write_state(bold)
+        self._write_ctx(ctx, {
+            "BTC-USD": {"weighted_confidence": 0.10},
+            "ETH-USD": {"weighted_confidence": 0.10},
+        })
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+        from portfolio import portfolio_mgr
+        monkeypatch.setattr(portfolio_mgr, "STATE_FILE", patient)
+        monkeypatch.setattr(portfolio_mgr, "BOLD_STATE_FILE", bold)
+        with patch("portfolio.agent_invocation._load_config", return_value=self._enabled_cfg()):
+            skip, reason = ai._no_position_skip([
+                "BTC-USD flipped HOLD->BUY",
+                "ETH-USD flipped HOLD->BUY",
+            ])
+        assert skip is False
+
+    def test_disabled_gate_never_skips(self, tmp_path, monkeypatch):
+        patient = tmp_path / "patient.json"
+        bold = tmp_path / "bold.json"
+        ctx = tmp_path / "agent_context_t1.json"
+        self._write_state(patient)
+        self._write_state(bold)
+        self._write_ctx(ctx, {"MSTR": {"weighted_confidence": 0.10}})
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+        from portfolio import portfolio_mgr
+        monkeypatch.setattr(portfolio_mgr, "STATE_FILE", patient)
+        monkeypatch.setattr(portfolio_mgr, "BOLD_STATE_FILE", bold)
+        disabled_cfg = {"claude_budget": {"no_position_skip_enabled": False}}
+        with patch("portfolio.agent_invocation._load_config", return_value=disabled_cfg):
+            skip, reason = ai._no_position_skip(["MSTR flipped HOLD->BUY"])
+        assert skip is False
+
+    def test_extract_triggered_tickers_finds_dash_usd(self):
+        out = ai._extract_triggered_tickers([
+            "BTC-USD flipped HOLD->BUY",
+            "ETH-USD crossed EMA",
+        ])
+        assert "BTC-USD" in out
+        assert "ETH-USD" in out
+
+    def test_extract_triggered_tickers_finds_stock(self):
+        out = ai._extract_triggered_tickers(["MSTR flipped HOLD->SELL"])
+        assert "MSTR" in out

@@ -277,6 +277,98 @@ def _extract_ticker(reasons):
     return "XAG-USD"  # default to silver
 
 
+def _extract_triggered_tickers(reasons):
+    """Extract all tickers mentioned across trigger reasons.
+
+    Plural counterpart of ``_extract_ticker``. Returns a de-duplicated list
+    preserving first-seen order. Used by the ``no_position_skip`` gate so
+    each reason in a multi-ticker trigger is checked.
+    """
+    import re
+    seen = []
+    for r in reasons or []:
+        if not isinstance(r, str):
+            continue
+        for m in re.finditer(r'\b([A-Z]{2,5}-USD)\b', r):
+            tk = m.group(1)
+            if tk not in seen:
+                seen.append(tk)
+        for m in re.finditer(r'\b([A-Z]{2,5})\b(?=\s+(?:flipped|crossed|broke))', r):
+            tk = m.group(1)
+            if tk not in seen:
+                seen.append(tk)
+    return seen
+
+
+def _no_position_skip(reasons):
+    """Skip-gate: no position held AND no strong entry signal.
+
+    Item 2 from docs/PLAN.md (reduce-claude-invocations). When every
+    triggered ticker has zero shares in BOTH Patient and Bold portfolios
+    AND no ticker shows a weighted_confidence >= entry_confidence_threshold
+    in the latest agent_context_t1.json, the Claude invocation is skipped.
+
+    Gated by config.claude_budget.no_position_skip_enabled (default False
+    for safe rollout). Returns (skip: bool, reason: str). Fail-open on any
+    error so a malformed config/context never blocks legitimate trades.
+    """
+    try:
+        cfg = _load_config()
+    except Exception as e:
+        logger.debug("no_position_skip: config load failed (%s) — fail open", e)
+        return (False, "")
+    budget = cfg.get("claude_budget", {}) if isinstance(cfg, dict) else {}
+    if not budget.get("no_position_skip_enabled", False):
+        return (False, "")
+    threshold = float(budget.get("entry_confidence_threshold", 0.65))
+
+    tickers = _extract_triggered_tickers(reasons)
+    if not tickers:
+        # No identifiable ticker — let downstream gates / Claude handle it.
+        return (False, "")
+
+    try:
+        from portfolio.portfolio_mgr import load_bold_state, load_state
+        patient = load_state() or {}
+        bold = load_bold_state() or {}
+    except Exception as e:
+        logger.debug("no_position_skip: portfolio load failed (%s) — fail open", e)
+        return (False, "")
+
+    def _shares(state, tk):
+        try:
+            return float(state.get("holdings", {}).get(tk, {}).get("shares", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            return 0.0
+
+    for tk in tickers:
+        if _shares(patient, tk) > 0 or _shares(bold, tk) > 0:
+            return (False, "")
+
+    # No tickers held. Check for strong entry signal in t1 context.
+    try:
+        from portfolio.file_utils import load_json
+        ctx = load_json(DATA_DIR / "agent_context_t1.json", default={}) or {}
+    except Exception as e:
+        logger.debug("no_position_skip: context load failed (%s) — fail open", e)
+        return (False, "")
+
+    signals = ctx.get("signals") if isinstance(ctx, dict) else None
+    if isinstance(signals, dict):
+        for tk in tickers:
+            sig = signals.get(tk)
+            if not isinstance(sig, dict):
+                continue
+            wc = sig.get("weighted_confidence")
+            try:
+                if wc is not None and float(wc) >= threshold:
+                    return (False, "")
+            except (TypeError, ValueError):
+                continue
+
+    return (True, "no_position_no_entry")
+
+
 def _log_trigger(reasons, status, tier=None):
     entry = {
         "ts": datetime.now(UTC).isoformat(),
@@ -817,6 +909,20 @@ def invoke_agent(reasons, tier=3):
     except Exception as e:
         # Import failures or shape mismatches must not derail the invocation.
         logger.warning("trade-guards gate failed (proceeding): %s", e)
+
+    # 2026-05-15 (docs/PLAN.md item 2, reduce-claude-invocations): skip the
+    # Claude subprocess when every triggered ticker has zero shares in both
+    # portfolios AND no signal posture suggests a strong entry. Gated by
+    # config.claude_budget.no_position_skip_enabled (default False) so the
+    # behavior change rolls out only after explicit opt-in. Fail-open.
+    try:
+        skip_now, skip_reason = _no_position_skip(reasons)
+        if skip_now:
+            logger.info("Layer 2 skipped: %s (no holdings, no entry-strong signal)", skip_reason)
+            _log_trigger(reasons, "skipped_no_position", tier=tier)
+            return False
+    except Exception as e:
+        logger.warning("no_position_skip gate failed (proceeding): %s", e)
 
     # Multi-agent mode: parallel specialists + synthesis (Coordinator Mode pattern)
     # Enabled via config.layer2.multi_agent = true, only for T2/T3
