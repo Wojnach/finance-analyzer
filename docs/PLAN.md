@@ -1,101 +1,76 @@
-# Plan: Layer 2 Tier Performance Pass
+# PLAN — Enroll all LLMs through shadow registry (2026-05-15)
 
-**Branch:** `perf/layer2-tier-perf`
-**Started:** 2026-05-14
-**Scope:** Reduce wasted tool-call roundtrips across T1/T2/T3, give every tier
-budget headroom that compensates for unavoidable sequential reads.
+## Why
 
-## Context
+`data/accuracy_cache.json` shows only 2 LLM voters today (ministral 58%, qwen3 60%). Three more LLM signals are wired but force-disabled (sentiment 46%, forecast 47%, claude_fundamental 58%). Four sentiment sub-models (CryptoBERT, FinBERT, Trading-Hero, FinGPT) are averaged inside one aggregate — individual accuracy never measured. Three more models on disk have no wrappers at all: `finance-llama-8b-gguf`, `cryptotrader-lm`, `custom-meta-trader`.
 
-Three commits already shipped to main in this work:
-- `89aa6f68` — cost-tracking infra (claude_gate json output, bigbet/iskbets routing, scripts/claude_cost_report.py)
-- `aec5ad19` — stdin=DEVNULL + auth-error cooldown
-- `68b99d2e` — T1 timeout 120 → 150
-- `9991a0e5` — T1 prompt: 3 Reads → 1 Bash cat
+The shadow registry infra (`portfolio/shadow_registry.py`, `data/shadow_registry.json`, `scripts/review_shadow_signals.py`) exists but only 5 entries are registered. The probability log (`portfolio/llm_probability_log.py`, central call at `signal_engine.py:3656`) accepts only 6 signal names via `_LLM_SIGNALS`.
 
-T1 work confirmed reduces wall time ~25-30s per invocation. T2 and T3 still
-do 5+ sequential Reads each cycle.
+Goal: route every LLM-class model on disk through the shadow → measure → promote pipeline this session. Keep cycle near 60s by throttling expensive shadows. Don't change vote weighting until shadow data justifies promotion.
 
-## Audit numbers (3d, n=45)
+## Pre-flight (2026-05-15 14:00 UTC)
 
-```
-T1 duration: min=0  p25=104  p50=114  p75=122  p90=135  p95=139  max=145
-T2 duration: p50=172  p95=247  max=284 (already 600s budget, healthy)
-T3 duration: p50=240  p95=390  max=390 (already 900s budget, healthy)
-```
+Three pre-existing critical errors noted, all OUTSIDE this session's scope:
+- accuracy_degradation on macro_regime/momentum_factors/structure (non-LLM signals)
+- accuracy_degradation on forecast::chronos_24h — VALIDATES re-enabling forecast as shadow not voter
+- contract_violation on Layer 2 silent fail at 13:01
 
-T2 and T3 are not currently timing out at the budget edge, but they're
-spending ~50-80s per invocation on sequential file Reads that can collapse
-into one Bash cat. Same fix, same savings, just less urgent than T1.
+None touched by this session.
 
-## What to ship
+## Scope this session
 
-### Batch 1 — T2/T3 prompt collapse + budget headroom
+| Batch | Files | Risk |
+|---|---|---|
+| 1 | `portfolio/tickers.py`, `data/shadow_registry.json`, `portfolio/signal_engine.py` (small gate) | Low |
+| 2 | `portfolio/sentiment.py`, `portfolio/llm_probability_log.py`, `data/shadow_registry.json` | Medium |
+| 3 | `portfolio/signals/finance_llama.py` (new), `portfolio/signals/cryptotrader_lm.py` (new), `portfolio/signals/meta_trader.py` (new), `portfolio/signal_registry.py`, `data/shadow_registry.json` | Low |
+| 4 | `portfolio/shadow_registry.py`, `portfolio/signal_engine.py` | Low |
 
-Files:
-- `portfolio/agent_invocation.py`
-  - `_build_tier_prompt` T2 branch — replace 5 sequential Reads of
-    `trading_insights.md` (optional), `TRADING_PLAYBOOK.md`,
-    `layer2_context.md`, `agent_context_t2.json`, both portfolio_state
-    files into single Bash cat. Use `[ -f data/trading_insights.md ] && cat
-    ... ; cat ...` so the optional read stays optional.
-  - `_build_tier_prompt` T3 branch — same treatment for
-    `TRADING_PLAYBOOK.md`, `layer2_context.md`, `agent_summary_compact.json`,
-    both portfolio_state files.
-  - TIER_CONFIG — bump T1 budget another 30s (150 → 180s) to leave
-    real headroom on top of the Bash-cat optimization, in case other
-    work creeps back in. T2/T3 stay (already plenty).
+## Hard rules
 
-### Batch 2 — docs + tests
-
-- `CLAUDE.md` — update T1 budget reference (150 → 180).
-- `.claude/rules/infrastructure.md` — same.
-- `tests/test_agent_invocation.py` — update T1 timeout assertion (150 → 180).
-- Add a regression test that the T1/T2/T3 prompts contain "cat" and do
-  NOT instruct the agent to Read those files individually.
-
-### Batch 3 — adversarial review (fresh Claude Code agent, not Codex)
-
-Spawn a `feature-dev:code-reviewer` agent on the worktree branch. Provide:
-- Diff range (`git log main..perf/layer2-tier-perf`)
-- Focus areas: prompt correctness, optional-file handling for
-  trading_insights.md, broken instructions if the cat command fails
-  partially.
-- Output contract: file:line findings, severity.
-
-Fix any P1/P2 finding before merging.
-
-### Batch 4 — test, merge, push
-
-- `.venv/Scripts/python.exe -m pytest tests/ -n auto` (full suite)
-- Fix any new failures (NOT the 26 known pre-existing).
-- Merge `perf/layer2-tier-perf` into `main`.
-- `cmd.exe /c git push`.
-- Restart `PF-DataLoop` via schtasks.
-- Clean up worktree.
+- **No vote-weight changes.** Every new signal enters shadow, not active vote pool. Existing 2-LLM consensus (ministral+qwen3) unchanged.
+- **Scaffold > broken inference.** Where a new model lacks a verified loader (finance-llama, cryptotrader-lm, meta_trader), the wrapper returns HOLD with `feature_unavailable=True` indicator and a TODO. Shadow registry entry created so future inference fill-in is incremental.
+- **Cycle budget stays near 60s.** Cheap CPU shadows run every cycle. Expensive GGUF shadows gated by `cycle_modulo` (default 3 for 8B models, 5 for Qwen2-36L).
+- **Existing tests must stay green.** Worktree lacks `config.json` symlink — run only targeted tests inside worktree. Full suite runs in main after merge.
 
 ## What could break
 
-1. **trading_insights.md optional read** — if the cat partial-fails on a
-   missing optional file, the agent might bail. Use `[ -f X ] && cat X`
-   pattern so missing file is silent success.
-2. **agent_summary_compact.json size** — ~1400 lines, ~64KB. Cat'ing it
-   into one tool result is fine size-wise (claude tool results easily
-   handle this).
-3. **Bash tool availability** — claude CLI is invoked with
-   `--allowedTools "Edit,Read,Bash,Write"` so Bash is on the allowlist.
-   Confirmed in `portfolio/agent_invocation.py` cmd build.
-4. **Prompt-following** — agents sometimes ignore "do NOT Read X" and
-   read anyway. If observed post-deploy, we don't lose anything (just
-   the savings). Worst case is same-as-before.
+1. **`_LLM_SIGNALS` expansion** without matching `extra_info` keys in `signal_engine.py:3654-3666` → silent log skip. Mitigation: every new signal name MUST set `extra_info[f"{name}_confidence"]` (and optionally `_indicators`) at compute site.
+2. **Shadow signal still voting.** `signal_engine` includes a signal in `votes` regardless of shadow status. Mitigation: add explicit drop step that consults `shadow_registry.load_registry()` after vote dict is built, before consensus.
+3. **Cycle modulo bug skips signal forever.** Persisted `cycle_phase` could desync. Mitigation: derive cycle counter from monotonic UTC minute, not persisted state.
+4. **Probability sum drift on derived-prob path.** Already normalized in `derive_probs_from_result()`. Leave alone.
 
-## Verification
+## Execution order
 
-After merge + restart, watch `data/invocations.jsonl` for:
-- T1 p50 drop from 114s → ~85-95s (already in flight from `9991a0e5`)
-- T2 p50 drop from 172s → ~120-140s
-- T3 p50 drop from 240s → ~180-200s
-- Zero new timeouts at the budget edges
-- Zero status="incomplete" rows linked to truncated prompts
+1. Worktree + plan commit
+2. Batch 1: re-enable as shadows. Test. Commit.
+3. Batch 2: split sentiment. Test. Commit.
+4. Batch 3: scaffold 3 new wrappers. Test. Commit.
+5. Batch 4: cycle throttle. Test. Commit.
+6. Adversarial review. Address P1/P2.
+7. Targeted pytest pass.
+8. Merge to main. Push via cmd.exe.
+9. Restart loops.
+10. 1h trail.
 
-Compare 3d before/after via `scripts/claude_cost_report.py --days 3`.
+## Verification per batch
+
+| Batch | Pass criteria |
+|---|---|
+| 1 | shadow_registry.json has 3 new entries documenting prior disable reason. signal_engine drops shadow-status signals from vote pool but keeps in raw_votes/log path. |
+| 2 | `_LLM_SIGNALS` includes 4 new names. Sentiment call emits 5 rows (legacy aggregate + 4 sub-voters) to llm_probability_log per invocation. |
+| 3 | 3 new modules import clean. Each returns valid result dict with `action="HOLD"`, `confidence=0.0`, indicator `feature_unavailable=True`. Registered in signal_registry. Shadow entries present. |
+| 4 | `cycle_modulo` skip path covered by unit test. Cheap shadows modulo=1, GGUF modulo=3, meta-trader modulo=5. |
+
+## Post-merge 1h trail
+
+1. `tail -F data/health_state.json` — abort if mean cycle_ms > 120000 over 5 min window.
+2. `tail -F data/critical_errors.jsonl` — any new signal-name entry → set status="retired" via `shadow_registry.resolve_shadow()`.
+3. After ~30 min: count rows by signal in `data/llm_probability_log.jsonl`. Any new signal with 0 rows = silent failure → retire.
+4. Spot-check `data/agent_summary.json` for 3 tickers, confirm new signal names appear with real probs.
+
+## Out of scope
+
+- Real GGUF inference for the 3 new wrappers — scaffolds return HOLD. Inference work scheduled as follow-up.
+- Brier/reliability binning UI.
+- `custom-trading-lora.gguf` audit — unknown provenance, untouched.

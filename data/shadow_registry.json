@@ -7,9 +7,11 @@
         "min_accuracy": 0.6,
         "max_missing_outcome_rate": 0.2
       },
-      "notes": "Parser fix shipped 2026-04-09 (fde9cf8+28aa5d0). Accuracy vs outcomes not yet measured \u2014 awaiting outcome backfill for sentiment_ab_log.",
-      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
-      "status": "shadow"
+      "notes": "Parser fix shipped 2026-04-09 (fde9cf8+28aa5d0). Accuracy vs outcomes not yet measured — awaiting outcome backfill for sentiment_ab_log. 2026-05-15: kept in shadow; now registered in llm_probability_log _LLM_SIGNALS so per-cycle votes are captured.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 1,
+      "cycle_phase": 0
     },
     "finbert": {
       "entered_shadow_ts": "2026-04-09T00:00:00+00:00",
@@ -18,9 +20,11 @@
         "min_accuracy": 0.6,
         "max_missing_outcome_rate": 0.2
       },
-      "notes": "CPU-cheap shadow alongside CryptoBERT/Trading-Hero-LLM. 86% neutral output, 87.9% primary-agreement \u2014 likely collapsed to safe-label. Keep for observation only.",
-      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
-      "status": "shadow"
+      "notes": "CPU-cheap shadow alongside CryptoBERT/Trading-Hero-LLM. 86% neutral output, 87.9% primary-agreement — likely collapsed to safe-label. 2026-05-15: kept in shadow; per-cycle log_vote() row now emitted via sentiment fan-out.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 1,
+      "cycle_phase": 0
     },
     "kronos": {
       "entered_shadow_ts": "2026-03-27T15:10:00+00:00",
@@ -29,7 +33,7 @@
         "min_accuracy": 0.55,
         "min_subprocess_success_rate": 0.9
       },
-      "notes": "Un-retired 2026-04-21 afternoon with proper vote-pool isolation (shadow sub-signal excluded from _health_weighted_vote). Subprocess reliability still 59% \u2014 fix is a separate work stream.",
+      "notes": "Un-retired 2026-04-21 afternoon with proper vote-pool isolation (shadow sub-signal excluded from _health_weighted_vote). Subprocess reliability still 59% — fix is a separate work stream.",
       "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
       "status": "shadow"
     },
@@ -52,6 +56,101 @@
       "notes": "Registered but force-HOLD via DISABLED_SIGNALS pending live validation.",
       "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
       "status": "shadow"
+    },
+    "cryptobert": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Split out from aggregate sentiment voter 2026-05-15. CryptoBERT sub-model previously hidden inside the 46% aggregate; per-model accuracy never measured. Fan-out call site: portfolio/sentiment.py. Crypto tickers only (BTC/ETH).",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 1,
+      "cycle_phase": 0
+    },
+    "trading_hero": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Split out from aggregate sentiment voter 2026-05-15. Trading-Hero-LLM sub-model previously hidden inside the 46% aggregate. Stock tickers only (MSTR + future tier-1 stocks).",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 1,
+      "cycle_phase": 0
+    },
+    "sentiment_legacy_ensemble": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 5000,
+        "min_accuracy": 0.5
+      },
+      "notes": "Historical aggregate of CryptoBERT/FinBERT/Trading-Hero/FinGPT scores. Disabled at 46% on 40K samples 2026-05-03. Kept as a registry-tracked baseline so the four split sub-voters (cryptobert/finbert/trading_hero/fingpt) can be compared against the ensemble they replaced. Vote remains force-HOLD via DISABLED_SIGNALS — this entry exists for telemetry parity, not promotion.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow"
+    },
+    "forecast": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55,
+        "max_missing_outcome_rate": 0.2
+      },
+      "notes": "Re-registered as shadow 2026-05-15 after 2026-05-12 disable (25.6% recent 1d, 6966 samples all-time at 47%). Chronos-2 time-series foundation model failing in ranging regime. Vote remains force-HOLD via DISABLED_SIGNALS; this entry tracks recovery via fresh shadow data. Run cost: ~3s/cycle on GPU — cycle_modulo=3 to keep loop near 60s.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 3,
+      "cycle_phase": 0
+    },
+    "claude_fundamental": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Re-registered as shadow 2026-05-15 after 2026-05-03 disable (19.8% recent 1d, 222 samples, structural BUY bias on Opus tier). Vote remains force-HOLD via DISABLED_SIGNALS; this entry tracks any recovery after the bias-detector fix. Run cost: ~5s/cycle (Claude CLI subprocess cascade) — cycle_modulo=5 to protect cycle time.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 5,
+      "cycle_phase": 1
+    },
+    "finance_llama": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/finance-llama-8b-gguf/wiroai-finance-llama-8b-q4_k_m.gguf (4.6GB GGUF). Wrapper at portfolio/signals/finance_llama.py returns HOLD with feature_unavailable=True until inference (llama-server prompt + token-logprob extraction) is implemented and verified. Cycle cost target: ~4s on GPU — cycle_modulo=3 once inference is live.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 3,
+      "cycle_phase": 2
+    },
+    "cryptotrader_lm": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.6
+      },
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/cryptotrader-lm/ (PEFT LoRA on Ministral-8B base + GGUF copy). Crypto-only (BTC/ETH). Wrapper at portfolio/signals/cryptotrader_lm.py returns HOLD with feature_unavailable=True until LoRA loader is implemented. Higher promotion bar (0.60) because the published model card claims 72% accuracy and 0.94 Sharpe — if it can't clear 60% live we want to know fast.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 3,
+      "cycle_phase": 0
+    },
+    "meta_trader": {
+      "entered_shadow_ts": "2026-05-15T14:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/custom-meta-trader/ (Qwen2-36L unsloth safetensors, 5.8GB, 32K context). Wrapper at portfolio/signals/meta_trader.py returns HOLD with feature_unavailable=True. Designed to consume other LLM voter outputs from the same cycle as features (meta-model role), so it must be invoked AFTER ministral/qwen3 in the dispatch order. cycle_modulo=5 because Qwen2-36L inference is the most expensive in our stack.",
+      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 5,
+      "cycle_phase": 2
     }
   }
 }

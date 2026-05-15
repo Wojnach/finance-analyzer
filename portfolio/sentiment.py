@@ -74,6 +74,47 @@ def _is_crypto(ticker):
     return ticker.upper().replace("-USD", "") in CRYPTO_TICKERS
 
 
+_SENT_TO_ACTION = {"positive": "BUY", "negative": "SELL", "neutral": "HOLD"}
+
+
+def _log_sub_vote(signal_name: str, ticker: str, sentiment_label: str,
+                  avg_scores: dict) -> None:
+    """Emit a probability-log row for one sentiment sub-model.
+
+    Added 2026-05-15 LLM shadow-enrollment. Each sentiment sub-voter
+    (trading_hero / cryptobert / finbert / fingpt) writes an independent
+    row so Brier scores and per-model accuracy can be measured outside
+    the aggregate `sentiment` voter (currently 46% on 40K samples — the
+    ensemble masks which sub-model is actually carrying signal).
+
+    Failure modes are swallowed: log_vote() is fire-and-forget by design
+    (see portfolio.llm_probability_log) and we never want a logging
+    failure to interrupt the sentiment-compute path. The function is
+    a no-op when:
+
+      * portfolio.llm_probability_log is unavailable (import error).
+      * sentiment_label is not in {"positive", "negative", "neutral"}.
+      * avg_scores is malformed.
+      * signal_name is not in _LLM_SIGNALS (silent drop inside log_vote).
+    """
+    try:
+        from portfolio.llm_probability_log import derive_probs_from_result, log_vote
+        action = _SENT_TO_ACTION.get(sentiment_label, "HOLD")
+        confidence = float(avg_scores.get(sentiment_label, 0.0))
+        indicators = {"avg_scores": avg_scores}
+        probs = derive_probs_from_result(
+            signal_name, action, confidence, indicators=indicators,
+        )
+        if probs is None:
+            return
+        log_vote(
+            signal_name, ticker, probs,
+            horizon="1d", chosen=action, confidence=confidence,
+        )
+    except Exception:
+        logger.debug("sub-vote log failed for %s/%s", signal_name, ticker, exc_info=True)
+
+
 def _fetch_crypto_headlines(ticker="BTC", limit=20, *, cryptocompare_api_key=None):
     category = TICKER_CATEGORIES.get(ticker.upper(), ticker.upper())
     url = f"{CRYPTOCOMPARE_URL}&categories={category}"
@@ -344,6 +385,8 @@ def _stash_ab_context(
     primary_result: dict,
     all_articles: list[dict],
     diss_mult: float,
+    *,
+    log_ticker_full: str | None = None,
 ) -> None:
     """Store the inline portion of an A/B entry until the batched fingpt
     results arrive in flush_ab_log(). Called from get_sentiment().
@@ -351,11 +394,18 @@ def _stash_ab_context(
     Thread-safe — multiple ThreadPoolExecutor workers call this concurrently.
 
     2026-04-28: cryptobert_shadow slot added; CryptoBERT was demoted from
-    crypto primary to shadow. See get_sentiment docstring for rationale.
+    crypto primary to shadow.
+
+    2026-05-15: log_ticker_full slot added. Stashes the full ticker
+    (e.g. "BTC-USD") so flush_ab_log() can emit per-fingpt log_vote()
+    rows keyed by the same ticker as the synchronous trading_hero /
+    cryptobert / finbert rows. Falls back to the short ticker when
+    callers don't pass one.
     """
     with _pending_ab_lock:
         _pending_ab_entries[ab_key] = {
             "ticker": ticker,
+            "log_ticker_full": log_ticker_full or ticker,
             "primary_result": primary_result,
             "finbert_shadow": None,  # filled in below by get_sentiment
             "cryptobert_shadow": None,  # filled in below for crypto tickers (2026-04-28)
@@ -451,6 +501,17 @@ def flush_ab_log() -> None:
                             "confidence": round(fg_avg[fg_overall], 4),
                             "avg_scores": {k: round(v, 4) for k, v in fg_avg.items()},
                         })
+                        # 2026-05-15 LLM shadow-enrollment: emit a fingpt row
+                        # to llm_probability_log so it joins the synchronous
+                        # trading_hero/cryptobert/finbert rows in the same
+                        # accuracy/Brier pipeline. Uses the full ticker
+                        # stashed during _stash_ab_context (falls back to
+                        # the short form if the caller never passed one).
+                        _log_sub_vote(
+                            "fingpt",
+                            entry.get("log_ticker_full", entry["ticker"]),
+                            fg_overall, fg_avg,
+                        )
                     except Exception:
                         logger.debug(
                             "fingpt headlines aggregation failed for %s", ab_key,
@@ -746,7 +807,8 @@ def _log_ab_result(ticker, primary_result, shadow_results):
 # ---------------------------------------------------------------------------
 
 def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
-                   *, cryptocompare_api_key=None) -> dict:
+                   *, cryptocompare_api_key=None,
+                   _log_ticker_full: str | None = None) -> dict:
     """Get sentiment for a ticker using primary model + shadow A/B models.
 
     2026-04-28 (fix/sentiment-relevance-and-aggregation): two changes here.
@@ -841,6 +903,26 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
         "dissemination_score": diss_mult,
     }
 
+    # 2026-05-15 LLM shadow-enrollment: emit a per-sub-model probability
+    # log row so each sentiment sub-voter (trading_hero, cryptobert,
+    # finbert, fingpt) has independent accuracy/Brier tracking instead of
+    # being hidden inside the 46% aggregate. log_vote() is a no-op for
+    # signals not in _LLM_SIGNALS, so this never crashes even if the
+    # registry was rolled back.
+    #
+    # Ticker logged: prefer the full "BTC-USD" form (matches the
+    # aggregate `sentiment` row emitted by signal_engine.log_vote at
+    # ~line 3677) so outcome backfill joins line up. The caller may
+    # pass `_log_ticker_full="BTC-USD"`; absent that, we fall back to
+    # the short form so this path stays useful for standalone CLI calls.
+    #
+    # Horizon "1d" because get_sentiment is called once per ticker per
+    # SENTIMENT_TTL (15 min) regardless of which horizon is being
+    # evaluated, and outcome backfill keys per-horizon accuracy off the
+    # logged horizon.
+    log_ticker = _log_ticker_full or ticker
+    _log_sub_vote("trading_hero", log_ticker, overall, avg)
+
     # --- Shadow models (A/B testing — logged only, don't affect consensus) ---
     #
     # 2026-04-09: The A/B log write used to happen inline at the bottom of
@@ -857,7 +939,10 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
     # The primary model's voting result is still computed and returned
     # SYNCHRONOUSLY — batching only affects the shadow log, not the vote.
     ab_key = f"{short}:{datetime.now(UTC).isoformat()}"
-    _stash_ab_context(ab_key, short, primary_result, all_articles, diss_mult)
+    _stash_ab_context(
+        ab_key, short, primary_result, all_articles, diss_mult,
+        log_ticker_full=log_ticker,
+    )
 
     # Shadow: FinGPT — enqueue for post-cycle Phase 3 execution. Zero-cost
     # here; the actual inference runs via llama_server finance-llama-8b
@@ -905,6 +990,7 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
                 "confidence": round(fb_avg[fb_overall], 4),
                 "avg_scores": {k: round(v, 4) for k, v in fb_avg.items()},
             })
+            _log_sub_vote("finbert", log_ticker, fb_overall, fb_avg)
     except Exception as e:
         logger.debug("FinBERT shadow failed: %s", e)
 
@@ -926,6 +1012,7 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
                     "confidence": round(cb_avg[cb_overall], 4),
                     "avg_scores": {k: round(v, 4) for k, v in cb_avg.items()},
                 })
+                _log_sub_vote("cryptobert", log_ticker, cb_overall, cb_avg)
         except Exception as e:
             logger.debug("CryptoBERT shadow failed: %s", e)
 

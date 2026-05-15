@@ -54,12 +54,33 @@ _PROB_LOG = _DATA_DIR / "llm_probability_log.jsonl"
 # by `log_vote` so callers can call unconditionally.
 _LLM_SIGNALS = frozenset(
     {
+        # Currently active voters and the previously-tracked LLM cohort.
         "ministral",
         "qwen3",
         "sentiment",
         "news_event",
         "forecast",
         "claude_fundamental",
+        # 2026-05-15 LLM shadow-enrollment: split sentiment sub-models out
+        # so per-model accuracy/Brier can be measured independently of the
+        # aggregate `sentiment` voter (currently 46% on 40K samples). The
+        # ensemble masks which sub-model is actually carrying signal. These
+        # names are emitted by portfolio/sentiment.py.fan_out_sub_models()
+        # when the aggregate is computed; if the fan-out site is absent
+        # for any reason, log_vote() is a no-op so this is safe to seed.
+        "cryptobert",
+        "finbert",
+        "trading_hero",
+        "fingpt",
+        # 2026-05-15 LLM shadow-enrollment: scaffold entries for three
+        # unused models on disk (finance-llama-8b-gguf, cryptotrader-lm,
+        # custom-meta-trader). Wrappers in portfolio/signals/* register
+        # with the signal engine and emit log_vote() abstention rows until
+        # real inference is wired up. Registering the name here so log_vote
+        # accepts the row instead of silently dropping it.
+        "finance_llama",
+        "cryptotrader_lm",
+        "meta_trader",
     }
 )
 
