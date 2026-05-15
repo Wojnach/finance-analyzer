@@ -152,7 +152,31 @@ Confidence guide: 80+ = strong conviction, 60-79 = moderate, 40-59 = weak/mixed,
 
 
 def _parse_response(text):
-    """Parse model output into action + reasoning + confidence."""
+    """Parse model output into action + reasoning + confidence.
+
+    2026-05-15 confidence-recovery fix: Ministral-3 wraps its JSON in
+    ``` ```json codefences AND emits literal newlines inside the
+    `reasoning` string value. Raw newlines are invalid inside JSON
+    string literals (must be escaped as ``\\n``), so json.loads()
+    on the brace-extracted substring throws InvalidControlCharacter
+    and `_extract_json_payload` returns None. With payload=None the
+    function fell through the `if isinstance(payload, dict)` block
+    and confidence stayed at None, which `signal_engine._call_ministral`
+    translates into `extra_info["ministral_confidence"]` never being
+    set, which `llm_probability_log.derive_probs_from_result` then
+    treats as confidence=0.0 → the canonical conf-zero abstention
+    shape ``{BUY: 0.25, HOLD: 0.5, SELL: 0.25}``. For 9+ days every
+    ministral row in `data/llm_probability_log.jsonl` was that exact
+    shape, blowing Brier-score calibration analysis silently.
+
+    Fix has two layers:
+      1. Action is already regex-recovered from the raw text below
+         (this preexists).
+      2. Confidence is now regex-extracted from raw text when JSON
+         parsing failed — a literal ``"confidence": 75`` substring
+         in the model output is enough to recover the value, even
+         when the surrounding JSON is malformed by raw newlines.
+    """
     payload = _extract_json_payload(text)
     decision = None
     reasoning = text[:200]
@@ -179,6 +203,20 @@ def _parse_response(text):
     if decision is None:
         match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
         decision = match.group(1) if match else "HOLD"
+    if confidence is None and text:
+        # 2026-05-15: regex fallback when JSON parse failed. Accepts
+        # `"confidence": 75` or `"confidence":75.0` or even bare
+        # `confidence: 0.8` (some Qwen3 thinking-mode outputs drop the
+        # outer quotes). 0-100 is renormalized to 0-1; 0-1 is preserved.
+        m = re.search(r'"?confidence"?\s*:\s*([0-9]+(?:\.[0-9]+)?)', text)
+        if m:
+            try:
+                raw = float(m.group(1))
+                if raw > 1.0:
+                    raw = raw / 100.0
+                confidence = max(0.0, min(1.0, raw))
+            except (ValueError, TypeError):
+                pass
     return decision, reasoning, confidence
 
 
