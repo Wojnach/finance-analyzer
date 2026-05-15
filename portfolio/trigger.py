@@ -61,7 +61,10 @@ def _load_claude_budget():
 # operational triggers that must always fire.
 _FLOOR_EXEMPT_REASON_TYPES = {
     "first_of_day", "periodic_review", "F&G_extreme",
-    "post_trade", "price_move",
+    "post_trade",
+    # price_move removed 2026-05-15: a 2% move in a 3% ATR ranging tape
+    # is low-quality. atr_mult floor (default 1.5) already protects
+    # genuine breakouts (2% / 0.5% ATR = 4x passes).
 }
 
 
@@ -399,7 +402,22 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             pct = abs(price - old_price) / old_price
             if pct >= PRICE_THRESHOLD:
                 direction = "up" if price > old_price else "down"
-                reasons.append(f"{ticker} moved {pct:.1%} {direction}")
+                _pm_reason = f"{ticker} moved {pct:.1%} {direction}"
+                # 2026-05-15: route price_move through floor gate.
+                # A 2% move in a 3% ATR ranging tape is low-quality;
+                # the atr_mult floor (default 1.5) filters it. Floor
+                # is OR-gated with weighted_conf so high-conviction
+                # moves still pass.
+                _pm_sig = signals.get(ticker, {}) or {}
+                _pm_extra = _pm_sig.get("extra", {}) or {}
+                _pm_conf = _pm_sig.get("confidence", 0) or 0
+                _pm_atr_pct = (
+                    _pm_extra.get("atr_pct") or _pm_sig.get("atr_pct") or 0
+                )
+                _pm_atr_mult = 0.0
+                if _pm_atr_pct and _pm_atr_pct > 0:
+                    _pm_atr_mult = (pct * 100.0) / _pm_atr_pct
+                _floor_candidates.append((_pm_reason, _pm_conf, _pm_atr_mult))
 
     # 4. Fear & Greed crossed threshold
     prev_fg = prev.get("fear_greeds", {})

@@ -1732,3 +1732,54 @@ class TestClaudeBudgetGates:
         )
         flip_reasons = [r for r in reasons if "flipped" in r]
         assert flip_reasons, f"expected flip emitted via ATR override, got: {reasons}"
+
+    def test_price_move_suppressed_when_low_conf_and_low_atr_mult(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """2026-05-15: price_move no longer floor-exempt. A 2% move with
+        low weighted-conf AND atr_mult <1.5 (high-ATR ranging tape)
+        should be suppressed."""
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        prices_initial = {"BTC-USD": 68000}
+        # Seed baseline with a BUY to populate state["last"].prices.
+        weak_extra = {"atr_pct": 3.0}
+        check_triggers(
+            {"BTC-USD": {"action": "BUY", "confidence": 0.80, "extra": weak_extra}},
+            prices_initial, {}, {},
+        )
+        _suppress_cooldown(isolate_state_files["state_file"])
+        prices_moved = {"BTC-USD": 69360}  # +2%, atr_pct=3% -> atr_mult=0.67 <1.5
+        triggered, reasons = check_triggers(
+            {"BTC-USD": {"action": "HOLD", "confidence": 0.30, "extra": weak_extra}},
+            prices_moved, {}, {},
+        )
+        moved = [r for r in reasons if "moved" in r]
+        assert not moved, f"expected price_move suppressed, got: {reasons}"
+
+    def test_price_move_passes_when_low_atr_breakout(
+        self, isolate_state_files, monkeypatch,
+    ):
+        """Same 2% move but in 0.5% ATR (breakout) -> atr_mult=4 -> pass."""
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        prices_initial = {"BTC-USD": 68000}
+        weak_extra = {"atr_pct": 0.5}
+        check_triggers(
+            {"BTC-USD": {"action": "BUY", "confidence": 0.80, "extra": weak_extra}},
+            prices_initial, {}, {},
+        )
+        _suppress_cooldown(isolate_state_files["state_file"])
+        prices_moved = {"BTC-USD": 69360}  # +2%, atr_pct=0.5% -> atr_mult=4.0 >=1.5
+        triggered, reasons = check_triggers(
+            {"BTC-USD": {"action": "HOLD", "confidence": 0.30, "extra": weak_extra}},
+            prices_moved, {}, {},
+        )
+        moved = [r for r in reasons if "moved" in r]
+        assert moved, f"expected price_move emitted via ATR override, got: {reasons}"
