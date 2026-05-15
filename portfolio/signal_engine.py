@@ -3198,7 +3198,18 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
             newsapi_key = (config or {}).get("newsapi_key", "")
             cc_api_key = (config or {}).get("cryptocompare_api_key", "") or None
-            _sent_fn = partial(get_sentiment, cryptocompare_api_key=cc_api_key)
+            # 2026-05-15 LLM shadow-enrollment: pass the full ticker
+            # (e.g. "BTC-USD") so per-sub-voter rows in
+            # llm_probability_log.jsonl use the same ticker key as the
+            # aggregate `sentiment` row emitted ~30 lines below.
+            # _log_ticker_full is consumed only by _log_sub_vote() — it
+            # does NOT change which headlines get fetched (sentiment.py
+            # still keys headline lookup off the short ticker arg).
+            _sent_fn = partial(
+                get_sentiment,
+                cryptocompare_api_key=cc_api_key,
+                _log_ticker_full=ticker,
+            )
             sent = _cached(
                 f"sentiment_{short_ticker}",
                 SENTIMENT_TTL,
