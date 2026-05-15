@@ -174,6 +174,25 @@ def _parse_response(text):
     if decision is None:
         match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
         decision = match.group(1) if match else "HOLD"
+    if confidence is None and text:
+        # 2026-05-15: regex fallback when JSON parse failed. Same root
+        # cause as ministral_trader._parse_response — Qwen3 wraps its
+        # JSON in ```json codefences and the `reasoning` string value
+        # contains raw newlines that break json.loads() on the brace-
+        # extracted substring. Without this fallback every qwen3 row
+        # in data/llm_probability_log.jsonl logs the canonical conf-
+        # zero shape {BUY: 0.25, HOLD: 0.5, SELL: 0.25} (see the
+        # 2026-04-30 incident write-up in this function for the
+        # earlier 0-100/0-1 scale half of the same bug).
+        m = re.search(r'"?confidence"?\s*:\s*([0-9]+(?:\.[0-9]+)?)', text)
+        if m:
+            try:
+                raw = float(m.group(1))
+                if raw > 1.0:
+                    raw = raw / 100.0
+                confidence = max(0.0, min(1.0, raw))
+            except (ValueError, TypeError):
+                pass
     return decision, reasoning, confidence
 
 
