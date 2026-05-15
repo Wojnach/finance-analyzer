@@ -1,5 +1,58 @@
 # Changelog
 
+## 2026-05-15 (LLM shadow enrollment)
+
+Routes every LLM-class model on disk through the shadow → measure →
+promote pipeline. No vote-weight changes; all new signals enter as
+shadow (logged but not voted) so they can accumulate accuracy/Brier
+data before any consensus impact.
+
+**Shadow registry expansion:**
+- 8 new entries in `data/shadow_registry.json`: cryptobert,
+  trading_hero, sentiment_legacy_ensemble, forecast,
+  claude_fundamental, finance_llama, cryptotrader_lm, meta_trader.
+  Each with promotion criteria (200 samples / 0.55-0.60 accuracy)
+  and cycle_modulo / cycle_phase throttle fields.
+
+**Probability log set expanded:**
+- `portfolio/llm_probability_log._LLM_SIGNALS` from 6 to 13 names.
+
+**Sentiment fan-out:**
+- New `_log_sub_vote()` helper in `portfolio/sentiment.py` emits one
+  row per sub-model (trading_hero, cryptobert, finbert, fingpt)
+  instead of folding them into the 46% aggregate. Sync emission
+  for the three inline shadows; async emission for fingpt via
+  `flush_ab_log()`. New `_log_ticker_full` kwarg threads the full
+  ticker through so per-sub-voter rows align with the aggregate.
+
+**Three scaffold signal modules:**
+- `portfolio/signals/finance_llama.py`
+- `portfolio/signals/cryptotrader_lm.py`
+- `portfolio/signals/meta_trader.py`
+
+All three return abstention (HOLD / conf=0 / feature_unavailable=True)
+until real inference is implemented. Registered via
+`signal_registry.register_enhanced` with `max_confidence=0.7`.
+cryptotrader_lm refuses non-crypto tickers as a permanent guard.
+
+**Cycle-modulo throttle:**
+- `portfolio/shadow_registry.should_run_this_cycle()` and
+  `cycle_count_now()`. Stateless modulo gate using UTC epoch minute.
+- Hooked into `portfolio/signal_engine.py` enhanced dispatch loop.
+- Fail-closed for expensive shadows on registry error
+  (`_KNOWN_SHADOW_LLMS` fallback set).
+
+**Tests added:**
+- `tests/test_llm_scaffold_signals.py` (8)
+- `tests/test_sentiment_sub_vote_logging.py` (6)
+- `tests/test_shadow_cycle_throttle.py` (11)
+
+Adversarial review caught 1 P2 bug (throttle fall-open on registry
+error) which was fixed before merge.
+
+Live verification ~10 min after restart: 12 LLM signal names
+emitting independent rows in `data/llm_probability_log.jsonl`.
+
 ## 2026-05-11 (reliability hardening)
 
 Three-batch improvement session targeting silent failure detection,

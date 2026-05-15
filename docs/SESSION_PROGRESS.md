@@ -1,30 +1,28 @@
 # Session Progress
 
-## Auto-improvement session (2026-05-15)
+## After-hours research session (2026-05-14 evening)
 
 **Status:** SHIPPED — merged to main, pushed.
 
-**Scope:** 5 bug fixes across 4 files + 4 new regression tests + documentation.
+### What we did
+- Full 8-phase after-hours research session
+- **Key fix**: IC cache was 12 days stale (main loop passes `horizon=None`, bypassing IC loading). Added proactive IC refresh every 60 cycles (~60 min).
+- Upgraded IC unavailability log from debug to info level
+- Resolved 4 critical accuracy degradation errors
+- Recomputed IC cache (65 signals, 27-31 tickers)
+- 178 tests passed, 0 failures
 
-### Bugs Fixed
-- **B2**: ADX cache key used `id(df)` (memory address reuse after GC) → content-based key `(len, first_close, last_close)`
-- **B3**: Flip cooldown in trigger.py vulnerable to NTP backwards jumps → clock-skew reset guard
-- **B4**: AlertBudget class had no thread safety → `threading.Lock()` on all methods
-- **B5**: reporting._module_failure_streaks mutated from ticker threads without lock → `_module_lock` added
-- **B6**: data_collector._fetch_one_timeframe returned None on failure → returns `(label, {"error": ...})`
+### Key findings
+1. Signal engine has 6-layer accuracy gate — all working correctly, no bugs
+2. IC-based weighting + regime conditioning already implemented (more sophisticated than documented)
+3. news_event accuracy: 25% at 1d but 70% at 3h — horizon matters enormously
+4. Per-ticker consensus barely above coin-flip (BTC 53%, XAG 51%, ETH 49%)
+5. Silver thesis validated: 6th deficit year, China export controls, US critical mineral
 
-### False Positives Rejected
-- **B1**: Portfolio backup rotation before write — atomic `os.replace()` already protects against crash. Original order is correct.
-
-### Tests Added
-- AlertBudget concurrent send/flush thread safety (2 tests)
-- Trigger clock-skew guard test
-- ADX cache content-key test
-- data_collector error-tuple test (updated existing)
-
-### Housekeeping
-- Resolved 5 stale critical_errors.jsonl entries (4 accuracy_degradation for disabled signals, 1 Avanza retraction)
-- Updated SYSTEM_OVERVIEW.md with 2026-05-15 findings
+### What's next
+- Monitor IC refresh in logs (fires at cycle 30, 90, 150, ...)
+- Consider disabling `structure` (49-50% across 16K samples, no edge)
+- Investigate Layer 2 timeout cascades (93 unresolved contract_violations)
 
 ---
 
@@ -3905,3 +3903,177 @@ portfolio/agent_invocation.py
 tests/test_agent_invocation.py
 tests/test_agent_timeout_enforcement.py
 tests/test_auth_failure_bypass.py
+
+### 2026-05-14 10:32 UTC | main
+1394bc4e feat(dashboard): add /api/claude_cost + swedish_market holiday flag
+.claude/settings.json
+dashboard/app.py
+dashboard/static/js/main.js
+dashboard/static/js/render/layer2-activity-card.js
+dashboard/static/js/state.js
+dashboard/static/js/views/health.js
+dashboard/static/js/views/more.js
+dashboard/system_status.py
+data/daily_research_macro.json
+data/daily_research_quant.json
+data/daily_research_review.json
+data/daily_research_signal_audit.json
+data/daily_research_ticker_deep_dive.json
+data/metals_swing_state.json
+data/morning_briefing.json
+
+### 2026-05-14 10:44 UTC | main
+68b99d2e fix(layer2): bump T1 timeout 120s → 150s after duration audit
+CLAUDE.md
+portfolio/agent_invocation.py
+tests/test_agent_invocation.py
+
+### 2026-05-14 10:44 UTC | fix/semgrep-suppress-fps
+1e2330b4 fix(security): suppress 16 semgrep false-positive findings
+dashboard/app.py
+dashboard/auth.py
+dashboard/house_blueprint.py
+data/onchain_cache.json
+portfolio/avanza_orders.py
+portfolio/claude_gate.py
+portfolio/mstr_loop/strategies/__init__.py
+portfolio/onchain_data.py
+portfolio/signal_registry.py
+portfolio/signals/breakeven_inflation_momentum.py
+portfolio/signals/metals_cross_asset.py
+
+### 2026-05-14 10:45 UTC | fix/semgrep-suppress-fps
+fd82132f fix(security): suppress 16 semgrep false-positive findings
+dashboard/app.py
+dashboard/auth.py
+dashboard/house_blueprint.py
+portfolio/avanza_orders.py
+portfolio/claude_gate.py
+portfolio/mstr_loop/strategies/__init__.py
+portfolio/onchain_data.py
+portfolio/signal_registry.py
+portfolio/signals/breakeven_inflation_momentum.py
+portfolio/signals/metals_cross_asset.py
+
+### 2026-05-14 11:25 UTC | main
+9991a0e5 perf(layer2): collapse T1 file reads into one Bash cat
+portfolio/agent_invocation.py
+
+### 2026-05-14 11:28 UTC | perf/layer2-tier-perf
+3d3fef52 docs: plan T2/T3 prompt collapse + T1 budget headroom bump
+docs/PLAN.md
+
+### 2026-05-14 11:30 UTC | fix/grid-fisher-eod-dup
+5ebc73e9 fix(grid_fisher): prevent EOD duplicate-sell stacking (P0-9)
+portfolio/grid_fisher.py
+tests/test_grid_fisher_reconcile.py
+
+### 2026-05-14 11:33 UTC | perf/layer2-tier-perf
+4219f55d perf(layer2): T2/T3 Bash-cat collapse + T1 budget 150 → 180s
+CLAUDE.md
+portfolio/agent_invocation.py
+tests/test_agent_invocation.py
+
+### 2026-05-14 11:36 UTC | fix/cf-access-jwt-verification
+2d0e7f5f fix(dashboard): verify Cloudflare Access JWT (P0 from adversarial review)
+dashboard/auth.py
+dashboard/cf_access.py
+tests/test_dashboard_cf_access.py
+
+### 2026-05-14 11:36 UTC | main
+89cd7a3d fix(dashboard): make unresolved errors tappable on health view
+dashboard/static/js/views/health.js
+
+### 2026-05-14 11:37 UTC | perf/layer2-tier-perf
+bbc24b28 fix(layer2): address adversarial-review P2 findings on T2/T3 cat
+portfolio/agent_invocation.py
+tests/test_agent_invocation.py
+
+### 2026-05-14 11:40 UTC | perf/layer2-tier-perf
+3c8b7739 test: bump test_tier1_config timeout assertion 120 → 180
+tests/test_tiered_invocation.py
+
+### 2026-05-15 15:46 UTC | research/llm-shadow-enrollment-20260515
+b3f39e8c docs(plan): LLM shadow enrollment session 2026-05-15
+docs/PLAN.md
+
+### 2026-05-15 15:52 UTC | research/llm-shadow-enrollment-20260515
+c527a1c0 feat(llm-shadow): register 8 new LLMs in shadow registry + extend _LLM_SIGNALS
+data/shadow_registry.json
+portfolio/llm_probability_log.py
+
+### 2026-05-15 15:58 UTC | research/llm-shadow-enrollment-20260515
+beb15d3a feat(llm-shadow): scaffold finance_llama, cryptotrader_lm, meta_trader signals
+portfolio/signal_registry.py
+portfolio/signals/cryptotrader_lm.py
+portfolio/signals/finance_llama.py
+portfolio/signals/meta_trader.py
+tests/test_llm_scaffold_signals.py
+
+### 2026-05-15 16:08 UTC | research/llm-shadow-enrollment-20260515
+55aa05f2 feat(llm-shadow): split sentiment into 4 per-model log_vote rows
+portfolio/sentiment.py
+portfolio/signal_engine.py
+tests/test_sentiment_sub_vote_logging.py
+
+### 2026-05-15 16:11 UTC | research/llm-shadow-enrollment-20260515
+03247729 feat(llm-shadow): cycle-modulo throttle for shadow signals
+portfolio/shadow_registry.py
+portfolio/signal_engine.py
+tests/test_shadow_cycle_throttle.py
+
+### 2026-05-15 16:17 UTC | research/llm-shadow-enrollment-20260515
+31fe7026 fix(llm-shadow): throttle failure is fail-closed for expensive shadows
+portfolio/signal_engine.py
+
+## LLM shadow enrollment session (2026-05-15 afternoon)
+
+**Status:** SHIPPED — merged to main (commit f9431b9c), pushed, loops restarted.
+
+### What we did
+Routed every LLM-class model on disk through the shadow → measure → promote pipeline.
+
+Before: 2 LLM voters (ministral, qwen3). 3 disabled LLMs invisible (sentiment, forecast, claude_fundamental). 4 sentiment sub-models averaged into a single 46%-accuracy aggregate. 3 models on disk had no wrappers.
+
+After: 12 LLM signals emitting independent rows to `data/llm_probability_log.jsonl`. Each registered in `data/shadow_registry.json` with promotion criteria. Cycle budget protected by cycle_modulo throttle.
+
+Live verification (16:23 UTC, ~10 min after restart):
+```
+ministral          25 rows
+qwen3              24
+sentiment          24
+forecast           17  (was 0 - disabled)
+news_event         17
+meta_trader        16  (new scaffold)
+finance_llama      16  (new scaffold)
+cryptotrader_lm    16  (new scaffold)
+claude_fundamental 16  (was 0 - disabled)
+trading_hero       12  (was buried in aggregate)
+finbert            12  (was buried in aggregate)
+cryptobert          5  (was buried in aggregate, crypto-only)
+```
+
+### Implementation
+
+4 batches inside a worktree (`research/llm-shadow-enrollment-20260515`):
+
+- **Batch 1**: 8 new entries in `data/shadow_registry.json` (cryptobert, trading_hero, sentiment_legacy_ensemble, forecast, claude_fundamental, finance_llama, cryptotrader_lm, meta_trader). Extended `_LLM_SIGNALS` from 6 to 13.
+- **Batch 2**: Split sentiment into 4 per-model log_vote rows via new `_log_sub_vote()` helper. Sync rows for trading_hero/cryptobert/finbert; async row for fingpt via `flush_ab_log()`.
+- **Batch 3**: Three scaffold modules in `portfolio/signals/` returning HOLD/conf=0/feature_unavailable=True until inference is wired. Registered with `signal_registry.register_enhanced`.
+- **Batch 4**: `cycle_modulo` throttle (UTC epoch minute counter, stateless). Hooks `should_run_this_cycle()` into `signal_engine.py` enhanced dispatch. Fail-closed for expensive shadows (`_KNOWN_SHADOW_LLMS` fallback list).
+
+Adversarial review (cavecrew-reviewer) caught 1 P2 bug: the original throttle exception handler fell open, allowing expensive shadows to run every cycle on registry error. Fixed in commit 31fe7026 — throttle errors now fail-closed for known expensive shadow LLMs.
+
+### Test results
+- 227 targeted tests green in worktree
+- 198 targeted tests green in main after merge
+- New test files: `test_llm_scaffold_signals.py` (8), `test_sentiment_sub_vote_logging.py` (6), `test_shadow_cycle_throttle.py` (11)
+
+### Out of scope (follow-ups)
+- Real GGUF inference for finance_llama / cryptotrader_lm / meta_trader scaffolds — flip `_FEATURE_AVAILABLE` once loader is verified, scaffold body is replaced with model call.
+- Brier-score reliability UI on dashboard.
+- `custom-trading-lora.gguf` audit — unknown provenance, untouched.
+- Re-enabling sentiment/forecast/claude_fundamental into actual voting (currently shadow-only by registry status).
+
+### Trail target
+1 hour burn-in monitoring after restart at 18:23 CEST. Verify cycle_ms < 120s, no new critical_errors entries from new signal names, llm_probability_log row growth across all 13 signals.
