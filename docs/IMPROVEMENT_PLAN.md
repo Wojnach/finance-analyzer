@@ -14,12 +14,11 @@ Findings prioritized by production impact. Cosmetic issues omitted.
 
 ## 1. Bugs & Problems Found
 
-### B1 [P0] Portfolio backup rotation before write — crash data loss
+### B1 [P0] Portfolio backup rotation before write — FALSE POSITIVE
 **File:** `portfolio/portfolio_mgr.py:108-113`
-**Bug:** `_save_state_to()` and `update_state()` call `_rotate_backups(path)` BEFORE
-`_atomic_write_json(path, state)`. If write crashes, the original file was already rotated
-to `.bak`. On restart, recovery loads the pre-trade `.bak` state — positions revert.
-**Fix:** Move `_rotate_backups()` AFTER successful write.
+**Analysis:** `_atomic_write_json` uses `os.replace()` (atomic on all OS) — if write crashes
+before replace, original file is intact. Backup rotation before write is correct: backup captures
+the pre-write state. No fix needed.
 
 ### B2 [P0] ADX cache key uses `id(df)` — stale hits on address reuse
 **File:** `portfolio/signal_engine.py:37`
@@ -53,19 +52,19 @@ silently dropping the timeframe from `raw_results`.
 
 ## 2. Implementation Batches
 
-### Batch 1: Safety & Thread Safety (4 files)
-1. `portfolio/portfolio_mgr.py` — B1: backup after write
-2. `portfolio/alert_budget.py` — B4: threading lock
-3. `portfolio/reporting.py` — B5: threading lock on failure streaks
-4. `portfolio/trigger.py` — B3: clock skew guard
+### Batch 1: Safety & Thread Safety (3 files) — DONE
+1. ~~`portfolio/portfolio_mgr.py` — B1: backup after write~~ FALSE POSITIVE, no change needed
+2. `portfolio/alert_budget.py` — B4: threading lock ✓
+3. `portfolio/reporting.py` — B5: threading lock on failure streaks ✓
+4. `portfolio/trigger.py` — B3: clock skew guard ✓
 
-### Batch 2: Signal Quality (2 files)
-1. `portfolio/signal_engine.py` — B2: ADX cache key fix
-2. `portfolio/data_collector.py` — B6: error tuple from failed timeframes
+### Batch 2: Signal Quality (2 files) — DONE
+1. `portfolio/signal_engine.py` — B2: ADX cache key fix ✓
+2. `portfolio/data_collector.py` — B6: error tuple from failed timeframes ✓
 
-### Batch 3: Housekeeping
-1. Resolve stale critical_errors.jsonl entries for disabled signals
-2. Update SYSTEM_OVERVIEW.md
+### Batch 3: Housekeeping — DONE
+1. Resolved 5 stale critical_errors.jsonl entries for disabled signals ✓
+2. Updated SYSTEM_OVERVIEW.md ✓
 
 ---
 

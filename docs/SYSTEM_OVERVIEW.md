@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-12
-Branch: improve/auto-session-2026-05-12
+Updated: 2026-05-15
+Branch: improve/auto-session-2026-05-15
 
 ## 1) Architecture Summary
 
@@ -28,12 +28,12 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 ### Orchestration (5 modules)
 - `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
 - `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen so watchdog never sees stale start time.
-- `trigger.py` (330 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
+- `trigger.py` (330 lines): Change detection — consensus flip (with clock-skew guard), price >2%, F&G threshold, sentiment reversal, post-trade
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
 ### Signal System (52 signals: 12 core + 40 enhanced, 33 active + 19 disabled)
-- `signal_engine.py` (~3,800 lines): 52-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
+- `signal_engine.py` (~4,200 lines): 52-signal voting, weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache
 - `signal_registry.py` (~300 lines): Plugin-based signal discovery via importlib, lazy loading. All signals registered as "enhanced" via `register_enhanced()`. 5-min import-failure cooldown.
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
@@ -46,7 +46,7 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 - `shared_state.py` (206 lines): Thread-safe cache (TTL + stale fallback), rate limiters, NewsAPI quota
 
 ### Portfolio & Risk (7 modules)
-- `portfolio_mgr.py` (77 lines): State load/save via atomic_write_json, TOCTOU-safe via load_json
+- `portfolio_mgr.py` (181 lines): State load/save with rolling backups (C7), per-file locks (C8), atomic read-modify-write, corruption recovery
 - `trade_guards.py` (267 lines): Per-ticker cooldown, consecutive-loss escalation, position rate limit
 - `risk_management.py` (710 lines): Drawdown circuit breaker (-15%), ATR stops, concentration risk, correlation pairs
 - `equity_curve.py` (599 lines): FIFO round-trip matching, Sharpe/Sortino, max drawdown, calmar ratio
@@ -55,7 +55,7 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 - `kelly_sizing.py`: Kelly criterion position sizing
 
 ### Reporting & Analysis (6 modules)
-- `reporting.py` (962 lines): agent_summary.json (full/compact/tiered), three-tier compaction
+- `reporting.py` (962 lines): agent_summary.json (full/compact/tiered), three-tier compaction, thread-safe module failure tracking
 - `journal.py`: Layer 2 journal JSONL streaming
 - `journal_index.py` (400 lines): BM25 relevance ranking, importance scoring
 - `reflection.py` (243 lines): Periodic strategy metrics (win rate, avg PnL)
@@ -230,3 +230,12 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - **B4 (skipped)**: health.py fromisoformat already guarded at all 3 call sites.
 - **B5 (partial)**: `__import__("json")` → standard import in metals_cross_asset.py. oscillator_trend correlation group verified NOT dead code.
 - **False positives rejected**: risk_management concentration min() is correct; grid_fisher ORDER_FILLED prevents double-count.
+
+### Findings from 2026-05-15 Auto Session
+
+- **B1 (false positive)**: Portfolio backup rotation before write looked like a crash-data-loss risk, but `_atomic_write_json` uses `os.replace()` which is atomic — if write crashes before replace, original file stays intact. No fix needed.
+- **B2 (fixed)**: ADX cache key used `id(df)` (memory address) — GC address reuse could return stale ADX. Replaced with content-based key `(len, first_close, last_close)`.
+- **B3 (fixed)**: Flip cooldown in `trigger.py` used `time.time()` — backward NTP adjustments made elapsed time negative, suppressing all flip triggers for up to 30 min. Added clock-skew reset guard.
+- **B4 (fixed)**: `alert_budget.py` `AlertBudget` class had no thread safety. Added `threading.Lock()` around all public methods.
+- **B5 (fixed)**: `reporting.py` `_module_failure_streaks` dict and `_module_escalated` set mutated from ThreadPoolExecutor threads without synchronization. Added `_module_lock`; escalation I/O moved outside lock.
+- **B6 (fixed)**: `data_collector._fetch_one_timeframe()` returned `None` on `compute_indicators()` failure, silently dropping timeframes. Now returns `(label, {"error": ...})` for explicit error visibility.
