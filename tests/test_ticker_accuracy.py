@@ -229,18 +229,18 @@ class TestDirectionProbability:
         from portfolio.ticker_accuracy import direction_probability
         mock_acc.return_value = {
             "rsi": {"accuracy": 0.7, "samples": 100, "correct": 70},
-            "ema": {"accuracy": 0.6, "samples": 50, "correct": 30},
+            "momentum": {"accuracy": 0.6, "samples": 50, "correct": 30},
             "bb": {"accuracy": 0.8, "samples": 200, "correct": 160},
         }
-        votes = {"rsi": "BUY", "ema": "BUY", "bb": "BUY"}
+        votes = {"rsi": "BUY", "momentum": "BUY", "bb": "BUY"}
 
         result = direction_probability("XAG-USD", votes, horizon="1d")
 
         # Manual calc:
         w_rsi = math.sqrt(100)  # 10
-        w_ema = math.sqrt(50)   # ~7.07
+        w_mom = math.sqrt(50)   # ~7.07
         w_bb = math.sqrt(200)   # ~14.14
-        expected = (0.7 * w_rsi + 0.6 * w_ema + 0.8 * w_bb) / (w_rsi + w_ema + w_bb)
+        expected = (0.7 * w_rsi + 0.6 * w_mom + 0.8 * w_bb) / (w_rsi + w_mom + w_bb)
         assert result["probability"] == pytest.approx(expected, abs=0.01)
         assert result["signals_used"] == 3
         assert result["total_samples"] == 350
@@ -250,10 +250,10 @@ class TestDirectionProbability:
         from portfolio.ticker_accuracy import direction_probability
         mock_acc.return_value = {
             "rsi": {"accuracy": 0.7, "samples": 100, "correct": 70},
-            "ema": {"accuracy": 0.7, "samples": 100, "correct": 70},
+            "momentum": {"accuracy": 0.7, "samples": 100, "correct": 70},
         }
-        # RSI says BUY, EMA says SELL — both 70% accurate
-        votes = {"rsi": "BUY", "ema": "SELL"}
+        # RSI says BUY, momentum says SELL — both 70% accurate
+        votes = {"rsi": "BUY", "momentum": "SELL"}
 
         result = direction_probability("XAG-USD", votes, horizon="1d")
         # BUY at 70% → p_up=0.7, SELL at 70% → p_up=0.3
@@ -277,12 +277,12 @@ class TestDirectionProbability:
         from portfolio.ticker_accuracy import direction_probability
         mock_acc.return_value = {
             "rsi": {"accuracy": 0.9, "samples": 3, "correct": 3},  # < min_samples
-            "ema": {"accuracy": 0.6, "samples": 50, "correct": 30},
+            "momentum": {"accuracy": 0.6, "samples": 50, "correct": 30},
         }
-        votes = {"rsi": "BUY", "ema": "BUY"}
+        votes = {"rsi": "BUY", "momentum": "BUY"}
 
         result = direction_probability("XAG-USD", votes, horizon="1d", min_samples=5)
-        assert result["signals_used"] == 1  # only ema
+        assert result["signals_used"] == 1  # only momentum
         assert result["probability"] == pytest.approx(0.6, abs=0.01)
 
     @patch("portfolio.ticker_accuracy.accuracy_by_ticker_signal")
@@ -339,9 +339,9 @@ class TestDirectionProbability:
     def test_single_signal_only(self, mock_acc):
         from portfolio.ticker_accuracy import direction_probability
         mock_acc.return_value = {
-            "volume": {"accuracy": 0.65, "samples": 50, "correct": 33},
+            "mean_reversion": {"accuracy": 0.65, "samples": 50, "correct": 33},
         }
-        votes = {"volume": "SELL"}
+        votes = {"mean_reversion": "SELL"}
 
         result = direction_probability("XAG-USD", votes)
         # SELL at 65% → P(up) = 0.35
@@ -499,11 +499,11 @@ class TestIntegration:
         # Build entries for each signal with known accuracy
         entries = []
         entries.extend(_make_entries_with_known_accuracy("XAG-USD", "rsi", 70, 100))
-        entries.extend(_make_entries_with_known_accuracy("XAG-USD", "ema", 30, 50))
+        entries.extend(_make_entries_with_known_accuracy("XAG-USD", "momentum", 30, 50))
         entries.extend(_make_entries_with_known_accuracy("XAG-USD", "bb", 160, 200))
         mock_load.return_value = entries
 
-        votes = {"rsi": "BUY", "ema": "BUY", "bb": "BUY"}
+        votes = {"rsi": "BUY", "momentum": "BUY", "bb": "BUY"}
         result = direction_probability("XAG-USD", votes, horizon="1d", days=None)
 
         # Expected: sqrt-weighted average

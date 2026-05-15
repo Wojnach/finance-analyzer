@@ -184,6 +184,27 @@ DISABLED_SIGNALS = {
                         # regime transitions to trending and accuracy recovers.
                         # Forecast logging (forecast_predictions.jsonl) will be silenced
                         # again — acceptable tradeoff vs consensus pollution.
+    "heikin_ashi",      # 2026-05-15: 43.5% blended 1d (27562 sam), 49.1% all-time.
+                        # 52% activation rate — loud + below coin flip. 53% at 3h is
+                        # marginal. Trend-following signal failing in persistent ranging
+                        # regime. High-sample gate (50% for 7K+) already blocks at 1d.
+    "candlestick",      # 2026-05-15: 44.1% blended 1d (12966 sam). 28% activation.
+                        # Below gate at all horizons except 3h (51.6%). Pattern
+                        # recognition signals degrade when volatility compresses.
+    "volume",           # 2026-05-15: 45.4% blended 1d (24762 sam). 19% activation.
+                        # Low activation limits damage but signal is structurally
+                        # below coin flip. Volume confirmation adds noise not signal.
+    "volume_flow",      # 2026-05-15: 47.2% blended 1d (65983 sam). 66% activation —
+                        # highest-activation signal below gate. 66K samples at 47% is
+                        # statistically conclusive. OBV/VWAP/A-D/CMF/MFI composite
+                        # is noise at 1d. Marginal at 3h (47.6%).
+    "ema",              # 2026-05-15: 46.2% blended 1d (17917 sam). 62% activation.
+                        # High activation + below gate = biggest noise contributor.
+                        # 59.7% at 3h is the only horizon with edge. In ranging regime
+                        # EMA crossovers whipsaw constantly. Trend signal with no trend.
+    "structure",        # 2026-05-15: 45.7% blended 1d (16652 sam). 42% activation.
+                        # BUY-biased (25.5% vs 16.6%). High/Low breakout and Donchian
+                        # signals fail in ranging markets. 49.9% at 3h (marginal).
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
