@@ -312,6 +312,27 @@ def _register_defaults():
                       "portfolio.signals.trend_slope_momentum",
                       "compute_trend_slope_momentum_signal",
                       max_confidence=0.7)
+    # 2026-05-15 LLM shadow-enrollment: scaffold registrations for three
+    # on-disk LLMs that previously had no wrapper. Each compute_*_signal
+    # returns HOLD/conf=0/feature_unavailable=True until real inference is
+    # implemented. Registering now so the dispatch loop produces telemetry
+    # (shadow_registry days-in-shadow, llm_probability_log abstention rows)
+    # that proves the wiring is alive before inference work begins.
+    #
+    # max_confidence=0.7 matches the established cap on LLM voters
+    # (ministral, qwen3, claude_fundamental, forecast).
+    register_enhanced("finance_llama",
+                      "portfolio.signals.finance_llama",
+                      "compute_finance_llama_signal",
+                      requires_context=True, max_confidence=0.7)
+    register_enhanced("cryptotrader_lm",
+                      "portfolio.signals.cryptotrader_lm",
+                      "compute_cryptotrader_lm_signal",
+                      requires_context=True, max_confidence=0.7)
+    register_enhanced("meta_trader",
+                      "portfolio.signals.meta_trader",
+                      "compute_meta_trader_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
