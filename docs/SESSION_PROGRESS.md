@@ -1,5 +1,33 @@
 # Session Progress
 
+## Auto-improvement session (2026-05-15)
+
+**Status:** SHIPPED — merged to main, pushed.
+
+**Scope:** 5 bug fixes across 4 files + 4 new regression tests + documentation.
+
+### Bugs Fixed
+- **B2**: ADX cache key used `id(df)` (memory address reuse after GC) → content-based key `(len, first_close, last_close)`
+- **B3**: Flip cooldown in trigger.py vulnerable to NTP backwards jumps → clock-skew reset guard
+- **B4**: AlertBudget class had no thread safety → `threading.Lock()` on all methods
+- **B5**: reporting._module_failure_streaks mutated from ticker threads without lock → `_module_lock` added
+- **B6**: data_collector._fetch_one_timeframe returned None on failure → returns `(label, {"error": ...})`
+
+### False Positives Rejected
+- **B1**: Portfolio backup rotation before write — atomic `os.replace()` already protects against crash. Original order is correct.
+
+### Tests Added
+- AlertBudget concurrent send/flush thread safety (2 tests)
+- Trigger clock-skew guard test
+- ADX cache content-key test
+- data_collector error-tuple test (updated existing)
+
+### Housekeeping
+- Resolved 5 stale critical_errors.jsonl entries (4 accuracy_degradation for disabled signals, 1 Avanza retraction)
+- Updated SYSTEM_OVERVIEW.md with 2026-05-15 findings
+
+---
+
 ## After-hours research session (2026-05-13 evening)
 
 **Status:** SHIPPED — merged to main, pushed.
