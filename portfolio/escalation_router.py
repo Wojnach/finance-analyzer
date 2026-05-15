@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 from typing import Iterable
 
 from portfolio.file_utils import atomic_write_json, load_json
@@ -145,18 +146,35 @@ def _ticker_held(ticker: str) -> bool:
     return False
 
 
+_TICKER_RE = re.compile(r"\b([A-Z]{2,5}(?:-[A-Z]{3})?)\b")
+_TICKER_BLOCKLIST = {
+    "BUY", "SELL", "HOLD", "USD", "EUR", "SEK",
+    "ATR", "RSI", "BB", "MA", "TF",
+}
+
+
 def _parse_ticker(reason: str) -> str:
-    """Cheap ticker extractor — first whitespace-delimited token if it
-    matches a known pattern. Mirrors trigger_buffer.parse_reason but
-    intentionally lighter to avoid a hard import cycle."""
+    """Scan full reason string for a ticker pattern, not just the first
+    token. 2026-05-15: previous first-token logic broke for reasons like
+    "post-trade BTC-USD ..." (head=post-trade)."""
     if not isinstance(reason, str):
         return ""
-    parts = reason.split()
-    if not parts:
-        return ""
-    head = parts[0]
-    if "-" in head and head.replace("-", "").isalnum():
-        return head
+    for m in _TICKER_RE.finditer(reason):
+        tok = m.group(1)
+        if tok in _TICKER_BLOCKLIST:
+            continue
+        # Prefer hyphenated forms (BTC-USD, XAU-USD) when present.
+        if "-" in tok:
+            return tok
+        # Plain symbols (e.g. MSTR) are accepted only if not blocklisted.
+        # Continue scanning in case a hyphenated form appears later.
+        plain_candidate = tok
+        # Look ahead for a hyphenated match later in the string.
+        rest = reason[m.end():]
+        later = _TICKER_RE.search(rest)
+        if later and "-" in later.group(1) and later.group(1) not in _TICKER_BLOCKLIST:
+            return later.group(1)
+        return plain_candidate
     return ""
 
 

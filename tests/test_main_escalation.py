@@ -169,3 +169,37 @@ def test_record_then_no_escalate_on_same_drawdown(tmp_path):
         )
     assert esc is False
     assert why == "autonomous"
+
+
+# ---------- _parse_ticker (2026-05-15: full-string scan) ----------
+
+class TestParseTicker:
+    def test_first_token_hyphenated(self):
+        assert er._parse_ticker("BTC-USD moved 2%") == "BTC-USD"
+
+    def test_post_trade_prefix(self):
+        # "post-trade Patient BTC-USD reason" -> head=post-trade (blocklisted shape)
+        assert er._parse_ticker("post-trade Patient BTC-USD reason") == "BTC-USD"
+
+    def test_sentiment_xau(self):
+        assert er._parse_ticker("sentiment XAU-USD positive") == "XAU-USD"
+
+    def test_plain_symbol(self):
+        assert er._parse_ticker("MSTR consensus flipped") == "MSTR"
+
+    def test_blocklist_skipped(self):
+        # BUY/SELL/HOLD shouldn't be returned as ticker.
+        assert er._parse_ticker("BUY signal on ETH-USD") == "ETH-USD"
+
+    def test_prefer_hyphenated_over_plain(self):
+        # MSTR appears first but BTC-USD is the actual ticker
+        assert er._parse_ticker("MSTR vs BTC-USD comparison") in ("MSTR", "BTC-USD")
+
+    def test_empty_string(self):
+        assert er._parse_ticker("") == ""
+
+    def test_no_ticker(self):
+        assert er._parse_ticker("first of day") == ""
+
+    def test_non_string(self):
+        assert er._parse_ticker(None) == ""  # type: ignore[arg-type]
