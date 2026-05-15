@@ -68,7 +68,7 @@ Remove the file to re-enable. See
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-33 active signals (52 modules registered, 19 force-HOLD) across 7 timeframes for 5 Tier-1
+17 active signals (65 modules registered, 49 disabled) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -80,7 +80,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 33 active signals (52 modules) → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 17 active signals (65 modules) → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -150,74 +150,55 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (52 Modules · 33 Active · 19 Disabled)
+## Signal System (65 Modules · 17 Active · 49 Disabled)
 
-### Core Active (10)
-1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
-2. MACD(12,26,9) — Histogram crossover
-3. EMA(9,21) — Trend following, 0.5% deadband
-4. BB(20,2) — Bollinger Band breakout
-5. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL)
-6. Sentiment — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), keyword-weighted
-7. Ministral-8B — Local LLM reasoning via llama-cpp-python
-8. Qwen3-8B — Local LLM reasoning, 61.8% at 3h (added 2026-03-29, GPU-gated)
-9. Volume Confirmation — Spike >1.5x avg confirms direction
-10. Funding Rate — 74.2% at 3h (535 sam), horizon-gated (active 3h/4h only, gated at 1d). Crypto-only.
+### Active (17)
+1. RSI(14) — Oversold <30 BUY, overbought >70 SELL (52.2% 1d, 32K sam)
+2. BB(20,2) — Bollinger Band breakout (54.8% 1d, 8K sam)
+3. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL) (58.6% 1d, 10K sam)
+4. Ministral-8B — Local LLM reasoning via llama-cpp-python (58.2% 1d, 6K sam)
+5. Qwen3-8B — Local LLM reasoning (60.1% 1d, 4K sam, 1.2% activation)
+6. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO (53.0% 1d)
+7. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B (52.6% 1d, 26K sam)
+8. Momentum Factors — Time-Series Mom, ROC-20, 52W High/Low (52.6% 1d, 20K sam)
+9. News Event — Headline velocity, keyword severity, source credibility (50.3% 1d)
+10. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY (60.3% 1d)
+11. Crypto Macro — DeFi TVL, staking yields, protocol revenue (57.1% 1d, crypto only)
+12. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
+13. COT Positioning — CFTC speculative/commercial positioning (100% 1d, 5 sam)
+14. Credit Spread Risk — HY OAS from FRED as cross-asset risk appetite gauge (54.2% 1d)
+15. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (60.0% 1d, BTC-only)
+16. Statistical Jump Regime — Jump detection for regime changes (54.4% 1d, 2K sam)
+17. BTC Proxy — MSTR→BTC proxy signal (46.6% 1d, 58 sam, under evaluation)
 
-### Core Disabled (1)
-11. ML Classifier (28.2%) — worse than coin flip
+### Disabled (49 — force-HOLD via DISABLED_SIGNALS)
+Core disabled: ML Classifier, MACD, EMA, Volume Confirmation, Funding Rate,
+Sentiment, Forecast (Chronos), Claude Fundamental, Fibonacci
 
-### Core Active (BTC-only) (1)
-12. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow. Sub-metric majority vote. BTC-only, 12h cache.
+Enhanced disabled: Trend, Volume Flow, Volatility, Candlestick, Structure,
+Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow,
+Futures Flow, DXY Cross-Asset
 
-### Enhanced Active (22 modules in `portfolio/signals/`)
-13. Trend — Golden/Death Cross, Supertrend, Ichimoku, ADX
-14. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO
-15. Volume Flow — OBV, VWAP, A/D, CMF, MFI
-16. Volatility — BB Squeeze, ATR Expansion, Keltner, Donchian
-17. Candlestick — Hammer, Engulfing, Doji, Morning/Evening Star
-18. Structure — High/Low Breakout, Donchian 55, RSI/MACD centerline
-19. Fibonacci — Retracement, Golden Pocket, Extensions, Pivots
-20. Smart Money — BOS, CHoCH, FVG, Liquidity Sweeps, Supply/Demand
-21. Heikin-Ashi — HA Trend, Hull MA, Alligator, Elder Impulse, TTM Squeeze
-22. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B
-23. Calendar — Day-of-Week, Turnaround Tue, FOMC Drift, Month-End
-24. Macro Regime — 200-SMA, DXY vs Risk, Yield Curve, FOMC proximity
-25. Momentum Factors — Time-Series Mom, ROC-20, 52W High/Low
-26. News Event — Headline velocity, keyword severity, source credibility
-27. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY
-28. Forecast — Chronos time-series foundation model (Kronos retired)
-29. Claude Fundamental — Haiku/Sonnet/Opus cascade (quality, valuation, catalysts)
-30. Futures Flow — Binance FAPI (crypto only): OI, LS Ratio, Funding Trend
-31. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
-32. DXY Cross-Asset — Intraday USD index inverse correlation (metals only)
-33. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only)
-34. Credit Spread Risk — HY OAS from FRED as cross-asset risk appetite gauge
-
-### Enhanced Disabled (19 — force-HOLD via DISABLED_SIGNALS)
-- ML Classifier — 41.7% accuracy, worse than coin flip
-- Oscillators — below 45% on all tickers at 1d
-- Orderbook Flow — 51.1% accuracy, 93.3% activation, no recent data
-- Smart Money — disabled globally 2026-04-24 (per-ticker blacklist)
-- Mahalanobis Turbulence — disabled, pending live validation (added 2026-04-24)
-- Crypto EVRP — disabled, pending live validation (added 2026-04-25)
-- Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure,
-  Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio,
-  Statistical Jump Regime, Network Momentum, OVX Metals Spillover,
-  XTrend Equity Spillover, Complexity Gap Regime, Realized Skewness
-  — all pending live validation (added Apr 2026)
+Pending validation (added Apr-May 2026): Futures Basis, Hurst Regime,
+Shannon Entropy, VIX Term Structure, Gold Real Yield Paradox, Cross-Asset
+TSMOM, Copper/Gold Ratio, Network Momentum, OVX Metals Spillover, XTrend
+Equity Spillover, Complexity Gap Regime, Realized Skewness, Mahalanobis
+Turbulence, Crypto EVRP, Hash Ribbons, Drift Regime Gate, Vol Ratio Regime,
+Residual Pair Reversion, Williams VIX Fix, Treasury Risk Rotation, Intraday
+Seasonality, Cubic Trend Persistence, VWAP Z-Score MR, Gold Overnight Bias,
+Metals VRP, Breakeven Inflation Momentum, Trend Slope Momentum
 
 ### Signal Mechanics
 - **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
-- **Accuracy gate**: signals below 47% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash). Tiered: 50% for 10K+ sample signals.
+- **Accuracy gate**: signals below 47% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash). Tiered: 50% for 7K+ sample signals.
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
 - **Volume/ADX gates**: RVOL <0.5 forces HOLD
-- **Applicable signals**: crypto=31, stocks=26, metals=28
+- **Applicable signals**: crypto=16, stocks=10, metals=12
 
 ## Instruments
 
-### Tier 1: Full signals (33 active × 7 timeframes)
+### Tier 1: Full signals (17 active × 7 timeframes)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
@@ -240,7 +221,7 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (52-signal voting, 33 active), `signal_registry.py` (plugin discovery),
+`signal_engine.py` (65-signal voting, 17 active), `signal_registry.py` (plugin discovery),
 `signals/*.py` (38 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
