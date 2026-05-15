@@ -839,9 +839,68 @@ def run(force_report=False, active_symbols=None):
         from portfolio.health import heartbeat_keepalive
 
         layer2_cfg = config.get("layer2", {})
+        budget_cfg = config.get("claude_budget", {}) or {}
         if os.environ.get("NO_TELEGRAM"):
             logger.info("[NO_TELEGRAM] Skipping agent invocation")
             _log_trigger(reasons_list, "skipped_test", tier=tier)
+        elif layer2_cfg.get("enabled", True) and budget_cfg.get("autonomous_first_enabled", False):
+            # Batch D / item 6: autonomous-first routing. Default to
+            # autonomous_decision() and only spawn Claude when escalation
+            # criteria match. See portfolio/escalation_router.py.
+            from portfolio.escalation_router import (
+                should_escalate_to_claude,
+                record_decision_snapshot,
+            )
+            # Compute current drawdown for both strategies (cheap — reads
+            # portfolio state + agent_summary, no network).
+            dd_patient = 0.0
+            dd_bold = 0.0
+            try:
+                from portfolio.risk_management import check_drawdown
+                dd_patient = check_drawdown(
+                    str(STATE_FILE),
+                    max_drawdown_pct=100.0,  # we want the number, not the breach
+                ).get("current_drawdown_pct", 0.0)
+                bold_path = STATE_FILE.parent / "portfolio_state_bold.json"
+                if bold_path.exists():
+                    dd_bold = check_drawdown(
+                        str(bold_path),
+                        max_drawdown_pct=100.0,
+                    ).get("current_drawdown_pct", 0.0)
+            except Exception as e:
+                logger.warning("escalation_router: drawdown calc failed: %s", e)
+
+            escalate, why = should_escalate_to_claude(
+                reasons_list, tier, signals,
+                escalate_drawdown_pct=float(budget_cfg.get("escalate_drawdown_pct", 5.0)),
+                current_drawdown_patient=dd_patient,
+                current_drawdown_bold=dd_bold,
+            )
+            if escalate and _is_agent_window():
+                logger.info("escalation_router: escalating to claude (%s)", why)
+                with heartbeat_keepalive():
+                    result = invoke_agent(reasons_list, tier=tier)
+                _log_trigger(reasons_list, f"invoked_{why}" if result else f"skipped_busy_{why}", tier=tier)
+            else:
+                if escalate:
+                    logger.info(
+                        "escalation_router: escalate=%s but outside agent window — autonomous (%s)",
+                        why, why,
+                    )
+                else:
+                    logger.info("escalation_router: autonomous handles (%s)", why)
+                from portfolio.autonomous import autonomous_decision
+                with heartbeat_keepalive():
+                    autonomous_decision(
+                        config, signals, prices_usd, fx_rate, state,
+                        reasons_list, tf_data, tier, triggered_tickers,
+                    )
+                _log_trigger(reasons_list, f"autonomous_{why}", tier=tier)
+            # Snapshot drawdown for next escalation comparison regardless of path.
+            try:
+                record_decision_snapshot(dd_patient, dd_bold)
+            except Exception as e:
+                logger.warning("escalation_router: snapshot failed: %s", e)
         elif layer2_cfg.get("enabled", True):
             if _is_agent_window():
                 with heartbeat_keepalive():
