@@ -294,9 +294,10 @@ def _fetch_one_timeframe(source, source_key, label, interval, limit, ttl):
             df = _fetch_klines(source, interval, limit)
         ind = compute_indicators(df)
         if ind is None:
+            rows = len(df) if df is not None else 0
             logger.debug("%s/%s: insufficient data (%d rows), skipping",
-                         source_key, label, len(df) if df is not None else 0)
-            return None
+                         source_key, label, rows)
+            return (label, {"error": f"insufficient data ({rows} rows)"})
         if label == "Now":
             action, conf = None, None
         else:

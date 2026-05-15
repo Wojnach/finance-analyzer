@@ -30,11 +30,9 @@ logger = logging.getLogger("portfolio.signal_engine")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _LOCAL_MODEL_ACCURACY_TTL = 1800
 
-# ADX computation cache — keyed by (id(df), len(df), last_close) tuple so a
-# new DataFrame allocated at the same address as a freed one doesn't get a
-# stale hit (see _compute_adx for the C1 content-key rationale, 2026-05-10
-# fixed the annotation drift that read ``dict[int, …]``).
-_adx_cache: dict[tuple[int, int, float], float | None] = {}
+# ADX computation cache — content-keyed by (len, first_close, last_close)
+# to prevent stale hits from Python address reuse after GC.
+_adx_cache: dict[tuple[int, float, float], float | None] = {}
 _adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
 _ADX_CACHE_MAX = 200  # prevent unbounded growth
 
@@ -2763,9 +2761,11 @@ def _compute_adx(df, period=14):
     if df is None or not isinstance(df, pd.DataFrame) or len(df) < period * 2:
         return None
 
-    # C1: Content-based key prevents GC-reuse collisions when a new DataFrame
-    # is allocated at the same address as a previously freed one.
-    df_id = (id(df), len(df), float(df["close"].iloc[-1]) if len(df) > 0 else 0.0)
+    df_id = (
+        len(df),
+        float(df["close"].iloc[0]) if len(df) > 0 else 0.0,
+        float(df["close"].iloc[-1]) if len(df) > 0 else 0.0,
+    )
     with _adx_lock:
         if df_id in _adx_cache:
             return _adx_cache[df_id]
