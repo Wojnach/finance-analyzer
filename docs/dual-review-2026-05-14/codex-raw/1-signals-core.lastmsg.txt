@@ -1,0 +1,18 @@
+The patch introduces data loss in forecast backfill and several accuracy/calibration paths that can silently use or produce incorrect data. These affect runtime decision metrics and persisted logs, so the patch is not correct.
+
+Full review comments:
+
+- [P1] Preserve forecast rows after hitting max_entries — Q:\fa-review-0514\portfolio\forecast_accuracy.py:322-327
+  When `updated` reaches `max_entries`, this `break` leaves the rest of `entries` out of `modified_entries`, and the subsequent `_write_predictions(modified_entries, path)` rewrites the JSONL with only the processed prefix. A routine backfill with more than `max_entries` eligible outcomes will therefore delete every later forecast prediction; preserve the unprocessed tail before writing or stop updating without truncating the file.
+
+- [P2] Emit forecast rows in the format accuracy reads — Q:\fa-review-0514\portfolio\forecast_signal.py:355-359
+  `compute_forecast_accuracy()` only looks at `sub_signals`/`raw_sub_signals`, but `run_forecasts()` creates rows with just `chronos` and `prophet` blocks. If this function is the producer for `forecast_predictions.jsonl`, those rows can get outcomes backfilled but will never be counted in forecast accuracy, so the forecast accuracy metrics remain empty for these predictions.
+
+- [P2] Log raw LLM actions before vote gating — Q:\fa-review-0514\portfolio\signal_engine.py:3655-3656
+  For local LLMs this reads from `votes` after `_gate_local_model_vote()` may have replaced a raw BUY/SELL with HOLD, while the confidence still comes from the model output. When qwen3 or ministral are held by the accuracy gate, the probability log records a confident HOLD instead of the model's raw prediction, corrupting calibration and Brier analysis; log the raw action or record this before gating.
+
+- [P2] Expire ticker accuracy cache per horizon — Q:\fa-review-0514\portfolio\accuracy_stats.py:1923-1926
+  Because `write_ticker_accuracy_cache()` refreshes the same `time` key for every horizon, a fresh write for `1d` makes any old `3h` or `4h` block pass this TTL check. Callers such as `signal_engine` then use stale per-ticker accuracy for horizon-specific gates and exemptions, so keep per-horizon timestamps or expire each horizon independently.
+
+- [P2] Expire regime accuracy cache per horizon — Q:\fa-review-0514\portfolio\accuracy_stats.py:1388-1390
+  Because `write_regime_accuracy_cache()` updates a single shared `time`, computing one horizon refreshes the TTL for all other cached regime blocks. A stale `3h` regime accuracy block can be served as fresh after a `1d` write and then overlay signal weights and gates for the wrong horizon in `signal_engine`; use per-horizon timestamps here as well.

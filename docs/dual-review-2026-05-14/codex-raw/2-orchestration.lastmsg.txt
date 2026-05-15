@@ -1,0 +1,21 @@
+Several orchestration paths can use wrong or stale context, and core health/reflection metrics are incorrect under normal operating scenarios. These issues can mislead Layer 2 decisions or suppress expected triggers, so the patch should not be considered correct as-is.
+
+Full review comments:
+
+- [P2] Match stock consensus/move trigger tickers — Q:/fa-review-0514/portfolio/agent_invocation.py:274-274
+  Stock trigger reasons emitted by `check_triggers` are `"{ticker} consensus ..."` and `"{ticker} moved ..."`; this regex only accepts stock symbols followed by `flipped`/`crossed`/`broke`, so those triggers fall through to the `XAG-USD` default. In those cases trade-guard blocking, decision feedback, and multi-agent specialist prompts run against the wrong instrument.
+
+- [P2] Avoid stale specialist reports after failures — Q:/fa-review-0514/portfolio/agent_invocation.py:849-849
+  When `layer2.multi_agent` is enabled and any specialist times out or auth-fails before writing its report, `wait_for_specialists` records `False` but this still builds a synthesis prompt over the fixed report paths. Because the report files are never cleaned before launch and `cleanup_reports()` is unused, the synthesis agent can read a previous run's report for another ticker as if it were current.
+
+- [P2] Persist FTD confirmation age by date — Q:/fa-review-0514/portfolio/market_health.py:244-246
+  With the normal fixed-length 90-day data fetch, `ftd_day_offset` is persisted as an array index (`n - 1` when detected). On later refreshes `n` remains the same while the saved index is unchanged, so this expression never exceeds the failure window and `FTD_CONFIRMED` never promotes to `confirmed_uptrend` after 10 days; market health stays understated until another state change.
+
+- [P2] Do not treat open positions as losses — Q:/fa-review-0514/portfolio/reflection.py:80-80
+  After an open BUY, cash drops by the cost of the position while the holding still has value, so computing `total_pnl_pct` from cash alone reports a large loss even if the portfolio is flat. These reflection metrics feed Layer 2 and can generate false "down X% — reduce size" insights whenever positions are open.
+
+- [P3] Convert probability fractions before formatting — Q:/fa-review-0514/portfolio/autonomous.py:710-710
+  `focus_probabilities` stores probabilities as fractions (the daily digest and focus analysis multiply by 100), but Mode B appends the raw value with a percent sign. When `notification.mode` is `probability`, a `0.62` probability is displayed as `0.62%` instead of `62%`, making the Telegram summary misleading.
+
+- [P3] Handle backward clock jumps in flip cooldown — Q:/fa-review-0514/portfolio/trigger.py:271-271
+  Because `flip_cooldowns` are persisted wall-clock timestamps, a backward NTP/manual clock adjustment after a flip makes `_flip_now_ts - last_flip_ts` negative. This branch then suppresses every sustained flip for that ticker until the clock catches up, potentially much longer than the 30-minute cooldown.

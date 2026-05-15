@@ -330,6 +330,34 @@ were used as second-opinion. Real Codex runs were re-triggered on quota
 recovery and stored to `codex-raw/`. Where real Codex output added findings
 beyond the substitute, the synthesis above was updated accordingly.
 
+## Real Codex findings (delta over substitute review)
+
+Real Codex review on **subsystem 1 / signals-core** completed and surfaced
+three findings that neither Claude review nor the substitute caught:
+
+- **`portfolio/signal_engine.py:3655-3656` — local LLM actions logged AFTER gate replaces them with HOLD.** `_gate_local_model_vote()` may downgrade qwen3/ministral BUY/SELL to HOLD, but the probability log records the gated HOLD with the model's *original confidence*. Calibration and Brier analysis poisoned. **Real P2 — should be promoted to P1 if calibration is used in production sizing.** Add to subsystem 1 P1 list.
+- **`portfolio/accuracy_stats.py:1923-1926` — `write_ticker_accuracy_cache` uses single `time` key for all horizons.** A fresh `1d` write refreshes the TTL for stale `3h`/`4h` blocks. `signal_engine` consumes stale per-ticker accuracy for horizon-specific gates. **Real P2, narrow but real.**
+- **`portfolio/accuracy_stats.py:1388-1390` — same single-`time`-key bug in `write_regime_accuracy_cache`.** Stale regime accuracy → wrong signal weights/gates. **Real P2, same root cause.**
+
+The forecast truncation P0 and schema-mismatch P0 (subsystem 1 above) are
+independently confirmed by real Codex.
+
+Real Codex review on **subsystem 2 / orchestration** also completed and
+surfaced six findings neither reviewer caught:
+
+- **`portfolio/agent_invocation.py:274` — `_extract_ticker` regex only matches `flipped|crossed|broke`, but `check_triggers` emits `"{ticker} consensus ..."` and `"{ticker} moved ..."`.** Stock-trigger reasons fall through to default `XAG-USD` ticker → wrong trade-guard, wrong specialist prompts, wrong decision feedback. **Real P1 — silent instrument misrouting.**
+- **`portfolio/agent_invocation.py:849` — `cleanup_reports()` unused; stale specialist reports leak across runs.** Synthesis agent reads previous run's report for a different ticker as if current. **Real P1.**
+- **`portfolio/market_health.py:244-246` — `ftd_day_offset` persisted as array index; with fixed 90-day fetch, never exceeds failure window, so `FTD_CONFIRMED` never promotes to `confirmed_uptrend` after 10 days.** Market health permanently understated. **Real P2.**
+- **`portfolio/reflection.py:80` — `total_pnl_pct = (cash - initial) / initial` ignores holdings value.** After a BUY, cash drops but holdings carry value; reflection reports false large loss → Layer 2 generates false "down X% — reduce size" insights whenever positions open. **Real P1, poisons Layer 2 prompts.**
+- **`portfolio/autonomous.py:710` — Mode B Telegram appends raw probability with `%` sign: `0.62` displayed as `0.62%` instead of `62%`.** Misleading operator. **Real P3 but operator-visible.**
+- **`portfolio/trigger.py:271` — `flip_cooldowns` use wall-clock timestamps; backward NTP jump makes `_flip_now_ts - last_flip_ts` negative → suppresses every sustained flip until clock catches up.** Note: commit `7a303961` ("clock skew guard for trigger") on main may already address; review branch baseline 2026-05-14 predates that fix. Re-audit on current main. **P3 if fixed, P1 if not.**
+
+Real Codex quota exhausted before reviewing subsystems 3-8 (next reset
+22:27 local). The codex-substitute reviews (Claude subagent with isolated
+context) covered those subsystems; see `codex-N-{subsystem}.md` and
+`cross-N-{subsystem}.md`. Re-run on next session: see
+`codex-real-findings.md` for instructions.
+
 ---
 
 ## Out of scope

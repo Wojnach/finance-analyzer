@@ -1,0 +1,17 @@
+OpenAI Codex v0.130.0
+--------
+workdir: Q:\fa-review-0514
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, C:\Users\Herc2\.codex\memories]
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019e271a-6acd-7653-8be4-8223b87aafad
+--------
+user
+commit 5a9523b: 1 signals-core
+ERROR: You've hit your usage limit. To get more access now, send a request to your admin or try again at May 15th, 2026 5:27 PM.
+codex
+Review was interrupted. Please re-run /review and wait for it to complete.
+ERROR: You've hit your usage limit. To get more access now, send a request to your admin or try again at May 15th, 2026 5:27 PM.
