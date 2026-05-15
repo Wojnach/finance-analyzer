@@ -805,9 +805,40 @@ def run(force_report=False, active_symbols=None):
             sentiments[name] = extra["sentiment"]
 
     triggered, reasons = check_triggers(signals, prices_usd, fear_greeds, sentiments)
+    reasons_list = list(reasons) if reasons else []
+
+    # Batch C / item 4: 5-min trigger buffer for noise collapse.
+    # Default batch_window_s=0 -> disabled (no-op pass-through).
+    # When >0, buffer accumulates reasons and only emits on window
+    # expiry or escalation force-flush (see portfolio/trigger_buffer.py).
+    try:
+        _budget_cfg = (config.get("claude_budget") or {}) if isinstance(config, dict) else {}
+        _batch_window = int(_budget_cfg.get("batch_window_s", 0) or 0)
+    except Exception:
+        _batch_window = 0
+    if triggered and _batch_window > 0 and not force_report:
+        try:
+            from portfolio import trigger_buffer
+            trigger_buffer.add(reasons_list, time.time())
+            flushed = trigger_buffer.flush_due(time.time(), window_s=_batch_window)
+            if not flushed:
+                logger.info(
+                    "trigger_buffer: %d reason(s) buffered, deferring",
+                    len(reasons_list),
+                )
+                triggered = False
+                reasons_list = []
+            else:
+                reasons_list = flushed
+                logger.info(
+                    "trigger_buffer: flushed %d merged reason(s)", len(flushed)
+                )
+        except Exception as e:
+            logger.warning("trigger_buffer: error (%s), pass-through", e)
 
     if triggered or force_report:
-        reasons_list = reasons if reasons else ["startup"]
+        if not reasons_list:
+            reasons_list = ["startup"]
         summary = write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
         report.summary_written = True
         logger.info("Trigger: %s", ', '.join(reasons_list))

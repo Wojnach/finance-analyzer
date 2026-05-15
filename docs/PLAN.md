@@ -49,12 +49,12 @@ All thresholds become config keys under new section `config.claude_budget`.
     "escalate_top5_disagree": true,
     "ministral_pregate_enabled": true,
     "ministral_pregate_min_score": 0.5,
-    "batch_window_s": 300
+    "batch_window_s": 0
   }
 }
 ```
 
-All keys default to current behavior if absent (e.g. `consensus_min_pct: 0`, `autonomous_first_enabled: false`) so the change is opt-in via config flip.
+All keys default to current behavior if absent (e.g. `consensus_min_pct: 0`, `autonomous_first_enabled: false`) so the change is opt-in via config flip. `batch_window_s` default 0 = disabled; set to 300 to enable 5-min batching.
 
 ## Implementation batches
 
