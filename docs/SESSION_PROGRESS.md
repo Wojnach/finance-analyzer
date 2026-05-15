@@ -1,5 +1,34 @@
 # Session Progress
 
+## After-hours research session (2026-05-15 evening)
+
+**Status:** SHIPPED — merged to main, pushed.
+
+### What we did
+- Full 8-phase after-hours research session
+- **Key change**: Disabled 6 underperforming signals: heikin_ashi (43.5%), candlestick (44.1%), volume (45.4%), volume_flow (47.2%), ema (46.2%), structure (45.7%). All below high-sample gate at 1d with 13K-66K samples.
+- Active signals: 23 → 17. Applicable: crypto=16, stocks=10, metals=12.
+- Updated CLAUDE.md with accurate signal counts, lists, gate thresholds (7K not 10K).
+- Fixed 5 test fixtures using now-disabled signals (ema→momentum, volume→mean_reversion).
+- Resolved 4 accuracy_degradation critical errors.
+- 2088 tests passed, 2 pre-existing failures (not caused by changes).
+
+### Key findings
+1. Activation/accuracy mismatch: loudest signals (62-68% activation) had worst accuracy (43-50%). Most accurate (qwen3 60%, econ_calendar 60%) had 1-58% activation.
+2. Macro outlook: bearish (0.65 confidence). S&P -1.24%, sticky inflation CPI 3.8%, oil $103+.
+3. Silver: structurally bullish despite ranging. 6th annual deficit, G/S ratio compressing 55:1.
+4. BTC: Clarity Act cleared committee, ETF inflows strong, but macro risk-off dominant.
+5. momentum_factors still degrading at 1d (43.2%) but kept active for 58% edge at 3h.
+6. qwen3 has highest accuracy (60.1%) but only 1.2% activation — thresholds likely too conservative.
+
+### What's next
+- Investigate Layer 2 silent failures (2 triggers fired without journal entries, P0)
+- Tune qwen3 activation thresholds (60% accuracy at 1.2% activation = wasted signal)
+- Outcome backfill for disabled signals (15+ signals with 0 outcome samples)
+- Regime-conditional signal weighting research
+
+---
+
 ## After-hours research session (2026-05-14 evening)
 
 **Status:** SHIPPED — merged to main, pushed.
@@ -4077,3 +4106,65 @@ Adversarial review (cavecrew-reviewer) caught 1 P2 bug: the original throttle ex
 
 ### Trail target
 1 hour burn-in monitoring after restart at 18:23 CEST. Verify cycle_ms < 120s, no new critical_errors entries from new signal names, llm_probability_log row growth across all 13 signals.
+
+### 2026-05-15 16:25 UTC | main
+801a2881 docs: SESSION_PROGRESS + CHANGELOG for LLM shadow enrollment 2026-05-15
+docs/CHANGELOG.md
+docs/SESSION_PROGRESS.md
+
+### 2026-05-15 16:31 UTC | reduce-claude-invocations
+ff56e409 plan(claude-budget): reduce Layer 2 invocations 40/d → ~6/d
+docs/PLAN.md
+
+### 2026-05-15 16:36 UTC | reduce-claude-invocations
+f059d28b feat(agent-invocation): skip Claude when no position and no entry signal
+portfolio/agent_invocation.py
+tests/test_agent_invocation.py
+
+### 2026-05-15 16:39 UTC | reduce-claude-invocations
+bb5a5272 feat(trigger): add claude_budget gates — consensus/density/confidence floors
+portfolio/trigger.py
+tests/test_trigger_core.py
+
+### 2026-05-15 16:40 UTC | reduce-claude-invocations
+bae557b3 feat(trigger): add 5-min trigger buffer for noise collapse
+portfolio/trigger_buffer.py
+tests/test_trigger_buffer.py
+
+### 2026-05-15 16:47 UTC | reduce-claude-invocations
+b97ae493 feat(escalation-router): autonomous-first routing with Claude escalation criteria
+portfolio/escalation_router.py
+portfolio/main.py
+tests/test_main_escalation.py
+
+### 2026-05-15 16:51 UTC | reduce-claude-invocations
+0f3fdf26 feat(escalation-gate): Ministral pre-gate as final guard before Claude
+portfolio/escalation_gate.py
+portfolio/main.py
+tests/test_escalation_gate.py
+
+### 2026-05-15 16:58 UTC | reduce-claude-invocations
+422351b8 fix(main): wire trigger_buffer into trigger handling (P1)
+docs/PLAN.md
+portfolio/main.py
+
+### 2026-05-15 17:04 UTC | reduce-claude-invocations
+1bac1a06 fix(trigger): remove price_move from floor-exempt list (P1)
+portfolio/trigger.py
+tests/test_trigger_core.py
+
+### 2026-05-15 17:06 UTC | reduce-claude-invocations
+22eeb0e5 fix(escalation-router): scan full reason for ticker, not just first token (P1)
+portfolio/escalation_router.py
+tests/test_main_escalation.py
+
+### 2026-05-15 17:11 UTC | reduce-claude-invocations
+7530efdc fix(escalation-gate): explicit 10s timeout on Ministral runner (P2)
+portfolio/escalation_gate.py
+tests/test_escalation_gate.py
+
+### 2026-05-15 17:37 UTC | fix/llm-confidence-regex-fallback
+e5883483 fix(llm): regex confidence fallback for ministral/qwen3
+portfolio/ministral_trader.py
+portfolio/qwen3_trader.py
+tests/test_llm_confidence_regex_fallback.py
