@@ -19,10 +19,31 @@
 
 Order = priority desc. Each item lists what + why + entry point so any session can resume cold.
 
-#### Item 1 — Verify finance_llama production emission post-restart (PARTIAL — re-verify after cycle 2+)
+#### Item 1 — Verify finance_llama production emission (✓ DONE 2026-05-17 02:38 UTC)
 
-- **Module-level verification: ✓ CONFIRMED.** Standalone probe at 22:11 UTC: 1.2s wall, `conf=0.60`, proper reasoning. Probe again at 22:16 (during model swap): 4.6s wall, same result. Real inference works.
-- **In-loop verification: ⚠ NOT YET WORKING.** All finance_llama rows in `data/llm_probability_log.jsonl` post-restart still show `conf=0.0` (10 rows at 22:13:25-40, cycle 1 startup phase). Likely cause: cycle 1 fires finance_llama BEFORE prewarmer has loaded finance-llama-8b → `query_llama_server` returns None → abstain `server_unavailable`.
+**Resolved.** Cycle 3 post-restart at 22:37:16-19 UTC emitted real conf=0.6-0.7 across all
+4 tickers including ETH-USD SELL @ 0.7. Required 2 fixes:
+
+1. **Throttle data-quality bug** (commit `bc2c659e`): signal_engine.py log_vote loop emitted
+   conf=0.0 rows for *every* throttled cycle of every cycle_modulo>1 shadow. The throttle
+   skip path set `votes[sig]="HOLD"` + `extra_info[f"{sig}_throttled"]=True`, but the log
+   loop happily called `log_vote` with default conf=0.0 anyway. Fix: guard log loop with
+   `extra_info.get(f"{sig_name}_throttled")` check. Without this guard, ALL shadow LLMs
+   with cycle_modulo>1 produce calibration-poisoning rows on every skip.
+
+2. **cycle_modulo bumped 3→1** for finance_llama as verification accelerator. **Restore
+   to 3 once ≥50 matched outcomes accumulate** — runs every 60s cycle = ~5s GPU swap per
+   call = ~8% of weekday cycle budget. Acceptable for verify window, wasteful long-term.
+
+Verification rows:
+```
+22:37:16 XAU-USD  HOLD  conf=0.6
+22:37:17 XAG-USD  HOLD  conf=0.6
+22:37:17 ETH-USD  SELL  conf=0.7
+22:37:19 BTC-USD  HOLD  conf=0.6
+```
+
+**Historical (pre-fix)**:
 - **Weekend cadence: 600s between cycles** (`portfolio.loop: Schedule: weekend → 4 instruments, 600s interval`). Cycle 2 starts ~22:27 UTC. Cycle 3 ~22:37 UTC.
 - **Pickup checklist**:
   ```
@@ -4337,3 +4358,26 @@ portfolio/agent_invocation.py
 portfolio/file_utils.py
 scripts/resolve_critical_errors_20260517.py
 tests/test_file_utils.py
+
+### 2026-05-16 22:22 UTC | main
+de8f01c5 docs(session): pickup brief for LLM shadow tail open items
+docs/SESSION_PROGRESS.md
+
+### 2026-05-16 22:23 UTC | main
+c4c4762b docs(fgl): swap codex review for claude code review subagent
+.claude/commands/fgl.md
+
+### 2026-05-16 22:31 UTC | main
+0f01e8dc docs+ops(review): swap codex for claude code subagent in workflow + daily task
+docs/GUIDELINES.md
+scripts/win/adversarial-review.bat
+
+### 2026-05-16 22:32 UTC | main
+bc2c659e fix(layer2): skip log_vote on throttled signals + verify finance_llama
+data/shadow_registry.json
+portfolio/signal_engine.py
+tests/test_shadow_cycle_throttle.py
+
+### 2026-05-16 22:47 UTC | main
+87d264e4 docs(fin-prereview): add premortem-reviewer as 5th parallel agent
+.claude/commands/fin-prereview.md
