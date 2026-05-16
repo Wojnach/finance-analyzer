@@ -12,16 +12,27 @@ Cycle cost target: 3-4 s on GPU when the model is already resident,
 ``data/shadow_registry.json`` keeps the loop budget bounded — at most
 one run every 3 minutes of UTC wall clock.
 
-Contract
---------
-* Build a Ministral-style prompt (reuses `ministral_trader._build_prompt`)
-  so the comparison against the live ministral voter stays apples-to-apples.
-* Call `query_llama_server("finance-llama-8b", prompt, stop=["[INST]"])`.
-* Parse with `ministral_trader._parse_response` — the regex-confidence
-  fallback shipped 2026-05-15 handles the same JSON-wrapped-in-codefences
-  output shape that finance-llama emits.
-* Wrap with the `model_load_safe()` guard the ministral signal uses, so
-  Plex transcodes don't trigger an OOM cold-swap.
+Prompt format
+-------------
+finance-llama-8b is a COMPLETION model (Llama-3.1-based, not Mistral
+instruction-tuned). The first revision of this file reused
+``ministral_trader._build_prompt`` which emits Mistral ``[INST]…[/INST]``
+markers. That format is off-distribution for this model and would
+produce echoed prompts / nonsense — the same root-cause as the
+2026-04-09 FinGPT incident, see
+``Q:/models/fingpt_infer.py:PROMPT_TEMPLATES`` for the historical fix.
+
+We instead emit a few-shot plain-text trading-decision template
+(``Situation: … Decision: … Confidence: …``) that gives the model a
+clear continuation pattern. Stop tokens are ``["\\n\\n", "Situation:"]``
+so generation halts after the first Decision/Confidence pair.
+
+Parser
+------
+``ministral_trader._parse_response`` is still reused — its regex
+fallbacks (``\\b(BUY|SELL|HOLD)\\b`` and ``"?confidence"?\\s*:\\s*…``)
+match plain text and quoted JSON alike. So switching prompt format
+doesn't require a separate parser.
 
 Failure modes return the canonical HOLD/conf=0 abstention shape so the
 voter falls under `_weighted_consensus` HOLD-filtering — never drives a
@@ -44,6 +55,63 @@ _MODEL_PATH = r"Q:\models\finance-llama-8b-gguf\wiroai-finance-llama-8b-q4_k_m.g
 # around for parity with other scaffold signals (cryptotrader_lm,
 # meta_trader) which still need their flips.
 _FEATURE_AVAILABLE = True
+
+
+# 2026-05-16: finance-llama-8b few-shot completion template. Mirrors the
+# pattern used in Q:/models/fingpt_infer.py:PROMPT_TEMPLATES for the same
+# model. Three examples cover BUY/SELL/HOLD so the model has a clear
+# label distribution; the stop tokens cut generation after the first
+# Decision/Confidence pair so the model can't drift into making up more
+# situations (the 2026-04-09 fingpt failure mode).
+_PROMPT_TEMPLATE = (
+    "Classify a trading decision for each financial situation as BUY, SELL, or HOLD "
+    "with a confidence score (0-100).\n\n"
+    "Situation: RSI=22, oversold; MACD turning up; volume 1.8x avg; bullish reversal setup\n"
+    "decision: BUY\n"
+    "confidence: 75\n\n"
+    "Situation: RSI=82, overbought; MACD turning down; volume 2.1x avg; exhaustion top\n"
+    "decision: SELL\n"
+    "confidence: 70\n\n"
+    "Situation: RSI=55, neutral; MACD flat; volume 0.8x avg; no clear edge\n"
+    "decision: HOLD\n"
+    "confidence: 65\n\n"
+    "Situation: {situation}\n"
+    "decision:"
+)
+# Labels are lowercased (decision:/confidence:) because the shared
+# ministral_trader._parse_response regex matches the literal lowercase
+# 'confidence' substring — a capitalized 'Confidence:' label in the
+# generated text would slip past the regex and trigger the 0.50
+# fallback path, suppressing real per-call certainty.
+
+_STOP_TOKENS = ["\n\n", "Situation:"]
+
+
+def _build_finance_llama_prompt(context: dict) -> str:
+    """Render the few-shot completion prompt for finance-llama-8b.
+
+    `context` keys mirror the ministral context but we only use a subset
+    here because the few-shot examples are short — the model has to do
+    the heavy lifting from a compact one-line situation, not a long
+    indicator dump. Long contexts diluted the few-shot pattern in
+    2026-04-09 prompt-engineering experiments.
+    """
+    ticker = context.get("ticker", "UNKNOWN")
+    rsi = context.get("rsi", "?")
+    macd = context.get("macd_hist", "?")
+    ema_dir = "up" if context.get("ema_bullish") else "down"
+    ema_gap = context.get("ema_gap_pct", "?")
+    bb = context.get("bb_position", "?")
+    vol = context.get("volume_ratio", "?")
+    fg = context.get("fear_greed", "?")
+    sentiment = context.get("news_sentiment", "?")
+    change = context.get("change_24h", "?")
+    situation = (
+        f"{ticker} 24h {change}; RSI={rsi}; MACD hist={macd}; "
+        f"EMA9 vs EMA21 {ema_dir} ({ema_gap}% gap); BB position {bb}; "
+        f"volume {vol}x avg; Fear&Greed={fg}; news sentiment {sentiment}"
+    )
+    return _PROMPT_TEMPLATE.format(situation=situation)
 
 
 def _abstain(reason: str, extra: dict | None = None) -> dict:
@@ -91,7 +159,7 @@ def compute_finance_llama_signal(df, context=None):
     # signal_registry imports every signal module at startup.
     try:
         from portfolio.llama_server import model_load_safe, query_llama_server
-        from portfolio.ministral_trader import _build_prompt, _parse_response
+        from portfolio.ministral_trader import _parse_response
     except ImportError as e:
         logger.warning("finance_llama dependencies missing: %s", e)
         return _abstain("dependency_unavailable", {"error": str(e)})
@@ -112,16 +180,17 @@ def compute_finance_llama_signal(df, context=None):
         logger.debug("model_load_safe check failed", exc_info=True)
 
     try:
-        prompt = _build_prompt(context)
+        prompt = _build_finance_llama_prompt(context)
     except (KeyError, ValueError) as e:
-        # Prompt builder hard-requires `ticker` and `price_usd`; surface
-        # missing keys as an abstention rather than a crash.
+        # Builder is permissive (defaults to "?" for missing fields) so
+        # a crash here would mean something genuinely malformed slipped
+        # past the missing_context guard above; surface as abstention.
         logger.warning("finance_llama prompt build failed: %s", e)
         return _abstain("prompt_build_failed", {"error": str(e)})
 
     text = None
     try:
-        text = query_llama_server("finance-llama-8b", prompt, stop=["[INST]"])
+        text = query_llama_server("finance-llama-8b", prompt, stop=_STOP_TOKENS)
     except Exception as e:
         logger.warning("finance_llama query failed: %s", e)
         return _abstain("inference_error", {"error": str(e)})

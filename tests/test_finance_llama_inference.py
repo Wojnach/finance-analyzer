@@ -156,6 +156,67 @@ def test_missing_ticker_in_context_returns_abstention():
     assert r["indicators"]["reason"] == "missing_context"
 
 
+def test_prompt_is_few_shot_completion_not_mistral_instruct():
+    """Reviewer caught this on the first revision: finance-llama-8b is a
+    Llama-3.1 completion model, not Mistral-instruct. The previous
+    revision reused ministral_trader._build_prompt which emits
+    [INST]...[/INST] markers — off-distribution for this model.
+
+    Pin the corrected behaviour: prompt uses the few-shot 'Situation /
+    Decision / Confidence' pattern lifted from
+    Q:/models/fingpt_infer.py:PROMPT_TEMPLATES, NOT Mistral markers."""
+    from portfolio.signals.finance_llama import _build_finance_llama_prompt
+
+    prompt = _build_finance_llama_prompt(
+        {"ticker": "BTC-USD", "rsi": 55, "macd_hist": 0.1, "ema_bullish": True}
+    )
+    assert "[INST]" not in prompt, "must not use Mistral instruction format"
+    assert "[/INST]" not in prompt
+    # Lowercased keys so the shared ministral parser's literal-string
+    # confidence regex matches without IGNORECASE.
+    assert "decision:" in prompt
+    assert "confidence:" in prompt
+    assert "Situation: BTC-USD" in prompt, "context must be interpolated"
+
+
+def test_plain_text_completion_output_is_parseable(monkeypatch):
+    """finance-llama-8b emits plain text like 'BUY\\nconfidence: 70' (not
+    JSON). The reused ministral _parse_response should recover both
+    action and confidence via its regex fallbacks. Verifies the two
+    pieces — new prompt + reused parser — compose correctly end-to-end.
+
+    Labels are lowercased to match the parser's literal 'confidence'
+    regex (no IGNORECASE flag on that path)."""
+    monkeypatch.setattr(_llama_server, "model_load_safe", lambda *a, **kw: True)
+    monkeypatch.setattr(
+        _llama_server,
+        "query_llama_server",
+        lambda *a, **kw: " BUY\nconfidence: 72\nThe setup shows strong reversal signals.",
+    )
+    r = compute_finance_llama_signal(pd.DataFrame({"close": [1.0]}), context=_ctx())
+    assert r["action"] == "BUY"
+    assert 0.71 <= r["confidence"] <= 0.73
+
+
+def test_stop_tokens_passed_to_llama_server(monkeypatch):
+    """Stop tokens cut generation after the first Decision/Confidence
+    pair so the model can't drift into making up more situations (the
+    2026-04-09 fingpt incident). Verify they are actually forwarded."""
+    captured = {}
+
+    def _spy(name, prompt, stop=None, **kw):
+        captured["name"] = name
+        captured["stop"] = stop
+        return "BUY\nConfidence: 60"
+
+    monkeypatch.setattr(_llama_server, "model_load_safe", lambda *a, **kw: True)
+    monkeypatch.setattr(_llama_server, "query_llama_server", _spy)
+    compute_finance_llama_signal(pd.DataFrame({"close": [1.0]}), context=_ctx())
+    assert captured["name"] == "finance-llama-8b"
+    assert "\n\n" in (captured["stop"] or [])
+    assert "Situation:" in (captured["stop"] or [])
+
+
 def test_result_validates_under_signal_engine(monkeypatch):
     """Shape contract: dispatcher runs results through
     _validate_signal_result; verify both BUY and abstention shapes pass."""
