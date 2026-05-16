@@ -1,5 +1,126 @@
 # Session Progress
 
+## 2026-05-17 00:15 UTC — LLM shadow tail status + pickup brief
+
+**Status of preceding work** (commits in main as of `a2e594bd`):
+- Step 1-6 of `/root/.claude/plans/no-we-don-t-these-glowing-ullman.md` shipped over 2 sessions.
+- LLM shadow registry now has 13 entries: 11 shadow, 2 retired (credit_spread_risk / crypto_macro).
+- `/api/llm-leaderboard` endpoint + frontend tile (under More tab) live.
+- Auto-promotion cron `PF-ShadowReview` daily 03:30 — first run last night was no-op (no shadows meeting `min_samples`).
+- finance-llama-8b real GGUF inference wired with Llama-completion few-shot prompt.
+
+**This session (verification + open-item documentation)**:
+- Live probe `compute_finance_llama_signal()` against running llama-server: 1.2s wall, returns `HOLD/conf=0.60` with proper reasoning string. **Real inference confirmed working at module level.**
+- In-loop emission of 4 finance_llama rows yesterday 22:08 UTC all showed `conf=0.0` (abstention) — root cause: model wasn't loaded yet (prewarmer warmed it 50min later at 22:58 UTC). Next firings should produce real conf values.
+- **Discovered**: loop hung after cycle 97 at 22:08:55 UTC for 4+ minutes silence. Hard-restarted via `schtasks /end /run PF-DataLoop` at 22:13 UTC.
+- Triggered fresh cycle to verify post-restart finance_llama emission works end-to-end.
+
+### Open items (pickup-from-fresh-session checklist)
+
+Order = priority desc. Each item lists what + why + entry point so any session can resume cold.
+
+#### Item 1 — Verify finance_llama production emission post-restart (PARTIAL — re-verify after cycle 2+)
+
+- **Module-level verification: ✓ CONFIRMED.** Standalone probe at 22:11 UTC: 1.2s wall, `conf=0.60`, proper reasoning. Probe again at 22:16 (during model swap): 4.6s wall, same result. Real inference works.
+- **In-loop verification: ⚠ NOT YET WORKING.** All finance_llama rows in `data/llm_probability_log.jsonl` post-restart still show `conf=0.0` (10 rows at 22:13:25-40, cycle 1 startup phase). Likely cause: cycle 1 fires finance_llama BEFORE prewarmer has loaded finance-llama-8b → `query_llama_server` returns None → abstain `server_unavailable`.
+- **Weekend cadence: 600s between cycles** (`portfolio.loop: Schedule: weekend → 4 instruments, 600s interval`). Cycle 2 starts ~22:27 UTC. Cycle 3 ~22:37 UTC.
+- **Pickup checklist**:
+  ```
+  grep '"signal": "finance_llama"' data/llm_probability_log.jsonl | tail -5
+  ```
+  Look for rows post-22:27 UTC with `confidence > 0`. If still all 0.0:
+  1. `tail -50 data/loop_out.txt | grep -E "prewarm|finance_llama|finance-llama-8b"` — what model was loaded during cycle?
+  2. Add logging at `portfolio/signals/finance_llama.py:_abstain` to capture reason string in agent.log (currently only in indicators dict which isn't surfaced).
+  3. If abstention is always `server_unavailable`: align `cycle_phase` in `data/shadow_registry.json:128` (currently 2) with the prewarmer slot that loads finance-llama-8b.
+- **Done when**: ≥5 finance_llama rows in production log with `0.40 ≤ confidence ≤ 0.80` and a non-trivial mix of BUY/SELL/HOLD `chosen`.
+
+#### Item 2 — cryptotrader_lm real PEFT LoRA inference (multi-session, M effort)
+
+- **What**: Flip `_FEATURE_AVAILABLE=True` in `portfolio/signals/cryptotrader_lm.py`, wire PEFT LoRA loader.
+- **Why**: Paper claims 72% accuracy on BTC/ETH; shadow registry has higher promotion bar (60% min_accuracy) to enforce that claim. Currently sitting at scaffold baseline ~14%.
+- **Entry points**:
+  - Model: `Q:/models/cryptotrader-lm/` (PEFT LoRA adapter + GGUF copy)
+  - Existing GGUF wiring: `portfolio/llama_server._MODEL_CONFIGS["ministral8_lora"]` already loads Ministral-8B base + `cryptotrader-lm-lora.gguf` adapter via `--lora` extra-arg. **This means cryptotrader_lm signal can use `query_llama_server("ministral8_lora", prompt)` directly — no new server config needed.**
+  - Crypto-only guard already in scaffold at `portfolio/signals/cryptotrader_lm.py` — keep it.
+- **Risks**: ministral8_lora rotation slot may need to be enabled in `portfolio/llm_batch.py` rotation if it isn't currently rotating.
+- **Test pattern**: copy `tests/test_finance_llama_inference.py` and replace `finance-llama-8b` with `ministral8_lora`.
+
+#### Item 3 — meta_trader Qwen2-36L wiring (multi-session, L effort)
+
+- **What**: Wire `portfolio/signals/meta_trader.py` to consume other LLM votes (ministral, qwen3, finance_llama) from the same cycle as features, then call Qwen2-36L.
+- **Why**: Designed as the meta-model layer — leverages other voters' outputs.
+- **Entry points**:
+  - Model: `Q:/models/custom-meta-trader/` (Qwen2-36L unsloth safetensors, 5.8GB, 32K context)
+  - **Not in `_MODEL_CONFIGS` yet** — need to either (a) add a new server config, or (b) load via separate subprocess using `Q:/models/.venv-llm` like cryptobert/finbert.
+  - Upstream votes available via `context_data` in `signal_engine.py:3617` (`requires_context=True` already set in registry).
+  - **Dispatch order matters**: meta_trader must run AFTER ministral/qwen3 so their votes are populated. Check `_enhanced_entries` iteration order in `signal_engine.py:3512`. May need explicit dependency wiring.
+- **Risks**: 36L params on RTX 3080 10GB likely too big for full GPU offload; will need partial offload + much higher latency. `cycle_modulo=5` budget assumes ~10s per call — may need bigger modulo.
+
+#### Item 4 — Lower trading_hero promotion bar (XS, instant)
+
+- **What**: `data/shadow_registry.json` → `trading_hero.promotion_criteria.min_samples`: 200 → 100.
+- **Why**: 74 matched outcomes today at 55.4% accuracy. Already above min_accuracy bar (55%). Will auto-promote within days at lower threshold.
+- **Risk**: 100-sample voter is statistically wobbly (SE ≈ 5pp). Mitigated by auto-retire (status flips back if 30d acc < 50%).
+- **Done when**: `scripts/review_shadow_signals.py --promote --dry-run` shows `[DRY] would promote trading_hero: …`.
+
+#### Item 5 — Brier reliability bin UI (S, optional)
+
+- **What**: Add a small reliability-diagram component to `dashboard/static/js/views/llm_leaderboard.js`.
+- **Why**: Text Brier already in endpoint. Bin viz makes calibration visible.
+- **Effort**: ~50 LOC SVG, or ~30 LOC Canvas. Bins probability deciles vs realised hit-rate.
+- **Skip if**: trading_hero promotes first and we have a real vote-pool change to celebrate instead.
+
+#### Item 6 — `custom-trading-lora.gguf` provenance audit (XS, low value)
+
+- **What**: Check `Q:/models/custom-trading-lora/` for what's in it.
+- **Why**: Plan flagged "unknown provenance, leave dormant" — should at minimum understand what was trained.
+- **Effort**: 15 min. Read model card / README in the directory.
+
+#### Item 7 — Frontend home-tile insert (XS, deferred)
+
+- **What**: Add `views/llm_leaderboard.js` snapshot to home view.
+- **Why**: Currently only reachable via More tab.
+- **Why deferred**: Per memory `feedback_dashboard_priorities`, home is for ops not P&L. Leaderboard is ops-adjacent — judgement call. Skip until user asks.
+
+#### Item 8 — qwen3 prompt revision (M, speculative)
+
+- **What**: Audit `portfolio/qwen3_trader.py:_build_prompt`. qwen3 stuck 95%+ HOLD across all tickers/cycles since conf-fix shipped.
+- **Why**: Could be real model behaviour in ranging tape, OR could be the prompt biases toward "default to HOLD when evidence is mixed" line.
+- **Quick test**: Probe qwen3 manually with a strong-signal context (RSI 18, oversold + bullish MACD) and see if it BUYs.
+- **Skip if**: probe shows model votes BUY/SELL when warranted — then HOLD bias is real model output, not parser/prompt issue.
+
+### Loop health notes (CRITICAL — DO NOT DELETE)
+- **Loop hung at cycle 97** after my 22:30 UTC merge. Hard-restart at 22:13 UTC May 17 fixed it.
+- **If loop hangs again post-restart**: rollback commit `1ecb8d44` + `284596ae` (finance_llama wiring + prompt fix). The plan was to add timeout to `query_llama_server` call but the underlying client already has 240s timeout. **The hang root cause is NOT identified yet.** If it recurs, investigate: maybe prewarmer + finance_llama signal both trying to load the same model simultaneously deadlocks the file lock at `data/llama_server.lock`.
+
+---
+
+## After-hours research session (2026-05-16 evening)
+
+**Status:** SHIPPED — merged to main, pushed (35b65a15).
+
+### What we did
+- Full 8-phase after-hours research: review, macro, quant, signal audit, plan, implement, ship, briefing
+- **Batch 1**: Extended 3h/4h ranging regime gate — added momentum_factors (42.2%), structure (40.0%), econ_calendar (36.4%) which were ungated at 3h due to replace-semantics
+- **Batch 2**: Lowered dynamic correlation threshold from 0.85 to 0.75 — catches empirically observed pairs (structure-trend r=0.94, macro_regime-momentum_factors r=0.86)
+- **Batch 3**: Stub journal entry for incomplete Layer 2 runs — prevents false contract_violation critical errors
+- Signal correlation audit found 27 highly correlated pairs in BTC-USD (r>0.5) and 13 in XAG-USD
+
+### Key market findings
+- Hot CPI 3.8% YoY crashed silver -10.6%, killed rate-cut narrative
+- Strait of Hormuz effectively closed: WTI $106, Brent $108 (+11% weekly)
+- Trump-Xi summit: trade truce, Boeing deal, managed coexistence
+- BTC MVRV at 1.2 accumulation zone (7/7 positive 12-month returns historically)
+- Patient XAG position -11.4% underwater ($86.43 avg vs $75.69 spot)
+
+### What's next
+- Monitor if 3h gate fix reduces accuracy degradation alerts over next 24h
+- Walk-forward daily reweighting (priority 5, 3-day effort — deferred)
+- MVRV cycle gate for BTC SELL suppression (easy, deferred pending verification)
+- Watch $75 XAG support — breach means thesis review
+
+---
+
 ## After-hours research session (2026-05-15 evening)
 
 **Status:** SHIPPED — merged to main, pushed.
@@ -4168,3 +4289,51 @@ e5883483 fix(llm): regex confidence fallback for ministral/qwen3
 portfolio/ministral_trader.py
 portfolio/qwen3_trader.py
 tests/test_llm_confidence_regex_fallback.py
+
+### 2026-05-16 19:31 UTC | main
+29d4ab3c feat(shadow): auto-promotion + dashboard leaderboard (Plan Steps 5+6)
+dashboard/app.py
+portfolio/shadow_registry.py
+portfolio/signal_engine.py
+scripts/review_shadow_signals.py
+scripts/win/install-shadow-review-task.ps1
+tests/test_shadow_auto_promotion.py
+
+### 2026-05-16 19:41 UTC | main
+72ff168a fix(shadow-task): use schtasks + .bat wrapper for cross-shell install
+scripts/win/install-shadow-review-task.ps1
+scripts/win/shadow-review.bat
+
+### 2026-05-16 19:51 UTC | fix/everything-fgl-20260516
+9013a196 docs: PLAN.md for fix-everything /fgl session
+docs/PLAN.md
+
+### 2026-05-16 19:52 UTC | fix/everything-fgl-20260516
+957cd5b5 chore(shadow): retire 2 dead shadows, refresh 2 split-out entered_ts
+data/shadow_registry.json
+
+### 2026-05-16 19:55 UTC | fix/everything-fgl-20260516
+1c9db894 feat(dashboard): LLM leaderboard view tile
+dashboard/static/js/main.js
+dashboard/static/js/views/llm_leaderboard.js
+dashboard/static/js/views/more.js
+
+### 2026-05-16 19:59 UTC | fix/everything-fgl-20260516
+1ecb8d44 feat(signals): wire finance-llama-8b real GGUF inference
+portfolio/signals/finance_llama.py
+tests/test_finance_llama_inference.py
+tests/test_llm_scaffold_signals.py
+
+### 2026-05-16 20:09 UTC | fix/everything-fgl-20260516
+284596ae fix(finance_llama): use Llama-completion prompt, not Mistral instruct
+portfolio/signals/finance_llama.py
+tests/test_finance_llama_inference.py
+
+### 2026-05-16 22:18 UTC | main
+201200cd fix(layer2): count-based journal_written + dashboard 401 diagnostics
+dashboard/auth.py
+dashboard/cf_access.py
+portfolio/agent_invocation.py
+portfolio/file_utils.py
+scripts/resolve_critical_errors_20260517.py
+tests/test_file_utils.py
