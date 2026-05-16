@@ -1,135 +1,102 @@
-# PLAN — Reduce Claude CLI Layer 2 invocations 40/day → ~6/day
+# /fgl: fix-everything session — 2026-05-16
 
-Branch: `reduce-claude-invocations`
-Date: 2026-05-15
+## Goal
 
-## Context
+Close LLM shadow-enrollment tail. Last session shipped Steps 1-6 of
+`/root/.claude/plans/no-we-don-t-these-glowing-ullman.md`; this session
+tackles open items from the post-ship status report.
 
-Layer 2 (Claude CLI) currently fires ~40 times/day, ~20 successful runs, mostly HOLD-HOLD outcomes. Most triggers are low-conviction flickers (consensus 16–30%, sustained-flip on noise). Local LLMs (Ministral-8B, Qwen3-8B, Chronos-2) + 33 signals already do the hard work — Claude should be the rare arbiter, not the default. Sonnet pin just shipped (cost cap), but the right fix is to call less.
+## Items in scope
 
-User picked options 1, 2, 4, 5, 6, 7, 8 from the brainstorm. Skipped option 3 (per-ticker cooldown bump — felt like a band-aid).
-
-## Scope — 7 changes
-
-| # | Change | File(s) | Risk |
+| # | Item | Batch | Effort |
 |---|---|---|---|
-| 1 | Drop sub-40% consensus triggers entirely | `portfolio/trigger.py` | low |
-| 2 | No-position-no-entry skip in `invoke_agent` | `portfolio/agent_invocation.py`, reuse `portfolio_mgr.load_state/load_bold_state` | low |
-| 4 | Raise `SUSTAINED_CHECKS` 3→5 for low-density triggers | `portfolio/trigger.py` | low |
-| 5 | Confidence floor + ATR floor on every trigger reason | `portfolio/trigger.py` | low |
-| 6 | Autonomous-first: Layer 3 handles routine; Claude only on escalation criteria | `portfolio/main.py`, `portfolio/autonomous.py`, `portfolio/agent_invocation.py` | **med** |
-| 7 | Ministral pre-gate classifier ("should_escalate?") | new `portfolio/escalation_gate.py`, hook in `portfolio/main.py` | med |
-| 8 | 5-min trigger batching aggregator | new `portfolio/trigger_buffer.py`, hook in `portfolio/main.py` | low-med |
+| 1 | Join-rate investigation (resolved during exploration — temporal, not bug) | A | XS |
+| 2 | Stale shadow audit (5 entries >30d) | A | S |
+| 3 | Frontend tile for `/api/llm-leaderboard` | B | S |
+| 4 | `finance_llama` real GGUF inference (flip `_FEATURE_AVAILABLE=True`) | C | M |
 
-All thresholds become config keys under new section `config.claude_budget`.
+Out of scope (future session):
+- `cryptotrader_lm` real PEFT LoRA inference
+- `meta_trader` Qwen2-36L unsloth + upstream-vote wiring
+- `custom-trading-lora.gguf` provenance audit
+- qwen3 verdict-diversity probe (today's data shows it working — 7 unique probs, 95% HOLD is real ranging-tape behavior)
+- Brier reliability binning UI
 
-## Existing primitives to reuse
+## Findings during exploration
 
-- `portfolio/perception_gate.py` — already a gate point (currently disabled). Item 5 piggybacks.
-- `portfolio/portfolio_mgr.py:load_state/load_bold_state` — item 2 holdings check.
-- `portfolio/trigger.py:_save_state` — item 8 buffer persistence.
-- `portfolio/llm_batch.py` (Ministral runner) — item 7 classifier.
-- `portfolio/autonomous.py:autonomous_decision` — item 6 routine path.
-- `portfolio/signal_engine.py` `weighted_confidence` output — item 5 floor.
-- `portfolio/file_utils.atomic_write_json / atomic_append_jsonl` — required for any state I/O.
+### Join rate is temporal
 
-## Config additions (`config.claude_budget` section in `config.json`)
+Ran `portfolio.llm_outcome_backfill.backfill()` manually:
 
-```jsonc
-{
-  "claude_budget": {
-    "consensus_min_pct": 40,
-    "sustained_checks_low_density": 5,
-    "sustained_density_threshold": 0.40,
-    "min_weighted_confidence": 0.55,
-    "min_atr_multiple": 1.5,
-    "no_position_skip_enabled": true,
-    "autonomous_first_enabled": true,
-    "escalate_drawdown_pct": 5.0,
-    "escalate_top5_disagree": true,
-    "ministral_pregate_enabled": true,
-    "ministral_pregate_min_score": 0.5,
-    "batch_window_s": 0
-  }
-}
+```
+processed: 14038
+written: 209
+skipped_already_present: 8978
+skipped_too_recent: 4818      # 1d horizon hasn't elapsed
+skipped_missing_price: 3
+skipped_bad_row: 30
 ```
 
-All keys default to current behavior if absent (e.g. `consensus_min_pct: 0`, `autonomous_first_enabled: false`) so the change is opt-in via config flip. `batch_window_s` default 0 = disabled; set to 300 to enable 5-min batching.
+Post-backfill join rates:
+- old voters (ministral/qwen3/sentiment/news_event/claude_fundamental/forecast): **75%**
+- new sentiment splits (trading_hero/finbert/fingpt): **27%** (most rows still <24h)
+- scaffolds (cryptotrader_lm/finance_llama/meta_trader): **22%**
 
-## Implementation batches
+Asymptotic behavior. As more time passes, new voters converge to ~75%.
+`PF-LLMBackfill` already scheduled hourly. No fix needed beyond
+documenting the expected curve.
 
-### Batch A — Trigger gates (items 1, 4, 5)
-`portfolio/trigger.py` only.
-- Load `claude_budget` config at module init.
-- Item 1: in consensus block (lines 212–250), require `buy_conf*100 ≥ consensus_min_pct` before emitting reason.
-- Item 4: in sustained-flip block (lines 253–287), use `sustained_checks_low_density` when signal density < `sustained_density_threshold`. Density = active_voters / applicable_signals.
-- Item 5: each trigger emission carries `(reason, weighted_conf, atr_mult)`. Emit only if `conf ≥ min_weighted_confidence` OR `atr_mult ≥ min_atr_multiple` OR reason_type in {"first_of_day","periodic_review","F&G_extreme","post_trade"}.
-- Tests: `tests/test_trigger.py` — add cases for each new gate; ensure existing trigger paths still fire when thresholds met.
+### Stale shadow audit
 
-### Batch B — No-position skip (item 2)
-`portfolio/agent_invocation.py` only.
-- New helper `_no_position_skip(reasons) → (bool, str)`:
-  - Load both portfolios via `portfolio_mgr.load_state` / `load_bold_state`.
-  - Parse tickers via existing `_extract_triggered_tickers`.
-  - If every ticker has zero shares in both portfolios AND no reason carries `weighted_conf ≥ 0.65` (read from buffered trigger context, see Batch C state file or re-read latest `agent_context_t1.json`) → return (True, "no_position_no_entry").
-- Insert gate before subprocess spawn (around current line 800). Status `skipped_no_position`.
-- Tests: `tests/test_agent_invocation.py` — held vs unheld vs entry-strong-conf cases.
+| Signal | Real state | Action |
+|---|---|---|
+| `credit_spread_risk` | 0 samples, not in `_LLM_SIGNALS`, force-HOLD | **Retire** |
+| `crypto_macro` | Same | **Retire** |
+| `finbert` | 253 samples (post-split), stale `entered_shadow_ts=2026-04-09` | **Refresh** to 2026-05-15 |
+| `fingpt` | 119 samples, same stale ts | **Refresh** to 2026-05-15 |
+| `kronos` | 0 samples, un-retired 2026-04-21, never emitted | **Leave + document** — separate subprocess-reliability work-stream |
 
-### Batch C — Trigger batching (item 8)
-New file `portfolio/trigger_buffer.py`.
-- 5-min sliding window keyed on (ticker, reason_type).
-- API: `buffer.add(reasons_with_meta, ts)`, `buffer.flush_due(now) → list[merged_reason]`.
-- State: `data/trigger_buffer.json` (atomic write).
-- Dedupe identical reasons; concat distinct ones within window. Flush on window expiry or T3 escalation reason present.
-- Hook in `portfolio/main.py` between `check_triggers()` (line 807) and `invoke_agent()` (line 848): triggers go to buffer; only flushed reasons reach `invoke_agent`.
-- Tests: new `tests/test_trigger_buffer.py`.
+### Frontend tile
 
-### Batch D — Autonomous-first (item 6)
-`portfolio/main.py` + `portfolio/autonomous.py` + `portfolio/agent_invocation.py`.
-- Master switch: `claude_budget.autonomous_first_enabled`. When true, default routing is `autonomous_decision(...)`.
-- Escalation criteria — call `invoke_agent` ONLY if ANY true:
-  1. `tier == 3` (F&G extreme / first-of-day / periodic 4h)
-  2. Drawdown change > `escalate_drawdown_pct` since last decision
-  3. Top-5 reliable signals split BUY vs SELL on triggered ticker (use `accuracy_stats.top_n_for_ticker`)
-  4. Held position + SELL-side flip toward exit
-  5. Post-trade trigger
-- All others → `autonomous_decision`. Journal entry written. Telegram sent.
-- Tests: extend `tests/test_autonomous.py` + new escalation-criteria cases in `tests/test_main_escalation.py`.
+`dashboard/static/index.html` is the SPA. Tiles live in `dashboard/static/js/views/*.js`.
+Pattern: each view exports a render function returning innerHTML string.
+Add `views/llm_leaderboard.js` + router wire + home insert.
 
-### Batch E — Ministral pre-gate (item 7)
-New `portfolio/escalation_gate.py`.
-- Function `should_escalate(reasons, tier, signals, prices, held_positions) → (bool, float, str)`:
-  - Builds short structured prompt (trigger reasons + top-5 signal posture + held positions).
-  - Calls `llm_batch.run_ministral(prompt, schema)` returning JSON `{escalate: bool, confidence: float, why: str}`.
-  - Falls open (return `(True, 0.0, "ministral_unavailable")`) on any error — never silently swallow.
-- Hook in `main.py` AFTER Batch D escalation criteria, as the final guard before `invoke_agent`. If `escalate=False` AND `confidence ≥ ministral_pregate_min_score` → route to autonomous instead. Log gate decision to `data/escalation_gate.jsonl`.
-- Tests: mock Ministral output in `tests/test_escalation_gate.py`.
+### finance_llama inference
 
-## Order of execution
+Plan:
+1. Register `finance-llama-8b` in `portfolio/llama_server._MODEL_CONFIGS`
+2. In `portfolio/signals/finance_llama.py`: flip `_FEATURE_AVAILABLE=True`
+3. Build Ministral-style prompt
+4. Call `query_llama_server("finance-llama-8b", prompt, stop=["</s>"])`
+5. Parse action + confidence via same regex fallback ministral/qwen3 use
+6. Emit `log_vote()` via `derive_probs_from_result()`
 
-Wave 1 (parallel): A, B, C — fully independent.
-Wave 2: D — depends on A's gate config wired in.
-Wave 3: E — sits between D's criteria and `invoke_agent`.
+Cycle cost target: 3-4s on GPU. `cycle_modulo=3` per existing registry entry.
+Falls back to abstention if llama-server unavailable or VRAM tight (Plex transcode).
 
-Each wave: implement → run targeted tests → commit. Final: integration test + Claude Code review subagent (NOT codex, per user direction).
+## Batches
 
-## What could break
-
-- **False negatives.** Stricter gates can swallow real triggers. Mitigation: T3 first-of-day path always on; log `skipped_*` reasons with full context in `invocations.jsonl` for weekly audit.
-- **Autonomous-first wrong call.** `autonomous.py` writes HOLD-only today. Risk of holding through degradation. Mitigation: escalation criteria explicitly include held-position SELL-side flip and drawdown move.
-- **Ministral classifier drift.** Could systematically under-escalate. Mitigation: log every gate decision to `data/escalation_gate.jsonl` + post-hoc weekly review.
-- **Config file race.** Use existing `load_config()` (atomic). Already safe.
-- **Worktree missing config.json symlink.** Targeted tests only inside worktree; full suite runs after merge to main.
+- **A** — registry hygiene (3 files: registry JSON + helper + docs)
+- **B** — frontend tile (3 files: view, router, home wire)
+- **C** — finance_llama inference (3 files: signal, llama_server config, tests)
 
 ## Verification
 
-1. Targeted tests per batch:
-   `.venv/Scripts/python.exe -m pytest tests/test_trigger.py tests/test_agent_invocation.py tests/test_autonomous.py tests/test_trigger_buffer.py tests/test_escalation_gate.py tests/test_main_escalation.py -v`
-2. Full suite on main after merge: `.venv/Scripts/python.exe -m pytest tests/ -n auto` — must not regress (allow 26 known pre-existing failures per `docs/TESTING.md`).
-3. **Claude Code review agent** (NOT codex). Subagent reads branch diff, reports issues, no fix authority.
-4. Dry run: replay last 24h of `data/invocations.jsonl` through new gates (write `scripts/simulate_budget_gates.py`) — count what would have been skipped. Target ≥70% reduction.
-5. Post-merge: monitor `data/invocations.jsonl` for 24h. Target ~6 invocations/day. Audit `skipped_*` entries weekly.
+Each batch: `pytest -n auto` (changed-files first, then full), codex review
+xhigh, fix P1/P2, merge to main, push via cmd.exe, restart loops.
 
-## Rollback
+## Risks
 
-Each config key has a safe default that disables the new behavior. Flip switches off via `config.json` without redeploy. Code-level: revert merge commit on main.
+| Risk | Mitigation |
+|---|---|
+| `finance-llama-8b-gguf` not loadable by current llama-server build | Wrap try/except, fallback abstention. Test `model_load_safe()` first. |
+| Real inference inflates cycle p95 above 90s | `cycle_modulo=3` cap; smoke-test cycle time |
+| New `entered_shadow_ts` breaks accuracy-history continuity | Registry-only field; doesn't touch outcome backfill or accuracy_cache |
+| Codex P1 in retired signals | Retired = `status="retired"` only; vote remains force-HOLD — no behavioural change |
+
+## Out-of-band
+
+User said system has been running. Loops restart required after C ships
+(touches signal_engine wiring). A & B are dashboard/registry only — no
+restart needed.
