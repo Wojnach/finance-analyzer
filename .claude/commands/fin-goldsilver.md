@@ -429,3 +429,14 @@ from portfolio.avanza_session import (
 - Cancel orders uses POST not DELETE: `cancel_order(order_id)`.
 - Stop-loss payload is nested — see `data/metals_avanza_helpers.py:place_stop_loss()` for format.
 - Also works without Playwright via `portfolio.avanza_client` when TOTP credentials are configured.
+
+
+## Pre-decision premortem
+
+**MANDATORY before issuing any BUY/SELL/HOLD verdict or recommending an order ladder.** Read `docs/TRADE_PREMORTEM.md` for the full pattern, then write a `## Premortem` block **immediately above** the verdict line:
+
+- ≥3 narratives (≥5 for warrants/leveraged products), each a concrete causal chain (`X happened because Y assumption was wrong, manifested as Z`).
+- Cover at minimum: direction-wrong, stop-too-tight, entry-timing, signal-accuracy/calibration, macro-window if applicable.
+- Each narrative ends with one-line mitigation or `ACCEPT` w/ reasoning.
+
+Skip only for pure read-only requests (price lookup, health/status, history dump) where no recommendation is being made.
