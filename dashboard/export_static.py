@@ -62,7 +62,7 @@ def _get_dashboard_token():
     """Read dashboard token from config.json, if configured."""
     try:
         cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None
     return cfg.get("dashboard_token") or None
 

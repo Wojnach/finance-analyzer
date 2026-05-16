@@ -902,7 +902,7 @@ def api_mstr_loop():
                             out["last_poll"] = _json.loads(line)
                         except _json.JSONDecodeError:
                             pass
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             pass
     trades_path = DATA_DIR / "mstr_loop_trades.jsonl"
     if trades_path.exists():
@@ -914,7 +914,7 @@ def api_mstr_loop():
                             out["last_trade"] = _json.loads(line)
                         except _json.JSONDecodeError:
                             pass
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             pass
     return jsonify(out)
 
