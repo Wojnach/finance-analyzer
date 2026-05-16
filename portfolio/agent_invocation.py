@@ -1482,6 +1482,22 @@ def _check_agent_completion_locked():
             )
         except Exception as e:
             logger.warning("Agent incomplete alert failed: %s", e)
+        if not journal_written:
+            try:
+                stub_entry = {
+                    "ts": completed_at,
+                    "trigger": "; ".join(_agent_reasons or []),
+                    "status": "incomplete",
+                    "tier": _agent_tier,
+                    "duration_s": duration_s,
+                    "decisions": {"patient": {"action": "HOLD", "reasoning": "Agent completed without decision (incomplete run)"},
+                                  "bold": {"action": "HOLD", "reasoning": "Agent completed without decision (incomplete run)"}},
+                    "tickers": {},
+                }
+                atomic_append_jsonl(JOURNAL_FILE, stub_entry)
+                logger.info("Wrote stub journal entry for incomplete T%d run", _agent_tier)
+            except Exception as e:
+                logger.warning("Failed to write stub journal entry: %s", e)
 
     # Track consecutive stack overflow crashes
     global _consecutive_stack_overflows

@@ -1195,8 +1195,14 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # Fundamentals operate on hours/days timescale, not 3h. Sonnet/Opus have
         # 78-83% BUY bias (500-entry audit), so the ungateed BUY vote at 3h is
         # pure noise. Gate at 3h/4h in ranging; let it vote at 12h/1d/3d/5d.
-        "3h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental"}),
-        "4h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental"}),
+        # 2026-05-16: added momentum_factors (42.2% recent), structure (40.0%),
+        # econ_calendar (36.4%). Correlation analysis shows these 3 share factor
+        # exposure with the _default-gated cluster (r=0.75-0.94 with trend/macro_regime).
+        # They produce noise at 3h in ranging but were ungated due to replace-semantics.
+        "3h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental",
+                         "momentum_factors", "structure", "econ_calendar"}),
+        "4h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental",
+                         "momentum_factors", "structure", "econ_calendar"}),
     },
     "trending-up": {
         # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
@@ -1538,7 +1544,7 @@ _DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
 # HOLD dominance — max observed r=0.538 (ema↔trend), making the 0.7
 # threshold unreachable and dynamic groups always falling back to static.
 # Agreement rate only counts pairs where at least one signal voted non-HOLD.
-_DYNAMIC_CORR_THRESHOLD = 0.85  # agreement rate threshold for clustering
+_DYNAMIC_CORR_THRESHOLD = 0.75  # agreement rate threshold for clustering (lowered 0.85→0.75 on 2026-05-16: empirical analysis showed pairs at 0.75-0.84 that should cluster)
 _DYNAMIC_CORR_MIN_SAMPLES = 30  # minimum signal log entries for reliable correlation
 _DYNAMIC_CORR_MIN_PAIRS = 20    # minimum non-HOLD pairs to trust agreement rate
 
