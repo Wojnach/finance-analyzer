@@ -122,11 +122,11 @@
         "min_samples": 200,
         "min_accuracy": 0.55
       },
-      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/finance-llama-8b-gguf/wiroai-finance-llama-8b-q4_k_m.gguf (4.6GB GGUF). Wrapper at portfolio/signals/finance_llama.py returns HOLD with feature_unavailable=True until inference (llama-server prompt + token-logprob extraction) is implemented and verified. Cycle cost target: ~4s on GPU \u2014 cycle_modulo=3 once inference is live.",
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/finance-llama-8b-gguf/wiroai-finance-llama-8b-q4_k_m.gguf (4.6GB GGUF). Wrapper at portfolio/signals/finance_llama.py returns HOLD with feature_unavailable=True until inference (llama-server prompt + token-logprob extraction) is implemented and verified. Cycle cost target: ~4s on GPU \u2014 cycle_modulo=3 once inference is live. [2026-05-17 verify: bumped cycle_modulo 3->1 temporarily to validate end-to-end emission in production; restore to 3 once mean_conf>0 verified to keep cycle budget bounded]",
       "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
       "status": "shadow",
-      "cycle_modulo": 3,
-      "cycle_phase": 2
+      "cycle_modulo": 1,
+      "cycle_phase": 0
     },
     "cryptotrader_lm": {
       "entered_shadow_ts": "2026-05-15T14:00:00+00:00",

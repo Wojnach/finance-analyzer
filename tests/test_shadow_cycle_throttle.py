@@ -160,3 +160,29 @@ def test_get_status_for_registered_signal(registry):
 
 def test_get_status_for_unknown_signal_is_none(registry):
     assert sr.get_status("not_registered", path=registry) is None
+
+
+def test_throttled_signal_does_not_emit_log_vote_row():
+    """Reproduces 2026-05-17 data-quality regression: finance_llama
+    throttled cycles were producing {BUY:0.25, HOLD:0.5, SELL:0.25}
+    rows with conf=0.0 in llm_probability_log.jsonl because
+    signal_engine.log_vote ran regardless of throttle skip. Calibration
+    Brier scores were artificially inflated by these silent abstentions.
+
+    Pin the behaviour: when extra_info[f"{sig}_throttled"]=True is set
+    by the dispatch throttle, the corresponding log_vote() call must
+    be skipped. The next phase-aligned cycle is the real measurement.
+    """
+    from portfolio import signal_engine
+    src = pathlib.Path(signal_engine.__file__).read_text()
+    # Verify the guard is present at the log_vote site
+    assert "_throttled" in src and "continue" in src, "throttle guard missing in signal_engine"
+    # Find the guard pattern proximate to the log_vote loop
+    log_vote_idx = src.find("for sig_name in llm_signals():")
+    assert log_vote_idx > 0
+    guard_idx = src.find('extra_info.get(f"{sig_name}_throttled")', log_vote_idx)
+    assert guard_idx > 0, "throttled-guard must sit inside the log_vote loop"
+    # Guard must be before any conf= assignment so we never compute conf
+    # for a throttled signal (cheap, but also documents intent)
+    conf_idx = src.find("conf = extra_info.get", log_vote_idx)
+    assert guard_idx < conf_idx, "throttled-guard must short-circuit before conf read"

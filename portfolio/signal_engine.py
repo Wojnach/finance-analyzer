@@ -3749,6 +3749,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             action = votes.get(sig_name)
             if not action or action not in ("BUY", "HOLD", "SELL"):
                 continue
+            # 2026-05-17: skip log_vote for throttle-skipped signals. The
+            # shadow-throttle hook above sets votes[sig_name]="HOLD" +
+            # extra_info[f"{sig_name}_throttled"]=True when cycle_modulo
+            # filters a signal out. Without this guard those throttled
+            # cycles emit a {BUY: 0.25, HOLD: 0.5, SELL: 0.25} row with
+            # confidence=0.0 — which pollutes calibration data because
+            # the signal never actually computed anything. Throttled
+            # cycles should be silent in the probability log; the next
+            # phase-aligned cycle is the real measurement.
+            if extra_info.get(f"{sig_name}_throttled"):
+                continue
             if sig_name == "sentiment":
                 conf = extra_info.get("sentiment_conf", 0.0)
                 indicators = {
