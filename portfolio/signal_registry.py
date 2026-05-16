@@ -312,6 +312,15 @@ def _register_defaults():
                       "portfolio.signals.trend_slope_momentum",
                       "compute_trend_slope_momentum_signal",
                       max_confidence=0.7)
+    # TTM Squeeze — volatility compression (BB inside KC) + momentum breakout
+    # 2026-05-16: John Carter; TrendSpider 2025 (68-72% filtered accuracy).
+    # Fires rarely (only on squeeze release after 3+ bars). Cross-asset.
+    # Different from volatility.py bb_squeeze: uses BB-inside-KC (not width)
+    # plus linreg momentum histogram for direction prediction.
+    register_enhanced("ttm_squeeze",
+                      "portfolio.signals.ttm_squeeze",
+                      "compute_ttm_squeeze_signal",
+                      max_confidence=0.7)
     # 2026-05-15 LLM shadow-enrollment: scaffold registrations for three
     # on-disk LLMs that previously had no wrapper. Each compute_*_signal
     # returns HOLD/conf=0/feature_unavailable=True until real inference is
