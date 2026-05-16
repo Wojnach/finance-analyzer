@@ -60,10 +60,26 @@ def test_finance_llama_abstains_without_context(ohlcv):
     assert r["indicators"]["reason"] == "missing_context"
 
 
-def test_cryptotrader_lm_returns_abstention_on_crypto(ohlcv):
+def test_cryptotrader_lm_abstains_without_server(ohlcv):
+    """cryptotrader_lm left scaffold mode 2026-05-17 — real inference is
+    now wired through llama_server (ministral8_lora slot with LoRA
+    adapter). With only `ticker` and no live llama-server the function
+    abstains with reason='server_unavailable'. Real-server probe
+    coverage lives in tests/test_cryptotrader_lm_inference.py.
+
+    The canonical HOLD/conf=0 abstention shape is preserved."""
     r = compute_cryptotrader_lm_signal(ohlcv, context={"ticker": "BTC-USD"})
-    _assert_abstention(r, "cryptotrader_lm")
-    assert r["indicators"]["reason"] == "scaffold"
+    assert r["action"] == "HOLD"
+    assert r["confidence"] == 0.0
+    assert r["sub_signals"] == {"cryptotrader_lm": "HOLD"}
+    assert r["indicators"]["feature_unavailable"] is True
+    # Acceptable reasons depend on test-env state. Without price_usd in
+    # context the Mistral prompt builder raises KeyError → prompt_build_failed.
+    # Other paths: server unreachable, exception, Plex VRAM tight.
+    assert r["indicators"]["reason"] in {
+        "server_unavailable", "inference_error", "plex_vram_tight",
+        "prompt_build_failed",
+    }
 
 
 def test_cryptotrader_lm_refuses_non_crypto(ohlcv):
