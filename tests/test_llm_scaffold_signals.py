@@ -44,10 +44,20 @@ def _assert_abstention(result, signal_name):
     assert result["indicators"]["feature_unavailable"] is True
 
 
-def test_finance_llama_returns_abstention(ohlcv):
-    r = compute_finance_llama_signal(ohlcv, context={"ticker": "BTC-USD"})
-    _assert_abstention(r, "finance_llama")
-    assert r["indicators"]["reason"] == "scaffold"
+def test_finance_llama_abstains_without_context(ohlcv):
+    """finance_llama left scaffold mode 2026-05-16 — real inference is now
+    wired through llama_server. With no context it cannot build a prompt
+    so it must still produce the canonical abstention shape (action=HOLD,
+    conf=0). The reason string changes from "scaffold" to "missing_context".
+
+    Integration of the real inference path lives in
+    tests/test_finance_llama_inference.py with mocked llama_server."""
+    r = compute_finance_llama_signal(ohlcv)
+    assert r["action"] == "HOLD"
+    assert r["confidence"] == 0.0
+    assert r["sub_signals"] == {"finance_llama": "HOLD"}
+    assert r["indicators"]["feature_unavailable"] is True
+    assert r["indicators"]["reason"] == "missing_context"
 
 
 def test_cryptotrader_lm_returns_abstention_on_crypto(ohlcv):
@@ -76,7 +86,12 @@ def test_scaffolds_accept_no_context(ohlcv):
     """signal_engine may call enhanced compute fns without a context
     when requires_context=False (defensive — these all set
     requires_context=True so the dispatch always passes one, but the
-    callable contract should still tolerate missing context)."""
+    callable contract should still tolerate missing context).
+
+    finance_llama is no longer a scaffold but the no-context shape is
+    identical (HOLD, conf=0) so the contract holds — it just abstains
+    with a different reason string.
+    """
     assert compute_finance_llama_signal(ohlcv)["action"] == "HOLD"
     assert compute_cryptotrader_lm_signal(ohlcv)["action"] == "HOLD"
     assert compute_meta_trader_signal(ohlcv)["action"] == "HOLD"
@@ -102,11 +117,19 @@ def test_scaffolds_in_llm_probability_log_signal_set():
         assert is_llm_signal(name), f"{name} missing from _LLM_SIGNALS"
 
 
-def test_scaffolds_results_validate_under_signal_engine():
+def test_scaffolds_results_validate_under_signal_engine(monkeypatch):
     """The dispatch loop runs results through _validate_signal_result.
     Confirm our shape passes that gate so we don't silently get HOLD'd
-    by the validator instead of by intent."""
+    by the validator instead of by intent.
+
+    For finance_llama (now real inference), monkeypatch query_llama_server
+    to return None so we hit the abstention path and stay deterministic.
+    """
     from portfolio.signal_engine import _validate_signal_result
+    import portfolio.llama_server as _ls
+
+    monkeypatch.setattr(_ls, "query_llama_server", lambda *a, **kw: None)
+    monkeypatch.setattr(_ls, "model_load_safe", lambda *a, **kw: True)
 
     df = pd.DataFrame({"close": [1.0, 1.1]})
     for name, fn in (
@@ -115,7 +138,7 @@ def test_scaffolds_results_validate_under_signal_engine():
         ("meta_trader", compute_meta_trader_signal),
     ):
         v = _validate_signal_result(
-            fn(df, context={"ticker": "BTC-USD"}),
+            fn(df, context={"ticker": "BTC-USD", "price_usd": 100.0}),
             sig_name=name,
             max_confidence=0.7,
         )
