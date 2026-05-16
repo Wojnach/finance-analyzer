@@ -14,7 +14,7 @@ ultrathink
 
 5. **DOCUMENT AS YOU GO.** Update any existing docs that your changes affect. Write findings and decisions into your plan doc.
 
-6. **ADVERSARIAL REVIEW (codex).** After implementation is complete, commit a SHA and run `codex review --commit <SHA>`. Address every P1/P2 finding; decide P3 case-by-case and document reasoning in the follow-up commit. If a finding reveals a half-wired feature (e.g. SHORT entry added but exits still assume LONG), **disable the feature at the gate with a TODO** — never ship half-complete functionality.
+6. **ADVERSARIAL REVIEW (claude code subagent).** After implementation is complete, commit a SHA and spawn a Claude Code review subagent on the branch — `caveman:cavecrew-reviewer` for tight diffs, `pr-review-toolkit:code-reviewer` for broader PRs. Address every P1/P2 finding; decide P3 case-by-case and document reasoning in the follow-up commit. If a finding reveals a half-wired feature (e.g. SHORT entry added but exits still assume LONG), **disable the feature at the gate with a TODO** — never ship half-complete functionality. (Switched from `codex review` 2026-05-17: Codex usage limits hit unpredictably and there's no reliable way to tail/detect a stalled review — timeout timers give false negatives. Claude subagents stream observable progress and stay within Max sub.)
 
 7. **TEST.** Run the full suite in parallel: `.venv/Scripts/python.exe -m pytest tests/ -n auto`. For focused work, run only the tests touching your files. If a test fails, run it in isolation (`pytest file::Class::test_name`) first — if it passes alone it's pre-existing state isolation, skip per the known-failure list in `docs/TESTING.md`. Never push red.
 
