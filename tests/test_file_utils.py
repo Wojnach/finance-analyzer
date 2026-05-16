@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 import pytest
 
-from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl, require_json
+from portfolio.file_utils import (
+    atomic_append_jsonl,
+    atomic_write_json,
+    count_jsonl_lines,
+    load_json,
+    load_jsonl,
+    require_json,
+)
 
 
 class TestAtomicWriteJson:
@@ -306,3 +313,67 @@ class TestRequireJson:
         path.write_text("", encoding="utf-8")
         with pytest.raises(json.JSONDecodeError):
             require_json(path)
+
+
+class TestCountJsonlLines:
+    """count_jsonl_lines: non-blank line counter used as write-detection primitive.
+
+    Powers the journal_written / telegram_sent flags in agent_invocation.
+    Replaced ts-change heuristic on 2026-05-17 after that heuristic produced
+    false-positive "Layer 2 silent failure" alerts when the file mtime
+    changed without a real append.
+    """
+
+    def test_returns_zero_for_missing_file(self, tmp_path):
+        assert count_jsonl_lines(tmp_path / "missing.jsonl") == 0
+
+    def test_returns_zero_for_empty_file(self, tmp_path):
+        path = tmp_path / "empty.jsonl"
+        path.write_text("", encoding="utf-8")
+        assert count_jsonl_lines(path) == 0
+
+    def test_counts_data_lines(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a":1}\n{"b":2}\n{"c":3}\n', encoding="utf-8")
+        assert count_jsonl_lines(path) == 3
+
+    def test_ignores_blank_lines(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a":1}\n\n  \n{"b":2}\n\n', encoding="utf-8")
+        assert count_jsonl_lines(path) == 2
+
+    def test_counts_malformed_lines(self, tmp_path):
+        # Malformed JSON still counts — count is line-based, not parse-based.
+        # Protects against discarding partial-write entries.
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a":1}\nnot json\n{"b":2}\n', encoding="utf-8")
+        assert count_jsonl_lines(path) == 3
+
+    def test_appends_increment_count(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a":1}\n', encoding="utf-8")
+        before = count_jsonl_lines(path)
+        atomic_append_jsonl(path, {"b": 2})
+        after = count_jsonl_lines(path)
+        assert after == before + 1
+
+    def test_replace_same_content_does_not_change_count(self, tmp_path):
+        # The 2026-05-15 silent-failure scenario: file replaced by another
+        # writer with same content. ts-heuristic would flip true here;
+        # count-heuristic correctly stays equal.
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a":1}\n{"b":2}\n', encoding="utf-8")
+        before = count_jsonl_lines(path)
+        path.write_text('{"a":1}\n{"b":2}\n', encoding="utf-8")
+        after = count_jsonl_lines(path)
+        assert after == before
+
+    def test_truncate_drops_count(self, tmp_path):
+        # Entry written then truncated by external write — count drops,
+        # heuristic correctly returns False (after > before is False).
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a":1}\n{"b":2}\n{"c":3}\n', encoding="utf-8")
+        before = count_jsonl_lines(path)
+        path.write_text('{"a":1}\n', encoding="utf-8")
+        after = count_jsonl_lines(path)
+        assert after < before

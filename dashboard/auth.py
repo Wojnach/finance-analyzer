@@ -173,14 +173,27 @@ def require_auth(f):
             if hmac.compare_digest(bearer_token, expected):
                 return f(*args, **kwargs)
 
+        # Suppressed false-positive: bool() wraps a logical-and of two header
+        # str|None values, not a numeric typecast — NaN injection N/A here.
+        # nosemgrep: python.lang.security.audit.dangerous-typecasts.dangerous-bool-cast
+        cf_headers_seen = cf_email is not None and cf_jwt is not None
         return jsonify({
             "error": "Unauthorized",
             "message": (
                 "Visit /?token=YOUR_TOKEN once to set a 1-year rolling auth "
                 "cookie. Replace YOUR_TOKEN with the dashboard_token from "
-                "config.json. (If you arrived here through Cloudflare Access, "
-                "this means Access didn't inject its identity header — "
-                "contact the app owner.)"
+                "config.json."
+            ),
+            "cf_access_headers_present": cf_headers_seen,
+            "cf_access_hint": (
+                "Cloudflare Access headers WERE present but JWT verification "
+                "failed. Most common cause: cf_access_team_domain and/or "
+                "cf_access_aud_tag missing from config.json. Check dashboard "
+                "log for cf_access warnings."
+                if cf_headers_seen
+                else "Cloudflare Access headers NOT present. Either Access "
+                "isn't deployed on this hostname or its identity-header "
+                "injection isn't enabled. Check the Access app config."
             ),
         }), 401
 

@@ -13,7 +13,12 @@ from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
 from portfolio.claude_gate import detect_auth_failure
-from portfolio.file_utils import atomic_append_jsonl, last_jsonl_entry, load_jsonl
+from portfolio.file_utils import (
+    atomic_append_jsonl,
+    count_jsonl_lines,
+    last_jsonl_entry,
+    load_jsonl,
+)
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
 
@@ -1040,6 +1045,19 @@ def invoke_agent(reasons, tier=3):
         # conditional turns that into "log the unresolved entries in your
         # journal entry and proceed with the trigger task".
         agent_env["PF_HEADLESS_AGENT"] = "1"
+        # 2026-05-17: switched from ts-change to count-delta heuristic for
+        # journal_written / telegram_sent. The old ``_ts_before != _ts_after``
+        # check produced false positives whenever the file changed for any
+        # reason — atomic-replace, mtime touch, or a write-then-overwrite —
+        # not just genuine appends. Observed 2026-05-15 12:48 (BTC T2) and
+        # 15:38 (XAU T2) where both invocations reported journal_written=true
+        # but no entry persisted in layer2_journal.jsonl, triggering false
+        # silent-failure alerts. Counting non-blank lines before vs after the
+        # subprocess catches genuine appends and is robust to single-file
+        # replacements that preserve content. _journal_ts_before is kept for
+        # diagnostic logging only.
+        _journal_count_before = count_jsonl_lines(JOURNAL_FILE)
+        _telegram_count_before = count_jsonl_lines(TELEGRAM_FILE)
         _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
         _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
         # Set timing/tier state BEFORE Popen so the watchdog thread never
@@ -1362,30 +1380,20 @@ def _check_agent_completion_locked():
     except Exception:
         logger.warning("Failed to read journal timestamp after agent completion")
         journal_ts_after = None
-    journal_written = (
-        _journal_ts_before is not None
-        and journal_ts_after is not None
-        and journal_ts_after != _journal_ts_before
-    )
-
-    # BUG-97: Same protection for telegram file
     try:
         telegram_ts_after = _last_jsonl_ts(TELEGRAM_FILE)
     except Exception:
         logger.warning("Failed to read telegram timestamp after agent completion")
         telegram_ts_after = None
-    telegram_sent = (
-        _telegram_ts_before is not None
-        and telegram_ts_after is not None
-        and telegram_ts_after != _telegram_ts_before
-    )
 
-    # Without a baseline from invoke_agent(), stay conservative and do not infer
-    # success from pre-existing files in the workspace.
-    if _journal_ts_before is None:
-        journal_written = False
-    if _telegram_ts_before is None:
-        telegram_sent = False
+    # 2026-05-17: count-delta heuristic (see baseline capture above for the
+    # 2026-05-15 false-positive incident motivating this). A new entry must
+    # increase the non-blank line count; same count means nothing appended,
+    # even if mtime / contents shifted underneath us.
+    journal_count_after = count_jsonl_lines(JOURNAL_FILE)
+    telegram_count_after = count_jsonl_lines(TELEGRAM_FILE)
+    journal_written = journal_count_after > _journal_count_before
+    telegram_sent = telegram_count_after > _telegram_count_before
 
     # 2026-04-13: Scan agent.log for auth-error markers (see claude_gate.py
     # detect_auth_failure). Claude CLI can exit 0 while printing "Not logged

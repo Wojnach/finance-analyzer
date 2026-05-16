@@ -46,6 +46,23 @@ _JWKS_CACHE_TTL = 3600.0
 _JWKS_CLIENT_CACHE: dict[str, tuple[float, PyJWKClient]] = {}
 _JWKS_LOCK = threading.Lock()
 
+_MISSING_CONFIG_WARNED = False
+_MISSING_CONFIG_LOCK = threading.Lock()
+
+
+def _warn_missing_config_once() -> None:
+    global _MISSING_CONFIG_WARNED
+    with _MISSING_CONFIG_LOCK:
+        if _MISSING_CONFIG_WARNED:
+            return
+        _MISSING_CONFIG_WARNED = True
+    logger.warning(
+        "cf_access: received Cf-Access-Jwt-Assertion but cf_access_team_domain "
+        "and/or cf_access_aud_tag are missing from config.json — failing "
+        "closed and falling through to cookie/query/bearer auth. Add both "
+        "keys to enable CF Access SSO."
+    )
+
 
 def _get_jwks_client(team_domain: str) -> Optional[PyJWKClient]:
     """Return a cached PyJWKClient for the given CF team domain.
@@ -98,6 +115,11 @@ def verify_cf_jwt(
     """
     if not team_domain or not aud_tag:
         # Config not set — CF-Access auth is opt-in. Fail closed.
+        # 2026-05-16: log once-per-process so an operator who *does* have
+        # CF Access deployed but forgot the config keys sees a smoking gun
+        # in the dashboard log instead of a silent 401.
+        if token:
+            _warn_missing_config_once()
         return None
     if not token or not expected_email:
         return None

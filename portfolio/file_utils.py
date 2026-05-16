@@ -346,6 +346,28 @@ def last_jsonl_entry(path, field=None):
     return None
 
 
+def count_jsonl_lines(path):
+    """Return the number of non-blank lines in a JSONL file.
+
+    Counts lines, not parsed entries — malformed JSON still counts as a
+    line. Returns 0 for missing/empty/unreadable files.
+
+    Used as a robust write-detection primitive: comparing line counts
+    before/after a subprocess catches genuine appends while ignoring
+    spurious mtime/replace events that don't actually add data.
+    """
+    path = Path(path)
+    try:
+        with open(path, "rb") as f:
+            count = 0
+            for raw in f:
+                if raw.strip():
+                    count += 1
+            return count
+    except (OSError, FileNotFoundError):
+        return 0
+
+
 def prune_jsonl(path, max_entries=5000):
     """Prune a JSONL file to keep only the most recent *max_entries*.
 
