@@ -44,6 +44,7 @@ import "./views/avanza.js";
 import "./views/assets.js";
 import "./views/prices.js";
 import "./views/portfolio.js";
+import "./views/llm_leaderboard.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();

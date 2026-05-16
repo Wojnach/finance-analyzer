@@ -12,6 +12,7 @@ const ITEMS = [
   { route: "assets",     label: "Assets",      hint: "Tradeable warrant catalog — what the loops can buy/sell" },
   { route: "portfolio",  label: "Portfolio",   hint: "Patient + Bold simulated P&L (legacy home)" },
   { route: "health",     label: "Health",      hint: "Loops, signals, errors" },
+  { route: "llm-leaderboard", label: "LLM leaderboard", hint: "Per-LLM accuracy + Brier + shadow status" },
   { route: "cost",       label: "Claude cost", hint: "CLI tokens + $ rollup (7d default)" },
   { route: "messages",   label: "Messages",    hint: "Telegram log + saved-only" },
   { route: "metals",     label: "Metals",      hint: "XAG/XAU warrants" },
