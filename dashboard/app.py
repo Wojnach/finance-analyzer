@@ -1275,6 +1275,89 @@ def api_metals_accuracy():
     return jsonify(data)
 
 
+def _compute_llm_leaderboard():
+    """Per-signal accuracy + Brier scorecard joined with shadow_registry.
+
+    Scans the full llm_probability_log.jsonl + llm_probability_outcomes.jsonl.
+    Cached at the /api/ layer because the join touches ~85K rows.
+    """
+    from portfolio.shadow_registry import days_in_shadow, load_registry
+
+    registry = load_registry()
+    shadows = registry.get("shadows", {})
+    log_rows = _load_jsonl_impl(DATA_DIR / "llm_probability_log.jsonl") or []
+    out_rows = _load_jsonl_impl(DATA_DIR / "llm_probability_outcomes.jsonl") or []
+
+    outcomes = {}
+    for row in out_rows:
+        if not isinstance(row, dict):
+            continue
+        key = (row.get("ts"), row.get("signal"), row.get("ticker"), row.get("horizon"))
+        outcomes[key] = row.get("outcome")
+
+    per_sig = {}
+    for row in log_rows:
+        if not isinstance(row, dict):
+            continue
+        sig = row.get("signal")
+        if not sig:
+            continue
+        d = per_sig.setdefault(sig, {"n": 0, "n_matched": 0, "correct": 0, "brier_sum": 0.0})
+        d["n"] += 1
+        key = (row.get("ts"), sig, row.get("ticker"), row.get("horizon"))
+        actual = outcomes.get(key)
+        if actual is None:
+            continue
+        d["n_matched"] += 1
+        if row.get("chosen") == actual:
+            d["correct"] += 1
+        probs = row.get("probs") or {}
+        row_brier = 0.0
+        for action in ("BUY", "HOLD", "SELL"):
+            y = 1.0 if actual == action else 0.0
+            try:
+                p = float(probs.get(action, 0.0))
+            except (TypeError, ValueError):
+                p = 0.0
+            row_brier += (p - y) ** 2
+        d["brier_sum"] += row_brier
+
+    leaderboard = []
+    for sig in sorted(set(per_sig.keys()) | set(shadows.keys())):
+        agg = per_sig.get(sig) or {"n": 0, "n_matched": 0, "correct": 0, "brier_sum": 0.0}
+        entry = shadows.get(sig, {})
+        accuracy = (agg["correct"] / agg["n_matched"]) if agg["n_matched"] else None
+        brier = (agg["brier_sum"] / agg["n_matched"]) if agg["n_matched"] else None
+        days = days_in_shadow(sig) if sig in shadows else None
+        leaderboard.append({
+            "name": sig,
+            "status": entry.get("status"),
+            "n_samples": agg["n"],
+            "n_with_outcome": agg["n_matched"],
+            "join_rate": round(agg["n_matched"] / agg["n"], 4) if agg["n"] else None,
+            "accuracy": round(accuracy, 4) if accuracy is not None else None,
+            "brier": round(brier, 4) if brier is not None else None,
+            "days_in_shadow": round(days, 1) if days is not None else None,
+            "last_reviewed": entry.get("last_reviewed_ts"),
+            "promotion_criteria": entry.get("promotion_criteria"),
+            "notes": entry.get("notes"),
+        })
+    return {"updated_ts": datetime.now(UTC).isoformat(), "signals": leaderboard}
+
+
+@app.route("/api/llm-leaderboard")
+@require_auth
+def api_llm_leaderboard():
+    """Per-LLM scorecard: status, sample count, join rate, accuracy, Brier.
+
+    Joins llm_probability_log entries against backfilled outcomes and
+    cross-references shadow_registry for promotion criteria + days in shadow.
+    Cached for 5 minutes — the join is O(N+M) over ~85K rows.
+    """
+    data = _cached_read("llm_leaderboard_v1", 300, _compute_llm_leaderboard)
+    return jsonify(data)
+
+
 @app.route("/api/trades")
 @require_auth
 def api_trades():

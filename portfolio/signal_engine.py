@@ -3522,7 +3522,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # restores the documented behavior. Other DISABLED_SIGNALS-aware
             # call sites: count_active_signals():468, dynamic correlation:558,
             # accuracy_stats.py, ticker_accuracy.py, backtester.py, reporting.py.
-            if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in _DISABLED_SIGNAL_OVERRIDES:
+            # 2026-05-16 (LLM shadow-enrollment Step 5): promoted shadows
+            # override DISABLED_SIGNALS. When review_shadow_signals.py --promote
+            # has flipped a signal's status to "promoted" in shadow_registry.json,
+            # we let it vote normally even though DISABLED_SIGNALS still lists
+            # it. This is the registry's way of saying the signal earned its
+            # way back into consensus without requiring a manual tickers.py
+            # edit and code reload. is_promoted() is 60s-cached so the extra
+            # call is effectively free in the hot loop.
+            _promoted_override = False
+            try:
+                from portfolio.shadow_registry import is_promoted
+                _promoted_override = is_promoted(sig_name)
+            except Exception:
+                pass
+            if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in _DISABLED_SIGNAL_OVERRIDES and not _promoted_override:
                 # Shadow-safe signals: compute but don't let them vote.
                 # Their predictions go into _shadow_votes for accuracy tracking.
                 if sig_name in _SHADOW_SAFE_SIGNALS:

@@ -243,6 +243,43 @@ def should_run_this_cycle(
     return cycle_count % modulo == phase
 
 
+# 2026-05-16 (LLM shadow-enrollment Step 5): promotion override cache.
+# signal_engine.py calls is_promoted(name) on every dispatch loop, so we
+# keep the registry read cheap with a 60s TTL. Recomputing the frozenset
+# every call would mean an atomic JSON read per signal per ticker per
+# cycle — ~80 reads per minute even on the patient loop.
+_PROMOTED_CACHE: dict = {"data": frozenset(), "loaded_at": 0.0}
+_PROMOTED_TTL_S = 60.0
+
+
+def is_promoted(signal: str, *, path: Path | str | None = None) -> bool:
+    """Return True when `signal` has been auto-promoted by the cron review.
+
+    Cached for 60s to keep hot-loop dispatch cheap. Promotion is the
+    registry's way of saying a shadow earned its way back into vote-
+    pool consensus; signal_engine uses this to override DISABLED_SIGNALS
+    without a code change.
+    """
+    import time as _time
+    now = _time.time()
+    if now - _PROMOTED_CACHE["loaded_at"] > _PROMOTED_TTL_S:
+        reg = load_registry(path=path)
+        promoted = frozenset(
+            sig for sig, entry in reg.get("shadows", {}).items()
+            if isinstance(entry, dict) and entry.get("status") == "promoted"
+        )
+        _PROMOTED_CACHE["data"] = promoted
+        _PROMOTED_CACHE["loaded_at"] = now
+    return signal in _PROMOTED_CACHE["data"]
+
+
+def _invalidate_promoted_cache() -> None:
+    """Test hook — reset the promotion cache so a freshly mutated
+    registry is observed immediately."""
+    _PROMOTED_CACHE["data"] = frozenset()
+    _PROMOTED_CACHE["loaded_at"] = 0.0
+
+
 def cycle_count_now() -> int:
     """Return the current cycle counter (UTC epoch minute).
 
