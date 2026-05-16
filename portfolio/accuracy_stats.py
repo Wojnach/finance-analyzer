@@ -964,7 +964,7 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
                 at_v = at.get(key, 0) or 0
                 rc_v = rc.get(key, 0) or 0
                 if at_v or rc_v:
-                    result[key] = max(at_v, rc_v)
+                    result[key] = at_v + rc_v
         accuracy_data[sig_name] = result
     return accuracy_data
 

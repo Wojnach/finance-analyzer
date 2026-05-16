@@ -182,6 +182,28 @@ class TestBlendAccuracyData:
         assert abs(result["rsi"]["accuracy"] - expected) < 0.01
 
 
+    def test_blend_directional_counts_sum_not_max(self):
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {
+            "rsi": {
+                "accuracy": 0.60, "total": 500, "correct": 300, "pct": 60.0,
+                "buy_accuracy": 0.62, "sell_accuracy": 0.58,
+                "total_buy": 300, "total_sell": 200,
+            }
+        }
+        recent = {
+            "rsi": {
+                "accuracy": 0.70, "total": 100, "correct": 70, "pct": 70.0,
+                "buy_accuracy": 0.75, "sell_accuracy": 0.65,
+                "total_buy": 60, "total_sell": 40,
+            }
+        }
+        result = blend_accuracy_data(alltime, recent)
+        assert result["rsi"]["total_buy"] == 360, "should sum, not max"
+        assert result["rsi"]["total_sell"] == 240, "should sum, not max"
+
+
 class TestLoadJsonOSError:
     """BUG-139: load_json handles OSError gracefully."""
 
