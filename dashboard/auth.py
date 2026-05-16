@@ -62,7 +62,7 @@ def _read_config_uncached() -> dict:
         with open(CONFIG_PATH, encoding="utf-8") as fp:
             data = json.load(fp)
         return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeDecodeError):
         return {}
 
 

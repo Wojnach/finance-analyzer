@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-05-15
-Branch: improve/auto-session-2026-05-15
+Updated: 2026-05-16
+Branch: improve/auto-session-2026-05-16
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 65 signal modules (17 active, 49 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -32,8 +32,8 @@ Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
-### Signal System (52 signals: 12 core + 40 enhanced, 33 active + 19 disabled)
-- `signal_engine.py` (~4,200 lines): 52-signal voting, weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache
+### Signal System (65 modules: 12 core + 53 enhanced, 17 active + 49 disabled)
+- `signal_engine.py` (~4,280 lines): 65-module voting (17 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache
 - `signal_registry.py` (~300 lines): Plugin-based signal discovery via importlib, lazy loading. All signals registered as "enhanced" via `register_enhanced()`. 5-min import-failure cooldown.
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators

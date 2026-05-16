@@ -160,7 +160,7 @@ class TestBlendAccuracyDataDirectionalMerge:
         assert result["rsi"]["buy_accuracy"] == 0.45
         assert result["rsi"]["total_buy"] == 100
 
-    def test_total_buy_sell_use_max(self):
+    def test_total_buy_sell_use_sum(self):
         alltime = {
             "rsi": {"accuracy": 0.55, "total": 200, "total_buy": 150, "total_sell": 50},
         }
@@ -168,8 +168,8 @@ class TestBlendAccuracyDataDirectionalMerge:
             "rsi": {"accuracy": 0.50, "total": 80, "total_buy": 30, "total_sell": 50},
         }
         result = blend_accuracy_data(alltime, recent)
-        assert result["rsi"]["total_buy"] == 150
-        assert result["rsi"]["total_sell"] == 50
+        assert result["rsi"]["total_buy"] == 180
+        assert result["rsi"]["total_sell"] == 100
 
 
 class TestHorizonBlacklistUpdatesVoters:

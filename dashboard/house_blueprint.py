@@ -106,7 +106,7 @@ def _list_runs() -> list[dict]:
         manifest = entry / "_manifest.json"
         try:
             slugs = json.loads(manifest.read_text())
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             slugs = []
         runs.append({
             "run_id": entry.name,
@@ -286,7 +286,7 @@ def run_detail(run_id: str):
     candidate_links = ""
     try:
         slugs = json.loads(manifest.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
         slugs = []
     if slugs:
         link_items = "".join(
@@ -393,7 +393,7 @@ def api_run(run_id: str):
         abort(404)
     try:
         slugs = json.loads(manifest.read_text())
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         abort(500)
     return jsonify({"run_id": run_id, "candidates": slugs})
 
