@@ -74,6 +74,11 @@ clock and log timestamps briefly disagree by 1 hour.
 - **Signal dispatch "soft confidence" implicit contract** — Not a bug. The contract is
   documented in signal_registry.py docstring and enforced by the min_confidence floor.
 - **main.py singleton lock race** — Already fixed with msvcrt/fcntl non-blocking lock.
+- **BUG-M2 grid_fisher cross-process lock** — False positive. `atomic_write_json` uses
+  tempfile → `os.replace` (atomic on NTFS). Dashboard reader always sees complete file.
+- **B15 health.py DST time comparison** — False positive. `check_outcome_staleness` uses
+  `datetime.fromisoformat().timestamp()` → UTC epoch vs `time.time()` → UTC epoch. Both
+  are DST-immune. `check_dead_signals` uses vote counts, no timestamps.
 
 ---
 

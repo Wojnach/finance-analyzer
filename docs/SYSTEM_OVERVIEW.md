@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-16
-Branch: improve/auto-session-2026-05-16
+Updated: 2026-05-17
+Branch: improve/auto-session-2026-05-17
 
 ## 1) Architecture Summary
 
@@ -51,7 +51,8 @@ Two-layer autonomous trading system with 65 signal modules (17 active, 49 disabl
 - `risk_management.py` (710 lines): Drawdown circuit breaker (-15%), ATR stops, concentration risk, correlation pairs
 - `equity_curve.py` (599 lines): FIFO round-trip matching, Sharpe/Sortino, max drawdown, calmar ratio
 - `monte_carlo.py` (401 lines): GBM with antithetic variates, probability-driven drift
-- `monte_carlo_risk.py` (504 lines): Student-t copula VaR/CVaR, correlation priors
+- `correlation_priors.py`: Single source of truth for asset correlation strengths (BTC↔ETH: 0.75, XAG↔XAU: 0.85)
+- `monte_carlo_risk.py` (504 lines): Student-t copula VaR/CVaR, imports correlation priors
 - `kelly_sizing.py`: Kelly criterion position sizing
 
 ### Reporting & Analysis (6 modules)
