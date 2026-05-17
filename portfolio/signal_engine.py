@@ -3515,6 +3515,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         }
 
         _signal_failures = []
+        _dispatch_t0 = time.monotonic()
         for sig_name, entry in _enhanced_entries.items():
             # BUG-178 fix (2026-04-10): respect DISABLED_SIGNALS in the dispatch
             # loop. Previously this loop iterated *every* registered enhanced
@@ -3652,7 +3653,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     extra_info[f"{sig_name}_indicators"] = validated["indicators"]
                 votes[sig_name] = validated["action"]
             except Exception as e:
-                logger.warning("Signal %s failed: %s", sig_name, e)
+                logger.warning("Signal %s failed: %s", sig_name, e, exc_info=True)
                 votes[sig_name] = "HOLD"
                 _signal_failures.append(sig_name)
         if _signal_failures:
@@ -3673,6 +3674,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             update_signal_health_batch(health_results)
         except Exception:
             logger.debug("Signal health tracking failed", exc_info=True)
+
+        _dispatch_dt = time.monotonic() - _dispatch_t0
+        if _dispatch_dt > 5.0:
+            logger.warning("[SLOW-DISPATCH] %s: enhanced signals took %.1fs", ticker, _dispatch_dt)
 
         # 2026-05-11 Stage 2 Batch 2: candlestick + forecast dead-zone
         # soft directional votes. Same pattern as Batch 1 (EMA / BB /
