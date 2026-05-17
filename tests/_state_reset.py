@@ -165,6 +165,22 @@ def reset_all_high_risk():
     reset_circuit_breakers()
 
 
+def reset_grid_fisher():
+    """Reset grid_fisher module-level state.
+
+    _state_lock is a threading.Lock (doesn't leak), but the test may
+    leave a stale GridFisherEngine singleton if the test file creates one.
+    """
+    try:
+        import portfolio.grid_fisher as gf
+        # No module-level mutable state to clear currently — grid_fisher
+        # keeps state in GridFisherEngine instances and on-disk JSON.
+        # Placeholder for future module-level caches.
+        _ = gf
+    except ImportError:
+        pass
+
+
 def reset_all():
     """Reset ALL module state (high + medium + low risk)."""
     reset_all_high_risk()
@@ -172,3 +188,4 @@ def reset_all():
     reset_logging_config()
     reset_api_utils()
     reset_trigger()
+    reset_grid_fisher()
