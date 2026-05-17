@@ -120,3 +120,21 @@ def test_scan_ignores_empty_cmdline(monkeypatch):
     assert payload["any_duplicate"] is False
     for L in payload["loops"]:
         assert L["count"] == 0
+
+
+def test_scan_handles_zero_create_time_without_crashing(monkeypatch):
+    """If psutil returns create_time=0 for all matched processes
+    (AccessDenied fallback), the scanner must NOT crash on min() of
+    an empty generator. Regression test for cavecrew-reviewer P1."""
+    procs = [
+        _fake_proc(123, ["py", "data/metals_loop.py"], create_time=0.0),
+        _fake_proc(124, ["py", "data/metals_loop.py"], create_time=0.0),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()  # must not raise
+    metals = next(L for L in payload["loops"] if L["name"] == "metals")
+    # Duplicate detection still works without create_time
+    assert metals["count"] == 2
+    assert metals["duplicate"] is True
+    # But uptime is unknown (None) instead of crashing
+    assert metals["oldest_uptime_seconds"] is None

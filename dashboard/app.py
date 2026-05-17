@@ -1647,9 +1647,12 @@ def api_loop_processes():
     try:
         return jsonify(scan())
     except Exception as exc:  # noqa: BLE001 — psutil should not raise, but the dashboard tile must degrade gracefully
+        # Log the full traceback locally for diagnosis; return a generic
+        # error string to the client so we don't leak filesystem paths
+        # or other internal context through the dashboard JSON.
         logger.exception("loop_processes scan failed: %s", exc)
         return jsonify({
-            "error": str(exc),
+            "error": "loop_processes scan failed; see server logs",
             "loops": [],
             "any_duplicate": False,
         }), 500

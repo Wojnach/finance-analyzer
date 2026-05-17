@@ -142,9 +142,14 @@ def scan(now_utc: datetime | None = None) -> dict[str, Any]:
             if m["create_time"] > 0 else None
             for m in matches
         ]
-        if matches:
-            oldest = min(m["create_time"] for m in matches if m["create_time"] > 0)
-            uptime = max(0, int(now_ts - oldest)) if oldest > 0 else None
+        # Compute oldest uptime defensively: matches may all have
+        # create_time=0 if psutil couldn't read the field (sandbox /
+        # AccessDenied edge); in that case min() on an empty generator
+        # raises ValueError and crashes the endpoint.
+        valid_starts = [m["create_time"] for m in matches if m["create_time"] > 0]
+        if valid_starts:
+            oldest = min(valid_starts)
+            uptime = max(0, int(now_ts - oldest))
         else:
             uptime = None
 
