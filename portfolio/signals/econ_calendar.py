@@ -261,4 +261,15 @@ def compute_econ_calendar_signal(df: pd.DataFrame, context: dict = None) -> dict
     # Cap confidence
     result["confidence"] = min(result["confidence"], _MAX_CONFIDENCE)
 
+    # Pause-period dampener: when next high-impact event is >14 days away,
+    # the signal has minimal predictive value (events produce round-trips
+    # during extended Fed pause periods). Reduce confidence aggressively.
+    evt = next_event(ref_date.date() if isinstance(ref_date, datetime) else ref_date)
+    if evt is None or evt["hours_until"] > 336:  # >14 days
+        result["confidence"] *= 0.3
+        result["indicators"]["pause_period_dampener"] = True
+    elif evt["hours_until"] > 168:  # 7-14 days
+        result["confidence"] *= 0.5
+        result["indicators"]["pause_period_dampener"] = "partial"
+
     return result

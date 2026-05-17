@@ -484,11 +484,11 @@ _RECENCY_WEIGHT_FAST = 0.90
 _RECENCY_MIN_SAMPLES = 30  # match ACCURACY_GATE_MIN_SAMPLES (was 50 default)
 
 # Crisis regime: when multiple macro-external signals are simultaneously
-# degraded (recent accuracy < 35% with 50+ samples), the market is in a
-# regime that breaks fundamental assumptions (e.g., wartime, systemic crisis).
-# In crisis mode, apply extra penalty to trend-following signals and boost
-# mean-reversion/calendar signals.
-_CRISIS_THRESHOLD = 0.35  # signal accuracy below this counts as "broken"
+# degraded (recent accuracy < 42% with 30+ samples), the market is in a
+# regime that breaks fundamental assumptions (e.g., wartime, systemic crisis,
+# prolonged Fed pause). In crisis mode, penalize trend-following signals and
+# boost mean-reversion signals (RSI, BB, statistical_jump_regime, calendar).
+_CRISIS_THRESHOLD = 0.42  # signal accuracy below this counts as "broken"
 _CRISIS_MIN_BROKEN = 3  # need at least 3 broken macro signals for crisis flag
 _CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
 _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
@@ -2406,7 +2406,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # crisis is in the macro indicators, not in the trend — penalizing trend
     # signals that are winning is actively harmful (observed: trend 61.6%,
     # EMA 62.9% being penalized 0.6x while crisis mode was active).
-    _MACRO_CRISIS_SIGNALS = {"fear_greed", "macro_regime", "structure", "news_event", "sentiment"}
+    _MACRO_CRISIS_SIGNALS = {"fear_greed", "macro_regime", "structure", "news_event", "sentiment", "econ_calendar", "crypto_macro"}
     broken_count = sum(
         1 for s in _MACRO_CRISIS_SIGNALS
         if accuracy_data.get(s, {}).get("total", 0) >= ACCURACY_GATE_MIN_SAMPLES
@@ -2415,7 +2415,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     crisis_mode = broken_count >= _CRISIS_MIN_BROKEN
 
     _TREND_SIGNALS = {"ema", "trend", "heikin_ashi", "volume_flow"}
-    _MR_SIGNALS = {"mean_reversion", "calendar"}
+    _MR_SIGNALS = {"mean_reversion", "calendar", "rsi", "bb", "statistical_jump_regime"}
 
     # Check if trend signals are actually underperforming before penalizing.
     # If avg trend accuracy > 55%, trend is capturing edge despite macro chaos.
