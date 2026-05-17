@@ -86,5 +86,39 @@ Agent: pr-review-toolkit:code-reviewer. → 08_infrastructure.md
 Read each, drop hallucinations, dedupe, re-rank P1/P2/P3.
 → SYNTHESIS.md
 
-## Premortem
-(filled by fresh agent)
+### 9. trading-bots — independent bot subpackages
+portfolio/golddigger/* (10 files), portfolio/elongir/* (10 files),
+portfolio/mstr_loop/* + strategies/ (15 files).
+Agent: pr-review-toolkit:code-reviewer. → 09_trading_bots.md
+
+### 10. supporting-modules — precomputes, prophecy, evolve, qwen3, etc.
+bigbet, fin_evolve, qwen3_signal, qwen3_trader, prophecy, focus_analysis,
+reflection, shadow_registry, sentiment_shadow_backfill,
+decision_outcome_tracker, vector_memory, bert_sentiment, regime_alerts,
+short_horizon, daily_digest, weekly_digest, digest, notification_text,
+seasonality, seasonality_updater, *_precompute (6 files),
+feature_normalizer, tickers, stats, analyze, backtester, data_refresh,
+fish_monitor_smart, fish_instrument_finder, tinylora_trainer.
+Agent: pr-review-toolkit:code-reviewer. → 10_supporting.md
+
+## Premortem (from fresh agent)
+
+**1. Hallucinated finding (signals-modules has 58 files; reviewer cites function that was renamed last week).**
+Causal: agent reads file, recalls stale pattern, claims bug that current code already fixes. Fix worktree edits non-bug, introduces real bug.
+**Hook applied:** Every finding cites `file:line` + 3-line code quote. Synthesis greps quotes against live file; non-matching dropped.
+
+**2. Coverage gap — `portfolio/golddigger/`, `portfolio/elongir/`, `portfolio/mstr_loop/` missing from partitions.**
+**Hook applied:** Added partitions 9 + 10. Inventory cross-check ran: `git ls-files` diffed against assigned files; 70 unassigned files placed in partitions 9-10.
+
+**3. Stale code drift — main loop writes `data/agent_summary.json` etc every 60s.**
+**Hook applied:** Reviewers explicitly forbidden from reading `data/*.json` and `data/*.jsonl`. Code only.
+
+**4. Cross-subsystem blind spot — bug in seam between two partitions.**
+**Hook applied:** Independent pass owns explicit seam checklist: (a) shared_state consumers, (b) journal writers vs dashboard readers, (c) trigger_state producers vs autonomous consumers.
+
+**5. Subagent silent failure — agent returns success with empty output.**
+**Hook applied:** Synthesis step asserts each report exists, ≥30 lines, contains "P1", "P2", "P3" or `(none)`. Failed reports re-dispatched, not silently synthesized.
+
+**6. Prioritization error — fresh reviewer lacks grudges memory.**
+**Hook applied:** Every dispatch prompt embeds the P1 auto-promote list: stop-loss API endpoint, config.json commit, CLAUDECODE env leak, non-atomic JSON write, claude -p exit-0-on-auth-fail, MIN_VOTERS bypass.
+
