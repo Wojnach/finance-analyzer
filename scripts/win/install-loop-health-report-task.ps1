@@ -17,8 +17,11 @@ if ($existing) {
     Write-Host "Removed existing $TaskName"
 }
 
-$action = New-ScheduledTaskAction -Execute "Q:\finance-analyzer\.venv\Scripts\python.exe" `
-    -Argument "Q:\finance-analyzer\scripts\loop_health_report.py" `
+# Hidden launch via run-hidden.vbs — see docs/HIDDEN_TASKS.md.
+$vbs = "Q:\finance-analyzer\scripts\win\run-hidden.vbs"
+$pythonExe = "Q:\finance-analyzer\.venv\Scripts\python.exe"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$pythonExe`" `"Q:\finance-analyzer\scripts\loop_health_report.py`"" `
     -WorkingDirectory "Q:\finance-analyzer"
 
 $trigger = New-ScheduledTaskTrigger -Once -At $RunOnce

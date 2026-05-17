@@ -21,5 +21,7 @@ if %EXIT_CODE% EQU 11 (
 )
 
 echo [%date% %time%] Restarting in 30s...
-timeout /t 30 /nobreak >nul
+REM ping not timeout: timeout errors when stdin is not a console
+REM (i.e. when launched hidden via run-hidden.vbs). See docs/HIDDEN_TASKS.md.
+ping -n 31 127.0.0.1 >nul
 goto restart

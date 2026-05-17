@@ -19,10 +19,13 @@ $trigger = New-ScheduledTaskTrigger `
     -RepetitionInterval (New-TimeSpan -Minutes 10) `
     -RepetitionDuration ([TimeSpan]::MaxValue)
 
-# Action: python scripts/fix_agent_dispatcher.py
-$action = New-ScheduledTaskAction `
-    -Execute $pythonPath `
-    -Argument "-u `"$scriptPath`"" `
+# Action: python scripts/fix_agent_dispatcher.py — hidden via run-hidden.vbs.
+# wscript → cmd /c → python keeps the existing process tree shape, so
+# claude subprocesses spawned by the dispatcher still see stdin=DEVNULL
+# (set explicitly in agent_invocation.py); see docs/PLAN.md premortem N1.
+$vbs = "Q:\finance-analyzer\scripts\win\run-hidden.vbs"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$pythonPath`" -u `"$scriptPath`"" `
     -WorkingDirectory $workingDir
 
 # Settings: cap runtime at 20 minutes (agent timeout is 15 min + buffer).

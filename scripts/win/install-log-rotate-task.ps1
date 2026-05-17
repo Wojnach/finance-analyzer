@@ -20,8 +20,10 @@ if ($existing) {
     Write-Host "Removed existing $TaskName"
 }
 
-$action = New-ScheduledTaskAction -Execute $pythonExe `
-    -Argument "-m portfolio.log_rotation" `
+# Hidden launch via run-hidden.vbs — see docs/HIDDEN_TASKS.md.
+$vbs = "Q:\finance-analyzer\scripts\win\run-hidden.vbs"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$pythonExe`" -m portfolio.log_rotation" `
     -WorkingDirectory $workDir
 
 # Hourly trigger starting in 5 minutes (so first run isn't immediately
