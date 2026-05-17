@@ -1,0 +1,8 @@
+{"name": "visibility_graph_rsi", "score": 7.9, "source": "arxiv:2605.01300", "date": "2026-05-17", "notes": "VGRSI on XAU Sharpe 2.55-3.6. Geometric, not trend/momentum."}
+{"name": "local_hurst_mr_timing", "score": 7.5, "source": "doi:10.3390/math12182911", "date": "2026-05-17", "notes": "H<0.5 anticipates faster MR in crypto pairs."}
+{"name": "tcn_mr_speed_estimator", "score": 7.3, "source": "doi:10.3390/math14081302", "date": "2026-05-17", "notes": "Distribution-free MR speed estimator. Universal, no re-fitting."}
+{"name": "latent_lob_stress_detector", "score": 7.2, "source": "arxiv:2604.20949", "date": "2026-05-17", "notes": "3-regime LOB model, +18.6 timestep lead. BTC/USDT validated."}
+{"name": "wavelet_hurst_dynamic_vol", "score": 7.0, "source": "doi:10.3389/fams.2025.1554144", "date": "2026-05-17", "notes": "Daubechies-4 wavelet Hurst, R2>0.72 OOS."}
+{"name": "multi_asset_ofi_granger", "score": 6.8, "source": "doi:10.1145/3768292.3770430", "date": "2026-05-17", "notes": "Cross-asset OFI with Granger peer selection. R2 90%+ improvement."}
+{"name": "cross_sectional_illiquidity", "score": 6.5, "source": "doi:10.1109/BigData66926.2025.11401552", "date": "2026-05-17", "notes": "Low-correlation with momentum. Hard-Mask attention filter."}
+{"name": "precious_metal_sentiment_adaptive", "score": 6.3, "source": "doi:10.1186/s40854-026-00911-2", "date": "2026-05-17", "notes": "Adaptive metals+sentiment (Financial Innovation 2026)."}

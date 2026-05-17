@@ -1,0 +1,38 @@
+{
+  "signal": "tsi_chop_mr",
+  "backtest_date": "2026-05-17",
+  "period": "1y daily",
+  "horizon": "5d forward",
+  "results": {
+    "BTC-USD": {
+      "accuracy": 50.8,
+      "signals": 63,
+      "activation": 20.9,
+      "buys": 38,
+      "sells": 25
+    },
+    "ETH-USD": {
+      "accuracy": 50.0,
+      "signals": 72,
+      "activation": 23.9,
+      "buys": 43,
+      "sells": 29
+    },
+    "XAU-USD": {
+      "accuracy": 35.7,
+      "signals": 28,
+      "activation": 15.1,
+      "buys": 5,
+      "sells": 23
+    },
+    "XAG-USD": {
+      "accuracy": 33.3,
+      "signals": 36,
+      "activation": 19.4,
+      "buys": 5,
+      "sells": 31
+    }
+  },
+  "notes": "Metals underperform because gold/silver trending strongly (low CHOP). Signal designed for ranging regime \u2014 anti-correlated with trend cluster. Crypto at ~50% baseline. Starts DISABLED for shadow validation.",
+  "verdict": "SHIP_DISABLED \u2014 crypto viable, metals need ranging regime to activate properly"
+}

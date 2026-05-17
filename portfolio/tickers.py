@@ -106,6 +106,7 @@ DISABLED_SIGNALS = {
     "breakeven_inflation_momentum",  # pending live validation (added 2026-05-13)
     "trend_slope_momentum",  # pending live validation (added 2026-05-14)
     "ttm_squeeze",  # pending live validation (added 2026-05-16)
+    "tsi_chop_mr",  # pending live validation (added 2026-05-17)
     "funding",          # 2026-05-13: 30.8% at 1d (743 sam). BUY-only signal, all wrong.
                         # 0% activation on all tickers in last 50 entries — phantom voter
                         # that escapes accuracy gate because it rarely votes. When it does
@@ -370,4 +371,5 @@ SIGNAL_NAMES = [
     "breakeven_inflation_momentum",
     "trend_slope_momentum",
     "ttm_squeeze",
+    "tsi_chop_mr",
 ]

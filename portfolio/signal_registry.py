@@ -342,6 +342,10 @@ def _register_defaults():
                       "portfolio.signals.meta_trader",
                       "compute_meta_trader_signal",
                       requires_context=True, max_confidence=0.7)
+    register_enhanced("tsi_chop_mr",
+                      "portfolio.signals.tsi_chop_mr",
+                      "compute_tsi_chop_mr_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
