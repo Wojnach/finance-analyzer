@@ -1,85 +1,124 @@
-# Improvement Plan — 2026-05-16
+# Improvement Plan — Auto-Session 2026-05-17
+
+Created: 2026-05-17
+Branch: `improve/auto-session-2026-05-17`
 
 ## Exploration Summary
 
-6 parallel agents + direct code reading covered the full codebase:
-- Signal pipeline (signal_engine.py, accuracy_stats.py, accuracy_degradation.py, loop_contract.py)
-- Data collection (data_collector, fear_greed, sentiment, futures_data, onchain, fx_rates)
-- Orchestration (main.py, agent_invocation, trigger, portfolio_mgr, risk_management)
-- Infrastructure (dashboard/app.py, auth.py, house_blueprint.py, export_static.py)
-- Metals subsystem (metals_loop.py, grid_fisher.py)
-- Portfolio & risk (trade_guards.py, equity_curve.py, monte_carlo.py)
+4 parallel agents + direct code reading covered full codebase:
+- Signal pipeline (signal_engine, signal_registry, accuracy_stats, outcome_tracker)
+- Data collection & orchestration (main, data_collector, trigger, agent_invocation, health)
+- Portfolio & risk (portfolio_mgr, risk_management, trade_guards, equity_curve, monte_carlo)
+- Dashboard & metals (dashboard/app, metals_loop, grid_fisher, avanza, file_utils)
 
-Previous session (2026-05-15) fixed B1-B6 (ADX cache, flip cooldown, alert_budget thread
-safety, reporting thread safety, data_collector error visibility). Those are verified fixed.
+Prior session (2026-05-16) fixed B7-B9 (blend_accuracy directional counts, dashboard
+UnicodeDecodeError, SYSTEM_OVERVIEW counts). Those are verified merged.
 
 ---
 
 ## 1. Bugs Found
 
-### B7 [P1] blend_accuracy_data directional sample counts use max() instead of sum()
-**File:** `portfolio/accuracy_stats.py:963-967`
-**Bug:** When blending all-time and recent accuracy, directional sample counts
-(`total_buy`, `total_sell`) use `max(at_v, rc_v)`. This discards samples from the
-smaller source. Downstream `_weighted_consensus` uses these counts for directional
-gating — understated counts can bypass the min-sample floor for directional accuracy.
-**Fix:** Sum the counts: `at_v + rc_v`. The directional *accuracy* values (lines 953-962)
-already pick the source with more samples, which is correct — but counts must aggregate.
-**Risk:** Low. Produces slightly more conservative gating (more samples = harder to gate).
+### B10 [P1] health.py signal rolling window uses list + slice (O(n) per append)
+**File:** `portfolio/health.py` — `_signal_health` dict values
+**Bug:** Signal health tracking uses `list.append(entry)` then `entries = entries[-50:]`
+every cycle. This creates a new list object every append (O(n) copy + GC pressure).
+With 17 signals × 5 tickers = 85 appends/min, this is ~5,100 unnecessary list copies/hour.
+**Fix:** Replace with `collections.deque(maxlen=50)`. Constant-time append, automatic eviction.
+**Risk:** Very low. Deque supports same iteration/indexing patterns used downstream.
 
-### B8 [P2] Dashboard UnicodeDecodeError not caught (5 locations)
-**Files:**
-- `dashboard/app.py:905,917` — `/api/mstr_loop` catches `OSError` but not `UnicodeDecodeError`
-- `dashboard/auth.py:65` — `_read_config_uncached()` catches `(FileNotFoundError, JSONDecodeError, OSError)` but not `UnicodeDecodeError`
-- `dashboard/export_static.py:65` — `_get_dashboard_token()` catches `(OSError, JSONDecodeError)` but not `UnicodeDecodeError`
-- `dashboard/house_blueprint.py:109,289,396` — `json.loads(manifest.read_text())` catches `JSONDecodeError` but not `UnicodeDecodeError`
-**Bug:** `UnicodeDecodeError` inherits from `ValueError`, not `OSError`. Corrupt UTF-8 in
-any of these files causes unhandled 500s. The auth.py case is worst — blocks all endpoints.
-**Fix:** Add `UnicodeDecodeError` (or `ValueError`) to each except clause.
-**Risk:** Trivial. Pure exception broadening.
+### B11 [P2] shared_state.py redundant time.time() under lock
+**File:** `portfolio/shared_state.py:69`
+**Bug:** `_now_evict = time.time()` called inside `_cache_lock` after `now = time.time()`
+was already captured outside. Adds a syscall under lock contention (8 concurrent workers).
+**Fix:** Reuse `now` variable. Difference is <1ms, irrelevant for timeout comparison.
+**Risk:** None. Pure optimization.
 
-### B9 [P2] SYSTEM_OVERVIEW.md signal counts stale
-**File:** `docs/SYSTEM_OVERVIEW.md:8,35`
-**Bug:** Says "52 signals (33 active, 19 disabled)". Reality: 65 modules, 17 active, 49 disabled.
-Also says "52-signal voting" on line 35. These became stale after the 6-signal disable on 2026-05-15.
-**Fix:** Update counts to match CLAUDE.md (65 modules, 17 active, 49 disabled).
-**Risk:** None. Documentation only.
+### B12 [P2] signal_engine.py broad Exception in enhanced signal dispatch
+**File:** `portfolio/signal_engine.py:3747` (approximate — enhanced signal try/except block)
+**Bug:** Catches bare `Exception` and returns HOLD with only DEBUG-level log. A crashing
+signal module is indistinguishable from a legitimate HOLD. Masks bugs for days/weeks.
+**Fix:** Log at WARNING with `exc_info=True` (traceback). Keep HOLD return for safety,
+but make crashes visible in logs and health module.
+**Risk:** Low. No behavior change (still returns HOLD), only visibility improvement.
+
+### B13 [P2] grid_fisher.py state file has no cross-process lock
+**File:** `portfolio/grid_fisher.py` — state read/write
+**Bug:** Metals loop writes `data/grid_fisher_state.json` every cycle. Dashboard reads it
+for `/api/grid-fisher`. No file lock → race condition on concurrent access.
+**Fix:** Use `file_utils.atomic_write_json()` (already atomic via tempfile+rename) and add
+shared/exclusive lock via `portfolio.process_lock` for the read side in dashboard.
+**Risk:** Low. atomic_write_json already prevents corruption; lock prevents stale reads.
+
+### B14 [P3] Hardcoded correlation priors duplicated across modules
+**Files:** `portfolio/monte_carlo_risk.py`, `portfolio/risk_management.py`
+**Bug:** Both files define `{"BTC-USD": {"ETH-USD": 0.7}, ...}` independently.
+Values can drift after edits to one file. No single source of truth.
+**Fix:** Extract to `portfolio/correlation_priors.py` as a frozen constant.
+**Risk:** Low. Pure extraction, no logic change.
+
+### B15 [P3] health.py dead-signal detection time comparison
+**File:** `portfolio/health.py` — dead signal check
+**Bug:** Compares `time.time()` (epoch float) with signal_log ISO timestamp strings.
+Works via `dateutil.parser` but breaks silently during DST transitions when system
+clock and log timestamps briefly disagree by 1 hour.
+**Fix:** Normalize both to UTC epoch before comparison. Use existing `datetime.now(UTC)`.
+**Risk:** Very low. Edge case only manifests during 2 DST transitions/year.
 
 ---
 
 ## 2. False Positives Investigated
 
-- **change_pct=0 default in accuracy_stats.py** — SAFE. `_vote_correct(vote, 0)` returns None
-  (neutral) since `abs(0) < 0.05`. Belt-and-suspenders with explicit None check.
-- **trade_guards.py race condition** — Already fixed. Has `_state_lock` with proper `with` guards.
-- **DISABLED_SIGNALS leaking into consensus** — Not confirmed. Signals filtered before
-  `_weighted_consensus` at lines 3513-3556.
-- **JSONL parsing in dashboard** — All JSONL reads have proper JSONDecodeError handling.
-- **Silent failures in _run_post_cycle** — All tasks wrapped in individual try/except with logging.
-- **Invariant check crashes in loop_contract** — All checks guarded, division-by-zero prevented.
+- **BUG-176 concentration stacking** — Investigated: the edge case requires >5 positions
+  in same asset class, which Patient/Bold strategies never reach (max 3 per class by design).
+  Not fixing — would add complexity for an impossible state.
+- **Signal dispatch "soft confidence" implicit contract** — Not a bug. The contract is
+  documented in signal_registry.py docstring and enforced by the min_confidence floor.
+- **main.py singleton lock race** — Already fixed with msvcrt/fcntl non-blocking lock.
 
 ---
 
 ## 3. Implementation Batches
 
-### Batch 1: Signal accuracy fix + docs (3 files)
-1. `portfolio/accuracy_stats.py` — B7: fix directional sample count blending
-2. `docs/SYSTEM_OVERVIEW.md` — B9: update signal counts
-3. Test: `tests/test_accuracy_stats.py` — add test for blend_accuracy_data directional counts
+### Batch 1: Foundation Fixes (3 files, no dependencies)
+1. `portfolio/health.py` — B10: deque conversion for signal rolling window
+2. `portfolio/shared_state.py` — B11: remove redundant time.time() under lock
+3. Tests: verify in `tests/test_health.py`, `tests/test_shared_state.py`
 
-### Batch 2: Dashboard resilience (4 files)
-1. `dashboard/app.py` — B8: add UnicodeDecodeError to mstr_loop catches
-2. `dashboard/auth.py` — B8: add UnicodeDecodeError to config reader
-3. `dashboard/export_static.py` — B8: add UnicodeDecodeError to token reader
-4. `dashboard/house_blueprint.py` — B8: add UnicodeDecodeError to 3 manifest reads
-5. Test: verify dashboard endpoints handle corrupt UTF-8 gracefully
+### Batch 2: Signal Visibility (2 files)
+1. `portfolio/signal_engine.py` — B12: upgrade exception logging to WARNING + traceback
+2. Tests: `tests/test_signal_engine.py` — verify warning is logged on signal crash
+
+### Batch 3: Correlation Priors Extraction (3 files, new module)
+1. NEW `portfolio/correlation_priors.py` — B14: single source of truth
+2. `portfolio/monte_carlo_risk.py` — import from new module
+3. `portfolio/risk_management.py` — import from new module
+4. Tests: NEW `tests/test_correlation_priors.py`
+
+### Batch 4: Grid Fisher Safety (2 files)
+1. `portfolio/grid_fisher.py` — B13: add process lock around state file I/O
+2. `_state_reset.py` — add grid_fisher state to test reset list
+3. Tests: `tests/test_grid_fisher.py`
+
+### Batch 5: Health Robustness (1 file)
+1. `portfolio/health.py` — B15: normalize dead-signal time comparison to UTC
+2. Tests: `tests/test_health.py` — DST edge case test
 
 ---
 
-## 4. Skipped (Too Risky for Autonomous)
+## 4. Skipped (Out of Scope)
 
-- **metals_loop.py monolith (ARCH-18)**: 7,882 lines. Highest bug density but too intertwined
-  for autonomous refactoring. Would need manual review.
-- **main.py re-exports (ARCH-17)**: 100+ re-exports. Breaking change to remove — callers unknown.
-- **No CI/CD (ARCH-19)**: Infrastructure change, not code fix.
-- **No type checking (ARCH-20)**: Would be a multi-session project.
+- **ARCH-17 main.py re-exports**: 10+ test files import from main. Dedicated session.
+- **ARCH-18 metals_loop.py monolith (7,882 lines)**: Needs design session.
+- **Circuit breaker metrics endpoint (FEAT-1)**: Nice-to-have, not a fix.
+- **Any config.json changes**: Security rule.
+- **Any live trading logic changes**: Safety rule.
+
+---
+
+## 5. Success Criteria
+
+- [ ] All 5 batches implemented with passing tests
+- [ ] Full test suite green (`pytest tests/ -n auto`)
+- [ ] No new test failures introduced
+- [ ] SYSTEM_OVERVIEW.md updated
+- [ ] Merged to main and pushed
