@@ -15,6 +15,7 @@
 
 $TaskName = "PF-CryptoLoop"
 $scriptDir = "Q:\finance-analyzer\scripts\win"
+$vbs = "$scriptDir\run-hidden.vbs"
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existing) {
@@ -22,8 +23,9 @@ if ($existing) {
     Write-Host "Removed existing $TaskName"
 }
 
-$action = New-ScheduledTaskAction -Execute "cmd.exe" `
-    -Argument "/c `"$scriptDir\crypto-loop.bat`"" `
+# Hidden launch via run-hidden.vbs — see docs/HIDDEN_TASKS.md.
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$scriptDir\crypto-loop.bat`"" `
     -WorkingDirectory "Q:\finance-analyzer"
 
 $trigger1 = New-ScheduledTaskTrigger -AtLogOn

@@ -28,8 +28,11 @@ if ($existing) {
     Write-Host "Removed existing $TaskName"
 }
 
-$action = New-ScheduledTaskAction -Execute "Q:\finance-analyzer\.venv\Scripts\python.exe" `
-    -Argument "$scriptDir\loop_health_report.py" `
+# Hidden launch via run-hidden.vbs — see docs/HIDDEN_TASKS.md.
+$vbs = "Q:\finance-analyzer\scripts\win\run-hidden.vbs"
+$pythonExe = "Q:\finance-analyzer\.venv\Scripts\python.exe"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$pythonExe`" `"$scriptDir\loop_health_report.py`"" `
     -WorkingDirectory "Q:\finance-analyzer"
 
 # 08:00 local — well after EU pre-open prep (07:00) so the loops have

@@ -17,9 +17,12 @@ $batPath  = "Q:\finance-analyzer\scripts\win\shadow-review.bat"
 # "no such task" error so a fresh install does not surface as a failure.
 schtasks /Delete /TN $taskName /F 2>$null | Out-Null
 
-# Create: daily 03:30, run the wrapper batch. /RL HIGHEST not used because
-# the task only reads JSONL + writes a log — no admin operations.
-schtasks /Create /SC DAILY /ST 03:30 /TN $taskName /TR "`"$batPath`"" /F | Out-Null
+# Create: daily 03:30, run the wrapper batch hidden via run-hidden.vbs.
+# /RL HIGHEST not used because the task only reads JSONL + writes a log —
+# no admin operations. See docs/HIDDEN_TASKS.md for the VBS shim.
+$vbs = "Q:\finance-analyzer\scripts\win\run-hidden.vbs"
+$taskCommand = "wscript.exe `"$vbs`" `"cmd.exe`" `"/c`" `"$batPath`""
+schtasks /Create /SC DAILY /ST 03:30 /TN $taskName /TR $taskCommand /F | Out-Null
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "FAILED to install $taskName (schtasks exit $LASTEXITCODE)"

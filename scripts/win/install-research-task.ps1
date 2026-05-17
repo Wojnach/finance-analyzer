@@ -12,8 +12,11 @@ if ($existing) {
     Write-Host "Removed existing task: $taskName"
 }
 
-# Create the action
-$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$scriptPath`"" -WorkingDirectory "Q:\finance-analyzer"
+# Hidden launch via run-hidden.vbs — see docs/HIDDEN_TASKS.md.
+$vbs = "Q:\finance-analyzer\scripts\win\run-hidden.vbs"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$scriptPath`"" `
+    -WorkingDirectory "Q:\finance-analyzer"
 
 # Trigger: daily at 22:30 (10:30 PM local time — after US close)
 $trigger = New-ScheduledTaskTrigger -Daily -At "22:30"

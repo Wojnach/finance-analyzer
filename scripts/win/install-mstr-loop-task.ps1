@@ -16,10 +16,14 @@ if ($existing) {
     Write-Host "Removed existing $TaskName"
 }
 
-# We use cmd /c with `set` to inject the phase env var before launching the
-# wrapper. Going via cmd avoids the PowerShell-vs-batch quoting hell.
-$action = New-ScheduledTaskAction -Execute "cmd.exe" `
-    -Argument "/c `"set `"MSTR_LOOP_PHASE=shadow`"&&`"$scriptDir\mstr-loop.bat`"`"" `
+# Hidden launch via run-hidden.vbs. The phase env var is injected inside
+# a wrapper bat invocation: cmd /c "set VAR=x && bat". We give that whole
+# string to cmd as a single /c argument so wscript→cmd parses it correctly.
+# (set/&& inside one /c-string is the standard cmd pattern.)
+$vbs = "$scriptDir\run-hidden.vbs"
+$cmdInner = "set MSTR_LOOP_PHASE=shadow && `"$scriptDir\mstr-loop.bat`""
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$cmdInner`"" `
     -WorkingDirectory "Q:\finance-analyzer"
 
 $trigger1 = New-ScheduledTaskTrigger -AtLogOn
