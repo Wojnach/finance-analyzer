@@ -1631,6 +1631,30 @@ def api_loop_health():
     return jsonify(read_loop_health())
 
 
+@app.route("/api/loop-processes")
+@require_auth
+def api_loop_processes():
+    """Running-loop enumeration for the duplicate-detection tile.
+
+    Replaces the visual "I can see the popup windows" cue that
+    disappears after hide-windows lands. psutil enumerates Python
+    processes once per request and matches each against the
+    finance-analyzer loop signatures in portfolio.loop_processes.
+
+    Cheap on the live machine (a few ms per call); poll every 30 s.
+    """
+    from portfolio.loop_processes import scan
+    try:
+        return jsonify(scan())
+    except Exception as exc:  # noqa: BLE001 — psutil should not raise, but the dashboard tile must degrade gracefully
+        logger.exception("loop_processes scan failed: %s", exc)
+        return jsonify({
+            "error": str(exc),
+            "loops": [],
+            "any_duplicate": False,
+        }), 500
+
+
 @app.route("/api/oil")
 @require_auth
 def api_oil():

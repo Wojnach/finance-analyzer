@@ -45,6 +45,7 @@ import "./views/assets.js";
 import "./views/prices.js";
 import "./views/portfolio.js";
 import "./views/llm_leaderboard.js";
+import "./views/loop_processes.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
