@@ -4593,3 +4593,7 @@ f67ca69a fix(loop_processes): handle zero create_time + sanitise endpoint error
 dashboard/app.py
 portfolio/loop_processes.py
 tests/test_loop_processes.py
+
+### 2026-05-17 22:33 UTC | main
+8feac719 session(hide-windows): log session progress + post-merge instructions
+docs/SESSION_PROGRESS.md
