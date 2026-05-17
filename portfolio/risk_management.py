@@ -721,13 +721,9 @@ def transaction_cost_analysis(portfolio: dict) -> dict:
 # Risk Audit Flags — pre-trade risk checks for Layer 2
 # ---------------------------------------------------------------------------
 
-# Hard-coded correlation pairs based on known relationships
-CORRELATED_PAIRS = {
-    "ETH-USD": ["BTC-USD"],
-    "BTC-USD": ["ETH-USD"],
-    "XAG-USD": ["XAU-USD"],
-    "XAU-USD": ["XAG-USD"],
-}
+from portfolio.correlation_priors import get_correlated_pairs
+
+CORRELATED_PAIRS = get_correlated_pairs()
 
 
 def check_concentration_risk(ticker, action, portfolio, agent_summary, strategy="patient"):

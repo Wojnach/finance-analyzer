@@ -110,19 +110,7 @@ def _nearest_psd(matrix: np.ndarray) -> np.ndarray:
 # Known correlation pairs (fallback when no historical data)
 # ---------------------------------------------------------------------------
 
-# From risk_management.py — approximate correlation strengths
-CORRELATION_PRIORS = {
-    ("BTC-USD", "ETH-USD"): 0.75,
-    ("XAG-USD", "XAU-USD"): 0.85,
-}
-
-
-def _get_prior_correlation(ticker_a: str, ticker_b: str) -> float:
-    """Look up prior correlation for a pair (order-independent)."""
-    return CORRELATION_PRIORS.get(
-        (ticker_a, ticker_b),
-        CORRELATION_PRIORS.get((ticker_b, ticker_a), 0.0),
-    )
+from portfolio.correlation_priors import CORRELATION_PRIORS, get_prior as _get_prior_correlation
 
 
 def build_correlation_matrix(
