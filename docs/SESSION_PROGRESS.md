@@ -1,5 +1,26 @@
 # Session Progress
 
+## 2026-05-17 15:30 UTC — Full adversarial review of finance-analyzer (in progress)
+
+Branch: `review/full-2026-05-17` (worktree `Q:/finance-analyzer-review`).
+Plan: `docs/PLAN_REVIEW_2026-05-17.md` (10-partition, ~10 fresh subagents in parallel).
+Findings dir: `docs/REVIEW_2026-05-17/`.
+
+Completed so far:
+- `00_independent_pass.md` — orchestrator cross-cutting review (seams, atomic I/O, auth gate).
+- `01_signals_core.md` — 3 P1, 13 P2, 14 P3 from pr-review-toolkit subagent.
+- `05_avanza_api.md` — 5 medium-risk + 1 nit from cavecrew-reviewer.
+
+In flight (background): orchestration, portfolio-risk, metals-core, signals-modules,
+data-external, infrastructure, trading-bots, supporting.
+
+Next: collect, cross-critique (verify file:line of every finding against current main),
+synthesize prioritized action list, commit, merge, push.
+
+NOT touched: code changes. This is a pure audit session.
+
+---
+
 ## 2026-05-17 00:15 UTC — LLM shadow tail status + pickup brief
 
 **Status of preceding work** (commits in main as of `a2e594bd`):
