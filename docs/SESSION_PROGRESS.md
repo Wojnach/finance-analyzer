@@ -1,5 +1,102 @@
 # Session Progress
 
+## 2026-05-18 — Hide-windows: scheduled-task popups → dashboard tile (MERGED, NOT PUSHED)
+
+**Problem:** ~14 scheduled-task wrappers each popped a terminal window
+on logon, cluttering Parsec sessions. The visible windows were also
+the user's only duplicate-detection cue (e.g. PF-CryptoLoop registered
+twice → two visible windows).
+
+**Fix (merged into main, awaiting push):**
+- `scripts/win/run-hidden.vbs`: universal hidden launcher (multi-arg
+  form so quoting survives Task Scheduler XML round-trip)
+- 22 `install-*.ps1`: route action via `wscript.exe run-hidden.vbs
+  cmd.exe /c <target>`
+- 10 `.bat` wrappers: swap `timeout` (needs console) → `ping`
+- `scripts/win/verify-tasks.ps1`: post-install runner that prints each
+  task's registered Execute/Arguments + (with `-Run`) starts each
+  task and asserts log mtime advances within 90s
+- `portfolio/loop_processes.py` + 8 tests: psutil-based duplicate
+  scanner
+- `dashboard/app.py`: `/api/loop-processes` endpoint
+- `dashboard/static/js/views/loop_processes.js`: new "Running loops"
+  view under More menu; red banner if any duplicate
+- `docs/HIDDEN_TASKS.md`: full runbook
+- `docs/PLAN.md`: design + premortem (6 narratives, 5 mitigations
+  folded in)
+
+**Premortem N1 honoured:** NO `pythonw.exe` swap — every task still
+spawns `python.exe` so the Layer 2 (`claude -p`) subprocess chain is
+unchanged. Mitigation for the historical "Not logged in exits 0"
+outage is on the inspection side (already shipped:
+agent_invocation.py:1074 `stdin=DEVNULL`).
+
+**Cavecrew review:** 2 findings, both fixed before merge.
+- P1: `min()` crashed on empty generator when all matched procs had
+  create_time=0 (psutil AccessDenied fallback)
+- P2: endpoint error response leaked exception strings
+
+**Tests:** 8 new pass. Full `pytest -n auto` in main: pre-existing
+baseline. In worktree: +15 from missing config.json symlink (known
+per `reference_worktree_symlinks.md`). No regressions from these
+changes (touched zero signal/consensus/metals code).
+
+**User-facing follow-up REQUIRED on next session:**
+1. User runs `! cmd.exe /c "cd /d Q:\finance-analyzer && git push origin main"`
+   — auto-mode classifier blocks push to main.
+2. **Kill orphan python processes first** (per `docs/HIDDEN_TASKS.md`
+   step 1 — Unregister doesn't kill children):
+   ```powershell
+   Get-Process python,pythonw,wscript,cmd -ErrorAction SilentlyContinue |
+     Where-Object { $_.CommandLine -match 'finance-analyzer|metals_loop|portfolio\.main|crypto_loop|oil_loop|golddigger|mstr_loop|silver_monitor' } |
+     Stop-Process -Force
+   ```
+3. Re-register every PF-* task:
+   ```powershell
+   Get-ChildItem Q:\finance-analyzer\scripts\win\install-*.ps1 |
+     ForEach-Object { & $_.FullName }
+   ```
+4. Verify:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File Q:\finance-analyzer\scripts\win\verify-tasks.ps1 -Run
+   ```
+5. Spot-check dashboard: browse to `#loop-processes`, expect green.
+
+**Existing duplicates that will be cleared in step 3:** PF-CryptoLoop,
+PF-MetalsLoop, PF-MstrLoop, PF-LoopResume (each registered twice
+right now per `schtasks /query`).
+
+## 2026-05-17 21:30 UTC — After-Hours Research Session (COMPLETE)
+
+**What was done:**
+- Phase 0: System review — identified 5 signals in severe accuracy degradation (32-39% recent)
+- Phase 1: Macro research — oil crisis (Hormuz, WTI $103), rate-hike prob 45%, all ranging
+- Phase 2: Quant research — IC-based weighting confirmed as priority, econ_calendar failure mechanism identified
+- Phase 3: Signal audit — discovered crisis mode not triggering (threshold too low), circuit breaker rescuing bad signals
+- Phase 5: Plan written to docs/RESEARCH_PLAN.md
+- Phase 6: Implemented fix (commit b0a086df):
+  - Crisis threshold raised 0.35 → 0.42
+  - Added econ_calendar + crypto_macro to crisis signal set
+  - Expanded MR boost to RSI, BB, statistical_jump_regime
+  - Added econ_calendar pause-period dampener (0.3x when events >14d away)
+- Phase 8: Morning briefing written to data/morning_briefing.json
+
+**What's next:**
+- IC-based rolling signal weights (3-day project, highest remaining priority)
+- ETH-specific BTC-lagged signal (fix 48.5% consensus accuracy)
+- Avanza session needs manual BankID refresh
+- Monitor if crisis mode now triggers with new thresholds
+
+**Deliverables written:**
+- data/daily_research_review.json
+- data/daily_research_macro.json
+- data/daily_research_quant.json
+- data/daily_research_ticker_deep_dive.json
+- data/daily_research_signal_audit.json
+- data/morning_briefing.json
+
+---
+
 ## 2026-05-17 15:30 UTC — Full adversarial review of finance-analyzer (in progress)
 
 Branch: `review/full-2026-05-17` (worktree `Q:/finance-analyzer-review`).
@@ -4402,3 +4499,97 @@ tests/test_shadow_cycle_throttle.py
 ### 2026-05-16 22:47 UTC | main
 87d264e4 docs(fin-prereview): add premortem-reviewer as 5th parallel agent
 .claude/commands/fin-prereview.md
+
+### 2026-05-16 22:48 UTC | main
+f682c127 docs(session): close Item 1 — finance_llama prod emission verified
+docs/SESSION_PROGRESS.md
+
+### 2026-05-16 23:24 UTC | main
+41702363 docs(fgl): delegate premortem to fresh general-purpose agent
+.claude/commands/fgl.md
+
+### 2026-05-16 23:25 UTC | feat/cryptotrader-lm-inference
+fb21a35c docs: PLAN.md for cryptotrader_lm real inference
+docs/PLAN.md
+
+### 2026-05-16 23:31 UTC | feat/cryptotrader-lm-inference
+3c53b4b4 feat(signals): wire cryptotrader_lm real PEFT LoRA inference
+data/shadow_registry.json
+portfolio/signals/cryptotrader_lm.py
+tests/test_cryptotrader_lm_inference.py
+tests/test_llm_scaffold_signals.py
+
+### 2026-05-16 23:36 UTC | main
+24bb081a docs(fin-*): add trade-time premortem to all action-taking commands
+.claude/commands/fin-analyze.md
+.claude/commands/fin-btc.md
+.claude/commands/fin-crypto.md
+.claude/commands/fin-eth.md
+.claude/commands/fin-fish.md
+.claude/commands/fin-gold.md
+.claude/commands/fin-goldsilver.md
+.claude/commands/fin-metals.md
+.claude/commands/fin-mstr.md
+.claude/commands/fin-oil.md
+.claude/commands/fin-silver.md
+.claude/commands/fin-trades.md
+docs/TRADE_PREMORTEM.md
+
+### 2026-05-17 21:57 UTC | main
+258d6943 plan(hide-windows): consolidate scheduled-task popups via VBS shim + add duplicate-detection tile
+docs/PLAN.md
+
+### 2026-05-17 22:01 UTC | main
+265142b9 plan(hide-windows): premortem — drop pythonw swap, add verify-tasks runner + orphan-kill runbook
+docs/PLAN.md
+
+### 2026-05-17 22:06 UTC | fix-hide-task-windows
+d1b0aa39 feat(scripts/win): add run-hidden.vbs shim + replace timeout with ping in bat wrappers
+scripts/win/crypto-loop.bat
+scripts/win/golddigger-loop.bat
+scripts/win/golddigger.bat
+scripts/win/metals-loop.bat
+scripts/win/oil-loop.bat
+scripts/win/pf-loop.bat
+scripts/win/rc-server-2.bat
+scripts/win/rc-server-3.bat
+scripts/win/rc-server.bat
+scripts/win/run-hidden.vbs
+scripts/win/silver-monitor.bat
+
+### 2026-05-17 22:18 UTC | fix-hide-task-windows
+ec1f632d feat(scripts/win): route every PF-* task action through run-hidden.vbs
+scripts/win/install-adversarial-review-task.ps1
+scripts/win/install-crypto-loop-task.ps1
+scripts/win/install-fix-agent-task.ps1
+scripts/win/install-golddigger-task.ps1
+scripts/win/install-health-check-tasks.ps1
+scripts/win/install-local-llm-report-task.ps1
+scripts/win/install-log-rotate-task.ps1
+scripts/win/install-loop-health-daily-task.ps1
+scripts/win/install-loop-health-report-task.ps1
+scripts/win/install-loop-health-watchdog-task.ps1
+scripts/win/install-loop-resume-task.ps1
+scripts/win/install-market-tasks.ps1
+scripts/win/install-meta-learner-task.ps1
+scripts/win/install-metals-loop-task.ps1
+scripts/win/install-mstr-loop-task.ps1
+
+### 2026-05-17 22:23 UTC | fix-hide-task-windows
+2cbc5fea feat(dashboard): /api/loop-processes + Running-loops view
+dashboard/app.py
+dashboard/static/js/main.js
+dashboard/static/js/views/loop_processes.js
+dashboard/static/js/views/more.js
+portfolio/loop_processes.py
+tests/test_loop_processes.py
+
+### 2026-05-17 22:24 UTC | fix-hide-task-windows
+cdac50f2 docs(hide-windows): runbook for installation, verification, debugging
+docs/HIDDEN_TASKS.md
+
+### 2026-05-17 22:29 UTC | fix-hide-task-windows
+f67ca69a fix(loop_processes): handle zero create_time + sanitise endpoint error
+dashboard/app.py
+portfolio/loop_processes.py
+tests/test_loop_processes.py
