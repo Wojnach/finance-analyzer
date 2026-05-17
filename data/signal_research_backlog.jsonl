@@ -6,3 +6,11 @@
 {"name": "multi_asset_ofi_granger", "score": 6.8, "source": "doi:10.1145/3768292.3770430", "date": "2026-05-17", "notes": "Cross-asset OFI with Granger peer selection. R2 90%+ improvement."}
 {"name": "cross_sectional_illiquidity", "score": 6.5, "source": "doi:10.1109/BigData66926.2025.11401552", "date": "2026-05-17", "notes": "Low-correlation with momentum. Hard-Mask attention filter."}
 {"name": "precious_metal_sentiment_adaptive", "score": 6.3, "source": "doi:10.1186/s40854-026-00911-2", "date": "2026-05-17", "notes": "Adaptive metals+sentiment (Financial Innovation 2026)."}
+{"name": "connors_rsi2_crypto", "score": 7.4, "source": "stratbase.ai/blog", "date": "2026-05-17", "notes": "RSI(2)<10 BUY, 72% WR on BTC. Crypto-only (fails on commodities)."}
+{"name": "variance_ratio_regime_gate", "score": 7.2, "source": "firoozye.github.io", "date": "2026-05-17", "notes": "VR(k)<1 = MR, >1 = trending. Lower VR = higher MR Sharpe."}
+{"name": "gold_silver_ratio_ml_mr", "score": 6.9, "source": "SSRN 5710242", "date": "2026-05-17", "notes": "GSR z-score + ML regime filter. Sharpe 0.3->0.73."}
+{"name": "adx_dual_regime_switch", "score": 6.7, "source": "FMZQuant/medium", "date": "2026-05-17", "notes": "ADX<=25 MR mode, >25 breakout. Meta-signal architecture."}
+{"name": "hmm_rf_regime_classifiers", "score": 6.5, "source": "quantinsti.com", "date": "2026-05-17", "notes": "Per-regime RF classifiers. BTC Sharpe 1.76 vs 1.16."}
+{"name": "rvol_exhaustion_reversal", "score": 6.3, "source": "plus500.com", "date": "2026-05-17", "notes": "RVOL>4x at extremes = exhaustion reversal. Volume climax."}
+{"name": "eth_btc_rotation_zscore", "score": 6.0, "source": "dobermanvc.com", "date": "2026-05-17", "notes": "ETH/BTC ratio z-score >2 = rotation. ETF outflow confirmation."}
+{"name": "bpgdm_contrarian_metals", "score": 5.5, "source": "discoveryalert.com.au", "date": "2026-05-17", "notes": "Gold miners bullish % <10% = contrarian BUY. 2-3 year cycle."}

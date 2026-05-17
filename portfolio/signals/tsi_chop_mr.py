@@ -100,9 +100,9 @@ def _tsi_divergence(close: pd.Series, tsi_series: pd.Series,
     tsi_at_min = tsi_series.loc[close_min_idx]
     price_at_max = close.loc[close_max_idx]
     tsi_at_max = tsi_series.loc[close_max_idx]
-    if price_at_end <= price_at_min * 1.005 and tsi_at_end > tsi_at_min + 3:
+    if price_at_end <= price_at_min * 1.015 and tsi_at_end > tsi_at_min + 3:
         return "BUY"
-    if price_at_end >= price_at_max * 0.995 and tsi_at_end < tsi_at_max - 3:
+    if price_at_end >= price_at_max * 0.985 and tsi_at_end < tsi_at_max - 3:
         return "SELL"
     return "HOLD"
 

@@ -137,7 +137,8 @@ class TestTSIComputation:
     def test_tsi_nan_at_start(self):
         close = pd.Series(np.random.randn(50).cumsum() + 100)
         tsi = _compute_tsi(close)
-        assert tsi.iloc[0] != tsi.iloc[0] or True  # first values may be NaN or not
+        assert len(tsi) == len(close)
+        assert isinstance(tsi.iloc[-1], (float, np.floating))
 
 
 class TestCHOPComputation:
