@@ -1,6 +1,6 @@
 # Session Progress
 
-## 2026-05-18 — Hide-windows: scheduled-task popups → dashboard tile (MERGED, NOT PUSHED)
+## 2026-05-18 — Hide-windows: scheduled-task popups → dashboard tile (MERGED + PUSHED — re-install needs Admin)
 
 **Problem:** ~14 scheduled-task wrappers each popped a terminal window
 on logon, cluttering Parsec sessions. The visible windows were also
@@ -41,30 +41,43 @@ baseline. In worktree: +15 from missing config.json symlink (known
 per `reference_worktree_symlinks.md`). No regressions from these
 changes (touched zero signal/consensus/metals code).
 
-**User-facing follow-up REQUIRED on next session:**
-1. User runs `! cmd.exe /c "cd /d Q:\finance-analyzer && git push origin main"`
-   — auto-mode classifier blocks push to main.
-2. **Kill orphan python processes first** (per `docs/HIDDEN_TASKS.md`
-   step 1 — Unregister doesn't kill children):
-   ```powershell
-   Get-Process python,pythonw,wscript,cmd -ErrorAction SilentlyContinue |
-     Where-Object { $_.CommandLine -match 'finance-analyzer|metals_loop|portfolio\.main|crypto_loop|oil_loop|golddigger|mstr_loop|silver_monitor' } |
-     Stop-Process -Force
-   ```
-3. Re-register every PF-* task:
-   ```powershell
-   Get-ChildItem Q:\finance-analyzer\scripts\win\install-*.ps1 |
-     ForEach-Object { & $_.FullName }
-   ```
-4. Verify:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File Q:\finance-analyzer\scripts\win\verify-tasks.ps1 -Run
-   ```
-5. Spot-check dashboard: browse to `#loop-processes`, expect green.
+**Post-merge status (2026-05-18 actual):**
+- Push: DONE — origin/main @ `d3a07984`
+- Re-install attempt from non-admin cmd.exe: PARTIAL. Only
+  `PF-LogRotate` got the wscript wrapper. 20+ other tasks returned
+  `HRESULT 0x80070005 Access is denied` because they were
+  originally registered with an elevated principal. Non-admin
+  re-register cannot replace them.
 
-**Existing duplicates that will be cleared in step 3:** PF-CryptoLoop,
-PF-MetalsLoop, PF-MstrLoop, PF-LoopResume (each registered twice
-right now per `schtasks /query`).
+**User must complete from Administrator PowerShell:**
+```powershell
+# 1. Re-register every PF-* task (Unregister + Register pass).
+Get-ChildItem Q:\finance-analyzer\scripts\win\install-*.ps1 |
+  ForEach-Object { & $_.FullName }
+
+# 2. Inspect quoting + smoke-test each task by starting it and
+#    asserting the wrapper log mtime advances within 90s.
+powershell -ExecutionPolicy Bypass `
+  -File Q:\finance-analyzer\scripts\win\verify-tasks.ps1 -Run
+
+# 3. Spot-check dashboard: browse to /#loop-processes, expect green.
+```
+
+**Pre-existing bugs surfaced during the reinstall pass (NOT caused
+by hide-windows, but they will block re-running those two scripts):**
+- `install-rc-watchdog-task.ps1`: `RepetitionDuration` uses
+  `[TimeSpan]::MaxValue` → XML overflows the Win32 duration field
+  (`Duration:P99999999DT23H59M59S`). Fix: use
+  `(New-TimeSpan -Days 9000)` like `rc-keepalive` does.
+- `install-rc-server-task.ps1`: em-dash characters in Write-Host
+  string corrupted by PS host encoding → Write-Host parses
+  `(immediate)` as a command, fails. Fix: replace `—` with `--`.
+Backlog for next session.
+
+**Existing duplicates (PF-CryptoLoop, PF-MetalsLoop, PF-MstrLoop,
+PF-LoopResume registered twice per `schtasks /query`):** will be
+cleared as a side effect of step 1 above, since each install script
+calls `Unregister-ScheduledTask` before `Register-ScheduledTask`.
 
 ## 2026-05-17 21:30 UTC — After-Hours Research Session (COMPLETE)
 
@@ -4596,4 +4609,8 @@ tests/test_loop_processes.py
 
 ### 2026-05-17 22:33 UTC | main
 8feac719 session(hide-windows): log session progress + post-merge instructions
+docs/SESSION_PROGRESS.md
+
+### 2026-05-17 23:13 UTC | main
+d3a07984 session(hide-windows): update with post-push admin-required follow-up + pre-existing bugs surfaced
 docs/SESSION_PROGRESS.md
