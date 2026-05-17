@@ -292,7 +292,7 @@ def update_signal_health_batch(results: dict):
             recent = entry.get("recent_results", [])
             recent.append(success)
             if len(recent) > 50:
-                recent = recent[-50:]
+                del recent[:-50]
             entry["recent_results"] = recent
 
         atomic_write_json(HEALTH_FILE, state)

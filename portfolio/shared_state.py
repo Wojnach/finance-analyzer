@@ -66,12 +66,11 @@ def _cached(key, ttl, func, *args):
                     del _tool_cache[k]
 
         # C11/SS1: Evict stuck loading keys older than _LOADING_TIMEOUT seconds.
-        _now_evict = time.time()
         stuck = [k for k, ts in _loading_timestamps.items()
-                 if _now_evict - ts > _LOADING_TIMEOUT]
+                 if now - ts > _LOADING_TIMEOUT]
         for k in stuck:
             _loading_keys.discard(k)
-            stuck_duration = _now_evict - _loading_timestamps.pop(k, _now_evict)
+            stuck_duration = now - _loading_timestamps.pop(k, now)
             logger.warning("[%s] evicted stuck loading key after %.0fs (timeout %ds)", k, stuck_duration, _LOADING_TIMEOUT)
 
         # BUG-166: Dogpile prevention — if another thread is already loading
