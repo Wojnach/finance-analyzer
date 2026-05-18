@@ -52,12 +52,35 @@
   killed — new task definitions only take effect at next logon, so
   there is no trading interruption.
 
+**portfolio_state_bold.json encoding bug (fixed, no commit needed):**
+- `loop_contract.portfolio_arithmetic` invariant had been firing
+  CRITICAL on every cycle (cycle_ids 18, 19, 20 in the 20 min before
+  fix) with "state is NoneType". Root cause: file had a single
+  cp1252 em-dash byte 0x97 at position 6741 inside a Layer 2
+  transaction reason field
+  (`"Bold SELL NVDA \x97 price $186..."`). `file_utils.load_json`
+  opens with `encoding="utf-8"`, hits UnicodeDecodeError, returns
+  default=None, invariant logs CRITICAL.
+- Same family as the install-rc-server-task.ps1 em-dash bug fixed
+  earlier today: an LLM subprocess emits U+2014, a downstream writer
+  that doesn't enforce utf-8 lets the cp1252 codepoint through, then
+  the consumer reads strict utf-8 and faceplants.
+- Fixed: replaced 0x97 with `--`, validated as utf-8 + JSON, rewrote
+  via `atomic_write_json`. Verified `load_json` now succeeds (returns
+  dict with cash_sek=463,436.41, 19 transactions, 0 holdings).
+- File is gitignored so no commit. Writer-side bug (which writer let
+  the cp1252 byte through in the first place?) is a separate
+  investigation -- backlog for whoever sees the next occurrence in
+  `data/contract_violations.jsonl`.
+
 **Still on user's plate:**
 - Double-click `scripts/win/reinstall-all-tasks-elevated.bat` and click
   Yes on the UAC prompt. Review the PS1 output for any task that
   failed to register.
 - Open `https://<dashboard>/?#loop-processes` and spot-check the tile
   renders correctly (it polls `/api/loop-processes` every 30s).
+- (Optional) Push 2 local commits on `main` once you're back at a
+  terminal -- I cannot push from this session per the classifier.
 
 ## 2026-05-19 — TODO: finish remote branch sweep (BLOCKED on classifier)
 
@@ -5032,3 +5055,7 @@ scripts/win/reinstall-all-tasks-elevated.bat
 20fe6abb docs(claude.md): startup-check 2 = read the bottle (pending pickups)
 CLAUDE.md
 scripts/session_start_bottle.py
+
+### 2026-05-18 23:19 UTC | main
+c92a09e7 docs: address review findings on remote-sweep TODO
+docs/SESSION_PROGRESS.md
