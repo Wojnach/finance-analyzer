@@ -65,6 +65,55 @@ touch data/fix_agent.disabled
 Remove the file to re-enable. See
 `docs/plans/2026-04-13-auto-spawn-fix-agent.md` for the full design.
 
+## ⚠ STARTUP CHECK 2 — read the bottle (pending pickups)
+
+Run this immediately after the critical-errors check:
+
+```
+.venv/Scripts/python.exe scripts/session_start_bottle.py
+```
+
+The script reads `data/pending_pickups.json` and prints any scheduled
+verification work that is overdue, due today, or due in the next 2
+weeks. These are "bottle from the ocean" messages — a prior session
+flagged work for a future session (often days later when neither
+human nor AI would otherwise remember). Printing is silent when
+nothing is pending or recently completed.
+
+If output shows `[OVERDUE]` or `[DUE TODAY]`, surface the entry to the
+user verbatim BEFORE doing anything else, then propose either:
+
+* let the cron path run on its own schedule — `PF-PendingPickups`
+  daily 08:00 CET runs `scripts/process_pending_pickups.py`
+  automatically; OR
+* force-run now:
+  `.venv/Scripts/python.exe scripts/process_pending_pickups.py --force <ID>`
+
+If output shows recently completed pickups (last 48h), read the
+latest history entry in `data/pending_pickups.json` for that pickup
+and skim the top of `docs/SESSION_PROGRESS.md` — the verdict and
+summary land there. Then decide whether the verdict requires human
+action (e.g. a `promote` recommendation needs a human run of
+`scripts/review_shadow_signals.py --promote`; a `retire` verdict
+needs a `data/shadow_registry.json` status flip).
+
+Adding a new pickup (so a future session picks up some work for you):
+
+1. Append an entry to `data/pending_pickups.json` with `id`, `title`,
+   `due_ts`, `handler`, and a `context` block with the decision
+   thresholds the handler needs.
+2. Add the handler module under `scripts/pickups/<handler>.py`
+   exposing `run(pickup, repo_root) -> dict`.
+3. Whitelist the handler in `scripts/process_pending_pickups.py`
+   `_HANDLERS` dict. This whitelist is the CWE-706 guard — never
+   dynamic-import handler names from JSON.
+4. The dashboard tile at More → Pickups (`/api/pickups`) surfaces
+   pending + completed pickups for visual review.
+
+Dispatcher source: `scripts/process_pending_pickups.py`. Cron install
+(admin, one-time): `scripts/win/install-pending-pickups-task.ps1`.
+Backlog reference: `docs/IMPROVEMENT_BACKLOG.md`.
+
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
