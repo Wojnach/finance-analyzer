@@ -22,11 +22,11 @@ Full multi-subsystem adversarial review of the finance-analyzer codebase. Done p
 | 5 | infrastructure | caveman:cavecrew-reviewer | 0→8* | 16 | 0 | Done (own pass escalated 8 RISK→P1) |
 | 6 | metals-core | caveman:cavecrew-reviewer | 3 | 14 | 2 | Done |
 | 7 | avanza-api | pr-review-toolkit:code-reviewer | 8 | 10 | 13 | Done (strongest review) |
-| 8 | signals-modules | pr-review-toolkit:code-reviewer | — | — | — | **TIMED OUT** (stalled at 6min no progress) |
+| 8 | signals-modules | pr-review-toolkit:code-reviewer | 9 | 19 | 0 | Done (16 min run, briefly appeared stalled) |
 
-**Totals across 7 completed subsystems: 33 P1, 91 P2, 15 P3 + own pass (4 verified P1, 3 own P2, 3 own P3).**
+**Totals across 8 subsystems: 42 P1, 110 P2, 15 P3 + own pass (4 verified P1, 3 own P2, 3 own P3).**
 
-Signals-modules (38 plugin files in `portfolio/signals/*.py`) review missing — must be re-run separately. Filed as TODO at bottom.
+Signals-modules review came in late (after initial stall poll) — added as `09_signals_modules.md` and below.
 
 ## Top P1 issues (ordered by blast radius)
 
@@ -114,6 +114,30 @@ Signals-modules (38 plugin files in `portfolio/signals/*.py`) review missing —
 
 24. **`health.py:23-41`, `digest.py:47-52`, `journal.py:28`, `message_throttle.py:44-66`, `regime_alerts.py:90`, `prophecy.py:72`, `gpu_gate.py:216`** — Multiple TOCTOU read-modify-write races + missing sidecar locks (infrastructure, own escalations).
 
+### Signal modules (added after signals-modules reviewer completed)
+
+25. **`mahalanobis_turbulence.py:99` + `complexity_gap_regime.py:92`** — `_cached("...", _do_fetch, ttl=_CACHE_TTL)` mis-orders args. Real `_cached(key, ttl, func, *args)` signature → TypeError. **Both modules dead-on-arrival. Never voted. Currently listed as "pending live validation" but they were never live.**
+
+26. **vol_ratio_regime / tsi_chop_mr / residual_pair_reversion** — Non-canonical sub_signal strings (`"trending"`/`"ranging"`/`"HOLD (unstable)"`) violate BUY/SELL/HOLD contract. Downstream accuracy_stats and ic_computation misclassify.
+
+27. **vwap_zscore_mr.py:90 / hurst_regime.py:284-285 / network_momentum.py:356-357 / trend_slope_momentum.py:113-150** — Same vote written twice or echoed across keys; `majority_vote` double-counts. Pattern: 4 sub-signals from 2 underlying scalars → spurious 100% confidence.
+
+28. **crypto_evrp.py:204-242** — `_evrp_percentile_signal` and `_evrp_momentum_signal` compute DVOL percentile/momentum, NOT eVRP (DVOL−RV). `rv_hist` computed at line 215-227 then unused. Exported indicator name lies.
+
+29. **gold_overnight_bias.py:35-41** — `_AM_FIX_HOUR=10 UTC` year-round, but LBMA AM fix is 10:30 London local → 09:30 UTC during BST (~7 months/year). Off by 60 min for half the year.
+
+30. **cross_asset_tsmom.py:148-171** — Metals get equity-momentum direction logic; positive SPY 63d return voted BUY for XAU/XAG instead of SELL (safe-haven inversion missing). Also `gld_ret_63d` at line 228 fetches `"GLD"` but `_YF_TICKERS = ["TLT","SPY","GC=F","BTC-USD"]` — never fetched; indicator always None.
+
+31. **metals_vrp.py:169-176** — Historical VRP z-score subtracts scalar `rv_mean` from each GVZ point instead of contemporaneous RV[i]; collapses to GVZ z-score, not VRP. Also `sqrt(252)` annualization on 24/7 metals.
+
+32. **copper_gold_ratio.py:248-265 + treasury_risk_rotation.py:184-198 + xtrend_equity_spillover.py:228-251** — Metals/inversion logic inverts final `action` only, leaves `sub_signals` pre-inversion. Invariant `majority_vote(sub_signals)==action` violated in 3 modules.
+
+33. **news_event.py:137-147** — `_SECTOR_REP_TICKER` map references NVDA, AAPL, LMT, PLTR, TTWO, VRT — all removed Tier-1 instruments (Mar 15 + Apr 09 cleanups). Sector-peer fetches burn NewsAPI quota on dead tickers every cycle.
+
+34. **5 modules with BUY-only or SELL-only sub-signal voters** (intraday_seasonality `_hour_alpha_vote`/`_dow_vote`, gold_overnight_bias `_fix_proximity_vote`, gold_real_yield_paradox `_paradox_spread`, news_event `_keyword_severity_vote`). Accuracy gate detects hit rate, NOT directional fairness — these systematically tilt composites without detection.
+
+35. **econ_calendar.py:48-111** — `_event_proximity` (≤4h) and `_pre_event_risk` (events_within_hours(4)) overlap on the same upcoming event; SELL composite 3 voters from 1 event source. Compounds the data-external root cause (#17 hardcoded UTC times).
+
 ## Cross-cutting themes
 
 ### Theme A — Silent failure pattern (8+ findings)
@@ -147,6 +171,17 @@ Pattern: silent fallback without telemetry. **Each fallback should log + post a 
 ### Theme E — Concentration / position-sizing depends on stale prices
 After-hours stock trading + fallback to `avg_cost_usd` for missing prices means 5-20% blind spots in concentration checks. Caused by external boundary problems above. Cluster of: risk_management.py:752-758, warrant_portfolio.py:237-246, equity_curve.py:413.
 
+### Theme F — Sub-signal independence violated across signal modules (signals-modules)
+8+ modules have 2-4 sub-signals derived from the same scalar/series. `majority_vote` weighs correlated voters as independent → inflated confidence on single-source signals. Affects hurst_regime, network_momentum, vwap_zscore_mr, trend_slope_momentum, cubic_trend_persistence, xtrend_equity_spillover, breakeven_inflation_momentum, econ_calendar.
+**Recommended:** signal-module contract should declare sub-signal independence explicitly; engine collapses correlated voters into one with agreement as confidence multiplier.
+
+### Theme G — Non-canonical / asymmetric sub_signal voters (signals-modules)
+3 modules emit non-canonical strings; 5 modules have BUY-only or SELL-only voters; 3 modules invert action without inverting sub_signals.
+**Recommended:** add `_validate_signal_result(result)` strict check in `signal_engine` that:
+- rejects non-canonical strings
+- warns on BUY-only / SELL-only history (rolling check)
+- asserts `majority_vote(sub_signals) == action`
+
 ## Cross-critique (vs subagents)
 
 - Subagent claimed `signal_engine.py:3933` is a ZeroDivisionError P1. After verification: today gated by `active_voters < min_voters` at 3929. Demoted to P3 robustness ("future refactor risk"). Documented in own pass.
@@ -176,7 +211,13 @@ After-hours stock trading + fallback to `avg_cost_usd` for missing prices means 
 13. `eod_sell_order_id` clearing path for fast fills (#21).
 14. Warrant `_TRADING_MINUTES` parameterize by evaluation time (#23).
 15. Concentration check using stale prices (Theme E).
-16. RE-RUN signals-modules adversarial review (stalled subagent).
+16. Add `_validate_signal_result` strict check (Theme G) — catches contract violations + dead modules.
+
+### Signal-module priority order
+- **Immediate**: fix `_cached` arg order in mahalanobis_turbulence + complexity_gap_regime (2 dead modules; 1-line fixes each).
+- **Soon**: `_evrp_percentile_signal` compute actual eVRP not DVOL (crypto_evrp); `gold_overnight_bias` DST-aware fix times; `metals_vrp` use contemporaneous RV.
+- **Architectural**: collapse redundant sub-signals (Theme F), add strict result validator (Theme G).
+- **Cleanup**: `news_event._SECTOR_REP_TICKER` purge removed-Tier-1 tickers.
 
 ## Notes / housekeeping
 
@@ -195,3 +236,4 @@ After-hours stock trading + fallback to `avg_cost_usd` for missing prices means 
 - `06_metals_core.md`
 - `07_avanza_api.md`
 - `08_own_independent.md`
+- `09_signals_modules.md`
