@@ -1,5 +1,54 @@
 # Session Progress
 
+## 2026-05-18 PM — grid_fisher silent-rejection loop fix (MERGED)
+
+Live incident: 2026-05-18 18:30 UTC, grid_fisher entered a tight place /
+silent-cancel loop on OIL-USD (`BULL_OLJAB_X5_AVA_2`, ob 2367797). FNSE
+warrant orderbook was closed after hours, Avanza accepted submissions
+and returned order_ids but the orders never landed in the book.
+Reconcile saw each ghost as `external_cancel_buy` and re-armed every
+tick.
+
+Emergency mitigation (live):
+- Cancelled orphan order 883727567 via `cancel_order`.
+- Set OIL-USD cooldown_until = +24 h on both ob 2367797 + 2367803 in
+  `data/grid_fisher_state.json` so the still-running loop stops re-
+  arming.
+
+Fix on `fix/grid-fisher-hours-gate` (two independent gates):
+1. **Gate A (quote-staleness)** — `place_buy_ladder` short-circuits when
+   `get_quote().timeOfLast` is older than `GRID_QUOTE_STALENESS_THRESHOLD_S`
+   (1800 s default). Quote is cached per ob_id with
+   `GRID_QUOTE_CACHE_SECS` TTL under a `threading.Lock`. Missing /
+   future-dated `timeOfLast` → fail-safe-skip with one-shot warning.
+   Decision log: `skip_quote_stale`, `quote_field_missing`,
+   `quote_field_future_dated`.
+2. **Gate B (rapid-cancel back-off)** — post-reconcile, any
+   `external_cancel_buy` whose tier's `placed_ts` is within
+   `GRID_RAPID_CANCEL_THRESHOLD_S` (120 s) counts toward a per-instrument
+   streak; 2-in-a-row arms `inst.cooldown_until = now +
+   GRID_RAPID_CANCEL_COOLDOWN_S` (6 h). Slow cancels + fills + session-
+   roll reset the streak. State persists immediately after every counter
+   mutation. Decision log: `rapid_cancel_backoff`.
+
+State schema bumps 1 → 2. `load_state` now: older versions migrate via
+`.get` defaults; newer versions log critical and start fresh.
+
+Dashboard `/api/grid-fisher` payload now surfaces `rapid_cancel_count`
++ `last_rapid_cancel_ts` per instrument.
+
+Tests: 14 new in `tests/test_grid_fisher_hours_gate.py` + fakeSession
+`timeOfLast` injection so existing grid_fisher tests stay green. 98
+grid_fisher tests pass.
+
+Three premortem-derived hardenings: `threading.Lock` around the quote
+cache, `_persist()` inside the rapid-cancel branch, forward-version
+assert in `load_state`. Three review-derived hardenings: cache uses
+strict `<` (not `<=`), future-dated `timeOfLast` treated as stale,
+dashboard payload surfaces Gate B counters.
+
+Restart `PF-MetalsLoop` after merge.
+
 ## 2026-05-18 — Quiet accuracy-degradation alerts during regime flips
 
 **Problem:** "System isn't trading" investigation found 14 unresolved
