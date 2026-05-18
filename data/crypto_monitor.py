@@ -627,7 +627,7 @@ def main():
                 })
                 # Read back summary
                 try:
-                    lines = open(DATA_DIR / "crypto_monitor_log.jsonl", encoding="utf-8").readlines()
+                    lines = (DATA_DIR / "crypto_monitor_log.jsonl").read_text(encoding="utf-8").splitlines()
                     if lines:
                         last = json.loads(lines[-1])
                         analysis_history[-1]["summary"] = last.get("text", "")[:200]
