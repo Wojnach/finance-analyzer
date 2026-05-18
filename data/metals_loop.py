@@ -346,6 +346,7 @@ try:
         get_csrf,
         place_order,
         place_stop_loss,
+        place_trailing_stop_no_page,
     )
     AVANZA_CONTROL_AVAILABLE = True
 except ImportError as e:
@@ -4784,16 +4785,13 @@ def _handle_buy_fill(page, order, exec_price, price_data):
         vol = POSITIONS[pos_key]["units"]
         ob_id_str = POSITIONS[pos_key].get("ob_id", order.get("ob_id"))
         try:
-            result = place_stop_loss(
-                page, ACCOUNT_ID, ob_id_str,
-                trigger_price=HARDWARE_TRAILING_PCT,
-                sell_price=0,
+            ok, result = place_trailing_stop_no_page(
+                ACCOUNT_ID, ob_id_str,
+                trail_percent=HARDWARE_TRAILING_PCT,
                 volume=vol,
-                trigger_type="FOLLOW_DOWNWARDS",
-                value_type="PERCENTAGE",
                 valid_days=HARDWARE_TRAILING_VALID_DAYS,
             )
-            if result.get("status") == "SUCCESS":
+            if ok:
                 hw_stop_id = result.get("stoplossOrderId", "?")
                 POSITIONS[pos_key]["hw_trailing_stop_id"] = hw_stop_id
                 _save_positions(POSITIONS)

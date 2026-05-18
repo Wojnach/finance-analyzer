@@ -25,7 +25,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from portfolio.claude_gate import detect_auth_failure
+from portfolio.claude_gate import check_claude_gates, detect_auth_failure
 
 logger = logging.getLogger("portfolio.multi_agent_layer2")
 
@@ -133,6 +133,12 @@ def launch_specialists(
     Returns list of Popen processes. Caller must wait for them.
     """
     prompts = build_specialist_prompts(ticker, trigger_reasons)
+
+    allowed, reason = check_claude_gates(caller="multi_agent_specialist")
+    if not allowed:
+        logger.warning("Specialist launch blocked by claude_gate: %s", reason)
+        return []
+
     claude_cmd = shutil.which("claude")
     if not claude_cmd:
         logger.warning("claude not on PATH, cannot launch specialists")

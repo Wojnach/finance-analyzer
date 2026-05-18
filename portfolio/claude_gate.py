@@ -465,6 +465,34 @@ def _run_with_tree_kill(
 # Public API
 # ---------------------------------------------------------------------------
 
+
+def check_claude_gates(caller: str) -> tuple[bool, str]:
+    """Check kill switch, config gate, and rate limit without launching.
+
+    Used by multi_agent_layer2 specialist launches that manage their own
+    subprocess lifecycle but must still respect the master kill switch,
+    config gate, and rate-limit warnings.
+
+    Returns:
+        (allowed, reason) — allowed=True means launch is safe to proceed.
+        When allowed=False, reason explains why.
+    """
+    if not CLAUDE_ENABLED:
+        logger.info("Claude gate BLOCKED (CLAUDE_ENABLED=False) caller=%s", caller)
+        return False, "CLAUDE_ENABLED=False"
+    if not _load_config_layer2_enabled():
+        logger.info("Claude gate BLOCKED (config layer2.enabled=false) caller=%s", caller)
+        return False, "config.layer2.enabled=false"
+
+    today_count = _count_today_invocations()
+    if today_count >= _DAILY_WARN_THRESHOLD:
+        logger.warning(
+            "Daily invocation count (%d) exceeds threshold (%d) — caller=%s",
+            today_count, _DAILY_WARN_THRESHOLD, caller,
+        )
+    return True, "ok"
+
+
 def invoke_claude(
     prompt: str,
     caller: str,
