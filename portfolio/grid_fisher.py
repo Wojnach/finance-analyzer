@@ -133,6 +133,13 @@ class InstrumentState:
     # sell on top of the still-resting first one. Cleared by
     # ``roll_session_if_new_day``.
     eod_sell_order_id: Optional[str] = None
+    # 2026-05-18 (Gate B — silent-rejection back-off): consecutive count of
+    # ``external_cancel_buy`` reconciliations that fired within
+    # GRID_RAPID_CANCEL_THRESHOLD_S of a tier's ``placed_ts``. Reaches the
+    # threshold → instrument cooldown for GRID_RAPID_CANCEL_COOLDOWN_S.
+    # Reset by a successful fill or by ``roll_session_if_new_day``.
+    rapid_cancel_count: int = 0
+    last_rapid_cancel_ts: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +159,8 @@ class InstrumentState:
             "cooldown_until": self.cooldown_until,
             "last_direction_flip_ts": self.last_direction_flip_ts,
             "eod_sell_order_id": self.eod_sell_order_id,
+            "rapid_cancel_count": self.rapid_cancel_count,
+            "last_rapid_cancel_ts": self.last_rapid_cancel_ts,
         }
 
     @classmethod
@@ -173,6 +182,8 @@ class InstrumentState:
             cooldown_until=d.get("cooldown_until"),
             last_direction_flip_ts=d.get("last_direction_flip_ts"),
             eod_sell_order_id=d.get("eod_sell_order_id"),
+            rapid_cancel_count=int(d.get("rapid_cancel_count", 0) or 0),
+            last_rapid_cancel_ts=d.get("last_rapid_cancel_ts"),
         )
 
     # ---- queries -----------------------------------------------------------
@@ -343,29 +354,58 @@ _state_lock = threading.Lock()  # serialises load/save across threads
 def load_state(
     state_path: str | Path = GRID_STATE_FILE,
 ) -> GridFisherState:
-    """Load state from *state_path*. Returns a fresh state on missing/corrupt/old."""
+    """Load state from *state_path*. Returns a fresh state on missing/corrupt.
+
+    Version handling:
+      * File version equals current → normal load.
+      * File version is missing or older than current → load through
+        ``from_dict`` (all new fields default via ``.get``). The
+        in-memory version field is updated to the current schema on the
+        next ``save_state``.
+      * File version is **newer** than current → bail and start fresh.
+        This prevents a forward-incompatible state file from being
+        silently truncated when an older binary tries to read it
+        (premortem N7, 2026-05-18).
+    """
     raw = load_json(state_path, default=None)
     if not isinstance(raw, dict):
         logger.info("grid_fisher: no prior state found at %s", state_path)
         return GridFisherState(session_id=_today_session_id())
 
     file_version = raw.get("version")
-    if file_version != GRID_STATE_SCHEMA_VERSION:
-        # Don't silently coerce — start fresh and log so the operator notices.
-        logger.warning(
-            "grid_fisher: state file %s has version=%r, expected %d — resetting",
-            state_path, file_version, GRID_STATE_SCHEMA_VERSION,
+    try:
+        file_version_int = int(file_version) if file_version is not None else 0
+    except (TypeError, ValueError):
+        file_version_int = 0
+
+    if file_version_int > GRID_STATE_SCHEMA_VERSION:
+        logger.critical(
+            "grid_fisher: state file %s has version=%r > supported %d. "
+            "Refusing to read forward-incompatible state — starting fresh. "
+            "Operator: inspect %s and resolve before next session.",
+            state_path, file_version, GRID_STATE_SCHEMA_VERSION, state_path,
         )
         return GridFisherState(session_id=_today_session_id())
 
+    if file_version_int < GRID_STATE_SCHEMA_VERSION:
+        logger.info(
+            "grid_fisher: state file %s has version=%r, migrating to %d via defaults",
+            state_path, file_version, GRID_STATE_SCHEMA_VERSION,
+        )
+
     try:
-        return GridFisherState.from_dict(raw)
+        state = GridFisherState.from_dict(raw)
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning(
             "grid_fisher: state file %s is malformed (%s) — resetting",
             state_path, exc,
         )
         return GridFisherState(session_id=_today_session_id())
+
+    # Stamp the loaded state with the current schema version so the next
+    # save reflects the actual on-disk layout.
+    state.version = GRID_STATE_SCHEMA_VERSION
+    return state
 
 
 def save_state(
@@ -465,6 +505,11 @@ def roll_session_if_new_day(state: GridFisherState) -> bool:
         # corresponding order is from yesterday's session; either it filled
         # (inventory already 0) or it expired/got cancelled overnight.
         inst.eod_sell_order_id = None
+        # Gate B counters reset at session boundary — yesterday's
+        # silent-rejection state shouldn't follow us into a new
+        # trading day where the issue may have resolved.
+        inst.rapid_cancel_count = 0
+        inst.last_rapid_cancel_ts = None
     return True
 
 
@@ -519,6 +564,9 @@ def record_fill(
     target.fill_ts = fill_ts or _utcnow_iso()
     target.fill_price = fill_price
     inst.fills_this_session += 1
+    # Any fill clears the rapid-cancel streak — the orderbook is alive.
+    inst.rapid_cancel_count = 0
+    inst.last_rapid_cancel_ts = None
 
     if side == "buy":
         # Weighted-average entry
