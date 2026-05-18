@@ -1,5 +1,79 @@
 # Session Progress
 
+## 2026-05-18 — Quiet accuracy-degradation alerts during regime flips
+
+**Problem:** "System isn't trading" investigation found 14 unresolved
+critical_errors over the past 7 days, 11 of them `accuracy_degradation`
+alerts firing on 5 BUY-leaning signals (sentiment, structure,
+macro_regime, econ_calendar, crypto_macro) that scored 60-70% during
+the 5/04-5/11 rally and 33-39% during the 5/11-5/19 pullback. The
+trade gates (bull_trap, ensemble_entropy 0.92, per_ticker_consensus
+49.4%) were correctly crushing weighted_confidence to ~0.10 → below the
+0.56 GRID_MIN_SIGNAL_CONFIDENCE floor → grid_fisher placed no orders.
+The system was healthy. The alerts were noise from comparing two 7d
+windows that landed entirely on opposite sides of a regime flip.
+
+**Empirical proof:** signal_log.db hit rates with 14d windows:
+
+| Signal         | 7d_recent | 14d_recent | 14d_baseline | 14d delta |
+|----------------|-----------|------------|--------------|-----------|
+| sentiment      | 38.0%     | 51.0%      | 48.1%        | +2.9pp    |
+| structure      | 37.8%     | 50.2%      | 37.5%        | +12.7pp   |
+| macro_regime   | 39.1%     | 49.6%      | 49.2%        | +0.4pp    |
+| econ_calendar  | 33.9%     | 53.2%      | 44.8%        | +8.4pp    |
+| crypto_macro   | 35.2%     | 55.4%      | 53.8%        | +1.6pp    |
+
+All 14d deltas below 15pp threshold → alert wouldn't fire. 7d deltas
+22-37pp → guaranteed false alarms.
+
+**Fix (branch `fix-quiet-accuracy-degradation-alerts`):**
+- `portfolio/accuracy_degradation.py`:
+  - `BASELINE_TARGET_DAYS` 7.0 → 14.0
+  - `MIN_SNAPSHOT_AGE_DAYS` 6.0 → 13.0
+  - `save_full_accuracy_snapshot(*, days)` default 7 → 14
+  - Snapshot stamped with `window_days` field
+  - `_find_baseline_snapshot` filters to matching `window_days`
+    (legacy 7d snapshots ignored — clean transition, no apples/oranges)
+  - Hardcoded "7d" strings in `build_daily_summary` use
+    `BASELINE_TARGET_DAYS` constant
+  - INFO log on baseline-missing path (transition observability)
+- `tests/test_accuracy_degradation.py`:
+  - All baseline timestamps `days=7` → `days=14`
+  - Telegram body assertions use `BASELINE_TARGET_DAYS` symbolically
+  - New `TestBaselineWindowFilter` (3 tests) verifying legacy/
+    mismatched/matching window_days behavior
+  - New `TestSnapshotWindowStamp` (2 tests) — stamp + default=14 locked
+- `scripts/_resolve_critical_errors_20260518.py`: one-shot resolver
+  appending 14 resolution lines (11 accuracy, 2 avanza_account_mismatch,
+  1 contract_violation). Already run — 14/14 resolved.
+
+**Premortem (7 narratives via fresh general-purpose agent):** addressed
+F1 (transition observability via INFO log), F2 (window_days filter),
+F5 (Telegram strings). F3 (cycle-budget breach) accepted given
+HOURLY_THROTTLE_S gate. F4 (audit script intentionally pins days=7).
+F6/F7 accepted with reasoning.
+
+**Adversarial review (caveman:cavecrew-reviewer):** 3 P3 nits, all fixed:
+test stub `days=` defaults, stale `_6d_gate_` test name.
+
+**Verified:** 27/27 accuracy_degradation tests pass. 194/195 broader
+accuracy/snapshot/loop_contract suite (1 pre-existing test_accuracy_stats
+ema disable-reason failure, unrelated, pre-existing on main).
+
+**Trade gates untouched.** Trading does NOT resume from this PR. It
+will resume when actual signal accuracy recovers or regime clarifies.
+
+**Operational:** restart PF-DataLoop so new code path loads. Metals
+loop unaffected (it does not import accuracy_degradation).
+
+**Risks accepted:**
+- 13d post-merge transition window where alerts go quiet by design
+  (logged at INFO so it's observable, not silent).
+- Slower real-degradation detection (~2× lag) — acceptable trade-off
+  since real alpha decay persists for weeks.
+
+---
+
 ## 2026-05-18 — Hide-windows: scheduled-task popups → dashboard tile (MERGED + PUSHED — re-install needs Admin)
 
 **Problem:** ~14 scheduled-task wrappers each popped a terminal window
@@ -4614,3 +4688,12 @@ docs/SESSION_PROGRESS.md
 ### 2026-05-17 23:13 UTC | main
 d3a07984 session(hide-windows): update with post-push admin-required follow-up + pre-existing bugs surfaced
 docs/SESSION_PROGRESS.md
+
+### 2026-05-17 23:14 UTC | main
+db6b9aa6 session(hide-windows): update with admin-required follow-up + pre-existing bugs surfaced
+docs/SESSION_PROGRESS.md
+
+### 2026-05-18 13:48 UTC | main
+5d3c79e9 fix(scripts/win): pre-existing install-script bugs surfaced during hide-windows reinstall
+scripts/win/install-rc-server-task.ps1
+scripts/win/install-rc-watchdog-task.ps1
