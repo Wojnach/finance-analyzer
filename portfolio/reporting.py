@@ -778,7 +778,7 @@ def write_agent_summary(
 
     # Surface module warnings to Layer 2 so it knows what context is missing
     if _module_warnings:
-        summary["_module_warnings"] = _module_warnings
+        summary["_module_warnings"] = sorted(set(_module_warnings))
 
     # 2026-05-03: always notify health (passing [] on a clean cycle is
     # what triggers recovery — clears a stale prior failure record).

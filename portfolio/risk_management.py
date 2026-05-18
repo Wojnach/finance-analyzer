@@ -158,7 +158,7 @@ def _resolve_fx_rate(agent_summary: dict) -> float:
                 "ts": datetime.datetime.now(datetime.UTC).isoformat(),
             })
         except Exception as e:
-            logger.debug("fx cache persist failed: %s", e)
+            logger.warning("fx cache persist failed: %s", e)
         return rate
 
     # Try disk cache.

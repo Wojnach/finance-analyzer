@@ -3569,7 +3569,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                             extra_info[f"shadow_{sig_name}"] = True
                             shadow_votes[sig_name] = validated["action"]
                     except Exception as e:
-                        logger.debug("Shadow signal %s failed: %s", sig_name, e)
+                        logger.info("Shadow signal %s failed: %s", sig_name, e, exc_info=True)
                 votes[sig_name] = "HOLD"
                 continue
             if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
