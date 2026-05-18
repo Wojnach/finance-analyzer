@@ -1,211 +1,173 @@
-# Plan — grid_fisher silent-rejection loop fix
+# PLAN — Tighten directional-bias penalty so direction-balanced voters dominate consensus
 
-Date: 2026-05-18
-Branch: `fix/grid-fisher-hours-gate`
-Worktree: `.worktrees/grid-fisher-hours-gate`
+Date: 2026-05-19
+Branch: `fix-tighten-bias-penalty-threshold`
+Worktree: `.worktrees/rebalance-bias-threshold`
 
 ## Problem
 
-On 2026-05-18 18:30–18:40 UTC (= 20:30–20:40 CET) `grid_fisher` entered a
-tight loop on OIL-USD (`BULL_OLJAB_X5_AVA_2`, ob 2367797):
+Investigation in prior session (`docs/SESSION_PROGRESS.md` 2026-05-18)
+confirmed the 60-70% "accuracy" the user remembered came from a 1-2
+week rally tailwind (5/06-5/12). 5 BUY-biased signals (sentiment,
+crypto_macro, econ_calendar, structure, macro_regime) showed
+60-92% during the rally then collapsed to 33-47% after the 5/11-5/13
+regime flip. Net consensus accuracy 90d/all-tickers = 47-53% — a small
+BTC edge (~3pp), everything else inside noise.
 
-1. `place_buy_order` returns success + `order_id` (e.g. 883727550).
-2. ~55 s later (next reconcile tick) the `order_id` is absent from
-   `get_open_orders`. `reconcile_against_live` sees the live position
-   delta is 0 → classifies as `external_cancel_buy`, frees the tier.
-3. Next tick re-arms the same tier. Loops forever.
+Per-signal honest hit rates by ALL-TIME bias:
 
-Root cause: FNSE warrant orderbook for OLJAB is closed after ~17:25 CET.
-Verified via `/_api/market-guide/certificate/2367797`:
-- `quote.timeOfLast = 2026-05-18T06:15:01Z` (~12 h before the loop fired)
-- `quote.totalVolumeTraded = 0`
+| Signal              | bias | active_rate | active BUY:SELL | 14d hit |
+|---------------------|------|-------------|-----------------|---------|
+| rsi                 | 0.11 | 0.36        | 44:56           | 63.1%   |
+| bb                  | 0.15 | 0.09        | 42:58           | 55.0%   |
+| mean_reversion      | 0.20 | 0.30        | 40:60           | 52.9%   |
+| momentum            | 0.04 | 0.36        | 49:51           | 52.5%   |
+| sentiment           | 0.81 | 0.44        | 91:9            | 51.4%   |
+| crypto_macro        | 0.91 | 0.28        | 95:5            | 53.9%   |
+| econ_calendar       | 0.48 | 0.13        | 26:74           | 53.2%   |
+| structure           | 0.37 | 0.19        | 68:32           | 50.2%   |
+| macro_regime        | 0.26 | 0.34        | 37:63           | 49.6%   |
 
-Avanza accepts the submission and returns an `order_id` but the order
-never lives in the book — auto-cancelled immediately. `grid_fisher` has
-no after-hours gate per instrument and no rapid-cancel back-off, so it
-spins until EOD sweep or signal flip.
+Direction-balanced (bias <0.3): rsi, bb, momentum, mean_reversion,
+statistical_jump_regime, macro_regime. These survived the regime flip
+(rsi 56→69→66 across rally/flip/now).
 
-## Goals
+Direction-biased (bias >0.65): sentiment, crypto_macro,
+claude_fundamental, williams_vix_fix, crypto_evrp. These looked
+amazing in rally, terrible after.
 
-1. Stop the same failure mode for any warrant that is silently
-   auto-cancelled (after-hours, halted, knocked out, instrument-specific
-   reject). Two independent gates so neither is single-point.
-2. Zero false skips during normal hours — quote-staleness threshold
-   wide enough to absorb thin-trade lulls.
-3. Cheap: no extra Avanza calls per tick beyond what's already cached.
+## Existing infrastructure
+
+`portfolio/signal_engine.py` already has a directional-bias penalty at
+lines 500-504 + 2620-2630:
+
+```python
+_BIAS_THRESHOLD = 0.85  # >85% bias triggers penalty
+_BIAS_PENALTY = 0.5     # 0.5x weight for high-bias (85-95%)
+_BIAS_EXTREME_THRESHOLD = 0.95  # >95% extreme
+_BIAS_EXTREME_PENALTY = 0.2     # 0.2x weight for extreme bias
+_BIAS_MIN_ACTIVE = 30   # need 30+ active votes
+```
+
+Applied only when the signal votes IN its bias direction — contrarian
+votes keep full weight (an informative signal).
+
+Current penalty assignments (with current thresholds):
+
+| Signal              | bias | bucket | mult |
+|---------------------|------|--------|------|
+| sentiment           | 0.81 | none   | 1.0  |
+| crypto_macro        | 0.91 | high   | 0.5  |
+| claude_fundamental* | 0.81 | none   | 1.0  |
+| williams_vix_fix*   | 0.83 | none   | 1.0  |
+| crypto_evrp*        | 0.67 | none   | 1.0  |
+| fear_greed          | 1.00 | extr.  | 0.2  |
+| calendar            | 0.95 | extr.  | 0.2  |
+| funding             | 1.00 | extr.  | 0.2  |
+| news_event          | 0.99 | extr.  | 0.2  |
+
+(* = disabled or pending validation; not in active 17)
+
+## Goal
+
+Add a moderate-bias tier (0.65 < bias ≤ 0.85) at 0.7x and promote
+crypto_macro from "high" (0.5x) to "extreme" (0.2x) by lowering the
+extreme threshold 0.95 → 0.90.
+
+Net effect on weighted_consensus:
+- **sentiment** 1.0x → 0.7x on BUY votes (its bias direction)
+- **crypto_macro** 0.5x → 0.2x on BUY votes
+- claude_fundamental, williams_vix_fix, crypto_evrp also catch the new
+  moderate tier (but disabled/pending — no immediate live effect)
+- Direction-balanced signals (rsi, bb, momentum, mean_reversion,
+  statistical_jump_regime, macro_regime, structure) — UNCHANGED at 1.0x
+- Contrarian votes (e.g., sentiment SELL, crypto_macro SELL) — UNCHANGED
+  at 1.0x (informative; keep them)
+
+This is a config-only change. No new code path. No new signals.
 
 ## Design
 
-### Gate A — quote-staleness pre-placement gate
-
-Before placing a ladder for an instrument, check the cached `quote.timeOfLast`
-for the orderbook. Skip placement if `now - timeOfLast >
-GRID_QUOTE_STALENESS_THRESHOLD_S`.
-
-* Threshold: 1800 s (30 min). FNSE certs trade actively every few
-  seconds during open hours, so 30 min is comfortably above the noise
-  floor and well under a half-day after-hours gap.
-* Implementation: `place_buy_ladder` already calls `get_quote` as the
-  bid fallback. Pull `timeOfLast` from the same response (ms epoch),
-  compare to wall clock. To avoid double-calling when the caller
-  supplied a bid, add a tiny per-instrument quote cache (60 s TTL).
-* Decision log: `skip_quote_stale` with `ob_id`, `ticker`,
-  `time_of_last_age_s`, `threshold_s`.
-
-### Gate B — rapid-cancel back-off (post-reconcile)
-
-When `reconcile_against_live` classifies a tier as `external_cancel_buy`,
-record the cancel timestamp + age relative to that tier's `placed_ts`.
-If the age is below `GRID_RAPID_CANCEL_THRESHOLD_S` (default 120 s),
-increment a per-instrument counter `rapid_cancel_count`. When the count
-reaches `GRID_RAPID_CANCEL_MAX_CONSECUTIVE` (default 2), set
-`inst.cooldown_until` to `now + GRID_RAPID_CANCEL_COOLDOWN_S` (default
-6 h — long enough to span the rest of the trading day).
-
-* Reset counter on any successful fill or after the cooldown elapses.
-* Decision log: `rapid_cancel_backoff` with `ob_id`, `ticker`, `count`,
-  `cooldown_until`.
-
-### Config (`portfolio/grid_fisher_config.py`)
+`portfolio/signal_engine.py`:
 
 ```python
-GRID_QUOTE_STALENESS_THRESHOLD_S = 1800        # 30 min
-GRID_QUOTE_CACHE_SECS = 60                      # per-instrument cache
-GRID_RAPID_CANCEL_THRESHOLD_S = 120              # cancel within 2 min = "rapid"
-GRID_RAPID_CANCEL_MAX_CONSECUTIVE = 2            # 2 in a row → cooldown
-GRID_RAPID_CANCEL_COOLDOWN_S = 6 * 3600          # 6 h
+# Was:
+_BIAS_THRESHOLD = 0.85
+_BIAS_PENALTY = 0.5
+_BIAS_EXTREME_THRESHOLD = 0.95
+_BIAS_EXTREME_PENALTY = 0.2
+
+# After:
+_BIAS_MODERATE_THRESHOLD = 0.65  # NEW: catches sentiment (0.81)
+_BIAS_MODERATE_PENALTY = 0.7     # NEW: 0.7x weight (lighter)
+_BIAS_THRESHOLD = 0.85           # unchanged trigger (now "high")
+_BIAS_PENALTY = 0.5              # unchanged
+_BIAS_EXTREME_THRESHOLD = 0.90   # lowered 0.95 → 0.90 (catches crypto_macro 0.91)
+_BIAS_EXTREME_PENALTY = 0.2      # unchanged
 ```
 
-### State
+Update the cascade in `apply_confidence_penalties` / weighted_consensus
+loop to use the three-tier check, choosing the lowest applicable
+multiplier (extreme > high > moderate > none).
 
-Add to `InstrumentState`:
+## Files Touched
 
-```python
-rapid_cancel_count: int = 0
-last_rapid_cancel_ts: Optional[str] = None
-```
+1. `portfolio/signal_engine.py` — 4 constant changes + 3-tier branch
+2. `tests/test_signal_engine_core.py` or `tests/test_weighted_consensus.py`
+   — add tests for moderate-tier bias penalty + extreme-threshold drop
+3. `docs/PLAN.md` — this file (committed before implementation)
+4. `docs/SESSION_PROGRESS.md` — end-of-session note (after merge)
 
-Reset by `roll_session_if_new_day`. `TierOrder` already carries
-`placed_ts` so no schema bump on the tier dataclass.
+## Files NOT Touched (and why)
 
-State schema-version bumps 1 → 2; existing state files load cleanly
-because `from_dict` already uses `.get(...)` for every field.
+- `portfolio/accuracy_stats.py` — bias is already computed correctly there
+- `portfolio/accuracy_degradation.py` — the prior session's window change
+  is independent and stays
+- Trade gates (ACCURACY_GATE_THRESHOLD, GRID_MIN_SIGNAL_CONFIDENCE) —
+  intentionally untouched; this is about WEIGHTING not GATING
+- `data/activation_cache.json` — auto-recomputes; no manual write
 
-## Files to change
+## Risks
 
-| File | Change |
-|------|--------|
-| `portfolio/grid_fisher_config.py` | Add 5 new constants. |
-| `portfolio/grid_fisher.py` | (a) per-instrument quote cache + Gate A in `place_buy_ladder`; (b) rapid-cancel detection in `tick` after `reconcile_against_live`; (c) reset counters in `roll_session_if_new_day` / `record_fill`. New `InstrumentState` fields. |
-| `tests/test_grid_fisher_hours_gate.py` | New: unit tests for Gate A + Gate B happy / edge / reset paths. |
-| `docs/SESSION_PROGRESS.md` | Append the fix + restart instructions. |
-| `docs/GRID_FISHER.md` | Document both gates. |
+1. **Sentiment goes near-mute.** sentiment activates 44% of cycles
+   (highest active-rate signal we have). 0.7x of its BUY votes lowers
+   its consensus contribution. If sentiment was the swing vote on a
+   real BUY, we miss it. Mitigation: 0.7x is mild; rsi+bb+momentum
+   should dominate if they agree.
 
-## Execution order
+2. **Crypto_macro near-silent on BUY.** 0.2x effectively zero. But its
+   91% BUY-bias means it's saying nothing new vs the bull regime
+   itself. Honest cost: in clean rallies it stops boosting confidence.
 
-1. Branch + plan commit (this file).
-2. Premortem agent → append to this file → commit.
-3. Batch 1: config constants + state fields + helpers. Commit.
-4. Batch 2: Gate A (quote-staleness). Commit.
-5. Batch 3: Gate B (rapid-cancel back-off). Commit.
-6. Batch 4: tests. Commit.
-7. Adversarial review subagent on the branch. Fix P1/P2. Commit.
-8. `pytest -n auto`. Commit any fixes. Merge → main → push.
-9. Restart `PF-MetalsLoop` so new code loads.
+3. **Layer 2 prompt changes weighted_confidence outputs.** Layer 2
+   reads `agent_summary.json` which contains weighted_confidence per
+   ticker. Lower numbers could change Layer 2's decision style —
+   especially under "Patient" mandate where high confidence is
+   required. Mitigation: trade gates unchanged, so the decision
+   ENVELOPE doesn't shift, just where inside it we sit.
 
-## Risks (initial)
+4. **Backtest math will look worse retroactively.** Backtester replays
+   historical votes through current consensus weights. Past performance
+   numbers in dashboard `/api/accuracy-history` will subtly change.
+   Acceptable — that's the honest math, not regression.
 
-* **False skip in thin warrants**: a low-volume instrument may go 30 min
-  between trades during real hours. Mitigation: 30 min is generous;
-  config knob to tune; gate skips only placements, never cancels.
-* **State migration**: `InstrumentState.from_dict` already uses `.get`
-  for every field, so adding the two new fields is transparent for any
-  state file written by v1.
-* **Test fixture coupling**: existing grid_fisher tests build
-  `InstrumentState` via constructor — new fields default to safe values,
-  so no fixture churn expected. Will verify with full grid_fisher test
-  module before commit.
+5. **Tests asserting specific weight values may break.** Need to find
+   and update them.
+
+## Execution Order
+
+1. Plan + commit (this step)
+2. Premortem via fresh general-purpose agent
+3. Update plan with premortem findings + commit
+4. Implement constant changes + 3-tier branch (1 file)
+5. Run targeted tests; fix any value-asserting tests
+6. Add new tests for moderate-tier + extreme-threshold-drop
+7. Run full suite
+8. Adversarial review (`caveman:cavecrew-reviewer`)
+9. Address P1/P2 findings
+10. Commit + merge + push
+11. Restart PF-DataLoop
 
 ## Premortem
 
-(Generated 2026-05-18 by fresh general-purpose subagent.)
-
-### N1. `timeOfLast` field shape assumption [silent-failure]
-**Chain:** Premortem flagged that `get_quote` (calls
-`/_api/market-guide/stock/{ob_id}/quote`) might not actually include
-`timeOfLast`. **Verified empirically** before implementing — the field
-is present on both certificate and stock orderbooks, in milliseconds.
-Empirical sample at 2026-05-18 18:50 UTC for ob 2367797:
-`{"buy":16.18,"last":14.46,"timeOfLast":1779084901283,"updated":...}`.
-**Mitigation:** still defensive — if `timeOfLast` is missing or non-numeric
-the gate treats it as "stale" (fail-safe — skip placement) and logs
-`skip_quote_field_missing` once per instrument per process so we notice
-if Avanza changes the shape.
-
-### N2. 30-min threshold false-skip during real lulls [silent-failure / threshold]
-**Chain:** A thin-trade lull on a real instrument could exceed 30 min
-during open hours, surfacing as `skip_quote_stale` and starving the leg
-of placements during a real dip.
-**Mitigation:** threshold lives in config (`GRID_QUOTE_STALENESS_THRESHOLD_S`)
-so it's a one-line tune. Add a counter on `/api/grid-fisher` payload
-(`stale_skips_by_ob`) so we can audit false positives in dashboard.
-
-### N3. Quote-cache thread-safety [concurrency]
-**Chain:** A new mutable dict attribute on `GridFisher` is read/written
-during `tick()` which runs on the metals_loop calling thread, while
-`_safe_session_call` itself dispatches I/O to a worker thread. A dict
-mutation racing iteration could `RuntimeError`.
-**Mitigation:** wrap the cache in a `threading.Lock`. Cheap, idiomatic.
-
-### N4. Rapid-cancel counter false-trips on direction-flip cancels [hidden coupling]
-**Chain:** During a direction flip, `cancel_armed_buys` cancels every
-armed tier; reconcile on the next tick could see ghost cancels.
-**Mitigation/verification:** Verified by reading `cancel_armed_buys`
-(grid_fisher.py:999) — it calls `cancel_buy_tier` which REMOVES the
-tier from `inst.buy_ladder` after a SUCCESS response, so reconcile
-won't see "armed but missing" later. `flip_direction` itself also
-clears the ladder. Gate B counter will not increment on a flip. ACCEPT.
-Issuer-side mass-cancel (instrument halt, barrier knockout) does
-trigger Gate B, which is **the intended behavior** — those are exactly
-the conditions we want a 6 h cooldown for.
-
-### N5. Dashboard / Layer 2 hardcoded category enum [Layer 2 / dashboard]
-**Chain:** New `skip_quote_stale` and `rapid_cancel_backoff` log
-categories could break a consumer that filters on a known-categories
-enum.
-**Verification:** Grepped — `dashboard/app.py:865` just tails the file
-with `load_jsonl_tail` (50 lines) and returns opaque entries. No enum.
-`portfolio/agent_invocation.py` and `portfolio/reporting.py` don't read
-`grid_fisher_decisions.jsonl`. ACCEPT.
-
-### N6. Rapid-cancel counter not persisted between reconcile + persist [atomic I/O]
-**Chain:** Counter is incremented in the reconcile branch of `tick`,
-but `tick`'s `_persist()` call is at the end. If `PF-MetalsLoop` is
-restarted mid-tick (which happens after every code merge per
-`feedback_restart_loops.md`), the counter resets and the threshold is
-never reached across restarts.
-**Mitigation:** call `_persist()` immediately inside the reconcile loop
-when `rapid_cancel_count` is mutated (single extra atomic write per
-ghost cancel — cheap, the file is ~3 KB).
-
-### N7. State schema v1→v2 silent-drift [test-passes-prod-differs]
-**Chain:** Plan bumps version 1→2, but nothing checks. A future hand-
-edited v3 state file would load as v2 with default zeros for any new
-fields, silently dropping the older counter values.
-**Mitigation:** at load time, if `state.version > GRID_STATE_SCHEMA_VERSION`,
-log critical and bail. Existing `load_state` likely already handles
-backward — review during Batch 1 and add forward-version assertion.
-
-## Plan amendments from premortem
-
-1. **Defensive shape check** in the new quote-fetch wrapper —
-   missing/invalid `timeOfLast` → fail-safe skip, one-shot log.
-2. **`threading.Lock` around the quote cache** — write helper
-   `_get_cached_quote(ob_id)` that acquires the lock.
-3. **`_persist()` inside reconcile** when `rapid_cancel_count`
-   increments — never lose progress across a metals_loop restart.
-4. **Forward-version assert** in `load_state` —
-   `if state.version > GRID_STATE_SCHEMA_VERSION: critical + bail`.
-5. **Stale-skips counter on dashboard payload** — add a small per-cycle
-   counter dict so `/api/grid-fisher` can surface false positives.
-
+(To be filled by fresh agent — see step 2.)
