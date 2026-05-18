@@ -128,4 +128,84 @@ because `from_dict` already uses `.get(...)` for every field.
 
 ## Premortem
 
-(appended after fresh-agent run)
+(Generated 2026-05-18 by fresh general-purpose subagent.)
+
+### N1. `timeOfLast` field shape assumption [silent-failure]
+**Chain:** Premortem flagged that `get_quote` (calls
+`/_api/market-guide/stock/{ob_id}/quote`) might not actually include
+`timeOfLast`. **Verified empirically** before implementing — the field
+is present on both certificate and stock orderbooks, in milliseconds.
+Empirical sample at 2026-05-18 18:50 UTC for ob 2367797:
+`{"buy":16.18,"last":14.46,"timeOfLast":1779084901283,"updated":...}`.
+**Mitigation:** still defensive — if `timeOfLast` is missing or non-numeric
+the gate treats it as "stale" (fail-safe — skip placement) and logs
+`skip_quote_field_missing` once per instrument per process so we notice
+if Avanza changes the shape.
+
+### N2. 30-min threshold false-skip during real lulls [silent-failure / threshold]
+**Chain:** A thin-trade lull on a real instrument could exceed 30 min
+during open hours, surfacing as `skip_quote_stale` and starving the leg
+of placements during a real dip.
+**Mitigation:** threshold lives in config (`GRID_QUOTE_STALENESS_THRESHOLD_S`)
+so it's a one-line tune. Add a counter on `/api/grid-fisher` payload
+(`stale_skips_by_ob`) so we can audit false positives in dashboard.
+
+### N3. Quote-cache thread-safety [concurrency]
+**Chain:** A new mutable dict attribute on `GridFisher` is read/written
+during `tick()` which runs on the metals_loop calling thread, while
+`_safe_session_call` itself dispatches I/O to a worker thread. A dict
+mutation racing iteration could `RuntimeError`.
+**Mitigation:** wrap the cache in a `threading.Lock`. Cheap, idiomatic.
+
+### N4. Rapid-cancel counter false-trips on direction-flip cancels [hidden coupling]
+**Chain:** During a direction flip, `cancel_armed_buys` cancels every
+armed tier; reconcile on the next tick could see ghost cancels.
+**Mitigation/verification:** Verified by reading `cancel_armed_buys`
+(grid_fisher.py:999) — it calls `cancel_buy_tier` which REMOVES the
+tier from `inst.buy_ladder` after a SUCCESS response, so reconcile
+won't see "armed but missing" later. `flip_direction` itself also
+clears the ladder. Gate B counter will not increment on a flip. ACCEPT.
+Issuer-side mass-cancel (instrument halt, barrier knockout) does
+trigger Gate B, which is **the intended behavior** — those are exactly
+the conditions we want a 6 h cooldown for.
+
+### N5. Dashboard / Layer 2 hardcoded category enum [Layer 2 / dashboard]
+**Chain:** New `skip_quote_stale` and `rapid_cancel_backoff` log
+categories could break a consumer that filters on a known-categories
+enum.
+**Verification:** Grepped — `dashboard/app.py:865` just tails the file
+with `load_jsonl_tail` (50 lines) and returns opaque entries. No enum.
+`portfolio/agent_invocation.py` and `portfolio/reporting.py` don't read
+`grid_fisher_decisions.jsonl`. ACCEPT.
+
+### N6. Rapid-cancel counter not persisted between reconcile + persist [atomic I/O]
+**Chain:** Counter is incremented in the reconcile branch of `tick`,
+but `tick`'s `_persist()` call is at the end. If `PF-MetalsLoop` is
+restarted mid-tick (which happens after every code merge per
+`feedback_restart_loops.md`), the counter resets and the threshold is
+never reached across restarts.
+**Mitigation:** call `_persist()` immediately inside the reconcile loop
+when `rapid_cancel_count` is mutated (single extra atomic write per
+ghost cancel — cheap, the file is ~3 KB).
+
+### N7. State schema v1→v2 silent-drift [test-passes-prod-differs]
+**Chain:** Plan bumps version 1→2, but nothing checks. A future hand-
+edited v3 state file would load as v2 with default zeros for any new
+fields, silently dropping the older counter values.
+**Mitigation:** at load time, if `state.version > GRID_STATE_SCHEMA_VERSION`,
+log critical and bail. Existing `load_state` likely already handles
+backward — review during Batch 1 and add forward-version assertion.
+
+## Plan amendments from premortem
+
+1. **Defensive shape check** in the new quote-fetch wrapper —
+   missing/invalid `timeOfLast` → fail-safe skip, one-shot log.
+2. **`threading.Lock` around the quote cache** — write helper
+   `_get_cached_quote(ob_id)` that acquires the lock.
+3. **`_persist()` inside reconcile** when `rapid_cancel_count`
+   increments — never lose progress across a metals_loop restart.
+4. **Forward-version assert** in `load_state` —
+   `if state.version > GRID_STATE_SCHEMA_VERSION: critical + bail`.
+5. **Stale-skips counter on dashboard payload** — add a small per-cycle
+   counter dict so `/api/grid-fisher` can surface false positives.
+
