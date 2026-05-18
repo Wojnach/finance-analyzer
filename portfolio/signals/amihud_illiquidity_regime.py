@@ -83,7 +83,7 @@ def compute_amihud_illiquidity_regime_signal(
     # Sub 2: ILLIQ trend (5-bar slope of z-score)
     z_recent = z.dropna().tail(10)
     if len(z_recent) >= 5:
-        slope = (z_recent.iloc[-1] - z_recent.iloc[-5]) / 5.0
+        slope = (z_recent.iloc[-1] - z_recent.iloc[-5]) / 4.0
         slope_val = safe_float(slope)
         if slope_val > 0.3:
             trend_vote = "SELL"

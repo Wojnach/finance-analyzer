@@ -120,3 +120,4 @@ class TestLiquidityRegimeDetection:
         r2 = compute_amihud_illiquidity_regime_signal(df.copy())
         assert r1["action"] == r2["action"]
         assert r1["confidence"] == r2["confidence"]
+        assert r1["indicators"] == r2["indicators"]
