@@ -848,6 +848,17 @@ class GridFisher:
         self.account_id = account_id
         self._buying_power_cache: Optional[tuple[float, float]] = None  # (mono_ts, value)
 
+        # Quote cache for Gate A (quote-staleness pre-placement check).
+        # Keyed by ob_id. Each entry is (cache_set_monotonic_ts, raw_quote_dict).
+        # Lock-guarded because the metals_loop tick can race the worker
+        # thread that fetches the underlying quote via _safe_session_call.
+        self._quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._quote_cache_lock = threading.Lock()
+        # Track which ob_ids we've already warned about a missing
+        # `timeOfLast` field so we don't spam the decision log when an
+        # endpoint returns an unexpected payload shape.
+        self._quote_shape_warned: set[str] = set()
+
         self.state = load_state(self.state_path)
         _seed_state_for_active_instruments(self.state, self.catalog)
 
@@ -1036,6 +1047,94 @@ class GridFisher:
             except Exception:  # noqa: BLE001
                 pass
 
+    # ---- Gate A: quote-staleness pre-placement check --------------------
+
+    def _fetch_quote_cached(self, ob_id: str) -> Optional[dict[str, Any]]:
+        """Return the most recent ``get_quote`` payload for *ob_id*.
+
+        Uses a per-instrument cache with TTL ``GRID_QUOTE_CACHE_SECS`` so
+        the staleness check doesn't double the per-tick get_quote count
+        (``place_buy_ladder`` already issues one as a bid fallback). The
+        cache is thread-safe (premortem N3) — the metals_loop main
+        thread and the single worker thread inside ``_safe_session_call``
+        share this dict.
+
+        Returns ``None`` if no quote could be fetched. The caller treats
+        ``None`` as "stale" and fail-safe-skips placement.
+        """
+        from portfolio.grid_fisher_config import GRID_QUOTE_CACHE_SECS
+
+        now_mono = time.monotonic()
+        with self._quote_cache_lock:
+            entry = self._quote_cache.get(ob_id)
+            if entry is not None:
+                cached_ts, cached_q = entry
+                if now_mono - cached_ts < GRID_QUOTE_CACHE_SECS:
+                    return cached_q
+
+        quote = self._safe_session_call(
+            self.session.get_quote, ob_id, default=None,
+        )
+        if quote is None:
+            return None
+
+        with self._quote_cache_lock:
+            # Race-resistant: if another thread populated a fresher
+            # quote between our miss and now, keep that one.
+            existing = self._quote_cache.get(ob_id)
+            if existing is None or existing[0] <= now_mono:
+                self._quote_cache[ob_id] = (now_mono, quote)
+        return quote
+
+    def _quote_time_of_last_age_s(
+        self, ob_id: str, quote: Optional[dict[str, Any]],
+    ) -> Optional[float]:
+        """Return age (seconds) of *quote*'s last trade, or None if absent.
+
+        Avanza publishes ``timeOfLast`` as a UTC millisecond epoch on the
+        ``/_api/market-guide/stock/{ob_id}/quote`` payload (verified
+        empirically 2026-05-18). A missing or non-numeric value is logged
+        once per ob_id (so an Avanza schema change is loud) and treated
+        as "stale → skip" by the caller.
+        """
+        if not isinstance(quote, dict):
+            return None
+        raw = quote.get("timeOfLast")
+        if raw is None:
+            if ob_id not in self._quote_shape_warned:
+                self._quote_shape_warned.add(ob_id)
+                self._log("quote_field_missing", ob_id=ob_id,
+                          field="timeOfLast",
+                          quote_keys=sorted(list(quote.keys()))[:12])
+            return None
+        try:
+            t_ms = float(raw)
+        except (TypeError, ValueError):
+            if ob_id not in self._quote_shape_warned:
+                self._quote_shape_warned.add(ob_id)
+                self._log("quote_field_invalid", ob_id=ob_id,
+                          field="timeOfLast", value=str(raw)[:80])
+            return None
+        return max(0.0, (time.time() * 1000.0 - t_ms) / 1000.0)
+
+    def _is_quote_stale(self, ob_id: str) -> tuple[bool, Optional[float]]:
+        """Gate A check. Returns ``(is_stale, age_s)``.
+
+        ``is_stale=True`` means: skip placement. Conditions:
+          * fetch failed (treat as stale, fail-safe)
+          * timeOfLast missing/invalid (treat as stale, fail-safe)
+          * age > GRID_QUOTE_STALENESS_THRESHOLD_S
+        """
+        from portfolio.grid_fisher_config import GRID_QUOTE_STALENESS_THRESHOLD_S
+
+        quote = self._fetch_quote_cached(ob_id)
+        if quote is None:
+            return True, None
+        age = self._quote_time_of_last_age_s(ob_id, quote)
+        if age is None:
+            return True, None
+        return age > GRID_QUOTE_STALENESS_THRESHOLD_S, age
+
     def _catalog_for(self, ob_id: str) -> Optional[dict[str, Any]]:
         for cert_name, meta in self.catalog.items():
             if str(meta.get("ob_id") or "") == str(ob_id):
@@ -1125,6 +1224,26 @@ class GridFisher:
         if inst.in_cooldown(self.now_fn()):
             self._log("skip_cooldown", ob_id=inst.ob_id,
                       ticker=inst.ticker, cooldown_until=inst.cooldown_until)
+            return 0
+
+        # Gate A — abort placement if the orderbook hasn't traded
+        # recently. Added 2026-05-18 after FNSE OLJAB X5 spun a place /
+        # silent-cancel loop after hours: Avanza accepted submissions but
+        # the orderbook was dead so every order auto-cancelled. ``quote``
+        # data is cached per instrument with GRID_QUOTE_CACHE_SECS TTL so
+        # we don't add an extra get_quote per tick when the bid fallback
+        # path also fetches one.
+        is_stale, age_s = self._is_quote_stale(inst.ob_id)
+        if is_stale:
+            from portfolio.grid_fisher_config import (
+                GRID_QUOTE_STALENESS_THRESHOLD_S,
+            )
+            self._log("skip_quote_stale", ob_id=inst.ob_id,
+                      ticker=inst.ticker,
+                      time_of_last_age_s=(
+                          round(age_s, 1) if age_s is not None else None
+                      ),
+                      threshold_s=GRID_QUOTE_STALENESS_THRESHOLD_S)
             return 0
 
         existing_tiers = {t.tier for t in inst.buy_ladder
