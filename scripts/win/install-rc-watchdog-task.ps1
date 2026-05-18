@@ -18,7 +18,7 @@ $action = New-ScheduledTaskAction -Execute "wscript.exe" `
 # Trigger: every 30 minutes, starting now, repeating indefinitely
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes 30) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)
+    -RepetitionDuration (New-TimeSpan -Days 9000)
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `

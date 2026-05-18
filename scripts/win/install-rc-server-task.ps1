@@ -1,7 +1,7 @@
-# install-rc-server-task.ps1 — Run as Administrator
+# install-rc-server-task.ps1 -- Run as Administrator
 # Creates two tasks for always-on Claude Code RC servers:
-#   PF-RemoteControl       — At logon (immediate launch, no delay)
-#   PF-RemoteControl-Wake  — On wake from sleep (30s delay for auto-reconnect)
+#   PF-RemoteControl       -- At logon (immediate launch, no delay)
+#   PF-RemoteControl-Wake  -- On wake from sleep (30s delay for auto-reconnect)
 
 $scriptPath = "Q:\finance-analyzer\scripts\win\rc-server-ensure.ps1"
 
@@ -68,8 +68,8 @@ Register-ScheduledTask -TaskName $wakeTask -Xml $xml
 # ---------- Summary ----------
 Write-Host ""
 Write-Host "=== Installed ==="
-Write-Host "  $logonTask        — At logon (immediate)"
-Write-Host "  $wakeTask   — On wake from sleep (30s delay, connection check)"
+Write-Host "  $logonTask        -- At logon (immediate)"
+Write-Host "  $wakeTask   -- On wake from sleep (30s delay, connection check)"
 Write-Host "  Script: $scriptPath"
 Write-Host ""
 Write-Host "To verify:"
