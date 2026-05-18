@@ -54,7 +54,59 @@ None. Closing the thread.
 
 ---
 
-## 2. `custom-trading-lora.gguf` — KEEP, defer wiring
+## 2. `custom-trading-lora.gguf` — RETIRE (Feb 2026 verdict: underperformed)
+
+### Updated decision (2026-05-18 evening review)
+
+The first half of this section was written before we found the
+pre-existing Feb-22 evaluation. Header verdict was wrong on first
+pass. Real history:
+
+* `data/lora_backtest_results.json` (2026-02-12, 7d / 260 prompts):
+  Custom LoRA BTC 51.5%, ETH 30.8%. BUY recall 0% on BTC.
+  Agreement with original CryptoTrader-LM on ETH only 17.7% — totally
+  different model behaviour.
+* `53a15df8 docs: add LoRA accuracy assessment with recommendation`
+  (Feb 22 2026): "Custom LoRA already disabled at 20.9%". Recommended
+  disabling original LoRA too.
+* `data/shadow_lora_config.json` (Feb 13 2026): both LoRAs wired
+  through an A/B harness writing to `ab_test_log.jsonl`. The A/B was
+  never re-run after Feb 22; Custom LoRA went dormant.
+
+**Caveat — the Feb measurement may have been biased by the broken v1
+GGUF**: original CryptoTrader-LM was scored 44% / 60% / 46% in
+different windows in Feb, and we now know the v1 GGUF emitted empty
+completions on every production prompt (fixed 2026-05-18 by v2
+regen). The Feb numbers for the *original* are not trustworthy.
+
+But the *Custom LoRA* GGUF was independently produced by
+`training/lora/pipeline.py` and has never been re-converted. Its
+30.8% ETH score is its own training output, not a tooling artefact.
+A new homebrew fine-tune would need a fresh training run with current
+data, not a re-evaluation of the Feb GGUF.
+
+### Decision
+
+**RETIRE Custom LoRA as a wiring candidate** for the 2026-05-18
+shadow-enrollment work. Do NOT add to `_LLM_SIGNALS`. Do NOT register
+in `data/shadow_registry.json`. Leave the GGUF file on disk for
+archival.
+
+If we want a 2nd Mistral-family LoRA voter, the right path is to
+re-train against fresh data via `training/lora/pipeline.py` and
+produce a NEW `custom-trading-lora-v2.gguf` — not to revive the Feb
+artefact.
+
+### Status
+
+`RETIRED — see LLM-CUSTOM-LORA-RETIRED in docs/IMPROVEMENT_BACKLOG.md`
+
+---
+
+## 2b. (HISTORICAL) Earlier same-day audit — pre Feb-verdict discovery
+
+The audit below was written before we found the Feb-22 backtest
+results. Kept for transparency.
 
 ### What it is
 
