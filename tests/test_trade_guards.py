@@ -282,6 +282,27 @@ class TestRecordTrade:
             state = json.loads(clean_state.read_text(encoding="utf-8"))
             assert state["consecutive_losses"]["bold"] == 2
 
+    def test_prunes_stale_ticker_trades(self, clean_state):
+        now = datetime.now(UTC)
+        state = {
+            "ticker_trades": {
+                "bold:BTC-USD": (now - timedelta(days=100)).isoformat(),
+                "bold:ETH-USD": (now - timedelta(days=30)).isoformat(),
+                "patient:XAG-USD": (now - timedelta(days=1)).isoformat(),
+            },
+            "consecutive_losses": {"patient": 0, "bold": 0},
+            "new_position_timestamps": {"patient": [], "bold": []},
+        }
+        clean_state.write_text(json.dumps(state), encoding="utf-8")
+
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            record_trade("MSTR", "BUY", "bold")
+            state = json.loads(clean_state.read_text(encoding="utf-8"))
+            assert "bold:BTC-USD" not in state["ticker_trades"]
+            assert "bold:ETH-USD" in state["ticker_trades"]
+            assert "patient:XAG-USD" in state["ticker_trades"]
+            assert "bold:MSTR" in state["ticker_trades"]
+
 
 # --- Config disable ---
 

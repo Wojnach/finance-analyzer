@@ -287,6 +287,24 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
                 state["consecutive_losses"][strategy] = 0
                 state["last_loss_ts"][strategy] = None
 
+        # Prune stale ticker_trades entries (>90 days old) to prevent
+        # unbounded growth. new_position_timestamps has its own 24h pruning
+        # below; ticker_trades had none.
+        _prune_cutoff = now - timedelta(days=90)
+        _ticker_trades = state.get("ticker_trades", {})
+        _stale_keys = []
+        for _k, _v in _ticker_trades.items():
+            try:
+                _dt = datetime.fromisoformat(_v)
+                if _dt.tzinfo is None:
+                    _dt = _dt.replace(tzinfo=UTC)
+                if _dt < _prune_cutoff:
+                    _stale_keys.append(_k)
+            except (ValueError, TypeError):
+                _stale_keys.append(_k)
+        for _k in _stale_keys:
+            del _ticker_trades[_k]
+
         # Track new position timestamps (BUY only)
         if direction == "BUY":
             if "new_position_timestamps" not in state:
