@@ -37,8 +37,14 @@ def _stub_econ_safe(monkeypatch):
 
 def _make_snapshot(*, ts: datetime, signals_recent=None,
                    per_ticker_recent=None, forecast_recent=None,
-                   consensus_recent=None) -> dict:
-    snap = {"ts": ts.isoformat(), "signals": {}}
+                   consensus_recent=None, window_days=None) -> dict:
+    # window_days defaults to BASELINE_TARGET_DAYS so tests pass the
+    # _find_baseline_snapshot filter introduced 2026-05-18. Pass
+    # window_days=7 to construct a legacy-format snapshot that should
+    # be skipped.
+    if window_days is None:
+        window_days = int(deg.BASELINE_TARGET_DAYS)
+    snap = {"ts": ts.isoformat(), "signals": {}, "window_days": window_days}
     if signals_recent is not None:
         snap["signals_recent"] = signals_recent
     if per_ticker_recent is not None:
@@ -216,7 +222,7 @@ class TestComparisonSource:
         _stub_econ_safe(monkeypatch)
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -245,7 +251,7 @@ class TestThresholdGates:
 
     def _basic_baseline(self, monkeypatch, tmp_path):
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -278,7 +284,7 @@ class TestThresholdGates:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.75, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -303,7 +309,7 @@ class TestSeverity:
             f"sig_{i}": {"accuracy": 0.62, "total": 200} for i in range(3)
         }
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent=baseline_signals,
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -321,7 +327,7 @@ class TestSeverity:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={},
             consensus_recent={"accuracy": 0.62, "total": 5000},
         )
@@ -346,7 +352,7 @@ class TestAntiNoise:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 50}},  # < 100
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -388,7 +394,7 @@ class TestAntiNoise:
         )
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -415,7 +421,7 @@ class TestAntiNoise:
         )
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -468,7 +474,7 @@ class TestThrottleReplay:
         _stub_econ_safe(monkeypatch)
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -494,7 +500,7 @@ class TestThrottleReplay:
         _stub_econ_safe(monkeypatch)
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -531,7 +537,7 @@ class TestScopeKeys:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             per_ticker_recent={"BTC-USD": {"rsi": {"accuracy": 0.62, "total": 200}}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -547,7 +553,7 @@ class TestScopeKeys:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             forecast_recent={"chronos_24h": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -694,7 +700,8 @@ class TestDailySummary:
             },
         }
         baseline = {
-            "ts": (datetime.now(UTC) - timedelta(days=7)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(days=14)).isoformat(),
+            "window_days": int(deg.BASELINE_TARGET_DAYS),
             "consensus_recent": {"accuracy": 0.58, "total": 800},
             "signals_recent": {
                 "rsi": {"accuracy": 0.62, "total": 1200},
@@ -708,10 +715,15 @@ class TestDailySummary:
             now=datetime(2026, 4, 16, 6, 0, tzinfo=UTC),
         )
 
-        # Header + consensus
+        # Header + consensus — assert via the constant so the test
+        # doesn't bit-rot if BASELINE_TARGET_DAYS changes again.
         assert "*ACCURACY DAILY*" in body
-        assert "Consensus: 56% recent7d" in body
-        assert "(Δ -2.0pp vs prev 7d)" in body
+        assert (
+            f"Consensus: 56% recent{int(deg.BASELINE_TARGET_DAYS)}d" in body
+        )
+        assert (
+            f"(Δ -2.0pp vs prev {int(deg.BASELINE_TARGET_DAYS)}d)" in body
+        )
         # Forecast vs LLM split — Codex P2#4
         assert "Forecast:  chronos 51% · kronos 49%" in body
         assert "LLM:       ministral 53% · qwen3 47%" in body
