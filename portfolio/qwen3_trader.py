@@ -95,6 +95,20 @@ def _extract_json_payload(text):
 
 
 def _build_prompt(context):
+    # 2026-05-18 HOLD-bias suspicion (not yet fixed — needs A/B):
+    # Production data shows qwen3 emitting HOLD on >95% of cycles. The system
+    # prompt below contains TWO reinforcements pushing toward HOLD:
+    #   (a) "A confident HOLD is better than a low-confidence BUY/SELL"
+    #   (b) "<40 = default to HOLD" in the confidence guide
+    # Combined with the conservative tuning ("Use HOLD when evidence is mixed,
+    # weak, or conflicting") this prompt biases the model heavily toward HOLD
+    # even when there is directional information available. accuracy_cache.json
+    # reports qwen3 at 60% on 3809 1d samples (good) but that average is
+    # dominated by SELL precision (73.7%); BUY accuracy is only 33.1%.
+    # Hypothesis: removing the (a) sentence would shift the BUY/SELL/HOLD mix
+    # without hurting precision. NOT changing speculatively — needs offline A/B
+    # via scripts/lora_backtest.py (or equivalent) against held-out 1d windows
+    # before touching the live prompt. See docs/LLM_FOLLOWUPS_20260518.md.
     ticker = context.get("ticker", "UNKNOWN")
     asset_type = context.get("asset_type", "cryptocurrency")
 
