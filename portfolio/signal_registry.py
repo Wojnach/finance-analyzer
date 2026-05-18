@@ -346,6 +346,14 @@ def _register_defaults():
                       "portfolio.signals.tsi_chop_mr",
                       "compute_tsi_chop_mr_signal",
                       max_confidence=0.7)
+    # Amihud illiquidity regime — liquidity regime detector (all assets)
+    # 2026-05-18: Amihud 2002 (11K citations). ILLIQ = |return|/dollar_volume.
+    # Z-scored vs 60d rolling. High ILLIQ = thin market (fakeout risk).
+    # Low ILLIQ = thick market (breakout conviction). First liquidity signal.
+    register_enhanced("amihud_illiquidity_regime",
+                      "portfolio.signals.amihud_illiquidity_regime",
+                      "compute_amihud_illiquidity_regime_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
