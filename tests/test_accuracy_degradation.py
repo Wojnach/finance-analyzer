@@ -736,3 +736,123 @@ class TestDailySummary:
         # Footer
         assert "Snapshot age" in body
         assert "5 signals tracked" in body
+
+
+# ---------------------------------------------------------------------------
+# Window-days baseline filter (2026-05-18 premortem F2)
+# ---------------------------------------------------------------------------
+
+class TestBaselineWindowFilter:
+    """Verify _find_baseline_snapshot rejects legacy 7d-format snapshots."""
+
+    def test_legacy_snapshot_without_window_days_is_skipped(
+        self, monkeypatch, tmp_path,
+    ):
+        """A baseline missing window_days must NOT be picked, so the
+        13-day post-merge transition window stays quiet rather than
+        producing apples-to-oranges comparisons against 7d-format data."""
+        _isolate_state(monkeypatch, tmp_path)
+        _stub_econ_safe(monkeypatch)
+
+        # Pre-2026-05-18 format: no window_days field, written under days=7
+        legacy = {
+            "ts": (datetime.now(UTC)
+                   - timedelta(days=14, hours=1)).isoformat(),
+            "signals": {},
+            "signals_recent": {"rsi": {"accuracy": 0.62, "total": 200}},
+        }
+        from portfolio.file_utils import atomic_append_jsonl
+        snap_path = tmp_path / "snapshots.jsonl"
+        atomic_append_jsonl(snap_path, legacy)
+        monkeypatch.setattr(acc_mod, "ACCURACY_SNAPSHOTS_FILE", snap_path)
+
+        _stub_current(
+            monkeypatch,
+            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+        )
+        violations = deg.check_degradation()
+        # No matching baseline → no alert despite the synthetic 20pp drop.
+        assert violations == []
+
+    def test_mismatched_window_days_is_skipped(self, monkeypatch, tmp_path):
+        """Future-proofing: if someone bumps BASELINE_TARGET_DAYS to 21
+        a 14d-stamped snapshot must not be silently used as baseline."""
+        _isolate_state(monkeypatch, tmp_path)
+        _stub_econ_safe(monkeypatch)
+
+        baseline = _make_snapshot(
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            window_days=7,  # wrong window
+        )
+        _write_baseline(monkeypatch, tmp_path, baseline)
+
+        _stub_current(
+            monkeypatch,
+            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+        )
+        violations = deg.check_degradation()
+        assert violations == []
+
+    def test_matching_window_days_passes_filter(self, monkeypatch, tmp_path):
+        """Positive control: a snapshot stamped with the expected
+        window_days IS picked and fires the expected violation."""
+        _isolate_state(monkeypatch, tmp_path)
+        _stub_econ_safe(monkeypatch)
+
+        baseline = _make_snapshot(
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            # window_days defaults to BASELINE_TARGET_DAYS via _make_snapshot
+        )
+        _write_baseline(monkeypatch, tmp_path, baseline)
+
+        _stub_current(
+            monkeypatch,
+            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+        )
+        violations = deg.check_degradation()
+        assert len(violations) == 1
+        assert "rsi" in violations[0].message
+
+
+# ---------------------------------------------------------------------------
+# Snapshot writer stamps window_days (2026-05-18 premortem F2)
+# ---------------------------------------------------------------------------
+
+class TestSnapshotWindowStamp:
+    def test_save_full_accuracy_snapshot_stamps_window_days(
+        self, monkeypatch, tmp_path,
+    ):
+        _isolate_state(monkeypatch, tmp_path)
+        # Minimal stubs so the writer doesn't try to load real data
+        monkeypatch.setattr(
+            acc_mod, "signal_accuracy",
+            lambda h="1d", entries=None: {"rsi": {"accuracy": 0.6,
+                                                   "total": 100}},
+        )
+        monkeypatch.setattr(
+            acc_mod, "accuracy_by_ticker_signal_cached", lambda h: {},
+        )
+        monkeypatch.setattr(deg, "_per_ticker_recent", lambda h, days,
+                            entries=None: {})
+        monkeypatch.setattr(
+            "portfolio.forecast_accuracy.cached_forecast_accuracy",
+            lambda horizon="24h", days=14, use_raw_sub_signals=True: {},
+        )
+        monkeypatch.setattr(
+            acc_mod, "consensus_accuracy",
+            lambda h="1d", entries=None, days=None: {"accuracy": 0.5,
+                                                     "total": 100},
+        )
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: [])
+
+        snap = deg.save_full_accuracy_snapshot()
+        assert snap.get("window_days") == int(deg.BASELINE_TARGET_DAYS)
+
+    def test_save_full_accuracy_snapshot_default_is_14(self):
+        """The default days kwarg drives the recent-window scan. Locking
+        it to 14 prevents silent regressions back to 7."""
+        import inspect
+        sig = inspect.signature(deg.save_full_accuracy_snapshot)
+        assert sig.parameters["days"].default == 14
