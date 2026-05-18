@@ -10,6 +10,7 @@ cap, session loss limit, cooldown, and probe-only mode.
 from __future__ import annotations
 
 import itertools
+import time
 from typing import Any
 
 import pytest
@@ -101,7 +102,12 @@ class FakeSession:
         return list(self.positions)
 
     def get_quote(self, orderbook_id: str):
-        return {"buy": 42.50, "sell": 42.55, "last": 42.52}
+        # ``timeOfLast`` is read by grid_fisher Gate A (quote-staleness)
+        # — return a fresh trade so existing placement tests aren't
+        # short-circuited by the new gate. Override in a subclass if a
+        # specific test wants to model a closed orderbook.
+        return {"buy": 42.50, "sell": 42.55, "last": 42.52,
+                "timeOfLast": int(time.time() * 1000)}
 
     # -- helpers for tests to model fills ----------------------------------
 

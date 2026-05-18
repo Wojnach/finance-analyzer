@@ -47,7 +47,10 @@ class _StubSession:
         return list(self.positions)
 
     def get_quote(self, ob_id: str):
-        return {"buy": 100.0, "sell": 100.5}
+        # ``timeOfLast`` keeps the new Gate A (quote-staleness) from
+        # short-circuiting these tests with a closed-orderbook decision.
+        return {"buy": 100.0, "sell": 100.5,
+                "timeOfLast": int(time.time() * 1000)}
 
     def place_buy_order(self, ob_id: str, price: float, volume: int):
         self.place_buy_calls.append((ob_id, price, volume))
