@@ -131,10 +131,20 @@ def write_agent_summary(
     except Exception:
         _macro_active = False
 
+    # 2026-05-19: stamp current bias-policy version so dashboard /
+    # backtester / accuracy-history consumers can render a "before / after"
+    # marker (premortem F3 mitigation). Import lazy to avoid circular
+    # dependency at module-import time.
+    try:
+        from portfolio.signal_engine import BIAS_POLICY_VERSION as _bpv
+    except Exception:
+        _bpv = "unknown"
+
     summary = {
         "timestamp": datetime.now(UTC).isoformat(),
         "trigger_reasons": trigger_reasons or [],
         "fx_rate": round(fx_rate, 2),
+        "bias_policy_version": _bpv,
         "macro_window": {"active": _macro_active},
         "portfolio": {
             "total_sek": round(total),
