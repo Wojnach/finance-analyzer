@@ -1,0 +1,24 @@
+{
+  "pickups": [
+    {
+      "id": "LLM-CRYPTOTRADER-72H",
+      "title": "Verify cryptotrader_lm v2 LoRA after 72h shadow data",
+      "due_ts": "2026-05-21T08:00:00+02:00",
+      "handler": "llm_cryptotrader_72h",
+      "context": {
+        "merge_commit": "07702358",
+        "merged_at": "2026-05-18T20:00:00+02:00",
+        "backlog_ref": "docs/IMPROVEMENT_BACKLOG.md#LLM-CRYPTOTRADER-72H",
+        "decision_thresholds": {
+          "min_directional": 50,
+          "min_accuracy_for_promote": 0.6,
+          "max_accuracy_for_retire": 0.55
+        }
+      },
+      "status": "pending",
+      "created_ts": "2026-05-19T00:00:00+02:00",
+      "created_by": "session-2026-05-19",
+      "history": []
+    }
+  ]
+}

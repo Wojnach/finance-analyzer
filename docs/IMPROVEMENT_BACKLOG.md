@@ -121,6 +121,14 @@ disk.
 **Prior triage:** `docs/LLM_FOLLOWUPS_20260518.md`; merge `07702358`
 (shadow-gate-lora-20260518); `scripts/probe_cryptotrader_lm.py`.
 **Scope:** S — passive accumulation + one review.
+**Auto-scheduled:** Yes (2026-05-19). Entry
+`LLM-CRYPTOTRADER-72H` in `data/pending_pickups.json` due
+2026-05-21T08:00 CET. `PF-PendingPickups` Windows task runs
+`scripts/process_pending_pickups.py` daily 08:00; on/after the due
+date it dispatches `scripts.pickups.llm_cryptotrader_72h`, applies
+the decision tree below, writes the verdict to
+`docs/SESSION_PROGRESS.md`, sends Telegram, and surfaces on the
+dashboard at More → Pickups (`/api/pickups`).
 
 ### What
 
