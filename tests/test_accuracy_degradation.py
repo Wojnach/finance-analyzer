@@ -37,8 +37,14 @@ def _stub_econ_safe(monkeypatch):
 
 def _make_snapshot(*, ts: datetime, signals_recent=None,
                    per_ticker_recent=None, forecast_recent=None,
-                   consensus_recent=None) -> dict:
-    snap = {"ts": ts.isoformat(), "signals": {}}
+                   consensus_recent=None, window_days=None) -> dict:
+    # window_days defaults to BASELINE_TARGET_DAYS so tests pass the
+    # _find_baseline_snapshot filter introduced 2026-05-18. Pass
+    # window_days=7 to construct a legacy-format snapshot that should
+    # be skipped.
+    if window_days is None:
+        window_days = int(deg.BASELINE_TARGET_DAYS)
+    snap = {"ts": ts.isoformat(), "signals": {}, "window_days": window_days}
     if signals_recent is not None:
         snap["signals_recent"] = signals_recent
     if per_ticker_recent is not None:
@@ -76,7 +82,7 @@ def _stub_current(monkeypatch, *, signals=None, per_ticker=None,
     if forecast is not None:
         monkeypatch.setattr(
             "portfolio.forecast_accuracy.cached_forecast_accuracy",
-            lambda horizon="24h", days=7, use_raw_sub_signals=True: forecast,
+            lambda horizon="24h", days=14, use_raw_sub_signals=True: forecast,
         )
     if consensus is not None:
         def _stub_consensus(horizon="1d", entries=None, days=None):
@@ -147,7 +153,7 @@ class TestSaveFullAccuracySnapshot:
         # Forecast (Chronos/Kronos)
         monkeypatch.setattr(
             "portfolio.forecast_accuracy.cached_forecast_accuracy",
-            lambda horizon="24h", days=7, use_raw_sub_signals=True: {
+            lambda horizon="24h", days=14, use_raw_sub_signals=True: {
                 "chronos_24h": {"accuracy": 0.51, "total": 420, "correct": 214},
                 "kronos_24h": {"accuracy": 0.49, "total": 380, "correct": 186},
             },
@@ -216,7 +222,7 @@ class TestComparisonSource:
         _stub_econ_safe(monkeypatch)
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -245,7 +251,7 @@ class TestThresholdGates:
 
     def _basic_baseline(self, monkeypatch, tmp_path):
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -278,7 +284,7 @@ class TestThresholdGates:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.75, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -303,7 +309,7 @@ class TestSeverity:
             f"sig_{i}": {"accuracy": 0.62, "total": 200} for i in range(3)
         }
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent=baseline_signals,
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -321,7 +327,7 @@ class TestSeverity:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={},
             consensus_recent={"accuracy": 0.62, "total": 5000},
         )
@@ -346,7 +352,7 @@ class TestAntiNoise:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 50}},  # < 100
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -357,7 +363,11 @@ class TestAntiNoise:
         violations = deg.check_degradation()
         assert violations == []
 
-    def test_snapshot_age_under_6d_gate_returns_empty(self, monkeypatch, tmp_path):
+    def test_snapshot_age_under_min_age_gate_returns_empty(self, monkeypatch, tmp_path):
+        # MIN_SNAPSHOT_AGE_DAYS bumped 6.0 → 13.0 on 2026-05-18.
+        # A baseline at now-4d is also outside BASELINE_TARGET_DAYS±36h so
+        # it gets rejected by _find_baseline_snapshot first. Either path
+        # produces the same observable: no alert.
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
@@ -388,7 +398,7 @@ class TestAntiNoise:
         )
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -415,7 +425,7 @@ class TestAntiNoise:
         )
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -468,7 +478,7 @@ class TestThrottleReplay:
         _stub_econ_safe(monkeypatch)
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -494,7 +504,7 @@ class TestThrottleReplay:
         _stub_econ_safe(monkeypatch)
 
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -531,7 +541,7 @@ class TestScopeKeys:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             per_ticker_recent={"BTC-USD": {"rsi": {"accuracy": 0.62, "total": 200}}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -547,7 +557,7 @@ class TestScopeKeys:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
-            ts=datetime.now(UTC) - timedelta(days=7, hours=1),
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
             forecast_recent={"chronos_24h": {"accuracy": 0.62, "total": 200}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
@@ -694,7 +704,8 @@ class TestDailySummary:
             },
         }
         baseline = {
-            "ts": (datetime.now(UTC) - timedelta(days=7)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(days=14)).isoformat(),
+            "window_days": int(deg.BASELINE_TARGET_DAYS),
             "consensus_recent": {"accuracy": 0.58, "total": 800},
             "signals_recent": {
                 "rsi": {"accuracy": 0.62, "total": 1200},
@@ -708,10 +719,15 @@ class TestDailySummary:
             now=datetime(2026, 4, 16, 6, 0, tzinfo=UTC),
         )
 
-        # Header + consensus
+        # Header + consensus — assert via the constant so the test
+        # doesn't bit-rot if BASELINE_TARGET_DAYS changes again.
         assert "*ACCURACY DAILY*" in body
-        assert "Consensus: 56% recent7d" in body
-        assert "(Δ -2.0pp vs prev 7d)" in body
+        assert (
+            f"Consensus: 56% recent{int(deg.BASELINE_TARGET_DAYS)}d" in body
+        )
+        assert (
+            f"(Δ -2.0pp vs prev {int(deg.BASELINE_TARGET_DAYS)}d)" in body
+        )
         # Forecast vs LLM split — Codex P2#4
         assert "Forecast:  chronos 51% · kronos 49%" in body
         assert "LLM:       ministral 53% · qwen3 47%" in body
@@ -724,3 +740,123 @@ class TestDailySummary:
         # Footer
         assert "Snapshot age" in body
         assert "5 signals tracked" in body
+
+
+# ---------------------------------------------------------------------------
+# Window-days baseline filter (2026-05-18 premortem F2)
+# ---------------------------------------------------------------------------
+
+class TestBaselineWindowFilter:
+    """Verify _find_baseline_snapshot rejects legacy 7d-format snapshots."""
+
+    def test_legacy_snapshot_without_window_days_is_skipped(
+        self, monkeypatch, tmp_path,
+    ):
+        """A baseline missing window_days must NOT be picked, so the
+        13-day post-merge transition window stays quiet rather than
+        producing apples-to-oranges comparisons against 7d-format data."""
+        _isolate_state(monkeypatch, tmp_path)
+        _stub_econ_safe(monkeypatch)
+
+        # Pre-2026-05-18 format: no window_days field, written under days=7
+        legacy = {
+            "ts": (datetime.now(UTC)
+                   - timedelta(days=14, hours=1)).isoformat(),
+            "signals": {},
+            "signals_recent": {"rsi": {"accuracy": 0.62, "total": 200}},
+        }
+        from portfolio.file_utils import atomic_append_jsonl
+        snap_path = tmp_path / "snapshots.jsonl"
+        atomic_append_jsonl(snap_path, legacy)
+        monkeypatch.setattr(acc_mod, "ACCURACY_SNAPSHOTS_FILE", snap_path)
+
+        _stub_current(
+            monkeypatch,
+            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+        )
+        violations = deg.check_degradation()
+        # No matching baseline → no alert despite the synthetic 20pp drop.
+        assert violations == []
+
+    def test_mismatched_window_days_is_skipped(self, monkeypatch, tmp_path):
+        """Future-proofing: if someone bumps BASELINE_TARGET_DAYS to 21
+        a 14d-stamped snapshot must not be silently used as baseline."""
+        _isolate_state(monkeypatch, tmp_path)
+        _stub_econ_safe(monkeypatch)
+
+        baseline = _make_snapshot(
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            window_days=7,  # wrong window
+        )
+        _write_baseline(monkeypatch, tmp_path, baseline)
+
+        _stub_current(
+            monkeypatch,
+            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+        )
+        violations = deg.check_degradation()
+        assert violations == []
+
+    def test_matching_window_days_passes_filter(self, monkeypatch, tmp_path):
+        """Positive control: a snapshot stamped with the expected
+        window_days IS picked and fires the expected violation."""
+        _isolate_state(monkeypatch, tmp_path)
+        _stub_econ_safe(monkeypatch)
+
+        baseline = _make_snapshot(
+            ts=datetime.now(UTC) - timedelta(days=14, hours=1),
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            # window_days defaults to BASELINE_TARGET_DAYS via _make_snapshot
+        )
+        _write_baseline(monkeypatch, tmp_path, baseline)
+
+        _stub_current(
+            monkeypatch,
+            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+        )
+        violations = deg.check_degradation()
+        assert len(violations) == 1
+        assert "rsi" in violations[0].message
+
+
+# ---------------------------------------------------------------------------
+# Snapshot writer stamps window_days (2026-05-18 premortem F2)
+# ---------------------------------------------------------------------------
+
+class TestSnapshotWindowStamp:
+    def test_save_full_accuracy_snapshot_stamps_window_days(
+        self, monkeypatch, tmp_path,
+    ):
+        _isolate_state(monkeypatch, tmp_path)
+        # Minimal stubs so the writer doesn't try to load real data
+        monkeypatch.setattr(
+            acc_mod, "signal_accuracy",
+            lambda h="1d", entries=None: {"rsi": {"accuracy": 0.6,
+                                                   "total": 100}},
+        )
+        monkeypatch.setattr(
+            acc_mod, "accuracy_by_ticker_signal_cached", lambda h: {},
+        )
+        monkeypatch.setattr(deg, "_per_ticker_recent", lambda h, days,
+                            entries=None: {})
+        monkeypatch.setattr(
+            "portfolio.forecast_accuracy.cached_forecast_accuracy",
+            lambda horizon="24h", days=14, use_raw_sub_signals=True: {},
+        )
+        monkeypatch.setattr(
+            acc_mod, "consensus_accuracy",
+            lambda h="1d", entries=None, days=None: {"accuracy": 0.5,
+                                                     "total": 100},
+        )
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: [])
+
+        snap = deg.save_full_accuracy_snapshot()
+        assert snap.get("window_days") == int(deg.BASELINE_TARGET_DAYS)
+
+    def test_save_full_accuracy_snapshot_default_is_14(self):
+        """The default days kwarg drives the recent-window scan. Locking
+        it to 14 prevents silent regressions back to 7."""
+        import inspect
+        sig = inspect.signature(deg.save_full_accuracy_snapshot)
+        assert sig.parameters["days"].default == 14
