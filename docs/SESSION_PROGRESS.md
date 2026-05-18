@@ -1,5 +1,64 @@
 # Session Progress
 
+## 2026-05-19 00:30 UTC — accuracy degradation root cause + _cached ttl fix + tail of hide-windows
+
+**Pre-existing install bugs (commit 5d3c79e9, pushed):**
+- `install-rc-watchdog-task.ps1`: replaced `[TimeSpan]::MaxValue` with
+  `(New-TimeSpan -Days 9000)`. Win32 Duration field overflows on the
+  TimeSpan::MaxValue serialisation, blocking task re-registration.
+- `install-rc-server-task.ps1`: replaced em-dashes with `--`. PS host
+  code page on this box mis-renders U+2014 inside `Write-Host` strings,
+  causing the parenthesised text that follows to be parsed as a
+  subcommand.
+
+**Accuracy-degradation critical errors (resolved via loop restart):**
+- 10 unresolved `accuracy_degradation` critical entries surfaced
+  between 16:32 and 19:27 UTC on 2026-05-18.
+- Root cause: PF-DataLoop was running pre-`b57a9695` code with 7d
+  recent/baseline windows. b57a9695 merged at 16:01 widening windows
+  to 14d (exactly to suppress the regime-flip false-positives that
+  were firing) but the loop was never restarted. Old code in memory
+  kept producing 5/4-11 vs 5/11-18 apples-to-apples diffs straddling
+  the rally→pullback regime change.
+- `schtasks /end` did not actually terminate the loop (pid 17828 went
+  to 100% CPU and stopped advancing the heartbeat). Force-killed via
+  `taskkill /F /T`. Re-launched via `/run`. New code confirmed in src
+  (BASELINE_TARGET_DAYS=14, MIN_SNAPSHOT_AGE_DAYS=13, window_days
+  filter active).
+- All 10 entries closed with `resolves_ts` follow-ups in
+  `data/critical_errors.jsonl`. Per the by-design transition window,
+  the detector will be quiet until ~2026-06-01 (waits for 14d-format
+  snapshots to accumulate). Daily snapshot writer fires at 06:05 UTC;
+  first `window_days=14` entry expected 2026-05-19T06:05Z.
+
+**Shadow-signal _cached() bug (commit e84cea01, pushed):**
+- `mahalanobis_turbulence._fetch_multi_asset_closes` and
+  `complexity_gap_regime._fetch_multi_asset_closes` were calling
+  `_cached("name", _do_fetch, ttl=_CACHE_TTL)`. Signature is
+  `_cached(key, ttl, func, *args)`, so `_do_fetch` bound to the ttl
+  positional slot and the `ttl` kwarg collided. Surfaced immediately
+  on the post-b57a9695 loop restart at 19:48 UTC. Swapped to
+  documented positional order. Tests
+  `tests/test_signal_{mahalanobis_turbulence,complexity_gap_regime}.py`
+  pass 51/51. Loop restarted again at 22:00 local to pick up the fix;
+  post-restart shadow-signal failure count is zero.
+
+**One-click admin reinstall launcher (added):**
+- `scripts/win/reinstall-all-tasks-elevated.bat` writes a small runner
+  PS1 then `Start-Process -Verb RunAs` to pop UAC once. The runner
+  iterates every `install-*.ps1` (each one Unregisters before
+  Registering so existing tasks are replaced atomically) and runs
+  `verify-tasks.ps1 -Run` at the end. Existing loop processes are NOT
+  killed — new task definitions only take effect at next logon, so
+  there is no trading interruption.
+
+**Still on user's plate:**
+- Double-click `scripts/win/reinstall-all-tasks-elevated.bat` and click
+  Yes on the UAC prompt. Review the PS1 output for any task that
+  failed to register.
+- Open `https://<dashboard>/?#loop-processes` and spot-check the tile
+  renders correctly (it polls `/api/loop-processes` every 30s).
+
 ## 2026-05-19 — TODO: finish remote branch sweep (BLOCKED on classifier)
 
 Followup to 2026-05-18 PM grid_fisher session. Local branch sweep done:
@@ -4938,3 +4997,7 @@ scripts/win/install-pending-pickups-task.ps1
 tests/test_api_pickups.py
 tests/test_pending_pickups_processor.py
 tests/test_pickup_llm_cryptotrader_72h.py
+
+### 2026-05-18 23:02 UTC | main
+4d3c26da docs: TODO for remote branch sweep finish + OIL Gate A/B verification
+docs/SESSION_PROGRESS.md
