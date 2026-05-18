@@ -1,5 +1,91 @@
 # Session Progress
 
+## 2026-05-18 — Shadow accuracy gate + cryptotrader_lm LoRA fix (MERGED)
+
+Two production bugs blocking the LLM shadow→promote pipeline. Both
+were data-quality failures masquerading as success — `--promote --dry-run`
+was about to flip three broken shadows into the live vote pool at the
+next 03:30 cron.
+
+**Bug A: Accuracy gate counted abstain rows as predictions.**
+`scripts/review_shadow_signals.py:_compute_signal_stats` and
+`dashboard/app.py:_compute_llm_leaderboard` joined
+`llm_probability_log.jsonl` against the outcome backfill without
+filtering scaffold/abstain rows. The `_abstain()` helper in
+`portfolio/signals/{finance_llama,cryptotrader_lm,meta_trader}.py`
+emits `{action:HOLD, confidence:0, indicators.feature_unavailable:True}`
+on every dispatch; outcome backfill labels ~64% of 1d windows as HOLD;
+the join then scored these scaffolds at ~64% accuracy on zero real
+predictions:
+
+```
+[DRY] would promote cryptotrader_lm: matched=779 accuracy=0.630 → promote  (992 abstain rows, 0 real)
+[DRY] would promote finance_llama:   matched=770 accuracy=0.635 → promote  (692 abstain, 304 real)
+[DRY] would promote meta_trader:     matched=732 accuracy=0.641 → promote  (752 abstain, 0 real)
+```
+
+**Bug B: cryptotrader_lm GGUF LoRA produced empty completions.**
+The Feb-2026 `Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf` was
+a homebrew conversion of `adapter_model.safetensors`. Loaded cleanly
+but emitted `completion_tokens=1, text=""` on every production prompt.
+All 992 cryptotrader_lm rows hit `server_unavailable` and logged as
+abstain. The conversion was likely done with an older llama.cpp
+build; v2 regen with current
+`Q:\models\llama.cpp\convert_lora_to_gguf.py` against
+`Q:\models\ministral-8b-hf\` base works:
+`probe_cryptotrader_lm.py` shows 5/5 parse, mean 105 tokens, mixed
+BUY/SELL/HOLD decisions, conf 0.6-0.85.
+
+**Fix**
+- `portfolio.llm_probability_log.is_directional_prediction(row)` — single
+  source of truth for "this row carries directional info" (`conf>0` AND
+  `chosen in {BUY,SELL}`). Used by both consumers — premortem N1
+  required they share one filter.
+- `scripts/review_shadow_signals.py:_compute_signal_stats` and
+  `dashboard/app.py:_compute_llm_leaderboard` route accuracy
+  through the helper. New `n_directional` field exposed in dashboard
+  payload for observability.
+- `portfolio/signal_engine.py` log_vote loop now skips when
+  `conf<=0 OR indicators.feature_unavailable is True`, with a single
+  `[log_vote_skipped]` INFO log per skip (premortem N4 observability).
+- Regenerated `cryptotrader-lm-lora.gguf` (v1 archived as
+  `cryptotrader-lm-lora-v1-broken.gguf` outside the repo).
+- `scripts/probe_cryptotrader_lm.py` is the contract test (premortem N3).
+- 22 new tests across 5 files. Touched-test areas: 0 failures.
+  Full-suite baseline drift: same ~36 worktree-symlink baseline as main.
+
+**Premortem** (7 narratives by fresh general-purpose agent — see
+`docs/PLAN.md` premortem section in this worktree):
+- N1 (reporting drift): ABSORBED — shared helper used by both
+  dashboard and gate.
+- N2 (atomic write race): test pinning `save_registry` →
+  `atomic_write_json` added (cavecrew-reviewer P2 follow-up).
+- N3 (weak probe gate): ABSORBED — probe parses output via
+  `_parse_response` and asserts parse_rate≥0.9.
+- N4 (silent skip drops real preds): ABSORBED — INFO log on skip
+  with reason.
+- N5 (HOLD exclusion breaks gate): ACCEPT — only review/dashboard
+  paths affected; `accuracy_stats.py` reads `signal_log.jsonl` not
+  `llm_probability_log.jsonl`.
+- N6 (acc-source drift, 58% vs 20%): ACCEPT for this PR; follow-up.
+- N7 (Layer 2 prompt drift): ACCEPT — `reporting.py` does not
+  currently surface LLM accuracy.
+
+**Deferred follow-ups**
+- 30pp accuracy gap between `accuracy_cache.json` (ministral 58%) and
+  `llm_probability_log` directional-only (ministral 20%) — two
+  different accounting systems with different gating. Out-of-scope.
+- 73% abstain rate for finance_llama in production — Plex-VRAM guard
+  + parse-failure path may be over-eager.
+- Brier denominator in `dashboard/app.py:_compute_llm_leaderboard` now
+  uses the directional set, which matches the accuracy denominator.
+  If callers want Brier over the full distribution (incl. HOLD), a
+  separate field would be needed.
+
+**Worktree:** `.worktrees/shadow-gate-lora-20260518`
+**Branch:** `fix/shadow-gate-lora-20260518`
+**Commits:** `735e7157`, `e0f13449`, `570f31d6`, `6d876e28`, `204ea229`
+
 ## 2026-05-18 — Quiet accuracy-degradation alerts during regime flips
 
 **Problem:** "System isn't trading" investigation found 14 unresolved
