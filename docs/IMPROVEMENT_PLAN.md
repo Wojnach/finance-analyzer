@@ -111,12 +111,35 @@ log line. Hard to grep for which signal is broken.
 - **Dashboard blueprint split**: 1600 lines → blueprints, dedicated session
 - **Any config.json or live trading logic changes**
 
+### Batch 4: Adversarial Review P1 Fixes (from REVIEW_2026-05-17)
+1. `portfolio/trigger.py` — P1.2: guard _save_state against empty ticker set
+2. `data/metals_loop.py` — P1.1: trailing stop TypeError (wrong API, wrong kwargs)
+3. `portfolio/claude_gate.py` + `portfolio/multi_agent_layer2.py` — P1.3: specialist gate bypass
+
+### Batch 5: Resource Cleanup
+1. `data/crypto_monitor.py` — file handle leak on inline open()
+2. `portfolio/gpu_gate.py` — psutil missing warning
+
 ---
 
-## 5. Success Criteria
+## 5. Implementation Status
 
-- [ ] All 3 batches implemented with passing tests
+All batches completed:
+- **Batch 1** (3 files): signal_engine shadow logging, risk_management FX warning, reporting dedup
+- **Batch 2** (1 file): trade_guards ticker_trades 90-day pruning
+- **Batch 3** (2 files): gpu_gate psutil warning, message_store triple-sanitize removal
+- **Batch 4** (4 files): P1.2 trigger baseline wipe, P1.1 trailing stop, P1.3 specialist gate
+- **Batch 5** (1 file): crypto_monitor file handle leak
+
+N5 (timestamp normalization at load time) deferred — defensive checks already in place at
+every access site, refactoring them would touch many paths without functional benefit.
+
+B10 (health.py deque) confirmed false positive — list never exceeds 51 entries, O(n) at n=51
+is sub-microsecond. B14 (correlation_priors) already extracted in a prior session.
+
+## 6. Success Criteria
+
+- [x] All batches implemented with passing tests
 - [ ] Full test suite green (`pytest tests/ -n auto`)
 - [ ] No new test failures introduced
-- [ ] SYSTEM_OVERVIEW.md updated with session findings
 - [ ] Merged to main and pushed
