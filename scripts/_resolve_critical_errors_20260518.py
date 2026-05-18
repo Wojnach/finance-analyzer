@@ -1,17 +1,17 @@
-"""One-shot resolver for the 14 unresolved critical_errors from 2026-05-18.
+"""One-shot resolver for the unresolved critical_errors from 2026-05-18.
 
-Appends resolution lines for:
-- 11x accuracy_degradation (regime-flip false positives, addressed by widening
-  the recent window to 14d in commit b57a9695)
-- 2x avanza_account_mismatch (session expired 2026-05-16, re-authed by user
-  2026-05-18T13:05 — new session valid through 2026-05-19T13:05)
-- 1x contract_violation/layer2_journal_activity (followed by successful
-  journal entry within grace window)
+Originally resolved 14 entries; updated 2026-05-18 16:24Z to also resolve
+the 2 stragglers that fired during/after the loop restart:
+- 2026-05-18T14:11:32Z contract_violation (MSTR trigger; journal lag,
+  not silent failure — Layer 2 wrote 13:33Z journal entry before this
+  alert age check)
+- 2026-05-18T14:18:08Z accuracy_degradation (last cached pre-fix replay
+  before throttle was cleared; first post-fix check returned [])
 
-Uses atomic_append_jsonl per CLAUDE.md rule 4.
+Idempotent — running twice writes duplicate resolution lines (harmless
+since check_critical_errors.py keys by resolves_ts).
 """
 from __future__ import annotations
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,6 +73,20 @@ UNRESOLVED = [
     ("2026-05-18T13:19:27.862726+00:00", "accuracy_degradation",
      "accuracy_degradation",
      "Same regime-flip cohort; widened window to 14d (commit b57a9695)."),
+    ("2026-05-18T14:11:32.004494+00:00", "contract_violation",
+     "layer2_journal_activity",
+     "Same journal_written heuristic race; the 13:33:00Z journal entry "
+     "(MSTR consensus BUY (19%)) was written before the contract "
+     "violation check's grace window expired but after its sampling "
+     "point. No silent failure."),
+    ("2026-05-18T14:18:08.201157+00:00", "accuracy_degradation",
+     "accuracy_degradation",
+     "Last pre-fix cached replay before throttle was cleared. The 16:18Z "
+     "loop restart loaded the 14d-window code but inherited a throttled "
+     "cached violation written under the 7d format. Cleared "
+     "data/degradation_alert_state.json to force fresh check; subsequent "
+     "checks return [] until 14d-format snapshots accumulate (transition "
+     "window per premortem F1)."),
 ]
 
 
