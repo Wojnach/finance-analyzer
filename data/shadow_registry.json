@@ -122,8 +122,8 @@
         "min_samples": 200,
         "min_accuracy": 0.55
       },
-      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/finance-llama-8b-gguf/wiroai-finance-llama-8b-q4_k_m.gguf (4.6GB GGUF). Wrapper at portfolio/signals/finance_llama.py returns HOLD with feature_unavailable=True until inference (llama-server prompt + token-logprob extraction) is implemented and verified. Cycle cost target: ~4s on GPU \u2014 cycle_modulo=3 once inference is live. [2026-05-17 verify: bumped cycle_modulo 3->1 temporarily to validate end-to-end emission in production; restore to 3 once mean_conf>0 verified to keep cycle budget bounded] [2026-05-17 restore: cycle_modulo 1->3 after end-to-end emission verified; production rows show real conf=0.6-0.7 (ETH SELL@0.7)]",
-      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/finance-llama-8b-gguf/wiroai-finance-llama-8b-q4_k_m.gguf (4.6GB GGUF). Wrapper at portfolio/signals/finance_llama.py returns HOLD with feature_unavailable=True until inference (llama-server prompt + token-logprob extraction) is implemented and verified. Cycle cost target: ~4s on GPU \u2014 cycle_modulo=3 once inference is live. [2026-05-17 verify: bumped cycle_modulo 3->1 temporarily to validate end-to-end emission in production; restore to 3 once mean_conf>0 verified to keep cycle budget bounded] [2026-05-17 restore: cycle_modulo 1->3 after end-to-end emission verified; production rows show real conf=0.6-0.7 (ETH SELL@0.7)] [2026-05-18 gate-fix: 73% of rows were abstain (conf=0) \u2014 Plex-VRAM guard and parse failures over-triggering. With new directional filter the accuracy denominator now uses only conf>0 rows. Investigation deferred to follow-up.]",
+      "last_reviewed_ts": "2026-05-18T20:00:00+00:00",
       "status": "shadow",
       "cycle_modulo": 3,
       "cycle_phase": 2
@@ -134,8 +134,8 @@
         "min_samples": 200,
         "min_accuracy": 0.6
       },
-      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/cryptotrader-lm/ (PEFT LoRA on Ministral-8B base + GGUF copy). Crypto-only (BTC/ETH). Wrapper at portfolio/signals/cryptotrader_lm.py returns HOLD with feature_unavailable=True until LoRA loader is implemented. Higher promotion bar (0.60) because the published model card claims 72% accuracy and 0.94 Sharpe \u2014 if it can't clear 60% live we want to know fast. [2026-05-17 wire: _FEATURE_AVAILABLE=True, real PEFT LoRA inference via llama_server ministral8_lora slot]",
-      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/cryptotrader-lm/ (PEFT LoRA on Ministral-8B base + GGUF copy). Crypto-only (BTC/ETH). Wrapper at portfolio/signals/cryptotrader_lm.py returns HOLD with feature_unavailable=True until LoRA loader is implemented. Higher promotion bar (0.60) because the published model card claims 72% accuracy and 0.94 Sharpe \u2014 if it can't clear 60% live we want to know fast. [2026-05-17 wire: _FEATURE_AVAILABLE=True, real PEFT LoRA inference via llama_server ministral8_lora slot] [2026-05-18 lora-fix: v1 GGUF (Feb-2026 homebrew conversion) emitted empty completions across 992 production rows; regenerated from adapter_model.safetensors via Q:/models/llama.cpp/convert_lora_to_gguf.py against Q:/models/ministral-8b-hf. v1 archived as cryptotrader-lm-lora-v1-broken.gguf. Probe script: scripts/probe_cryptotrader_lm.py asserts parse_rate>=0.9 + mean_tokens>=20. Sample counter resets after fix.]",
+      "last_reviewed_ts": "2026-05-18T20:00:00+00:00",
       "status": "shadow",
       "cycle_modulo": 3,
       "cycle_phase": 0
@@ -146,8 +146,8 @@
         "min_samples": 200,
         "min_accuracy": 0.55
       },
-      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/custom-meta-trader/ (Qwen2-36L unsloth safetensors, 5.8GB, 32K context). Wrapper at portfolio/signals/meta_trader.py returns HOLD with feature_unavailable=True. Designed to consume other LLM voter outputs from the same cycle as features (meta-model role), so it must be invoked AFTER ministral/qwen3 in the dispatch order. cycle_modulo=5 because Qwen2-36L inference is the most expensive in our stack.",
-      "last_reviewed_ts": "2026-05-15T14:00:00+00:00",
+      "notes": "Scaffold registered 2026-05-15. Model: Q:/models/custom-meta-trader/ (Qwen2-36L unsloth safetensors, 5.8GB, 32K context). Wrapper at portfolio/signals/meta_trader.py returns HOLD with feature_unavailable=True. Designed to consume other LLM voter outputs from the same cycle as features (meta-model role), so it must be invoked AFTER ministral/qwen3 in the dispatch order. cycle_modulo=5 because Qwen2-36L inference is the most expensive in our stack. [2026-05-18 gate-fix: scaffold emits HOLD/conf=0; new is_directional_prediction filter in portfolio.llm_probability_log excludes these from accuracy denominator + signal_engine skips log_vote when indicators.feature_unavailable. Awaiting real wiring (Item 3 of shadow-enrollment plan).]",
+      "last_reviewed_ts": "2026-05-18T20:00:00+00:00",
       "status": "shadow",
       "cycle_modulo": 5,
       "cycle_phase": 2

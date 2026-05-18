@@ -1,250 +1,295 @@
-# PLAN — Widen accuracy-degradation window to 14d to smooth regime flips
+# Plan — Fix shadow accuracy gate + cryptotrader_lm LoRA (2026-05-18)
 
-Date: 2026-05-18
-Branch: `fix-quiet-accuracy-degradation-alerts`
-Worktree: `.worktrees/quiet-accuracy-alerts`
+## Scope
 
-## Problem
+Two production bugs blocking the LLM shadow→promote pipeline. Both are
+data-quality failures masquerading as success.
 
-14 unresolved `critical_errors.jsonl` entries from the past 7 days,
-mostly `accuracy_degradation` alerts firing on 5 signals (sentiment,
-structure, macro_regime, econ_calendar, crypto_macro). The user reported
-"system isn't trading" — investigation found three independent
-confidence gates (bull_trap, ensemble_entropy 0.92, per_ticker_consensus
-49.4%) correctly crushing weighted_confidence to ~0.10, well below the
-0.56 GRID_MIN_SIGNAL_CONFIDENCE floor → grid_fisher skips all
-placements.
+## Findings (2026-05-18 investigation)
 
-Root cause confirmed via signal_log.db: market regime flipped around
-2026-05-11. 1d pct_up by ticker:
-- 5/04-5/11: 79% BTC, 63% ETH, 74% MSTR, 71% XAG, 62% XAU (rally)
-- 5/11-5/19: 24% BTC, 20% ETH, 32% MSTR, 43% XAG, 27% XAU (pullback)
+### Bug A — accuracy gate counts abstain rows as predictions
 
-The 5 BUY-leaning signals scored 60-70% during the rally and 33-39%
-during the pullback. They are not broken — they're directionally biased
-and lost on a regime flip. The degradation alert compares recent 7d
-to baseline 7d, and 7d windows fit entirely on one side of the flip
-→ guaranteed false alarm.
+`scripts/review_shadow_signals.py:_collect_stats` joins
+`llm_probability_log.jsonl` against `llm_probability_outcomes.jsonl` and
+counts every joined row in the denominator. Rows with
+`confidence == 0.0` are abstentions emitted by the canonical
+`_abstain()` helper in `portfolio/signals/finance_llama.py`,
+`cryptotrader_lm.py`, `meta_trader.py` etc. — they should NOT count.
 
-Empirical proof via signal_log.db (14d windows smooth the flip):
+`scripts/review_shadow_signals.py --promote --dry-run` reports:
 
-| Signal         | 7d_recent  | 14d_recent | 14d_baseline | 14d delta |
-|----------------|------------|------------|--------------|-----------|
-| sentiment      | 38.0%      | 51.0%      | 48.1%        | +2.9pp    |
-| structure      | 37.8%      | 50.2%      | 37.5%        | +12.7pp   |
-| macro_regime   | 39.1%      | 49.6%      | 49.2%        | +0.4pp    |
-| econ_calendar  | 33.9%      | 53.2%      | 44.8%        | +8.4pp    |
-| crypto_macro   | 35.2%      | 55.4%      | 53.8%        | +1.6pp    |
-
-All 14d deltas are positive or below the 15pp drop threshold → alert
-would not fire. 7d windows produce 22-37pp false drops.
-
-## Goal
-
-1. Widen the accuracy-degradation recent-window from 7d to 14d so
-   single-week regime flips don't trip the alert.
-2. Resolve the 14 unresolved critical_errors entries (regime-flip
-   artifacts, not real bugs).
-
-This does NOT touch:
-- The trade-gate accuracy lookup (`get_or_compute_recent_accuracy`
-  in `signal_engine.py` with `days=7`). Trade confidence stays gated
-  by the bull_trap + ensemble_entropy + per_ticker_consensus cascade
-  which is working correctly.
-- `ACCURACY_GATE_THRESHOLD = 0.47`, `GRID_MIN_SIGNAL_CONFIDENCE = 0.56`,
-  penalty multipliers. They are catching real risk.
-
-The fix quiets noise. It does NOT cause new trades. Trading will
-resume when actual signal accuracy recovers or when the regime
-clarifies.
-
-## Design
-
-### Change 1: Widen recent window
-
-`portfolio/accuracy_degradation.py`:
-
-```python
-BASELINE_TARGET_DAYS = 14.0      # was 7.0
-MIN_SNAPSHOT_AGE_DAYS = 13.0     # was 6.0
+```
+[DRY] would promote cryptotrader_lm: matched=779 accuracy=0.630 → promote
+[DRY] would promote finance_llama:   matched=770 accuracy=0.635 → promote
+[DRY] would promote meta_trader:     matched=732 accuracy=0.641 → promote
 ```
 
-`save_full_accuracy_snapshot(*, days: int = 7)` → `days: int = 14`.
+Reality (recomputed by filtering `confidence > 0`):
 
-Rationale:
-- `BASELINE_TARGET_DAYS = 14.0` controls both baseline lookup AND the
-  current recent-window cutoff in `_diff_against_baseline()`
-  (line 449: `cutoff = now - timedelta(days=int(BASELINE_TARGET_DAYS))`).
-  Bumping it widens both ends symmetrically.
-- `MIN_SNAPSHOT_AGE_DAYS = 13.0` ensures we only compare baselines
-  that are old enough to have been written under the new wider window
-  (1d slack for snapshot timing jitter).
-- Snapshot writer `days=14` ensures future snapshots store 14d data.
+| signal           | matched | real_acc | abstain |
+|------------------|--------:|---------:|--------:|
+| cryptotrader_lm  |       0 |        – |    992  |
+| meta_trader      |       0 |        – |    752  |
+| finance_llama    |     123 |   0.439  |    692  |
 
-### Change 2: Resolve old critical_errors
+`cryptotrader_lm` and `meta_trader` have zero real predictions. Outcome
+backfill labels ~64% of 1d windows as HOLD; scaffold rows always emit
+`chosen: "HOLD"`, so the join shows 64% accuracy on garbage. Without the
+fix the next 03:30 cron run would auto-promote three broken voters into
+production consensus.
 
-Append resolution lines to `data/critical_errors.jsonl` for the 14
-unresolved entries. Grouped by category:
-- 11x `accuracy_degradation` → resolved by this PR (window widened)
-- 2x `avanza_account_mismatch` → resolved by user re-running
-  `scripts/avanza_login.py` (session now valid through 2026-05-19T13:05)
-- 1x `contract_violation` (layer2_journal_activity at 09:32) → resolved
-  by subsequent journal entries written within the grace window
+### Bug B — cryptotrader_lm GGUF LoRA produces empty completions
 
-Resolution lines follow the format in CLAUDE.md:
+Server probe with the actual production prompt:
 
-```json
-{"ts":"<now>","level":"info","category":"resolution",
- "caller":"<same>","resolution":"<what was done>",
- "resolves_ts":"<original ts>","message":"<short>","context":{}}
+```
+prompt length: 1191 chars
+status: 200
+completion_tokens: 2
+finish_reason: stop
+text: '```'
 ```
 
-### Change 3: Tests
+`/v1/chat/completions` on the trivial prompt `Reply: HELLO` also
+returns `content: ""`. Base Ministral-8B without the LoRA serves
+correctly (verified upstream — `ministral` signal accumulates real
+predictions). The breakage is the LoRA file.
 
-`tests/test_accuracy_degradation*.py` — verify:
-- Constants updated to new values
-- `save_full_accuracy_snapshot` default is 14
-- Existing tests that may assume `days=7` updated
+GGUF header is well-formed:
 
-## Files Touched
+```
+metadata:
+  general.architecture: llama
+  general.type: adapter
+  adapter.type: lora
+  adapter.lora.alpha: 16.0
+  general.base_model.0.name: Ministral 8B Instruct 2410
 
-1. `portfolio/accuracy_degradation.py` — bump 3 constants
-2. `data/critical_errors.jsonl` — append resolution lines (in repo root,
-   not worktree — append from main after merge)
-3. `tests/test_accuracy_degradation*.py` — verify tests still pass,
-   update any hardcoded `days=7` assertions
-4. `docs/PLAN.md` — this file (committed before implementation)
-5. `docs/SESSION_PROGRESS.md` — end-of-session note
+tensors (144 total):
+  blk.0.attn_q.weight.lora_a  dims=[4096, 8] type=1
+  blk.0.attn_q.weight.lora_b  dims=[8, 4096]
+  blk.0.attn_v.weight.lora_a  dims=[4096, 8]
+  blk.0.attn_v.weight.lora_b  dims=[8, 1024]   ← matches Ministral GQA kv_heads
+```
 
-## Risks
+So format is correct, base/adapter match. Two hypotheses for why
+output collapses to EOS in ≤3 tokens:
 
-1. **Slower real-degradation detection.** A signal that genuinely starts
-   underperforming will take ~2x longer to trip the alert under a 14d
-   window vs 7d. Acceptable trade-off: real alpha decay persists for
-   weeks, the alert catches it eventually. Spurious 1-week regime flips
-   are the dominant failure mode in practice (this incident + 2026-04-16
-   W15/W16 collapse memory).
+1. **Homebrew conversion bug** — adapter_config.json declares
+   `model_type: "gpt2"` (wrong; should be `mistral`). Some converter
+   path may have used the wrong target-module mapping, scrambling the
+   weights even though the resulting tensor shapes look OK.
+2. **Quantization/precision mismatch** — LoRA was trained on bf16
+   base, applied here against Q4_K_M. With `lora_alpha/r = 16/8 = 2.0`
+   the scaled contribution lands in the residual stream of a heavily
+   quantized base; the model may collapse to EOS.
 
-2. **Transition window 13-14 days of fewer alerts.** Until 13d+
-   baselines accumulate in the snapshot history, MIN_SNAPSHOT_AGE_DAYS
-   blocks comparison. Net effect: alerts go quiet for ~13 days, then
-   resume. Acceptable — the user is already aware of current degradation
-   from this conversation, and the *trade gates* (which DO operate on
-   7d) continue catching weak signals during this window.
+User hint: "the LoRA might be our attempt to modify the original
+cryptotrader" — meaning the GGUF was locally converted from the
+PEFT safetensors via `convert_lora_to_gguf.py` against an updated
+llama.cpp. Most plausible single root cause.
 
-3. **Critical_errors resolution mass-write.** Atomic-append, each line
-   independent. If the loop is mid-write to the file, our appends
-   interleave cleanly (jsonl is line-delimited). No risk of corruption.
+### Bug C — scaffolds pollute probability log every cycle
 
-4. **`days=14` parameter change ripples elsewhere?** Grepped for
-   `save_full_accuracy_snapshot` — only called from
-   `maybe_save_daily_snapshot(config)` which doesn't override `days`.
-   So the default change takes effect everywhere.
+`meta_trader` still has `_FEATURE_AVAILABLE=False` and returns
+`HOLD/conf=0` on every dispatch. Every dispatch reaches `signal_engine`
+which calls `log_vote()` with that row. Result: 752 abstain rows for
+meta_trader, 992 for cryptotrader_lm (because every call hits the
+empty-completion path), 692 for finance_llama (Plex VRAM gate + parse
+failures + ticker abstains).
 
-## Execution Order
+The `bc2c659e` throttle-skip guard (2026-05-17) handles the
+cycle-modulo throttle case but not the abstain-result case.
 
-1. Write plan + commit (this step)
-2. Premortem via fresh general-purpose agent
-3. Implement bump: constants + snapshot writer default
-4. Run targeted tests: `pytest tests/test_accuracy_degradation*.py -v`
-5. Implement critical_errors resolution lines (append-only to data file
-   in main worktree, not branch — done as part of merge step)
-6. Run full suite: `pytest tests/ -n auto`
-7. Adversarial review via `caveman:cavecrew-reviewer`
-8. Address P1/P2 findings, document P3
-9. Commit + merge + push
-10. Restart PF-DataLoop (degradation tracker runs inside main loop)
+## What we will fix
+
+### Batch 1 — Accuracy gate filters abstain + HOLD-only rows
+
+`scripts/review_shadow_signals.py:_collect_stats`:
+
+* Skip rows where `confidence <= 0` (canonical abstain signal).
+* Skip rows where `chosen == "HOLD"`. HOLD is not a directional
+  prediction; counting it against the outcome label inflates accuracy
+  for HOLD-biased shadows. This matches the methodology in
+  `data/accuracy_cache.json`'s `correct_buy + correct_sell` rule.
+
+Add `tests/test_review_shadow_signals_filter.py` exercising:
+
+* abstain rows excluded from denominator
+* HOLD-on-HOLD ties don't count as correct (regression for the bogus
+  64% pass)
+* directional-only rows still count
+
+### Batch 2 — signal_engine.log_vote skips abstain results
+
+Extend the `bc2c659e` guard in `portfolio/signal_engine.py` so
+`log_vote` is also skipped when:
+
+* `confidence <= 0`, OR
+* `indicators.get("feature_unavailable") is True`
+
+This stops new pollution at the source. Existing rows stay (immutable
+journal) — the Batch 1 filter handles them at read time.
+
+Add `tests/test_signal_engine_log_vote_skip_abstain.py`.
+
+### Batch 3 — cryptotrader_lm LoRA repair attempt
+
+Try in order, stop at first success:
+
+1. Run current `convert_lora_to_gguf.py` from
+   `/mnt/q/models/llama.cpp` against
+   `Q:\models\cryptotrader-lm\adapter_model.safetensors` to produce a
+   fresh `cryptotrader-lm-lora.gguf`. Probe with real prompt;
+   `completion_tokens > 5` and non-empty `text` ⇒ success.
+2. If still empty: try with `--base Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf`
+   (newer converters accept GGUF base for shape lookup).
+3. If both fail: retire the `cryptotrader_lm` shadow in
+   `data/shadow_registry.json` with status=retired, notes documenting
+   the LoRA bug + a follow-up TODO to re-enable via PEFT-in-Python
+   path. Do NOT keep emitting abstain rows.
+
+### Batch 4 — Registry hygiene
+
+`data/shadow_registry.json` updates:
+
+* `cryptotrader_lm`: result-dependent (kept-shadow with new notes, or
+  retired).
+* `meta_trader`: notes updated to say scaffold-only, abstains filtered
+  by gate fix; do not retire (it's the next planned wiring per Item 3
+  of the shadow plan).
+* Reset `last_reviewed_ts` on the 3 affected entries so the next cron
+  re-evaluates with the fixed gate.
+
+## Files touched
+
+| File | Change |
+|---|---|
+| `portfolio/llm_probability_log.py` | NEW `is_directional_prediction(row)` helper |
+| `scripts/review_shadow_signals.py` | use shared filter in `_collect_stats` |
+| `dashboard/app.py` | use shared filter in `_compute_llm_leaderboard` (premortem #1) |
+| `tests/test_llm_probability_log_filter.py` | NEW |
+| `tests/test_review_shadow_signals_filter.py` | NEW |
+| `tests/test_llm_leaderboard_filter.py` | NEW |
+| `portfolio/signal_engine.py` | extend log_vote skip guard |
+| `tests/test_signal_engine_log_vote_skip_abstain.py` | NEW |
+| `Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf` | regen attempt (outside repo) |
+| `data/shadow_registry.json` | metadata cleanup (atomic_write via `shadow_registry.save_registry`) |
+| `docs/SESSION_PROGRESS.md` | session log entry |
+
+## Verification
+
+1. Unit tests added in batches 1 + 2 pass before commit.
+2. `python scripts/review_shadow_signals.py --promote --dry-run` after
+   Batch 1 + 4 should NOT propose to promote `cryptotrader_lm` or
+   `meta_trader`. `finance_llama` likely won't either with the real
+   filter (123 directional rows < 200 sample bar).
+3. `pytest -n auto` green vs main baseline (modulo the documented
+   worktree-symlink ~26 baseline failures).
+4. `caveman:cavecrew-reviewer` on the diff — fix all P1/P2.
+5. After merge + push + `PF-DataLoop` restart, watch one cycle:
+   * scaffold-emitted abstain rows must NOT appear in new
+     `llm_probability_log.jsonl` entries for `meta_trader`.
+   * cryptotrader_lm: either real predictions appearing (regen worked),
+     or zero rows because retired.
+
+## Out of scope
+
+* The 30 percentage-point gap between `accuracy_cache.json`
+  (ministral 58% on 1d) and `llm_probability_log` directional-only
+  accuracy (ministral 20% on 65 BUY+SELL rows). Two different
+  accounting systems with different gating; needs separate
+  investigation. Documented in SESSION_PROGRESS as a deferred item.
+* The 73% abstain rate for `finance_llama` in production. Plex-VRAM
+  guard + parse-failure path may both be over-eager. Defer.
+* Item 3 (meta_trader real wiring), Item 5 (Brier UI), Item 8 (qwen3
+  prompt revision) from the LLM-shadow plan — those are separate work.
 
 ## Premortem
 
-Fresh agent ran step 2. Findings + mitigations:
+(Generated 2026-05-18 by fresh `general-purpose` Agent reading PLAN.md +
+CLAUDE.md as its only context.)
 
-### F1 — Silent transition blackout (11-13 days, no comparison runs)
-Until baselines aged ≥13d accumulate in the JSONL, `check_degradation`
-returns `[]` every cycle. Looks healthy, but the detector is dark.
+### N1 — Reporting drift between gate and dashboard
 
-**Mitigation:** emit an INFO log + structured field
-`transition_active=True` in `check_degradation` when baseline lookup
-fails due to age. Tracked in `accuracy_snapshot_state.json` so
-follow-up observability is straightforward. ACCEPT no Telegram for it
-— user is aware from this conversation.
+The fix is at one read path only (`review_shadow_signals.py`). On
+2026-05-25, Layer 2 reads `agent_summary_compact.json` (built by
+`reporting.py`) or the dashboard reads `/api/llm-leaderboard`
+(`dashboard/app.py:_compute_llm_leaderboard`) and sees the old 64%
+accuracy printed for `cryptotrader_lm`. Layer 2 tiebreaks on it, takes
+a losing BTC trade.
 
-### F2 — Apples-to-oranges baseline (days 13-28 post-merge)
-Once a baseline aged ~14d is picked, its `signals_recent` was written
-with `days=7` (pre-merge format). Current side is computed with
-`days=14`. Diff = spurious alerts.
+**Mitigation (absorbed):** the abstain/HOLD filter is extracted into
+`portfolio/llm_probability_log.is_directional_prediction(row)` and
+imported by BOTH `scripts/review_shadow_signals.py` AND
+`dashboard/app.py:_compute_llm_leaderboard`. Test
+`tests/test_llm_leaderboard_filter.py` asserts the dashboard endpoint
+agrees with the gate for at least the three known-broken shadows.
 
-**Mitigation:** stamp every snapshot with `window_days` in the
-top-level dict. `_find_baseline_snapshot` filters to snapshots whose
-`window_days == BASELINE_TARGET_DAYS`. Missing field is treated as
-old-format and skipped. This makes the transition truly quiet (no
-mismatched comparisons) and turns the durable invariant explicit.
+`reporting.py` does not currently surface LLM accuracy into the
+agent_summary; verified by grep (`grep -n 'cryptotrader_lm\|llm_probability_log' portfolio/reporting.py`
+returns nothing). The 30pp `accuracy_cache.json` vs `llm_probability_log`
+discrepancy (out-of-scope) remains as a separate latent risk.
 
-### F3 — Cycle budget breach from 2x data size
-`_per_ticker_recent` filters `recent_entries` from `load_entries()`.
-Doubling to 14d roughly doubles the row count. The Codex P2 review
-note flagged 290s of redundant compute risk under 7d. Could nudge
-p95 over the 180s MAX_CYCLE_DURATION_S budget.
+### N2 — `shadow_registry.json` rewrite race
 
-**Mitigation:** the HOURLY_THROTTLE_S=55min path ALREADY gates this
-to ~24 runs/day. Hot-path is once-per-hour, not once-per-cycle. Plus
-the entry-sharing optimization (`recent_entries` computed once,
-threaded through all four scopes) keeps the scan cost O(1) in the
-number of signal names. Doubling the entry list is +O(n), well within
-budget. ACCEPT.
+ACCEPT. `portfolio/shadow_registry.py:save_registry` already routes
+through `file_utils.atomic_write_json` (verified line 78). Batch 4 must
+call `save_registry()` not `json.dump` directly — test will assert this
+by patching `atomic_write_json` and confirming it's called.
 
-### F4 — `cached_forecast_accuracy` cache-key collision
-`scripts/audit_accuracy_drops.py:241` still hardcodes `days=7` to
-`cached_forecast_accuracy`. The cached_forecast_accuracy memoization
-key is `(horizon, days, use_raw_sub_signals)` — different params
-means different cache entries, NOT collision/poisoning. The audit
-script's 7d view is an intentional separate diagnostic.
+### N3 — LoRA regen "success" probe too weak
 
-**Mitigation:** leave `audit_accuracy_drops.py` at `days=7`. Add a
-code comment noting the intentional divergence. The two views co-exist
-cleanly in the lru_cache.
+`completion_tokens > 5` proves the model isn't dead but says nothing
+about whether output parses as the expected
+`{action, confidence, reasoning}` JSON. A regen that emits valid prose
+but garbage JSON would still get accepted and cause production
+JSON-parse failures.
 
-### F5 — Telegram daily summary still says "vs prev 7d"
-`build_daily_summary` (lines 901, 940, 948, 962) hardcodes "7d" /
-"recent-7d". Post-merge the math is 14d but the UI lies.
-Existing test at `tests/test_accuracy_degradation.py:714` asserts the
-"7d" string and would pass on the bug.
+**Mitigation (absorbed):** the regen probe is a Python script
+`scripts/probe_cryptotrader_lm.py` that calls `_parse_response()` on at
+least 5 sampled production prompts and requires `parse_rate >= 0.9` AND
+`mean_completion_tokens >= 20`. If the probe fails on the regenerated
+file we fall back to retiring the shadow (Batch 3 step 3).
 
-**Mitigation:** replace hardcoded strings with
-`f"{int(BASELINE_TARGET_DAYS)}d"`. Update the test to use
-the constant symbolically.
+### N4 — log_vote skip drops legitimate low-conf BUY/SELL
 
-### F6 — Snapshot file growth
-Snapshots are append-forever; doubling window size doubles per-snapshot
-bytes. With ~120d history and growing.
+A real model emitting `chosen=BUY, confidence=0.0` (theoretically — no
+current code path does this; the parser defaults to 0.50 when missing)
+gets silently dropped. Test green, prod silent. Worse, when meta_trader
+gets wired (Item 3) a coding bug that returns `confidence=0.0` on real
+preds would never surface.
 
-**Mitigation:** ACCEPT for now. Existing `_check_snapshot_freshness`
-watches mtime. Add a file-size warning in a separate follow-up if it
-becomes material. Not blocking this PR.
+**Mitigation (absorbed):** the skip guard uses
+`indicators.get("feature_unavailable") is True OR confidence <= 0` and
+emits a single `logger.info("[log_vote_skipped] signal=%s reason=%s")`
+line every time it skips. `check_critical_errors.py` already monitors
+`shadow_silent` patterns (verify); if not, add a daily aggregation step
+in the existing 03:30 cron (out-of-scope but tracked in SESSION_PROGRESS).
 
-### F7 — `ViolationTracker` escalation count reset
-The 14 currently-unresolved alerts have escalation history.
-Post-merge they'll have different key sets (14d math) and existing
-escalation counts effectively reset.
+### N5 — HOLD exclusion drops existing voters below 47% gate
 
-**Mitigation:** This is desired — the existing alerts ARE noise and
-we're resolving them explicitly anyway. ACCEPT.
+`portfolio/accuracy_stats.py` was checked: it reads `signal_log.jsonl`
+(not `llm_probability_log.jsonl`) and already uses the
+`total_buy + total_sell` denominator pattern (see `accuracy_cache.json`
+shape). The gate fix is isolated to the promotion-script /
+leaderboard-endpoint read paths. ACCEPT — does NOT propagate to the
+force-HOLD signal gate.
 
-## Updated Files Touched
+### N6 — Out-of-scope `accuracy_cache.json` vs `llm_probability_log` drift
 
-1. `portfolio/accuracy_degradation.py`:
-   - Bump `BASELINE_TARGET_DAYS` 7.0 → 14.0
-   - Bump `MIN_SNAPSHOT_AGE_DAYS` 6.0 → 13.0
-   - Change `save_full_accuracy_snapshot(*, days: int = 7)` → 14
-   - Add `window_days` field to snapshot extras
-   - Filter baselines by matching `window_days` in `_find_baseline_snapshot`
-   - Emit informational log when transition_active
-   - Replace hardcoded "7d" strings in `build_daily_summary`
-2. `portfolio/accuracy_stats.py`:
-   - Plumb `window_days` extra through `save_accuracy_snapshot`
-3. `tests/test_accuracy_degradation*.py`:
-   - Update tests asserting "7d" strings or `days=7` defaults
-4. `data/critical_errors.jsonl`: append 14 resolution lines (main worktree, post-merge)
-5. `docs/PLAN.md`: this file
-6. `docs/SESSION_PROGRESS.md`: end-of-session note
+ACCEPT for this PR. Cross-source assert is a good idea but introducing
+a new contract assertion in the same PR that fixes the gate increases
+review surface and risk of false-positive alerts during the data
+transition. Tracked as a follow-up in `docs/SESSION_PROGRESS.md` →
+`accuracy_source_unification`.
 
+### N7 — Layer 2 prompt drift after we shrink real-pred counts
+
+After the fix `cryptotrader_lm` shows `n_with_outcome=0` in
+`/api/llm-leaderboard`. If `reporting.py` (compact summary builder)
+ever starts emitting `"prediction_count": ...` derived from the
+log-row count (unfiltered), Layer 2 might believe cryptotrader_lm is
+"active" when in fact every row is abstain. Verified not currently
+present, but if a future change adds it, this PR's helper must be
+used. Documented in the helper's docstring as a contract.
