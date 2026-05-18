@@ -1,250 +1,131 @@
-# PLAN — Widen accuracy-degradation window to 14d to smooth regime flips
+# Plan — grid_fisher silent-rejection loop fix
 
 Date: 2026-05-18
-Branch: `fix-quiet-accuracy-degradation-alerts`
-Worktree: `.worktrees/quiet-accuracy-alerts`
+Branch: `fix/grid-fisher-hours-gate`
+Worktree: `.worktrees/grid-fisher-hours-gate`
 
 ## Problem
 
-14 unresolved `critical_errors.jsonl` entries from the past 7 days,
-mostly `accuracy_degradation` alerts firing on 5 signals (sentiment,
-structure, macro_regime, econ_calendar, crypto_macro). The user reported
-"system isn't trading" — investigation found three independent
-confidence gates (bull_trap, ensemble_entropy 0.92, per_ticker_consensus
-49.4%) correctly crushing weighted_confidence to ~0.10, well below the
-0.56 GRID_MIN_SIGNAL_CONFIDENCE floor → grid_fisher skips all
-placements.
+On 2026-05-18 18:30–18:40 UTC (= 20:30–20:40 CET) `grid_fisher` entered a
+tight loop on OIL-USD (`BULL_OLJAB_X5_AVA_2`, ob 2367797):
 
-Root cause confirmed via signal_log.db: market regime flipped around
-2026-05-11. 1d pct_up by ticker:
-- 5/04-5/11: 79% BTC, 63% ETH, 74% MSTR, 71% XAG, 62% XAU (rally)
-- 5/11-5/19: 24% BTC, 20% ETH, 32% MSTR, 43% XAG, 27% XAU (pullback)
+1. `place_buy_order` returns success + `order_id` (e.g. 883727550).
+2. ~55 s later (next reconcile tick) the `order_id` is absent from
+   `get_open_orders`. `reconcile_against_live` sees the live position
+   delta is 0 → classifies as `external_cancel_buy`, frees the tier.
+3. Next tick re-arms the same tier. Loops forever.
 
-The 5 BUY-leaning signals scored 60-70% during the rally and 33-39%
-during the pullback. They are not broken — they're directionally biased
-and lost on a regime flip. The degradation alert compares recent 7d
-to baseline 7d, and 7d windows fit entirely on one side of the flip
-→ guaranteed false alarm.
+Root cause: FNSE warrant orderbook for OLJAB is closed after ~17:25 CET.
+Verified via `/_api/market-guide/certificate/2367797`:
+- `quote.timeOfLast = 2026-05-18T06:15:01Z` (~12 h before the loop fired)
+- `quote.totalVolumeTraded = 0`
 
-Empirical proof via signal_log.db (14d windows smooth the flip):
+Avanza accepts the submission and returns an `order_id` but the order
+never lives in the book — auto-cancelled immediately. `grid_fisher` has
+no after-hours gate per instrument and no rapid-cancel back-off, so it
+spins until EOD sweep or signal flip.
 
-| Signal         | 7d_recent  | 14d_recent | 14d_baseline | 14d delta |
-|----------------|------------|------------|--------------|-----------|
-| sentiment      | 38.0%      | 51.0%      | 48.1%        | +2.9pp    |
-| structure      | 37.8%      | 50.2%      | 37.5%        | +12.7pp   |
-| macro_regime   | 39.1%      | 49.6%      | 49.2%        | +0.4pp    |
-| econ_calendar  | 33.9%      | 53.2%      | 44.8%        | +8.4pp    |
-| crypto_macro   | 35.2%      | 55.4%      | 53.8%        | +1.6pp    |
+## Goals
 
-All 14d deltas are positive or below the 15pp drop threshold → alert
-would not fire. 7d windows produce 22-37pp false drops.
-
-## Goal
-
-1. Widen the accuracy-degradation recent-window from 7d to 14d so
-   single-week regime flips don't trip the alert.
-2. Resolve the 14 unresolved critical_errors entries (regime-flip
-   artifacts, not real bugs).
-
-This does NOT touch:
-- The trade-gate accuracy lookup (`get_or_compute_recent_accuracy`
-  in `signal_engine.py` with `days=7`). Trade confidence stays gated
-  by the bull_trap + ensemble_entropy + per_ticker_consensus cascade
-  which is working correctly.
-- `ACCURACY_GATE_THRESHOLD = 0.47`, `GRID_MIN_SIGNAL_CONFIDENCE = 0.56`,
-  penalty multipliers. They are catching real risk.
-
-The fix quiets noise. It does NOT cause new trades. Trading will
-resume when actual signal accuracy recovers or when the regime
-clarifies.
+1. Stop the same failure mode for any warrant that is silently
+   auto-cancelled (after-hours, halted, knocked out, instrument-specific
+   reject). Two independent gates so neither is single-point.
+2. Zero false skips during normal hours — quote-staleness threshold
+   wide enough to absorb thin-trade lulls.
+3. Cheap: no extra Avanza calls per tick beyond what's already cached.
 
 ## Design
 
-### Change 1: Widen recent window
+### Gate A — quote-staleness pre-placement gate
 
-`portfolio/accuracy_degradation.py`:
+Before placing a ladder for an instrument, check the cached `quote.timeOfLast`
+for the orderbook. Skip placement if `now - timeOfLast >
+GRID_QUOTE_STALENESS_THRESHOLD_S`.
+
+* Threshold: 1800 s (30 min). FNSE certs trade actively every few
+  seconds during open hours, so 30 min is comfortably above the noise
+  floor and well under a half-day after-hours gap.
+* Implementation: `place_buy_ladder` already calls `get_quote` as the
+  bid fallback. Pull `timeOfLast` from the same response (ms epoch),
+  compare to wall clock. To avoid double-calling when the caller
+  supplied a bid, add a tiny per-instrument quote cache (60 s TTL).
+* Decision log: `skip_quote_stale` with `ob_id`, `ticker`,
+  `time_of_last_age_s`, `threshold_s`.
+
+### Gate B — rapid-cancel back-off (post-reconcile)
+
+When `reconcile_against_live` classifies a tier as `external_cancel_buy`,
+record the cancel timestamp + age relative to that tier's `placed_ts`.
+If the age is below `GRID_RAPID_CANCEL_THRESHOLD_S` (default 120 s),
+increment a per-instrument counter `rapid_cancel_count`. When the count
+reaches `GRID_RAPID_CANCEL_MAX_CONSECUTIVE` (default 2), set
+`inst.cooldown_until` to `now + GRID_RAPID_CANCEL_COOLDOWN_S` (default
+6 h — long enough to span the rest of the trading day).
+
+* Reset counter on any successful fill or after the cooldown elapses.
+* Decision log: `rapid_cancel_backoff` with `ob_id`, `ticker`, `count`,
+  `cooldown_until`.
+
+### Config (`portfolio/grid_fisher_config.py`)
 
 ```python
-BASELINE_TARGET_DAYS = 14.0      # was 7.0
-MIN_SNAPSHOT_AGE_DAYS = 13.0     # was 6.0
+GRID_QUOTE_STALENESS_THRESHOLD_S = 1800        # 30 min
+GRID_QUOTE_CACHE_SECS = 60                      # per-instrument cache
+GRID_RAPID_CANCEL_THRESHOLD_S = 120              # cancel within 2 min = "rapid"
+GRID_RAPID_CANCEL_MAX_CONSECUTIVE = 2            # 2 in a row → cooldown
+GRID_RAPID_CANCEL_COOLDOWN_S = 6 * 3600          # 6 h
 ```
 
-`save_full_accuracy_snapshot(*, days: int = 7)` → `days: int = 14`.
+### State
 
-Rationale:
-- `BASELINE_TARGET_DAYS = 14.0` controls both baseline lookup AND the
-  current recent-window cutoff in `_diff_against_baseline()`
-  (line 449: `cutoff = now - timedelta(days=int(BASELINE_TARGET_DAYS))`).
-  Bumping it widens both ends symmetrically.
-- `MIN_SNAPSHOT_AGE_DAYS = 13.0` ensures we only compare baselines
-  that are old enough to have been written under the new wider window
-  (1d slack for snapshot timing jitter).
-- Snapshot writer `days=14` ensures future snapshots store 14d data.
+Add to `InstrumentState`:
 
-### Change 2: Resolve old critical_errors
-
-Append resolution lines to `data/critical_errors.jsonl` for the 14
-unresolved entries. Grouped by category:
-- 11x `accuracy_degradation` → resolved by this PR (window widened)
-- 2x `avanza_account_mismatch` → resolved by user re-running
-  `scripts/avanza_login.py` (session now valid through 2026-05-19T13:05)
-- 1x `contract_violation` (layer2_journal_activity at 09:32) → resolved
-  by subsequent journal entries written within the grace window
-
-Resolution lines follow the format in CLAUDE.md:
-
-```json
-{"ts":"<now>","level":"info","category":"resolution",
- "caller":"<same>","resolution":"<what was done>",
- "resolves_ts":"<original ts>","message":"<short>","context":{}}
+```python
+rapid_cancel_count: int = 0
+last_rapid_cancel_ts: Optional[str] = None
 ```
 
-### Change 3: Tests
+Reset by `roll_session_if_new_day`. `TierOrder` already carries
+`placed_ts` so no schema bump on the tier dataclass.
 
-`tests/test_accuracy_degradation*.py` — verify:
-- Constants updated to new values
-- `save_full_accuracy_snapshot` default is 14
-- Existing tests that may assume `days=7` updated
+State schema-version bumps 1 → 2; existing state files load cleanly
+because `from_dict` already uses `.get(...)` for every field.
 
-## Files Touched
+## Files to change
 
-1. `portfolio/accuracy_degradation.py` — bump 3 constants
-2. `data/critical_errors.jsonl` — append resolution lines (in repo root,
-   not worktree — append from main after merge)
-3. `tests/test_accuracy_degradation*.py` — verify tests still pass,
-   update any hardcoded `days=7` assertions
-4. `docs/PLAN.md` — this file (committed before implementation)
-5. `docs/SESSION_PROGRESS.md` — end-of-session note
+| File | Change |
+|------|--------|
+| `portfolio/grid_fisher_config.py` | Add 5 new constants. |
+| `portfolio/grid_fisher.py` | (a) per-instrument quote cache + Gate A in `place_buy_ladder`; (b) rapid-cancel detection in `tick` after `reconcile_against_live`; (c) reset counters in `roll_session_if_new_day` / `record_fill`. New `InstrumentState` fields. |
+| `tests/test_grid_fisher_hours_gate.py` | New: unit tests for Gate A + Gate B happy / edge / reset paths. |
+| `docs/SESSION_PROGRESS.md` | Append the fix + restart instructions. |
+| `docs/GRID_FISHER.md` | Document both gates. |
 
-## Risks
+## Execution order
 
-1. **Slower real-degradation detection.** A signal that genuinely starts
-   underperforming will take ~2x longer to trip the alert under a 14d
-   window vs 7d. Acceptable trade-off: real alpha decay persists for
-   weeks, the alert catches it eventually. Spurious 1-week regime flips
-   are the dominant failure mode in practice (this incident + 2026-04-16
-   W15/W16 collapse memory).
+1. Branch + plan commit (this file).
+2. Premortem agent → append to this file → commit.
+3. Batch 1: config constants + state fields + helpers. Commit.
+4. Batch 2: Gate A (quote-staleness). Commit.
+5. Batch 3: Gate B (rapid-cancel back-off). Commit.
+6. Batch 4: tests. Commit.
+7. Adversarial review subagent on the branch. Fix P1/P2. Commit.
+8. `pytest -n auto`. Commit any fixes. Merge → main → push.
+9. Restart `PF-MetalsLoop` so new code loads.
 
-2. **Transition window 13-14 days of fewer alerts.** Until 13d+
-   baselines accumulate in the snapshot history, MIN_SNAPSHOT_AGE_DAYS
-   blocks comparison. Net effect: alerts go quiet for ~13 days, then
-   resume. Acceptable — the user is already aware of current degradation
-   from this conversation, and the *trade gates* (which DO operate on
-   7d) continue catching weak signals during this window.
+## Risks (initial)
 
-3. **Critical_errors resolution mass-write.** Atomic-append, each line
-   independent. If the loop is mid-write to the file, our appends
-   interleave cleanly (jsonl is line-delimited). No risk of corruption.
-
-4. **`days=14` parameter change ripples elsewhere?** Grepped for
-   `save_full_accuracy_snapshot` — only called from
-   `maybe_save_daily_snapshot(config)` which doesn't override `days`.
-   So the default change takes effect everywhere.
-
-## Execution Order
-
-1. Write plan + commit (this step)
-2. Premortem via fresh general-purpose agent
-3. Implement bump: constants + snapshot writer default
-4. Run targeted tests: `pytest tests/test_accuracy_degradation*.py -v`
-5. Implement critical_errors resolution lines (append-only to data file
-   in main worktree, not branch — done as part of merge step)
-6. Run full suite: `pytest tests/ -n auto`
-7. Adversarial review via `caveman:cavecrew-reviewer`
-8. Address P1/P2 findings, document P3
-9. Commit + merge + push
-10. Restart PF-DataLoop (degradation tracker runs inside main loop)
+* **False skip in thin warrants**: a low-volume instrument may go 30 min
+  between trades during real hours. Mitigation: 30 min is generous;
+  config knob to tune; gate skips only placements, never cancels.
+* **State migration**: `InstrumentState.from_dict` already uses `.get`
+  for every field, so adding the two new fields is transparent for any
+  state file written by v1.
+* **Test fixture coupling**: existing grid_fisher tests build
+  `InstrumentState` via constructor — new fields default to safe values,
+  so no fixture churn expected. Will verify with full grid_fisher test
+  module before commit.
 
 ## Premortem
 
-Fresh agent ran step 2. Findings + mitigations:
-
-### F1 — Silent transition blackout (11-13 days, no comparison runs)
-Until baselines aged ≥13d accumulate in the JSONL, `check_degradation`
-returns `[]` every cycle. Looks healthy, but the detector is dark.
-
-**Mitigation:** emit an INFO log + structured field
-`transition_active=True` in `check_degradation` when baseline lookup
-fails due to age. Tracked in `accuracy_snapshot_state.json` so
-follow-up observability is straightforward. ACCEPT no Telegram for it
-— user is aware from this conversation.
-
-### F2 — Apples-to-oranges baseline (days 13-28 post-merge)
-Once a baseline aged ~14d is picked, its `signals_recent` was written
-with `days=7` (pre-merge format). Current side is computed with
-`days=14`. Diff = spurious alerts.
-
-**Mitigation:** stamp every snapshot with `window_days` in the
-top-level dict. `_find_baseline_snapshot` filters to snapshots whose
-`window_days == BASELINE_TARGET_DAYS`. Missing field is treated as
-old-format and skipped. This makes the transition truly quiet (no
-mismatched comparisons) and turns the durable invariant explicit.
-
-### F3 — Cycle budget breach from 2x data size
-`_per_ticker_recent` filters `recent_entries` from `load_entries()`.
-Doubling to 14d roughly doubles the row count. The Codex P2 review
-note flagged 290s of redundant compute risk under 7d. Could nudge
-p95 over the 180s MAX_CYCLE_DURATION_S budget.
-
-**Mitigation:** the HOURLY_THROTTLE_S=55min path ALREADY gates this
-to ~24 runs/day. Hot-path is once-per-hour, not once-per-cycle. Plus
-the entry-sharing optimization (`recent_entries` computed once,
-threaded through all four scopes) keeps the scan cost O(1) in the
-number of signal names. Doubling the entry list is +O(n), well within
-budget. ACCEPT.
-
-### F4 — `cached_forecast_accuracy` cache-key collision
-`scripts/audit_accuracy_drops.py:241` still hardcodes `days=7` to
-`cached_forecast_accuracy`. The cached_forecast_accuracy memoization
-key is `(horizon, days, use_raw_sub_signals)` — different params
-means different cache entries, NOT collision/poisoning. The audit
-script's 7d view is an intentional separate diagnostic.
-
-**Mitigation:** leave `audit_accuracy_drops.py` at `days=7`. Add a
-code comment noting the intentional divergence. The two views co-exist
-cleanly in the lru_cache.
-
-### F5 — Telegram daily summary still says "vs prev 7d"
-`build_daily_summary` (lines 901, 940, 948, 962) hardcodes "7d" /
-"recent-7d". Post-merge the math is 14d but the UI lies.
-Existing test at `tests/test_accuracy_degradation.py:714` asserts the
-"7d" string and would pass on the bug.
-
-**Mitigation:** replace hardcoded strings with
-`f"{int(BASELINE_TARGET_DAYS)}d"`. Update the test to use
-the constant symbolically.
-
-### F6 — Snapshot file growth
-Snapshots are append-forever; doubling window size doubles per-snapshot
-bytes. With ~120d history and growing.
-
-**Mitigation:** ACCEPT for now. Existing `_check_snapshot_freshness`
-watches mtime. Add a file-size warning in a separate follow-up if it
-becomes material. Not blocking this PR.
-
-### F7 — `ViolationTracker` escalation count reset
-The 14 currently-unresolved alerts have escalation history.
-Post-merge they'll have different key sets (14d math) and existing
-escalation counts effectively reset.
-
-**Mitigation:** This is desired — the existing alerts ARE noise and
-we're resolving them explicitly anyway. ACCEPT.
-
-## Updated Files Touched
-
-1. `portfolio/accuracy_degradation.py`:
-   - Bump `BASELINE_TARGET_DAYS` 7.0 → 14.0
-   - Bump `MIN_SNAPSHOT_AGE_DAYS` 6.0 → 13.0
-   - Change `save_full_accuracy_snapshot(*, days: int = 7)` → 14
-   - Add `window_days` field to snapshot extras
-   - Filter baselines by matching `window_days` in `_find_baseline_snapshot`
-   - Emit informational log when transition_active
-   - Replace hardcoded "7d" strings in `build_daily_summary`
-2. `portfolio/accuracy_stats.py`:
-   - Plumb `window_days` extra through `save_accuracy_snapshot`
-3. `tests/test_accuracy_degradation*.py`:
-   - Update tests asserting "7d" strings or `days=7` defaults
-4. `data/critical_errors.jsonl`: append 14 resolution lines (main worktree, post-merge)
-5. `docs/PLAN.md`: this file
-6. `docs/SESSION_PROGRESS.md`: end-of-session note
-
+(appended after fresh-agent run)
