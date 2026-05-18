@@ -75,16 +75,37 @@ modification).
 cmd.exe /c "cd /d Q:\finance-analyzer && git push origin --delete feat/focus-analysis-telegram feat/metals-execution-engine feature/agent-reasoning feature/bigbet-alerts feature/dashboard feature/forward-tracking feature/lora-training feature/social-sentiment feature/telegram-multitimeframe fix/accuracy-gating-followup-20260416 fix/macd-precision fix/metals-adversarial-review fix/metals-catalog-refresh-sync-playwright fix/metals-finish-review fix/metals-swing-sizing-and-time-limit improve/auto-session-2026-02-24 local-llm-accuracy-2026-03-09"
 ```
 
-17 branches. All verified merged into `origin/main` except
-`fix/accuracy-gating-followup-20260416` — 4 unmerged commits all
-verified obsolete (`b7c2e2df` superseded by current main
-`_compute_gate_relaxation`; `e5b02b75` superseded by main
-`replay_consensus.py:116`; `59455669` plan doc duplicates
-`d5577a67`; merge commit `5e93c7aa` covered by `877221a`).
+17 branches. 16 are full ancestors of `origin/main` (safe).
+`fix/accuracy-gating-followup-20260416` is NOT an ancestor of main
+(4 of its commits are not in main as SHAs), but the *content* of each
+of those 4 commits is already in main via different commits:
+- `b7c2e2df` (signal_engine circuit-breaker fix): main's
+  `_compute_gate_relaxation` (`portfolio/signal_engine.py:1909`) is a
+  superset — same Reviewer 1 I1 + Reviewer 2 P2-5 fixes plus extra
+  guards added in later Codex rounds.
+- `e5b02b75` (replay narrower except clauses): current main
+  `scripts/replay_consensus.py:116` uses the same
+  `(OSError, ValueError, KeyError, json.JSONDecodeError)` tuple.
+- `59455669` (plan doc): same doc landed in main as commit
+  `d5577a67`.
+- `5e93c7aa` (merge commit): the underlying P1 fix `877221a` is in
+  main.
 
-**Permanent fix** — add to `.claude/settings.local.json` `allow` list:
+So safe to push-delete via content equivalence, NOT via SHA ancestry.
+If you'd rather be strict, leave that one branch alone and delete the
+other 16.
+
+**Permanent fix** — user manually adds to `.claude/settings.local.json`
+`allow` list (agent self-edit is blocked by classifier). Narrow glob —
+don't allow blanket `--delete *` since that would permit deleting
+ANY remote ref including `main`. Use prefix-restricted patterns:
 ```json
-"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete *\")"
+"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete feat/*\")",
+"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete feature/*\")",
+"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete fix/*\")",
+"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete improve/*\")",
+"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete claude/*\")",
+"Bash(cmd.exe /c \"cd /d Q:\\finance-analyzer && git push origin --delete local-llm-*\")"
 ```
 
 **Already deleted from remote (5):** `fix/metals-cleanup-apr10`,
@@ -5001,3 +5022,13 @@ tests/test_pickup_llm_cryptotrader_72h.py
 ### 2026-05-18 23:02 UTC | main
 4d3c26da docs: TODO for remote branch sweep finish + OIL Gate A/B verification
 docs/SESSION_PROGRESS.md
+
+### 2026-05-18 23:18 UTC | main
+f4b32530 docs(claude.md): startup-check 2 = read the bottle (pending pickups)
+docs/SESSION_PROGRESS.md
+scripts/win/reinstall-all-tasks-elevated.bat
+
+### 2026-05-18 23:19 UTC | main
+20fe6abb docs(claude.md): startup-check 2 = read the bottle (pending pickups)
+CLAUDE.md
+scripts/session_start_bottle.py
