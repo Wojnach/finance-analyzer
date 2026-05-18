@@ -1182,6 +1182,10 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             # BUY-only bias. Was gated at 3h/4h in all regimes but still active
             # at _default in ranging where it pushes false BUY consensus.
             "sentiment",
+            # 2026-05-18: btc_proxy 46.5% all-time (71 sam), 47.5% recent (61 sam).
+            # MSTR-BTC leverage ratio expands in ranging — MSTR dropped 8.8% on
+            # BTC -1.5% (2026-05-18). Static proxy is noise in sideways markets.
+            "btc_proxy",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
