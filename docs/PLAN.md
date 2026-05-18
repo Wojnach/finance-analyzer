@@ -165,12 +165,16 @@ Try in order, stop at first success:
 
 | File | Change |
 |---|---|
-| `scripts/review_shadow_signals.py` | accuracy filter + docstring update |
+| `portfolio/llm_probability_log.py` | NEW `is_directional_prediction(row)` helper |
+| `scripts/review_shadow_signals.py` | use shared filter in `_collect_stats` |
+| `dashboard/app.py` | use shared filter in `_compute_llm_leaderboard` (premortem #1) |
+| `tests/test_llm_probability_log_filter.py` | NEW |
 | `tests/test_review_shadow_signals_filter.py` | NEW |
+| `tests/test_llm_leaderboard_filter.py` | NEW |
 | `portfolio/signal_engine.py` | extend log_vote skip guard |
 | `tests/test_signal_engine_log_vote_skip_abstain.py` | NEW |
 | `Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf` | regen attempt (outside repo) |
-| `data/shadow_registry.json` | metadata cleanup |
+| `data/shadow_registry.json` | metadata cleanup (atomic_write via `shadow_registry.save_registry`) |
 | `docs/SESSION_PROGRESS.md` | session log entry |
 
 ## Verification
@@ -203,4 +207,89 @@ Try in order, stop at first success:
 
 ## Premortem
 
-(to be filled by general-purpose Agent before implementation)
+(Generated 2026-05-18 by fresh `general-purpose` Agent reading PLAN.md +
+CLAUDE.md as its only context.)
+
+### N1 — Reporting drift between gate and dashboard
+
+The fix is at one read path only (`review_shadow_signals.py`). On
+2026-05-25, Layer 2 reads `agent_summary_compact.json` (built by
+`reporting.py`) or the dashboard reads `/api/llm-leaderboard`
+(`dashboard/app.py:_compute_llm_leaderboard`) and sees the old 64%
+accuracy printed for `cryptotrader_lm`. Layer 2 tiebreaks on it, takes
+a losing BTC trade.
+
+**Mitigation (absorbed):** the abstain/HOLD filter is extracted into
+`portfolio/llm_probability_log.is_directional_prediction(row)` and
+imported by BOTH `scripts/review_shadow_signals.py` AND
+`dashboard/app.py:_compute_llm_leaderboard`. Test
+`tests/test_llm_leaderboard_filter.py` asserts the dashboard endpoint
+agrees with the gate for at least the three known-broken shadows.
+
+`reporting.py` does not currently surface LLM accuracy into the
+agent_summary; verified by grep (`grep -n 'cryptotrader_lm\|llm_probability_log' portfolio/reporting.py`
+returns nothing). The 30pp `accuracy_cache.json` vs `llm_probability_log`
+discrepancy (out-of-scope) remains as a separate latent risk.
+
+### N2 — `shadow_registry.json` rewrite race
+
+ACCEPT. `portfolio/shadow_registry.py:save_registry` already routes
+through `file_utils.atomic_write_json` (verified line 78). Batch 4 must
+call `save_registry()` not `json.dump` directly — test will assert this
+by patching `atomic_write_json` and confirming it's called.
+
+### N3 — LoRA regen "success" probe too weak
+
+`completion_tokens > 5` proves the model isn't dead but says nothing
+about whether output parses as the expected
+`{action, confidence, reasoning}` JSON. A regen that emits valid prose
+but garbage JSON would still get accepted and cause production
+JSON-parse failures.
+
+**Mitigation (absorbed):** the regen probe is a Python script
+`scripts/probe_cryptotrader_lm.py` that calls `_parse_response()` on at
+least 5 sampled production prompts and requires `parse_rate >= 0.9` AND
+`mean_completion_tokens >= 20`. If the probe fails on the regenerated
+file we fall back to retiring the shadow (Batch 3 step 3).
+
+### N4 — log_vote skip drops legitimate low-conf BUY/SELL
+
+A real model emitting `chosen=BUY, confidence=0.0` (theoretically — no
+current code path does this; the parser defaults to 0.50 when missing)
+gets silently dropped. Test green, prod silent. Worse, when meta_trader
+gets wired (Item 3) a coding bug that returns `confidence=0.0` on real
+preds would never surface.
+
+**Mitigation (absorbed):** the skip guard uses
+`indicators.get("feature_unavailable") is True OR confidence <= 0` and
+emits a single `logger.info("[log_vote_skipped] signal=%s reason=%s")`
+line every time it skips. `check_critical_errors.py` already monitors
+`shadow_silent` patterns (verify); if not, add a daily aggregation step
+in the existing 03:30 cron (out-of-scope but tracked in SESSION_PROGRESS).
+
+### N5 — HOLD exclusion drops existing voters below 47% gate
+
+`portfolio/accuracy_stats.py` was checked: it reads `signal_log.jsonl`
+(not `llm_probability_log.jsonl`) and already uses the
+`total_buy + total_sell` denominator pattern (see `accuracy_cache.json`
+shape). The gate fix is isolated to the promotion-script /
+leaderboard-endpoint read paths. ACCEPT — does NOT propagate to the
+force-HOLD signal gate.
+
+### N6 — Out-of-scope `accuracy_cache.json` vs `llm_probability_log` drift
+
+ACCEPT for this PR. Cross-source assert is a good idea but introducing
+a new contract assertion in the same PR that fixes the gate increases
+review surface and risk of false-positive alerts during the data
+transition. Tracked as a follow-up in `docs/SESSION_PROGRESS.md` →
+`accuracy_source_unification`.
+
+### N7 — Layer 2 prompt drift after we shrink real-pred counts
+
+After the fix `cryptotrader_lm` shows `n_with_outcome=0` in
+`/api/llm-leaderboard`. If `reporting.py` (compact summary builder)
+ever starts emitting `"prediction_count": ...` derived from the
+log-row count (unfiltered), Layer 2 might believe cryptotrader_lm is
+"active" when in fact every row is abstain. Verified not currently
+present, but if a future change adds it, this PR's helper must be
+used. Documented in the helper's docstring as a contract.
