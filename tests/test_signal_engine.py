@@ -323,6 +323,152 @@ class TestDirectionalBiasPenalty:
         assert result[0] == "BUY"
 
 
+class TestResolveBiasPenaltyBoundaries:
+    """2026-05-19: three-tier bias penalty (moderate/high/extreme).
+
+    Each boundary tested separately so a refactor that breaks tier
+    ordering (e.g. accidentally `if bias > moderate: ... elif bias >
+    extreme` which would swallow extreme into moderate) fails loudly
+    instead of silently returning the wrong multiplier. Premortem F1.
+    """
+
+    def test_below_moderate_returns_1x(self):
+        from portfolio.signal_engine import _resolve_bias_penalty
+        assert _resolve_bias_penalty(0.64) == 1.0
+        assert _resolve_bias_penalty(0.65) == 1.0  # boundary: NOT > 0.65
+        assert _resolve_bias_penalty(0.0) == 1.0
+
+    def test_moderate_tier_returns_0_7x(self):
+        from portfolio.signal_engine import (
+            _BIAS_MODERATE_PENALTY, _resolve_bias_penalty,
+        )
+        # 0.65 < bias <= 0.85 → moderate (0.7x)
+        assert _resolve_bias_penalty(0.66) == _BIAS_MODERATE_PENALTY
+        assert _resolve_bias_penalty(0.81) == _BIAS_MODERATE_PENALTY  # sentiment
+        assert _resolve_bias_penalty(0.85) == _BIAS_MODERATE_PENALTY  # boundary
+
+    def test_high_tier_returns_0_5x(self):
+        from portfolio.signal_engine import (
+            _BIAS_PENALTY, _resolve_bias_penalty,
+        )
+        # 0.85 < bias <= 0.90 → high (0.5x)
+        assert _resolve_bias_penalty(0.86) == _BIAS_PENALTY
+        assert _resolve_bias_penalty(0.90) == _BIAS_PENALTY  # boundary
+
+    def test_extreme_tier_returns_0_2x(self):
+        from portfolio.signal_engine import (
+            _BIAS_EXTREME_PENALTY, _resolve_bias_penalty,
+        )
+        # bias > 0.90 → extreme (0.2x)
+        assert _resolve_bias_penalty(0.91) == _BIAS_EXTREME_PENALTY  # crypto_macro
+        assert _resolve_bias_penalty(0.95) == _BIAS_EXTREME_PENALTY
+        assert _resolve_bias_penalty(0.99) == _BIAS_EXTREME_PENALTY  # fear_greed-ish
+        assert _resolve_bias_penalty(1.00) == _BIAS_EXTREME_PENALTY
+
+    def test_tier_ordering_extreme_beats_moderate(self):
+        """Regression guard for premortem F1: extreme value must NOT
+        return moderate's multiplier. A buggy lowest-first cascade
+        would return 0.7 here."""
+        from portfolio.signal_engine import (
+            _BIAS_EXTREME_PENALTY, _resolve_bias_penalty,
+        )
+        # crypto_macro 0.91 in production: must hit extreme, not moderate.
+        assert _resolve_bias_penalty(0.91) == _BIAS_EXTREME_PENALTY
+        assert _resolve_bias_penalty(0.91) < 0.5  # stronger than high tier
+
+    def test_moderate_tier_catches_sentiment(self):
+        """Production sentinel: sentiment bias=0.81 must get moderate
+        penalty (was 1.0x pre-2026-05-19). Boundary regression guard."""
+        from portfolio.signal_engine import _resolve_bias_penalty
+        assert _resolve_bias_penalty(0.81) == 0.7
+
+
+class TestModerateTierEndToEnd:
+    """Verify the new moderate tier actually changes consensus output."""
+
+    def test_sentiment_buy_with_moderate_penalty_loses_to_balanced_sell(self):
+        """sentiment bias=0.81 voting BUY (in-bias) gets 0.7x. With
+        an equally-accurate direction-balanced opponent voting SELL,
+        the opponent should win on weighted_confidence."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        accuracy_data = {
+            "sentiment": {"accuracy": 0.55, "total": 500,
+                          "buy_accuracy": 0.55, "total_buy": 400},
+            "rsi": {"accuracy": 0.55, "total": 500,
+                    "sell_accuracy": 0.55, "total_sell": 250},
+        }
+        activation_rates = {
+            "sentiment": {"bias": 0.81, "samples": 99057,
+                          "normalized_weight": 1.0,
+                          "activation_rate": 0.44, "buy_rate": 0.40,
+                          "sell_rate": 0.04},
+            "rsi": {"bias": 0.11, "samples": 99057,
+                    "normalized_weight": 1.0, "activation_rate": 0.36,
+                    "buy_rate": 0.16, "sell_rate": 0.20},
+        }
+        # sentiment BUY (in-bias, 0.7x) vs rsi SELL (full weight)
+        # sentiment weight = 0.55 * 0.7 = 0.385; rsi weight = 0.55
+        # → rsi SELL wins.
+        votes = {"sentiment": "BUY", "rsi": "SELL"}
+        result = _weighted_consensus(
+            votes, accuracy_data, "unknown",
+            activation_rates=activation_rates,
+        )
+        assert result[0] == "SELL", (
+            f"sentiment BUY (bias 0.81, moderate 0.7x) should lose to "
+            f"rsi SELL (equal accuracy, full weight) — got {result[0]}"
+        )
+
+    def test_crypto_macro_promoted_to_extreme_after_threshold_drop(self):
+        """crypto_macro bias=0.91 was previously high tier (0.5x). After
+        lowering _BIAS_EXTREME_THRESHOLD 0.95 → 0.90 it sits in extreme
+        (0.2x). With crypto_macro acc=1.0 and opponent rsi acc=0.55:
+
+        OLD policy (0.91 → 0.5x): crypto_macro weight = 1.0 * 0.5 = 0.50
+        > rsi 0.55 = lose by margin → BUY wins
+        NEW policy (0.91 → 0.2x): crypto_macro weight = 1.0 * 0.2 = 0.20
+        < rsi 0.55 → SELL wins
+
+        rsi accuracy 0.55 is above the 0.47 gate so it stays in play."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        accuracy_data = {
+            "crypto_macro": {"accuracy": 1.0, "total": 500,
+                             "buy_accuracy": 1.0, "total_buy": 475},
+            "rsi": {"accuracy": 0.55, "total": 500,
+                    "sell_accuracy": 0.55, "total_sell": 250},
+        }
+        activation_rates = {
+            "crypto_macro": {"bias": 0.91, "samples": 15933,
+                             "normalized_weight": 1.0,
+                             "activation_rate": 0.28, "buy_rate": 0.265,
+                             "sell_rate": 0.012},
+            "rsi": {"bias": 0.11, "samples": 99057,
+                    "normalized_weight": 1.0, "activation_rate": 0.36,
+                    "buy_rate": 0.16, "sell_rate": 0.20},
+        }
+        votes = {"crypto_macro": "BUY", "rsi": "SELL"}
+        result = _weighted_consensus(
+            votes, accuracy_data, "unknown",
+            activation_rates=activation_rates,
+        )
+        assert result[0] == "SELL"
+
+
+class TestBiasPolicyVersion:
+    """2026-05-19 (premortem F3 mitigation): agent_summary.json must
+    carry the active bias policy version so dashboard /
+    accuracy-history consumers can mark the policy-change line."""
+
+    def test_constant_exists_and_is_iso_date(self):
+        from portfolio.signal_engine import BIAS_POLICY_VERSION
+        # ISO-8601 date YYYY-MM-DD
+        assert len(BIAS_POLICY_VERSION) == 10
+        assert BIAS_POLICY_VERSION[4] == "-"
+        assert BIAS_POLICY_VERSION[7] == "-"
+
+
 # ---------------------------------------------------------------------------
 # Directional accuracy gating
 # ---------------------------------------------------------------------------

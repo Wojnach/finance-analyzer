@@ -493,15 +493,56 @@ _CRISIS_MIN_BROKEN = 3  # need at least 3 broken macro signals for crisis flag
 _CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
 _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
 
-# Directional bias penalty: signals with extreme BUY or SELL bias (>85% of
-# their non-HOLD votes in one direction) get penalized because their
-# "accuracy" may just reflect market drift rather than genuine edge.
-# E.g., calendar (100% BUY) in a ranging-up market looks accurate by luck.
-_BIAS_THRESHOLD = 0.85  # >85% BUY or >85% SELL triggers penalty
-_BIAS_PENALTY = 0.5  # 0.5x weight for high-bias signals (85-95%)
-_BIAS_EXTREME_THRESHOLD = 0.95  # >95% triggers stronger penalty
-_BIAS_EXTREME_PENALTY = 0.2  # 0.2x weight for extreme-bias signals (>95%)
-_BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
+# Directional bias penalty: signals with skewed BUY or SELL vote
+# distributions get downweighted on votes IN their bias direction
+# because their "accuracy" may just reflect market drift rather than
+# genuine edge. Contrarian votes (rare, in the opposite direction)
+# keep full weight — those are the informative ones.
+#
+# 2026-05-19: added moderate tier (0.65) + lowered extreme tier
+# (0.95 → 0.90). Catches sentiment (0.81) and promotes crypto_macro
+# (0.91) to extreme. Goal: stop letting perma-bull signals dominate
+# consensus during rallies, when they look spuriously accurate via
+# directional tailwind. Direction-balanced voters (rsi bias=0.11,
+# bb 0.15, momentum 0.04) are unaffected. See docs/PLAN.md.
+_BIAS_MODERATE_THRESHOLD = 0.65  # 0.65 < bias <= 0.85
+_BIAS_MODERATE_PENALTY = 0.7     # 0.7x weight for moderate-bias signals
+_BIAS_THRESHOLD = 0.85           # 0.85 < bias <= 0.90 → "high"
+_BIAS_PENALTY = 0.5              # 0.5x weight for high-bias signals
+_BIAS_EXTREME_THRESHOLD = 0.90   # bias > 0.90 → extreme
+_BIAS_EXTREME_PENALTY = 0.2      # 0.2x weight for extreme-bias signals
+_BIAS_MIN_ACTIVE = 30            # need enough active votes to judge bias
+
+# Stamped into agent_summary.json so dashboard / backtester /
+# accuracy-history consumers can mark the "before / after" line
+# (premortem F3). Bump on any change to the constants above.
+BIAS_POLICY_VERSION = "2026-05-19"
+
+
+def _resolve_bias_penalty(bias: float) -> float:
+    """Pick the multiplicative penalty for a given bias value.
+
+    Highest-first ordering is non-negotiable — premortem F1 flagged
+    that a "lowest-first" cascade silently demotes extreme bias to
+    moderate (e.g. crypto_macro 0.91 would get 0.7x instead of 0.2x).
+
+    Bias is computed as ``abs(buy_rate - sell_rate) / activation_rate``
+    in portfolio.accuracy_stats.signal_activation_rates() — 0.0 is
+    perfectly balanced, 1.0 is 100% one-direction.
+
+    This is the single application point for the bias penalty.
+    apply_confidence_penalties (the post-consensus cascade) does NOT
+    re-apply this (premortem F6). If enabling unidirectional-
+    by-design signals later (e.g. vix_term_structure regime gates),
+    add a BIAS_PENALTY_EXEMPT allowlist here (premortem F5).
+    """
+    if bias > _BIAS_EXTREME_THRESHOLD:
+        return _BIAS_EXTREME_PENALTY
+    if bias > _BIAS_THRESHOLD:
+        return _BIAS_PENALTY
+    if bias > _BIAS_MODERATE_THRESHOLD:
+        return _BIAS_MODERATE_PENALTY
+    return 1.0
 
 # IC-based weight multiplier (2026-04-18): adjusts signal weight based on
 # Information Coefficient — the rank correlation between a signal's votes and
@@ -2611,21 +2652,20 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Correlation penalty: secondary signals in a group get reduced weight
         if signal_name in penalized_signals:
             weight *= penalized_signals[signal_name]
-        # Directional bias penalty (2026-05-02 research): signals with extreme
-        # BUY/SELL bias get penalized ONLY when voting in their bias direction.
-        # Contrarian votes (rare, high-value) keep full weight.
-        # E.g., calendar is 100% BUY — its BUY votes get 0.5x, but a rare
-        # SELL (if it ever emits one) keeps 1.0x because that's genuinely
-        # informative. Previous version penalized ALL votes equally.
+        # Directional bias penalty (2026-05-02 research, 2026-05-19
+        # three-tier): signals with skewed vote distributions get
+        # penalized ONLY when voting in their bias direction. Contrarian
+        # votes (rare, high-value) keep full weight. E.g., calendar is
+        # ~100% BUY — its BUY votes get 0.2x, but a rare SELL keeps
+        # 1.0x because that's genuinely informative.
         signal_bias = act_data.get("bias", 0.0)
         signal_samples = act_data.get("samples", 0)
-        if signal_samples >= _BIAS_MIN_ACTIVE and signal_bias > _BIAS_THRESHOLD:
+        if signal_samples >= _BIAS_MIN_ACTIVE and signal_bias > _BIAS_MODERATE_THRESHOLD:
             buy_rate = act_data.get("buy_rate", 0.0)
             sell_rate = act_data.get("sell_rate", 0.0)
             bias_direction = "BUY" if buy_rate >= sell_rate else "SELL"
             if vote == bias_direction:
-                penalty = _BIAS_EXTREME_PENALTY if signal_bias > _BIAS_EXTREME_THRESHOLD else _BIAS_PENALTY
-                weight *= penalty
+                weight *= _resolve_bias_penalty(signal_bias)
         # 2026-05-11 (Codex Fix B): apply soft-vote dampening LAST so it
         # composes with all upstream multipliers (accuracy, IC, regime,
         # horizon, macro, crisis, activity, correlation, bias). The
