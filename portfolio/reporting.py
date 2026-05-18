@@ -133,8 +133,9 @@ def write_agent_summary(
 
     # 2026-05-19: stamp current bias-policy version so dashboard /
     # backtester / accuracy-history consumers can render a "before / after"
-    # marker (premortem F3 mitigation). Import lazy to avoid circular
-    # dependency at module-import time.
+    # marker (premortem F3 mitigation). Lazy import is defensive — if
+    # signal_engine import fails for any reason, the snapshot writer
+    # still produces a usable agent_summary rather than crashing.
     try:
         from portfolio.signal_engine import BIAS_POLICY_VERSION as _bpv
     except Exception:
