@@ -91,7 +91,11 @@ DISABLED_SIGNALS = {
     "complexity_gap_regime",  # pending live validation (added 2026-04-22)
     "realized_skewness",  # KILLED 2026-04-29: 33.3% at 1d (90 sam). Below coin flip.
     "mahalanobis_turbulence",  # pending live validation (added 2026-04-24)
-    "crypto_evrp",  # pending live validation (added 2026-04-25)
+    # "crypto_evrp" RE-ENABLED 2026-05-18: 80.5% 1d_recent (77 sam), 92.4% 3d
+    # (105 sam), 66.7% 1d all-time. Anti-correlated (0% agreement) with the
+    # degraded macro_external cluster (crypto_macro 32.8%, credit_spread 19.3%).
+    # Strongest shadow-to-live promotion candidate. Accuracy gate auto-disables
+    # if performance degrades below 47%.
     "hash_ribbons",  # pending live validation (added 2026-04-26)
     "drift_regime_gate",  # pending live validation (added 2026-04-28)
     "vol_ratio_regime",  # pending live validation (added 2026-04-29)

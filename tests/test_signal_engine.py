@@ -1176,17 +1176,16 @@ class TestCorrelationPenaltyMultiGroup:
 
 
 class TestCrossAssetFlowGroup:
-    """2026-05-07: cross_asset_flow dissolved — futures_flow disabled (38.3%),
-    credit_spread_risk now unclustered at full weight."""
+    """2026-05-07: cross_asset_flow dissolved — futures_flow disabled (38.3%).
+    2026-05-18: credit_spread_risk moved to fundamental_cluster (100% agreement with crypto_macro)."""
 
     def test_cross_asset_flow_group_removed(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
         assert "cross_asset_flow" not in CORRELATION_GROUPS
 
-    def test_credit_spread_risk_unclustered(self):
+    def test_credit_spread_risk_in_fundamental_cluster(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
-        for group_members in CORRELATION_GROUPS.values():
-            assert "credit_spread_risk" not in group_members
+        assert "credit_spread_risk" in CORRELATION_GROUPS.get("fundamental_cluster", frozenset())
 
     def test_futures_flow_disabled(self):
         from portfolio.tickers import DISABLED_SIGNALS

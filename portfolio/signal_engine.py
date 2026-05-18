@@ -1727,16 +1727,18 @@ _STATIC_CORRELATION_GROUPS = {
     "momentum_cluster": frozenset({"mean_reversion", "rsi", "momentum"}),
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
-    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro"}),
+    # 2026-05-18: Added credit_spread_risk. Signal correlation analysis shows 100%
+    # agreement with crypto_macro (226 sam) and econ_calendar (226 sam). Without
+    # grouping, it voted at full 1.0x weight while being identical to crypto_macro.
+    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro", "credit_spread_risk"}),
     # 2026-04-19: Measured correlation (50 snapshots): credit_spread_risk
     # agrees 100% with macro_regime in ETH/XAU, 100% with news_event in BTC.
     # futures_flow agrees 100% with credit_spread_risk + macro_regime in ETH.
     # Both were orphaned and getting full 1.0x weight despite redundancy.
     # Grouped together rather than in trend_direction to avoid inflating that
     # mega-cluster further (already 9 members at 0.12x).
-    # 2026-05-07: futures_flow disabled (38.3% 1d). credit_spread_risk (53.7%)
-    # now unclustered — single-member groups are invalid per convention.
-    # credit_spread_risk votes at full 1.0x weight independently.
+    # 2026-05-07: futures_flow disabled (38.3% 1d). credit_spread_risk moved
+    # to fundamental_cluster (2026-05-18) — 100% agreement with crypto_macro.
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
