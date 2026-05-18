@@ -171,15 +171,21 @@ def _load_state():
 
 def _save_state(state):
     # Prune triggered_consensus entries for tickers not in current signals
-    # to prevent unbounded growth when tickers are removed from tracking
+    # to prevent unbounded growth when tickers are removed from tracking.
+    # P1.2 guard: skip prune when current_tickers is empty (e.g., BUG-178
+    # pool timeout, total fetch failure). Without this, an empty cycle wipes
+    # all baselines and the next successful cycle re-fires consensus triggers
+    # for every ticker — spawning a Layer 2 invocation storm.
     tc = state.get("triggered_consensus", {})
     current_tickers = state.get("_current_tickers")
-    if current_tickers is not None:
+    if current_tickers is not None and len(current_tickers) > 0:
         removed = {k for k in tc if k not in current_tickers}
         if removed:
             logger.info("trigger: pruning %d stale ticker(s) from baseline: %s", len(removed), ", ".join(sorted(removed)))
         pruned = {k: v for k, v in tc.items() if k in current_tickers}
         state["triggered_consensus"] = pruned
+    elif current_tickers is not None and len(current_tickers) == 0:
+        logger.warning("trigger: empty ticker set — skipping baseline prune to prevent invocation storm")
     state.pop("_current_tickers", None)  # don't persist internal field
     atomic_write_json(STATE_FILE, state)
 
