@@ -82,7 +82,7 @@ def _stub_current(monkeypatch, *, signals=None, per_ticker=None,
     if forecast is not None:
         monkeypatch.setattr(
             "portfolio.forecast_accuracy.cached_forecast_accuracy",
-            lambda horizon="24h", days=7, use_raw_sub_signals=True: forecast,
+            lambda horizon="24h", days=14, use_raw_sub_signals=True: forecast,
         )
     if consensus is not None:
         def _stub_consensus(horizon="1d", entries=None, days=None):
@@ -153,7 +153,7 @@ class TestSaveFullAccuracySnapshot:
         # Forecast (Chronos/Kronos)
         monkeypatch.setattr(
             "portfolio.forecast_accuracy.cached_forecast_accuracy",
-            lambda horizon="24h", days=7, use_raw_sub_signals=True: {
+            lambda horizon="24h", days=14, use_raw_sub_signals=True: {
                 "chronos_24h": {"accuracy": 0.51, "total": 420, "correct": 214},
                 "kronos_24h": {"accuracy": 0.49, "total": 380, "correct": 186},
             },
@@ -363,7 +363,11 @@ class TestAntiNoise:
         violations = deg.check_degradation()
         assert violations == []
 
-    def test_snapshot_age_under_6d_gate_returns_empty(self, monkeypatch, tmp_path):
+    def test_snapshot_age_under_min_age_gate_returns_empty(self, monkeypatch, tmp_path):
+        # MIN_SNAPSHOT_AGE_DAYS bumped 6.0 → 13.0 on 2026-05-18.
+        # A baseline at now-4d is also outside BASELINE_TARGET_DAYS±36h so
+        # it gets rejected by _find_baseline_snapshot first. Either path
+        # produces the same observable: no alert.
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
