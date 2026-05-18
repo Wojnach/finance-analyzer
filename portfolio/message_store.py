@@ -112,8 +112,6 @@ def _do_send_telegram(msg, config):
         logger.info("[NO_TELEGRAM] Skipping send")
         return True
 
-    msg = sanitize_message_text(msg)
-
     token = config.get("telegram", {}).get("token")
     chat_id = config.get("telegram", {}).get("chat_id")
     if not token or not chat_id:
