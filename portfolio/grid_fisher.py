@@ -133,6 +133,13 @@ class InstrumentState:
     # sell on top of the still-resting first one. Cleared by
     # ``roll_session_if_new_day``.
     eod_sell_order_id: Optional[str] = None
+    # 2026-05-18 (Gate B — silent-rejection back-off): consecutive count of
+    # ``external_cancel_buy`` reconciliations that fired within
+    # GRID_RAPID_CANCEL_THRESHOLD_S of a tier's ``placed_ts``. Reaches the
+    # threshold → instrument cooldown for GRID_RAPID_CANCEL_COOLDOWN_S.
+    # Reset by a successful fill or by ``roll_session_if_new_day``.
+    rapid_cancel_count: int = 0
+    last_rapid_cancel_ts: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +159,8 @@ class InstrumentState:
             "cooldown_until": self.cooldown_until,
             "last_direction_flip_ts": self.last_direction_flip_ts,
             "eod_sell_order_id": self.eod_sell_order_id,
+            "rapid_cancel_count": self.rapid_cancel_count,
+            "last_rapid_cancel_ts": self.last_rapid_cancel_ts,
         }
 
     @classmethod
@@ -173,6 +182,8 @@ class InstrumentState:
             cooldown_until=d.get("cooldown_until"),
             last_direction_flip_ts=d.get("last_direction_flip_ts"),
             eod_sell_order_id=d.get("eod_sell_order_id"),
+            rapid_cancel_count=int(d.get("rapid_cancel_count", 0) or 0),
+            last_rapid_cancel_ts=d.get("last_rapid_cancel_ts"),
         )
 
     # ---- queries -----------------------------------------------------------
@@ -343,29 +354,58 @@ _state_lock = threading.Lock()  # serialises load/save across threads
 def load_state(
     state_path: str | Path = GRID_STATE_FILE,
 ) -> GridFisherState:
-    """Load state from *state_path*. Returns a fresh state on missing/corrupt/old."""
+    """Load state from *state_path*. Returns a fresh state on missing/corrupt.
+
+    Version handling:
+      * File version equals current → normal load.
+      * File version is missing or older than current → load through
+        ``from_dict`` (all new fields default via ``.get``). The
+        in-memory version field is updated to the current schema on the
+        next ``save_state``.
+      * File version is **newer** than current → bail and start fresh.
+        This prevents a forward-incompatible state file from being
+        silently truncated when an older binary tries to read it
+        (premortem N7, 2026-05-18).
+    """
     raw = load_json(state_path, default=None)
     if not isinstance(raw, dict):
         logger.info("grid_fisher: no prior state found at %s", state_path)
         return GridFisherState(session_id=_today_session_id())
 
     file_version = raw.get("version")
-    if file_version != GRID_STATE_SCHEMA_VERSION:
-        # Don't silently coerce — start fresh and log so the operator notices.
-        logger.warning(
-            "grid_fisher: state file %s has version=%r, expected %d — resetting",
-            state_path, file_version, GRID_STATE_SCHEMA_VERSION,
+    try:
+        file_version_int = int(file_version) if file_version is not None else 0
+    except (TypeError, ValueError):
+        file_version_int = 0
+
+    if file_version_int > GRID_STATE_SCHEMA_VERSION:
+        logger.critical(
+            "grid_fisher: state file %s has version=%r > supported %d. "
+            "Refusing to read forward-incompatible state — starting fresh. "
+            "Operator: inspect %s and resolve before next session.",
+            state_path, file_version, GRID_STATE_SCHEMA_VERSION, state_path,
         )
         return GridFisherState(session_id=_today_session_id())
 
+    if file_version_int < GRID_STATE_SCHEMA_VERSION:
+        logger.info(
+            "grid_fisher: state file %s has version=%r, migrating to %d via defaults",
+            state_path, file_version, GRID_STATE_SCHEMA_VERSION,
+        )
+
     try:
-        return GridFisherState.from_dict(raw)
+        state = GridFisherState.from_dict(raw)
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning(
             "grid_fisher: state file %s is malformed (%s) — resetting",
             state_path, exc,
         )
         return GridFisherState(session_id=_today_session_id())
+
+    # Stamp the loaded state with the current schema version so the next
+    # save reflects the actual on-disk layout.
+    state.version = GRID_STATE_SCHEMA_VERSION
+    return state
 
 
 def save_state(
@@ -465,6 +505,11 @@ def roll_session_if_new_day(state: GridFisherState) -> bool:
         # corresponding order is from yesterday's session; either it filled
         # (inventory already 0) or it expired/got cancelled overnight.
         inst.eod_sell_order_id = None
+        # Gate B counters reset at session boundary — yesterday's
+        # silent-rejection state shouldn't follow us into a new
+        # trading day where the issue may have resolved.
+        inst.rapid_cancel_count = 0
+        inst.last_rapid_cancel_ts = None
     return True
 
 
@@ -519,6 +564,9 @@ def record_fill(
     target.fill_ts = fill_ts or _utcnow_iso()
     target.fill_price = fill_price
     inst.fills_this_session += 1
+    # Any fill clears the rapid-cancel streak — the orderbook is alive.
+    inst.rapid_cancel_count = 0
+    inst.last_rapid_cancel_ts = None
 
     if side == "buy":
         # Weighted-average entry
@@ -800,6 +848,17 @@ class GridFisher:
         self.account_id = account_id
         self._buying_power_cache: Optional[tuple[float, float]] = None  # (mono_ts, value)
 
+        # Quote cache for Gate A (quote-staleness pre-placement check).
+        # Keyed by ob_id. Each entry is (cache_set_monotonic_ts, raw_quote_dict).
+        # Lock-guarded because the metals_loop tick can race the worker
+        # thread that fetches the underlying quote via _safe_session_call.
+        self._quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._quote_cache_lock = threading.Lock()
+        # Track which ob_ids we've already warned about a missing
+        # `timeOfLast` field so we don't spam the decision log when an
+        # endpoint returns an unexpected payload shape.
+        self._quote_shape_warned: set[str] = set()
+
         self.state = load_state(self.state_path)
         _seed_state_for_active_instruments(self.state, self.catalog)
 
@@ -988,6 +1047,186 @@ class GridFisher:
             except Exception:  # noqa: BLE001
                 pass
 
+    # ---- Gate A: quote-staleness pre-placement check --------------------
+
+    def _fetch_quote_cached(self, ob_id: str) -> Optional[dict[str, Any]]:
+        """Return the most recent ``get_quote`` payload for *ob_id*.
+
+        Uses a per-instrument cache with TTL ``GRID_QUOTE_CACHE_SECS`` so
+        the staleness check doesn't double the per-tick get_quote count
+        (``place_buy_ladder`` already issues one as a bid fallback). The
+        cache is thread-safe (premortem N3) — the metals_loop main
+        thread and the single worker thread inside ``_safe_session_call``
+        share this dict.
+
+        Returns ``None`` if no quote could be fetched. The caller treats
+        ``None`` as "stale" and fail-safe-skips placement.
+        """
+        from portfolio.grid_fisher_config import GRID_QUOTE_CACHE_SECS
+
+        now_mono = time.monotonic()
+        with self._quote_cache_lock:
+            entry = self._quote_cache.get(ob_id)
+            if entry is not None:
+                cached_ts, cached_q = entry
+                if now_mono - cached_ts < GRID_QUOTE_CACHE_SECS:
+                    return cached_q
+
+        quote = self._safe_session_call(
+            self.session.get_quote, ob_id, default=None,
+        )
+        if quote is None:
+            return None
+
+        with self._quote_cache_lock:
+            # Race-resistant: if another thread populated a fresher
+            # quote between our miss and now, keep that one. Strictly
+            # ``<`` (not ``<=``) so a same-tick collision can't overwrite
+            # a fresher value with our older one.
+            existing = self._quote_cache.get(ob_id)
+            if existing is None or existing[0] < now_mono:
+                self._quote_cache[ob_id] = (now_mono, quote)
+        return quote
+
+    def _quote_time_of_last_age_s(
+        self, ob_id: str, quote: Optional[dict[str, Any]],
+    ) -> Optional[float]:
+        """Return age (seconds) of *quote*'s last trade, or None if absent.
+
+        Avanza publishes ``timeOfLast`` as a UTC millisecond epoch on the
+        ``/_api/market-guide/stock/{ob_id}/quote`` payload (verified
+        empirically 2026-05-18). A missing or non-numeric value is logged
+        once per ob_id (so an Avanza schema change is loud) and treated
+        as "stale → skip" by the caller.
+        """
+        if not isinstance(quote, dict):
+            return None
+        raw = quote.get("timeOfLast")
+        if raw is None:
+            if ob_id not in self._quote_shape_warned:
+                self._quote_shape_warned.add(ob_id)
+                self._log("quote_field_missing", ob_id=ob_id,
+                          field="timeOfLast",
+                          quote_keys=sorted(list(quote.keys()))[:12])
+            return None
+        try:
+            t_ms = float(raw)
+        except (TypeError, ValueError):
+            if ob_id not in self._quote_shape_warned:
+                self._quote_shape_warned.add(ob_id)
+                self._log("quote_field_invalid", ob_id=ob_id,
+                          field="timeOfLast", value=str(raw)[:80])
+            return None
+        age_s = (time.time() * 1000.0 - t_ms) / 1000.0
+        if age_s < 0:
+            # Future-dated timestamp from Avanza (data corruption /
+            # clock drift). Don't silently clamp to 0 — that would let
+            # a corrupted response sneak past Gate A even when the
+            # orderbook is actually closed. One-shot warning + treat as
+            # stale (caller short-circuits placement).
+            if ob_id not in self._quote_shape_warned:
+                self._quote_shape_warned.add(ob_id)
+                self._log("quote_field_future_dated", ob_id=ob_id,
+                          field="timeOfLast", age_s=round(age_s, 1),
+                          value=str(raw)[:80])
+            return None
+        return age_s
+
+    # ---- Gate B: rapid-cancel back-off ----------------------------------
+
+    def _maybe_arm_rapid_cancel_cooldown(
+        self, inst: InstrumentState, *, tier_idx: int,
+    ) -> None:
+        """Increment Gate B counter and arm a cooldown if the threshold is hit.
+
+        Triggered for every ``external_cancel_buy`` discovered by
+        ``reconcile_against_live``. The just-cancelled tier still lives
+        in ``inst.buy_ladder`` (status=CANCELLED, pruned later in the
+        tick) so we can read its ``placed_ts``. If the cancel age is
+        below ``GRID_RAPID_CANCEL_THRESHOLD_S``, the cancel is treated
+        as a silent broker reject and counted toward the consecutive
+        streak. Two in a row arms a 6 h cooldown (default). Anything
+        slower than the threshold resets the streak.
+
+        Persists state immediately so a process restart between this
+        write and the end-of-tick ``_persist`` doesn't lose the counter
+        (premortem N6).
+        """
+        from portfolio.grid_fisher_config import (
+            GRID_RAPID_CANCEL_COOLDOWN_S,
+            GRID_RAPID_CANCEL_MAX_CONSECUTIVE,
+            GRID_RAPID_CANCEL_THRESHOLD_S,
+        )
+
+        # Find the CANCELLED tier so we can compute the cancel age.
+        target: Optional[TierOrder] = None
+        for o in inst.buy_ladder:
+            if o.tier == tier_idx and o.status == ORDER_CANCELLED:
+                target = o
+                break
+        if target is None or not target.placed_ts:
+            return
+
+        try:
+            placed_dt = _dt.datetime.fromisoformat(
+                target.placed_ts.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return
+        if placed_dt.tzinfo is None:
+            placed_dt = placed_dt.replace(tzinfo=_dt.timezone.utc)
+        now_utc = _dt.datetime.now(_dt.timezone.utc)
+        age_s = (now_utc - placed_dt).total_seconds()
+
+        if age_s >= GRID_RAPID_CANCEL_THRESHOLD_S:
+            # Slow cancel — orderbook is alive; clear the streak.
+            if inst.rapid_cancel_count:
+                inst.rapid_cancel_count = 0
+                inst.last_rapid_cancel_ts = None
+                self._persist()
+            return
+
+        inst.rapid_cancel_count += 1
+        inst.last_rapid_cancel_ts = _utcnow_iso()
+
+        if inst.rapid_cancel_count >= GRID_RAPID_CANCEL_MAX_CONSECUTIVE:
+            cooldown_dt = now_utc + _dt.timedelta(
+                seconds=GRID_RAPID_CANCEL_COOLDOWN_S
+            )
+            inst.cooldown_until = cooldown_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            self._log(
+                "rapid_cancel_backoff",
+                ob_id=inst.ob_id,
+                ticker=inst.ticker,
+                tier=tier_idx,
+                age_s=round(age_s, 1),
+                count=inst.rapid_cancel_count,
+                cooldown_until=inst.cooldown_until,
+                threshold_s=GRID_RAPID_CANCEL_THRESHOLD_S,
+            )
+
+        # Persist immediately so a restart between this write and the
+        # end-of-tick ``_persist`` preserves the streak (premortem N6).
+        self._persist()
+
+    def _is_quote_stale(self, ob_id: str) -> tuple[bool, Optional[float]]:
+        """Gate A check. Returns ``(is_stale, age_s)``.
+
+        ``is_stale=True`` means: skip placement. Conditions:
+          * fetch failed (treat as stale, fail-safe)
+          * timeOfLast missing/invalid (treat as stale, fail-safe)
+          * age > GRID_QUOTE_STALENESS_THRESHOLD_S
+        """
+        from portfolio.grid_fisher_config import GRID_QUOTE_STALENESS_THRESHOLD_S
+
+        quote = self._fetch_quote_cached(ob_id)
+        if quote is None:
+            return True, None
+        age = self._quote_time_of_last_age_s(ob_id, quote)
+        if age is None:
+            return True, None
+        return age > GRID_QUOTE_STALENESS_THRESHOLD_S, age
+
     def _catalog_for(self, ob_id: str) -> Optional[dict[str, Any]]:
         for cert_name, meta in self.catalog.items():
             if str(meta.get("ob_id") or "") == str(ob_id):
@@ -1077,6 +1316,26 @@ class GridFisher:
         if inst.in_cooldown(self.now_fn()):
             self._log("skip_cooldown", ob_id=inst.ob_id,
                       ticker=inst.ticker, cooldown_until=inst.cooldown_until)
+            return 0
+
+        # Gate A — abort placement if the orderbook hasn't traded
+        # recently. Added 2026-05-18 after FNSE OLJAB X5 spun a place /
+        # silent-cancel loop after hours: Avanza accepted submissions but
+        # the orderbook was dead so every order auto-cancelled. ``quote``
+        # data is cached per instrument with GRID_QUOTE_CACHE_SECS TTL so
+        # we don't add an extra get_quote per tick when the bid fallback
+        # path also fetches one.
+        is_stale, age_s = self._is_quote_stale(inst.ob_id)
+        if is_stale:
+            from portfolio.grid_fisher_config import (
+                GRID_QUOTE_STALENESS_THRESHOLD_S,
+            )
+            self._log("skip_quote_stale", ob_id=inst.ob_id,
+                      ticker=inst.ticker,
+                      time_of_last_age_s=(
+                          round(age_s, 1) if age_s is not None else None
+                      ),
+                      threshold_s=GRID_QUOTE_STALENESS_THRESHOLD_S)
             return 0
 
         existing_tiers = {t.tier for t in inst.buy_ladder
@@ -1351,6 +1610,8 @@ class GridFisher:
             inst = self.state.by_instrument[ob]
             self._log("external_cancel_buy", ob_id=ob, ticker=inst.ticker,
                       tier=tier)
+            # Gate B — rapid-cancel back-off.
+            self._maybe_arm_rapid_cancel_cooldown(inst, tier_idx=tier)
         for ob, tier in reconcile.cancelled_sells:
             inst = self.state.by_instrument[ob]
             self._log("external_cancel_sell", ob_id=ob,
@@ -1649,6 +1910,12 @@ def summarise(state: GridFisherState) -> dict[str, Any]:
                 "session_pnl_sek": round(inst.session_pnl_sek, 2),
                 "fills_this_session": inst.fills_this_session,
                 "cooldown_until": inst.cooldown_until,
+                # Gate B visibility — surface the rapid-cancel counters
+                # on the dashboard payload so operators can see WHY an
+                # instrument is in cooldown and spot repeated silent-
+                # reject patterns before the cooldown expires.
+                "rapid_cancel_count": inst.rapid_cancel_count,
+                "last_rapid_cancel_ts": inst.last_rapid_cancel_ts,
             }
             for ob, inst in state.by_instrument.items()
         },

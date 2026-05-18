@@ -1,295 +1,211 @@
-# Plan — Fix shadow accuracy gate + cryptotrader_lm LoRA (2026-05-18)
+# Plan — grid_fisher silent-rejection loop fix
 
-## Scope
+Date: 2026-05-18
+Branch: `fix/grid-fisher-hours-gate`
+Worktree: `.worktrees/grid-fisher-hours-gate`
 
-Two production bugs blocking the LLM shadow→promote pipeline. Both are
-data-quality failures masquerading as success.
+## Problem
 
-## Findings (2026-05-18 investigation)
+On 2026-05-18 18:30–18:40 UTC (= 20:30–20:40 CET) `grid_fisher` entered a
+tight loop on OIL-USD (`BULL_OLJAB_X5_AVA_2`, ob 2367797):
 
-### Bug A — accuracy gate counts abstain rows as predictions
+1. `place_buy_order` returns success + `order_id` (e.g. 883727550).
+2. ~55 s later (next reconcile tick) the `order_id` is absent from
+   `get_open_orders`. `reconcile_against_live` sees the live position
+   delta is 0 → classifies as `external_cancel_buy`, frees the tier.
+3. Next tick re-arms the same tier. Loops forever.
 
-`scripts/review_shadow_signals.py:_collect_stats` joins
-`llm_probability_log.jsonl` against `llm_probability_outcomes.jsonl` and
-counts every joined row in the denominator. Rows with
-`confidence == 0.0` are abstentions emitted by the canonical
-`_abstain()` helper in `portfolio/signals/finance_llama.py`,
-`cryptotrader_lm.py`, `meta_trader.py` etc. — they should NOT count.
+Root cause: FNSE warrant orderbook for OLJAB is closed after ~17:25 CET.
+Verified via `/_api/market-guide/certificate/2367797`:
+- `quote.timeOfLast = 2026-05-18T06:15:01Z` (~12 h before the loop fired)
+- `quote.totalVolumeTraded = 0`
 
-`scripts/review_shadow_signals.py --promote --dry-run` reports:
+Avanza accepts the submission and returns an `order_id` but the order
+never lives in the book — auto-cancelled immediately. `grid_fisher` has
+no after-hours gate per instrument and no rapid-cancel back-off, so it
+spins until EOD sweep or signal flip.
 
+## Goals
+
+1. Stop the same failure mode for any warrant that is silently
+   auto-cancelled (after-hours, halted, knocked out, instrument-specific
+   reject). Two independent gates so neither is single-point.
+2. Zero false skips during normal hours — quote-staleness threshold
+   wide enough to absorb thin-trade lulls.
+3. Cheap: no extra Avanza calls per tick beyond what's already cached.
+
+## Design
+
+### Gate A — quote-staleness pre-placement gate
+
+Before placing a ladder for an instrument, check the cached `quote.timeOfLast`
+for the orderbook. Skip placement if `now - timeOfLast >
+GRID_QUOTE_STALENESS_THRESHOLD_S`.
+
+* Threshold: 1800 s (30 min). FNSE certs trade actively every few
+  seconds during open hours, so 30 min is comfortably above the noise
+  floor and well under a half-day after-hours gap.
+* Implementation: `place_buy_ladder` already calls `get_quote` as the
+  bid fallback. Pull `timeOfLast` from the same response (ms epoch),
+  compare to wall clock. To avoid double-calling when the caller
+  supplied a bid, add a tiny per-instrument quote cache (60 s TTL).
+* Decision log: `skip_quote_stale` with `ob_id`, `ticker`,
+  `time_of_last_age_s`, `threshold_s`.
+
+### Gate B — rapid-cancel back-off (post-reconcile)
+
+When `reconcile_against_live` classifies a tier as `external_cancel_buy`,
+record the cancel timestamp + age relative to that tier's `placed_ts`.
+If the age is below `GRID_RAPID_CANCEL_THRESHOLD_S` (default 120 s),
+increment a per-instrument counter `rapid_cancel_count`. When the count
+reaches `GRID_RAPID_CANCEL_MAX_CONSECUTIVE` (default 2), set
+`inst.cooldown_until` to `now + GRID_RAPID_CANCEL_COOLDOWN_S` (default
+6 h — long enough to span the rest of the trading day).
+
+* Reset counter on any successful fill or after the cooldown elapses.
+* Decision log: `rapid_cancel_backoff` with `ob_id`, `ticker`, `count`,
+  `cooldown_until`.
+
+### Config (`portfolio/grid_fisher_config.py`)
+
+```python
+GRID_QUOTE_STALENESS_THRESHOLD_S = 1800        # 30 min
+GRID_QUOTE_CACHE_SECS = 60                      # per-instrument cache
+GRID_RAPID_CANCEL_THRESHOLD_S = 120              # cancel within 2 min = "rapid"
+GRID_RAPID_CANCEL_MAX_CONSECUTIVE = 2            # 2 in a row → cooldown
+GRID_RAPID_CANCEL_COOLDOWN_S = 6 * 3600          # 6 h
 ```
-[DRY] would promote cryptotrader_lm: matched=779 accuracy=0.630 → promote
-[DRY] would promote finance_llama:   matched=770 accuracy=0.635 → promote
-[DRY] would promote meta_trader:     matched=732 accuracy=0.641 → promote
+
+### State
+
+Add to `InstrumentState`:
+
+```python
+rapid_cancel_count: int = 0
+last_rapid_cancel_ts: Optional[str] = None
 ```
 
-Reality (recomputed by filtering `confidence > 0`):
+Reset by `roll_session_if_new_day`. `TierOrder` already carries
+`placed_ts` so no schema bump on the tier dataclass.
 
-| signal           | matched | real_acc | abstain |
-|------------------|--------:|---------:|--------:|
-| cryptotrader_lm  |       0 |        – |    992  |
-| meta_trader      |       0 |        – |    752  |
-| finance_llama    |     123 |   0.439  |    692  |
+State schema-version bumps 1 → 2; existing state files load cleanly
+because `from_dict` already uses `.get(...)` for every field.
 
-`cryptotrader_lm` and `meta_trader` have zero real predictions. Outcome
-backfill labels ~64% of 1d windows as HOLD; scaffold rows always emit
-`chosen: "HOLD"`, so the join shows 64% accuracy on garbage. Without the
-fix the next 03:30 cron run would auto-promote three broken voters into
-production consensus.
-
-### Bug B — cryptotrader_lm GGUF LoRA produces empty completions
-
-Server probe with the actual production prompt:
-
-```
-prompt length: 1191 chars
-status: 200
-completion_tokens: 2
-finish_reason: stop
-text: '```'
-```
-
-`/v1/chat/completions` on the trivial prompt `Reply: HELLO` also
-returns `content: ""`. Base Ministral-8B without the LoRA serves
-correctly (verified upstream — `ministral` signal accumulates real
-predictions). The breakage is the LoRA file.
-
-GGUF header is well-formed:
-
-```
-metadata:
-  general.architecture: llama
-  general.type: adapter
-  adapter.type: lora
-  adapter.lora.alpha: 16.0
-  general.base_model.0.name: Ministral 8B Instruct 2410
-
-tensors (144 total):
-  blk.0.attn_q.weight.lora_a  dims=[4096, 8] type=1
-  blk.0.attn_q.weight.lora_b  dims=[8, 4096]
-  blk.0.attn_v.weight.lora_a  dims=[4096, 8]
-  blk.0.attn_v.weight.lora_b  dims=[8, 1024]   ← matches Ministral GQA kv_heads
-```
-
-So format is correct, base/adapter match. Two hypotheses for why
-output collapses to EOS in ≤3 tokens:
-
-1. **Homebrew conversion bug** — adapter_config.json declares
-   `model_type: "gpt2"` (wrong; should be `mistral`). Some converter
-   path may have used the wrong target-module mapping, scrambling the
-   weights even though the resulting tensor shapes look OK.
-2. **Quantization/precision mismatch** — LoRA was trained on bf16
-   base, applied here against Q4_K_M. With `lora_alpha/r = 16/8 = 2.0`
-   the scaled contribution lands in the residual stream of a heavily
-   quantized base; the model may collapse to EOS.
-
-User hint: "the LoRA might be our attempt to modify the original
-cryptotrader" — meaning the GGUF was locally converted from the
-PEFT safetensors via `convert_lora_to_gguf.py` against an updated
-llama.cpp. Most plausible single root cause.
-
-### Bug C — scaffolds pollute probability log every cycle
-
-`meta_trader` still has `_FEATURE_AVAILABLE=False` and returns
-`HOLD/conf=0` on every dispatch. Every dispatch reaches `signal_engine`
-which calls `log_vote()` with that row. Result: 752 abstain rows for
-meta_trader, 992 for cryptotrader_lm (because every call hits the
-empty-completion path), 692 for finance_llama (Plex VRAM gate + parse
-failures + ticker abstains).
-
-The `bc2c659e` throttle-skip guard (2026-05-17) handles the
-cycle-modulo throttle case but not the abstain-result case.
-
-## What we will fix
-
-### Batch 1 — Accuracy gate filters abstain + HOLD-only rows
-
-`scripts/review_shadow_signals.py:_collect_stats`:
-
-* Skip rows where `confidence <= 0` (canonical abstain signal).
-* Skip rows where `chosen == "HOLD"`. HOLD is not a directional
-  prediction; counting it against the outcome label inflates accuracy
-  for HOLD-biased shadows. This matches the methodology in
-  `data/accuracy_cache.json`'s `correct_buy + correct_sell` rule.
-
-Add `tests/test_review_shadow_signals_filter.py` exercising:
-
-* abstain rows excluded from denominator
-* HOLD-on-HOLD ties don't count as correct (regression for the bogus
-  64% pass)
-* directional-only rows still count
-
-### Batch 2 — signal_engine.log_vote skips abstain results
-
-Extend the `bc2c659e` guard in `portfolio/signal_engine.py` so
-`log_vote` is also skipped when:
-
-* `confidence <= 0`, OR
-* `indicators.get("feature_unavailable") is True`
-
-This stops new pollution at the source. Existing rows stay (immutable
-journal) — the Batch 1 filter handles them at read time.
-
-Add `tests/test_signal_engine_log_vote_skip_abstain.py`.
-
-### Batch 3 — cryptotrader_lm LoRA repair attempt
-
-Try in order, stop at first success:
-
-1. Run current `convert_lora_to_gguf.py` from
-   `/mnt/q/models/llama.cpp` against
-   `Q:\models\cryptotrader-lm\adapter_model.safetensors` to produce a
-   fresh `cryptotrader-lm-lora.gguf`. Probe with real prompt;
-   `completion_tokens > 5` and non-empty `text` ⇒ success.
-2. If still empty: try with `--base Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf`
-   (newer converters accept GGUF base for shape lookup).
-3. If both fail: retire the `cryptotrader_lm` shadow in
-   `data/shadow_registry.json` with status=retired, notes documenting
-   the LoRA bug + a follow-up TODO to re-enable via PEFT-in-Python
-   path. Do NOT keep emitting abstain rows.
-
-### Batch 4 — Registry hygiene
-
-`data/shadow_registry.json` updates:
-
-* `cryptotrader_lm`: result-dependent (kept-shadow with new notes, or
-  retired).
-* `meta_trader`: notes updated to say scaffold-only, abstains filtered
-  by gate fix; do not retire (it's the next planned wiring per Item 3
-  of the shadow plan).
-* Reset `last_reviewed_ts` on the 3 affected entries so the next cron
-  re-evaluates with the fixed gate.
-
-## Files touched
+## Files to change
 
 | File | Change |
-|---|---|
-| `portfolio/llm_probability_log.py` | NEW `is_directional_prediction(row)` helper |
-| `scripts/review_shadow_signals.py` | use shared filter in `_collect_stats` |
-| `dashboard/app.py` | use shared filter in `_compute_llm_leaderboard` (premortem #1) |
-| `tests/test_llm_probability_log_filter.py` | NEW |
-| `tests/test_review_shadow_signals_filter.py` | NEW |
-| `tests/test_llm_leaderboard_filter.py` | NEW |
-| `portfolio/signal_engine.py` | extend log_vote skip guard |
-| `tests/test_signal_engine_log_vote_skip_abstain.py` | NEW |
-| `Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf` | regen attempt (outside repo) |
-| `data/shadow_registry.json` | metadata cleanup (atomic_write via `shadow_registry.save_registry`) |
-| `docs/SESSION_PROGRESS.md` | session log entry |
+|------|--------|
+| `portfolio/grid_fisher_config.py` | Add 5 new constants. |
+| `portfolio/grid_fisher.py` | (a) per-instrument quote cache + Gate A in `place_buy_ladder`; (b) rapid-cancel detection in `tick` after `reconcile_against_live`; (c) reset counters in `roll_session_if_new_day` / `record_fill`. New `InstrumentState` fields. |
+| `tests/test_grid_fisher_hours_gate.py` | New: unit tests for Gate A + Gate B happy / edge / reset paths. |
+| `docs/SESSION_PROGRESS.md` | Append the fix + restart instructions. |
+| `docs/GRID_FISHER.md` | Document both gates. |
 
-## Verification
+## Execution order
 
-1. Unit tests added in batches 1 + 2 pass before commit.
-2. `python scripts/review_shadow_signals.py --promote --dry-run` after
-   Batch 1 + 4 should NOT propose to promote `cryptotrader_lm` or
-   `meta_trader`. `finance_llama` likely won't either with the real
-   filter (123 directional rows < 200 sample bar).
-3. `pytest -n auto` green vs main baseline (modulo the documented
-   worktree-symlink ~26 baseline failures).
-4. `caveman:cavecrew-reviewer` on the diff — fix all P1/P2.
-5. After merge + push + `PF-DataLoop` restart, watch one cycle:
-   * scaffold-emitted abstain rows must NOT appear in new
-     `llm_probability_log.jsonl` entries for `meta_trader`.
-   * cryptotrader_lm: either real predictions appearing (regen worked),
-     or zero rows because retired.
+1. Branch + plan commit (this file).
+2. Premortem agent → append to this file → commit.
+3. Batch 1: config constants + state fields + helpers. Commit.
+4. Batch 2: Gate A (quote-staleness). Commit.
+5. Batch 3: Gate B (rapid-cancel back-off). Commit.
+6. Batch 4: tests. Commit.
+7. Adversarial review subagent on the branch. Fix P1/P2. Commit.
+8. `pytest -n auto`. Commit any fixes. Merge → main → push.
+9. Restart `PF-MetalsLoop` so new code loads.
 
-## Out of scope
+## Risks (initial)
 
-* The 30 percentage-point gap between `accuracy_cache.json`
-  (ministral 58% on 1d) and `llm_probability_log` directional-only
-  accuracy (ministral 20% on 65 BUY+SELL rows). Two different
-  accounting systems with different gating; needs separate
-  investigation. Documented in SESSION_PROGRESS as a deferred item.
-* The 73% abstain rate for `finance_llama` in production. Plex-VRAM
-  guard + parse-failure path may both be over-eager. Defer.
-* Item 3 (meta_trader real wiring), Item 5 (Brier UI), Item 8 (qwen3
-  prompt revision) from the LLM-shadow plan — those are separate work.
+* **False skip in thin warrants**: a low-volume instrument may go 30 min
+  between trades during real hours. Mitigation: 30 min is generous;
+  config knob to tune; gate skips only placements, never cancels.
+* **State migration**: `InstrumentState.from_dict` already uses `.get`
+  for every field, so adding the two new fields is transparent for any
+  state file written by v1.
+* **Test fixture coupling**: existing grid_fisher tests build
+  `InstrumentState` via constructor — new fields default to safe values,
+  so no fixture churn expected. Will verify with full grid_fisher test
+  module before commit.
 
 ## Premortem
 
-(Generated 2026-05-18 by fresh `general-purpose` Agent reading PLAN.md +
-CLAUDE.md as its only context.)
+(Generated 2026-05-18 by fresh general-purpose subagent.)
 
-### N1 — Reporting drift between gate and dashboard
+### N1. `timeOfLast` field shape assumption [silent-failure]
+**Chain:** Premortem flagged that `get_quote` (calls
+`/_api/market-guide/stock/{ob_id}/quote`) might not actually include
+`timeOfLast`. **Verified empirically** before implementing — the field
+is present on both certificate and stock orderbooks, in milliseconds.
+Empirical sample at 2026-05-18 18:50 UTC for ob 2367797:
+`{"buy":16.18,"last":14.46,"timeOfLast":1779084901283,"updated":...}`.
+**Mitigation:** still defensive — if `timeOfLast` is missing or non-numeric
+the gate treats it as "stale" (fail-safe — skip placement) and logs
+`skip_quote_field_missing` once per instrument per process so we notice
+if Avanza changes the shape.
 
-The fix is at one read path only (`review_shadow_signals.py`). On
-2026-05-25, Layer 2 reads `agent_summary_compact.json` (built by
-`reporting.py`) or the dashboard reads `/api/llm-leaderboard`
-(`dashboard/app.py:_compute_llm_leaderboard`) and sees the old 64%
-accuracy printed for `cryptotrader_lm`. Layer 2 tiebreaks on it, takes
-a losing BTC trade.
+### N2. 30-min threshold false-skip during real lulls [silent-failure / threshold]
+**Chain:** A thin-trade lull on a real instrument could exceed 30 min
+during open hours, surfacing as `skip_quote_stale` and starving the leg
+of placements during a real dip.
+**Mitigation:** threshold lives in config (`GRID_QUOTE_STALENESS_THRESHOLD_S`)
+so it's a one-line tune. Add a counter on `/api/grid-fisher` payload
+(`stale_skips_by_ob`) so we can audit false positives in dashboard.
 
-**Mitigation (absorbed):** the abstain/HOLD filter is extracted into
-`portfolio/llm_probability_log.is_directional_prediction(row)` and
-imported by BOTH `scripts/review_shadow_signals.py` AND
-`dashboard/app.py:_compute_llm_leaderboard`. Test
-`tests/test_llm_leaderboard_filter.py` asserts the dashboard endpoint
-agrees with the gate for at least the three known-broken shadows.
+### N3. Quote-cache thread-safety [concurrency]
+**Chain:** A new mutable dict attribute on `GridFisher` is read/written
+during `tick()` which runs on the metals_loop calling thread, while
+`_safe_session_call` itself dispatches I/O to a worker thread. A dict
+mutation racing iteration could `RuntimeError`.
+**Mitigation:** wrap the cache in a `threading.Lock`. Cheap, idiomatic.
 
-`reporting.py` does not currently surface LLM accuracy into the
-agent_summary; verified by grep (`grep -n 'cryptotrader_lm\|llm_probability_log' portfolio/reporting.py`
-returns nothing). The 30pp `accuracy_cache.json` vs `llm_probability_log`
-discrepancy (out-of-scope) remains as a separate latent risk.
+### N4. Rapid-cancel counter false-trips on direction-flip cancels [hidden coupling]
+**Chain:** During a direction flip, `cancel_armed_buys` cancels every
+armed tier; reconcile on the next tick could see ghost cancels.
+**Mitigation/verification:** Verified by reading `cancel_armed_buys`
+(grid_fisher.py:999) — it calls `cancel_buy_tier` which REMOVES the
+tier from `inst.buy_ladder` after a SUCCESS response, so reconcile
+won't see "armed but missing" later. `flip_direction` itself also
+clears the ladder. Gate B counter will not increment on a flip. ACCEPT.
+Issuer-side mass-cancel (instrument halt, barrier knockout) does
+trigger Gate B, which is **the intended behavior** — those are exactly
+the conditions we want a 6 h cooldown for.
 
-### N2 — `shadow_registry.json` rewrite race
+### N5. Dashboard / Layer 2 hardcoded category enum [Layer 2 / dashboard]
+**Chain:** New `skip_quote_stale` and `rapid_cancel_backoff` log
+categories could break a consumer that filters on a known-categories
+enum.
+**Verification:** Grepped — `dashboard/app.py:865` just tails the file
+with `load_jsonl_tail` (50 lines) and returns opaque entries. No enum.
+`portfolio/agent_invocation.py` and `portfolio/reporting.py` don't read
+`grid_fisher_decisions.jsonl`. ACCEPT.
 
-ACCEPT. `portfolio/shadow_registry.py:save_registry` already routes
-through `file_utils.atomic_write_json` (verified line 78). Batch 4 must
-call `save_registry()` not `json.dump` directly — test will assert this
-by patching `atomic_write_json` and confirming it's called.
+### N6. Rapid-cancel counter not persisted between reconcile + persist [atomic I/O]
+**Chain:** Counter is incremented in the reconcile branch of `tick`,
+but `tick`'s `_persist()` call is at the end. If `PF-MetalsLoop` is
+restarted mid-tick (which happens after every code merge per
+`feedback_restart_loops.md`), the counter resets and the threshold is
+never reached across restarts.
+**Mitigation:** call `_persist()` immediately inside the reconcile loop
+when `rapid_cancel_count` is mutated (single extra atomic write per
+ghost cancel — cheap, the file is ~3 KB).
 
-### N3 — LoRA regen "success" probe too weak
+### N7. State schema v1→v2 silent-drift [test-passes-prod-differs]
+**Chain:** Plan bumps version 1→2, but nothing checks. A future hand-
+edited v3 state file would load as v2 with default zeros for any new
+fields, silently dropping the older counter values.
+**Mitigation:** at load time, if `state.version > GRID_STATE_SCHEMA_VERSION`,
+log critical and bail. Existing `load_state` likely already handles
+backward — review during Batch 1 and add forward-version assertion.
 
-`completion_tokens > 5` proves the model isn't dead but says nothing
-about whether output parses as the expected
-`{action, confidence, reasoning}` JSON. A regen that emits valid prose
-but garbage JSON would still get accepted and cause production
-JSON-parse failures.
+## Plan amendments from premortem
 
-**Mitigation (absorbed):** the regen probe is a Python script
-`scripts/probe_cryptotrader_lm.py` that calls `_parse_response()` on at
-least 5 sampled production prompts and requires `parse_rate >= 0.9` AND
-`mean_completion_tokens >= 20`. If the probe fails on the regenerated
-file we fall back to retiring the shadow (Batch 3 step 3).
+1. **Defensive shape check** in the new quote-fetch wrapper —
+   missing/invalid `timeOfLast` → fail-safe skip, one-shot log.
+2. **`threading.Lock` around the quote cache** — write helper
+   `_get_cached_quote(ob_id)` that acquires the lock.
+3. **`_persist()` inside reconcile** when `rapid_cancel_count`
+   increments — never lose progress across a metals_loop restart.
+4. **Forward-version assert** in `load_state` —
+   `if state.version > GRID_STATE_SCHEMA_VERSION: critical + bail`.
+5. **Stale-skips counter on dashboard payload** — add a small per-cycle
+   counter dict so `/api/grid-fisher` can surface false positives.
 
-### N4 — log_vote skip drops legitimate low-conf BUY/SELL
-
-A real model emitting `chosen=BUY, confidence=0.0` (theoretically — no
-current code path does this; the parser defaults to 0.50 when missing)
-gets silently dropped. Test green, prod silent. Worse, when meta_trader
-gets wired (Item 3) a coding bug that returns `confidence=0.0` on real
-preds would never surface.
-
-**Mitigation (absorbed):** the skip guard uses
-`indicators.get("feature_unavailable") is True OR confidence <= 0` and
-emits a single `logger.info("[log_vote_skipped] signal=%s reason=%s")`
-line every time it skips. `check_critical_errors.py` already monitors
-`shadow_silent` patterns (verify); if not, add a daily aggregation step
-in the existing 03:30 cron (out-of-scope but tracked in SESSION_PROGRESS).
-
-### N5 — HOLD exclusion drops existing voters below 47% gate
-
-`portfolio/accuracy_stats.py` was checked: it reads `signal_log.jsonl`
-(not `llm_probability_log.jsonl`) and already uses the
-`total_buy + total_sell` denominator pattern (see `accuracy_cache.json`
-shape). The gate fix is isolated to the promotion-script /
-leaderboard-endpoint read paths. ACCEPT — does NOT propagate to the
-force-HOLD signal gate.
-
-### N6 — Out-of-scope `accuracy_cache.json` vs `llm_probability_log` drift
-
-ACCEPT for this PR. Cross-source assert is a good idea but introducing
-a new contract assertion in the same PR that fixes the gate increases
-review surface and risk of false-positive alerts during the data
-transition. Tracked as a follow-up in `docs/SESSION_PROGRESS.md` →
-`accuracy_source_unification`.
-
-### N7 — Layer 2 prompt drift after we shrink real-pred counts
-
-After the fix `cryptotrader_lm` shows `n_with_outcome=0` in
-`/api/llm-leaderboard`. If `reporting.py` (compact summary builder)
-ever starts emitting `"prediction_count": ...` derived from the
-log-row count (unfiltered), Layer 2 might believe cryptotrader_lm is
-"active" when in fact every row is abstain. Verified not currently
-present, but if a future change adds it, this PR's helper must be
-used. Documented in the helper's docstring as a contract.

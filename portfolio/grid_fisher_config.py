@@ -144,6 +144,30 @@ GRID_ACTIVE_INSTRUMENTS = {
 }
 
 # ---------------------------------------------------------------------------
+# Trading-hours / silent-rejection gates (added 2026-05-18 after the
+# OIL-USD ghost-cancel loop — Avanza accepted orders into a closed FNSE
+# orderbook and silently auto-cancelled them, causing grid_fisher to
+# re-arm every tick).
+# ---------------------------------------------------------------------------
+# Gate A — pre-placement: skip if the orderbook's last trade is older
+# than this. FNSE warrants trade continuously during open hours, so a
+# 30-min gap is well above the noise floor of a normal mid-session lull.
+GRID_QUOTE_STALENESS_THRESHOLD_S = 1800
+# Per-instrument quote-cache TTL so the staleness check doesn't double
+# the get_quote call count per tick (place_buy_ladder already fetches a
+# quote as the bid fallback). Lock-guarded; never replaces a fresher
+# value with an older one.
+GRID_QUOTE_CACHE_SECS = 60
+# Gate B — post-reconcile: a tier cancelled within this many seconds of
+# placement is treated as "rapid" (likely silent-reject by Avanza). Two
+# rapid cancels in a row on the same instrument arm the cooldown.
+GRID_RAPID_CANCEL_THRESHOLD_S = 120
+GRID_RAPID_CANCEL_MAX_CONSECUTIVE = 2
+# Cooldown applied when the rapid-cancel threshold trips. 6 h spans the
+# rest of the trading day even when the bug surfaces at market open.
+GRID_RAPID_CANCEL_COOLDOWN_S = 6 * 3600
+
+# ---------------------------------------------------------------------------
 # State files
 # ---------------------------------------------------------------------------
 GRID_STATE_FILE = "data/grid_fisher_state.json"
@@ -151,6 +175,11 @@ GRID_DECISIONS_LOG = "data/grid_fisher_decisions.jsonl"
 
 # ---------------------------------------------------------------------------
 # State-schema version. Bump when state-file shape changes; older files
-# are reset (and logged) rather than crashing.
+# load through ``from_dict``'s ``.get`` defaults. A state file with a
+# higher version than this constant is treated as forward-incompatible
+# and the loader bails (critical log) rather than silently dropping
+# fields it doesn't understand.
+# 2026-05-18: v2 adds InstrumentState.rapid_cancel_count and
+# last_rapid_cancel_ts for Gate B.
 # ---------------------------------------------------------------------------
-GRID_STATE_SCHEMA_VERSION = 1
+GRID_STATE_SCHEMA_VERSION = 2
