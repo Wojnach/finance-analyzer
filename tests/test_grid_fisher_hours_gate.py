@@ -158,6 +158,16 @@ class TestGateAQuoteStaleness:
         f._is_quote_stale("1650161")
         assert sess.get_quote_calls == 1
 
+    def test_future_dated_timeoflast_treated_as_stale(self, tmp_path):
+        """A future ``timeOfLast`` (Avanza data corruption / clock skew)
+        must fail-safe to stale — never silently clamp to age=0 and
+        let placement through (review finding 2026-05-18)."""
+        sess = _StaleQuoteSession(time_of_last_ms=_now_ms() + 60_000)
+        f = _build_fisher(sess, tmp_path)
+        is_stale, age_s = f._is_quote_stale("1650161")
+        assert is_stale is True
+        assert age_s is None
+
 
 # ---------------------------------------------------------------------------
 # Gate B — rapid-cancel back-off

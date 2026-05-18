@@ -1080,9 +1080,11 @@ class GridFisher:
 
         with self._quote_cache_lock:
             # Race-resistant: if another thread populated a fresher
-            # quote between our miss and now, keep that one.
+            # quote between our miss and now, keep that one. Strictly
+            # ``<`` (not ``<=``) so a same-tick collision can't overwrite
+            # a fresher value with our older one.
             existing = self._quote_cache.get(ob_id)
-            if existing is None or existing[0] <= now_mono:
+            if existing is None or existing[0] < now_mono:
                 self._quote_cache[ob_id] = (now_mono, quote)
         return quote
 
@@ -1115,7 +1117,20 @@ class GridFisher:
                 self._log("quote_field_invalid", ob_id=ob_id,
                           field="timeOfLast", value=str(raw)[:80])
             return None
-        return max(0.0, (time.time() * 1000.0 - t_ms) / 1000.0)
+        age_s = (time.time() * 1000.0 - t_ms) / 1000.0
+        if age_s < 0:
+            # Future-dated timestamp from Avanza (data corruption /
+            # clock drift). Don't silently clamp to 0 — that would let
+            # a corrupted response sneak past Gate A even when the
+            # orderbook is actually closed. One-shot warning + treat as
+            # stale (caller short-circuits placement).
+            if ob_id not in self._quote_shape_warned:
+                self._quote_shape_warned.add(ob_id)
+                self._log("quote_field_future_dated", ob_id=ob_id,
+                          field="timeOfLast", age_s=round(age_s, 1),
+                          value=str(raw)[:80])
+            return None
+        return age_s
 
     # ---- Gate B: rapid-cancel back-off ----------------------------------
 
@@ -1895,6 +1910,12 @@ def summarise(state: GridFisherState) -> dict[str, Any]:
                 "session_pnl_sek": round(inst.session_pnl_sek, 2),
                 "fills_this_session": inst.fills_this_session,
                 "cooldown_until": inst.cooldown_until,
+                # Gate B visibility — surface the rapid-cancel counters
+                # on the dashboard payload so operators can see WHY an
+                # instrument is in cooldown and spot repeated silent-
+                # reject patterns before the cooldown expires.
+                "rapid_cancel_count": inst.rapid_cancel_count,
+                "last_rapid_cancel_ts": inst.last_rapid_cancel_ts,
             }
             for ob, inst in state.by_instrument.items()
         },
