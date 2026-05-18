@@ -66,8 +66,16 @@ RISE_THRESHOLD_PP = 10.0  # symmetric for the daily summary "improved" list
 # raised floor pushes the noise floor down to roughly 1 in 1000.
 MIN_SAMPLES_HISTORICAL = 200
 MIN_SAMPLES_CURRENT = 200
-MIN_SNAPSHOT_AGE_DAYS = 6.0   # don't alert without a real baseline
-BASELINE_TARGET_DAYS = 7.0    # find snapshot near now-7d
+# 2026-05-18: widened recent/baseline windows from 7d → 14d so a single
+# week of regime flip (rally→pullback) no longer trips the alert. 7d
+# windows fit entirely on one side of a regime change and produce
+# guaranteed false drops (5/04-5/11 → 5/11-5/18 incident: 5 signals each
+# showed 22-37pp false drops; 14d windows reduce the same drops to 0.4-12.7pp,
+# all under the 15pp threshold). Pair: MIN_SNAPSHOT_AGE_DAYS=13 so the
+# 13-14d post-merge transition window does not pull a stale 7d-format
+# baseline. See docs/PLAN.md (2026-05-18 quiet-accuracy-alerts).
+MIN_SNAPSHOT_AGE_DAYS = 13.0   # don't alert without a real baseline
+BASELINE_TARGET_DAYS = 14.0    # find snapshot near now-14d
 BASELINE_MAX_DELTA_HOURS = 36.0  # tolerance when picking the baseline snapshot
 COOLDOWN_PER_SIGNAL_S = 24 * 3600   # Telegram re-emission cooldown
 HOURLY_THROTTLE_S = 55 * 60         # don't recompute more than once per ~hour
@@ -116,7 +124,7 @@ def _save_snapshot_state(state: dict) -> None:
 
 # --- Snapshot writer ---
 
-def save_full_accuracy_snapshot(*, days: int = 7) -> dict[str, Any]:
+def save_full_accuracy_snapshot(*, days: int = 14) -> dict[str, Any]:
     """Compute the full four-scope snapshot and append to accuracy_snapshots.jsonl.
 
     Returns the snapshot dict for inspection. Safe to call repeatedly —
@@ -194,6 +202,13 @@ def save_full_accuracy_snapshot(*, days: int = 7) -> dict[str, Any]:
     except Exception as e:
         logger.warning("Consensus accuracy snapshot failed: %s", e)
 
+    # 2026-05-18: stamp the window size used so _find_baseline_snapshot
+    # can refuse to compare against pre-merge 7d-window snapshots during
+    # the post-merge transition window. Snapshots without this field are
+    # treated as legacy (pre-2026-05-18) and skipped. See premortem F2 in
+    # docs/PLAN.md.
+    extras["window_days"] = days
+
     # save_accuracy_snapshot() also writes the lifetime `signals` block.
     # That helper still does its own load_entries() — acceptable cost
     # (one extra scan / day).
@@ -268,9 +283,22 @@ def _load_snapshots() -> list[dict]:
 
 
 def _find_baseline_snapshot(snapshots: list[dict], now: datetime) -> dict | None:
+    """Pick the closest snapshot to (now - BASELINE_TARGET_DAYS).
+
+    2026-05-18 (premortem F2): filter out snapshots whose ``window_days``
+    field doesn't match BASELINE_TARGET_DAYS. Snapshots without this field
+    are pre-2026-05-18 (7d windows) and must be skipped to avoid
+    apples-to-oranges comparisons against the new 14d current-side
+    computation. Returns None during the 13d transition window where no
+    matching snapshot has accumulated yet — callers handle that as
+    "no baseline available" (same path as cold start).
+    """
     from portfolio.accuracy_stats import _find_snapshot_near
+    target_window = int(BASELINE_TARGET_DAYS)
+    matched = [s for s in snapshots
+               if int(s.get("window_days", 0) or 0) == target_window]
     target = now - timedelta(days=BASELINE_TARGET_DAYS)
-    return _find_snapshot_near(snapshots, target,
+    return _find_snapshot_near(matched, target,
                                max_delta_hours=BASELINE_MAX_DELTA_HOURS)
 
 
@@ -332,7 +360,7 @@ def check_degradation(now: datetime | None = None,
                       min_samples_historical: int = MIN_SAMPLES_HISTORICAL,
                       min_samples_current: int = MIN_SAMPLES_CURRENT,
                       throttle_seconds: float = HOURLY_THROTTLE_S) -> list:
-    """Compare recent-7d accuracy to the snapshot from 7 days ago.
+    """Compare recent-14d accuracy to the snapshot from 14 days ago.
 
     Returns a list of loop_contract.Violation objects. Codex P1#2: when
     throttled, returns the cached violations from the last full check
@@ -370,6 +398,19 @@ def check_degradation(now: datetime | None = None,
     snapshots = _load_snapshots()
     baseline = _find_baseline_snapshot(snapshots, now) if snapshots else None
     age_days = _snapshot_age_days(baseline, now) if baseline else 0.0
+
+    # 2026-05-18 (premortem F1): transition-active observability. During
+    # the 13-day post-merge window, no 14d-format baseline exists yet so
+    # _find_baseline_snapshot returns None. Log this as INFO once per
+    # check_degradation run so the operator can see "detector is dark by
+    # design" instead of "detector is healthy and silent" — distinct
+    # failure modes that previously looked identical.
+    if not baseline:
+        logger.info(
+            "Degradation check: no matching baseline (window_days=%d). "
+            "Detector quiet until 14d snapshots accumulate.",
+            int(BASELINE_TARGET_DAYS),
+        )
 
     # Compute violations (empty list on the no-baseline / too-young paths)
     if baseline and age_days >= MIN_SNAPSHOT_AGE_DAYS:
@@ -898,12 +939,12 @@ def build_daily_summary(*, latest: dict, baseline: dict | None,
         try:
             b_acc = float(b_consensus.get("accuracy", 0.0)) * 100.0
             delta = consensus_acc - b_acc
-            delta_str = f" (Δ {delta:+.1f}pp vs prev 7d)"
+            delta_str = f" (Δ {delta:+.1f}pp vs prev {int(BASELINE_TARGET_DAYS)}d)"
         except (TypeError, ValueError):
             delta_str = ""
     lines.append(
-        f"`Consensus: {consensus_acc:.0f}% recent7d{delta_str} · "
-        f"{consensus_total} sam`"
+        f"`Consensus: {consensus_acc:.0f}% recent{int(BASELINE_TARGET_DAYS)}d"
+        f"{delta_str} · {consensus_total} sam`"
     )
 
     # Forecast block: explicit allowlist instead of Ministral/Qwen3
@@ -937,7 +978,8 @@ def build_daily_summary(*, latest: dict, baseline: dict | None,
     if drops:
         lines.append("")
         lines.append(
-            f"*Degraded (>{DROP_THRESHOLD_PP:.0f}pp drop vs prev 7d, "
+            f"*Degraded (>{DROP_THRESHOLD_PP:.0f}pp drop vs prev "
+            f"{int(BASELINE_TARGET_DAYS)}d, "
             f"<{ABSOLUTE_FLOOR_PCT:.0f}% recent abs)*"
         )
         for d in drops[:TOP_DROPS_IN_SUMMARY]:
@@ -945,7 +987,10 @@ def build_daily_summary(*, latest: dict, baseline: dict | None,
 
     if gains:
         lines.append("")
-        lines.append(f"*Improved (>{RISE_THRESHOLD_PP:.0f}pp gain vs prev 7d)*")
+        lines.append(
+            f"*Improved (>{RISE_THRESHOLD_PP:.0f}pp gain vs prev "
+            f"{int(BASELINE_TARGET_DAYS)}d)*"
+        )
         for g in gains[:TOP_GAINS_IN_SUMMARY]:
             lines.append(_format_summary_row(g))
 
@@ -959,7 +1004,8 @@ def build_daily_summary(*, latest: dict, baseline: dict | None,
     sig_count = len(signals_recent or {})
     lines.append("")
     lines.append(
-        f"`Snapshot age: {snap_age} · {sig_count} signals tracked · window: recent-7d`"
+        f"`Snapshot age: {snap_age} · {sig_count} signals tracked · "
+        f"window: recent-{int(BASELINE_TARGET_DAYS)}d`"
     )
 
     return "\n".join(lines)
