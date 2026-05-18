@@ -308,6 +308,39 @@ dashboard payload surfaces Gate B counters.
 
 Restart `PF-MetalsLoop` after merge.
 
+**Post-merge verification (2026-05-18 23:17 UTC):**
+
+PF-MetalsLoop restarted (PIDs 23256 + 2088 → 26488 + 2120). Init log
+confirmed `Grid fisher: ACTIVE (6 instruments, enabled=True)` on the
+new code.
+
+Gate A live probe against Avanza after FNSE close — all 4 warrants
+correctly flagged stale:
+```
+2367797 OIL BULL OLJAB X5     stale=True age=17.03h
+2367803 OIL BEAR OLJAB X5     stale=True age=17.03h
+1650161 XAG BULL SILVER X5    stale=True age=17.04h
+ 738811 XAU BULL GULD X5      stale=True age=14.91h
+```
+A repeat of yesterday's 18:30 storm now short-circuits at
+`place_buy_ladder` → zero ghost orders, one `skip_quote_stale` decision
+per cycle instead of ~120 ghost orders / hour.
+
+Gate B synthetic probe on OIL-USD (two placed_ts=now-30s cancels):
+```
+cancel #1 (age=30s): rapid_cancel_count=1, cooldown_until=None
+cancel #2 (age=30s): rapid_cancel_count=2, cooldown_until=now+6h
+```
+Decision log entry written:
+```
+{"category":"rapid_cancel_backoff","ob_id":"2367797","ticker":"OIL-USD",
+ "tier":1,"age_s":30.3,"count":2,
+ "cooldown_until":"2026-05-19T05:17:24Z","threshold_s":120}
+```
+
+Both gates verified live with the exact decision-log categories the
+dashboard surfaces. Fix is in production.
+
 ## 2026-05-18 — Shadow accuracy gate + cryptotrader_lm LoRA fix (MERGED)
 
 Two production bugs blocking the LLM shadow→promote pipeline. Both
