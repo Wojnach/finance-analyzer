@@ -1,5 +1,33 @@
 # Session Progress
 
+## 2026-05-18 Late — After-Hours Research: Signal Fixes (MERGED)
+
+After-hours research session. Risk-off day: Dow -1.1%, Nasdaq -1.5%,
+10Y >4.60%, oil $108 WTI (Iran/Hormuz), $657M crypto liquidations.
+
+Three signal fixes from correlation analysis + accuracy audit:
+
+1. **crypto_evrp re-enabled** (tickers.py): 80.5% 1d_recent (77 sam),
+   92.4% 3d. Anti-correlated with degraded macro cluster. Removed from
+   DISABLED_SIGNALS.
+
+2. **credit_spread_risk → fundamental_cluster** (signal_engine.py:1737):
+   After futures_flow disabled (2026-05-07), credit_spread_risk was
+   orphaned — voting at full 1.0x despite 100% agreement with crypto_macro.
+   Moved to fundamental_cluster for proper correlation penalization.
+
+3. **btc_proxy gated in ranging** (signal_engine.py:1185): 46.5% all-time,
+   MSTR dropped 8.8% on BTC -1.5%. Leverage amplifies noise in sideways
+   markets. Added to ranging regime gate.
+
+Tests: 1559 passed, 5 failed (all pre-existing).
+
+### What's next
+- Walk-forward signal reweighting (arXiv Feb 2026) — effort: 2 days
+- Signal correlation pruning in mean_reversion cluster — effort: 2 days
+- HMM 3-state regime detection — effort: 3 days
+- Adaptive MSTR-BTC beta (rolling OLS) — effort: 1 day
+
 ## 2026-05-18 PM — grid_fisher silent-rejection loop fix (MERGED)
 
 Live incident: 2026-05-18 18:30 UTC, grid_fisher entered a tight place /
