@@ -96,7 +96,7 @@ def _fetch_multi_asset_closes() -> pd.DataFrame | None:
             logger.warning("mahalanobis_turbulence: multi-asset fetch failed: %s", e)
             return None
 
-    return _cached("mahalanobis_turb_closes", _do_fetch, ttl=_CACHE_TTL)
+    return _cached("mahalanobis_turb_closes", _CACHE_TTL, _do_fetch)
 
 
 def _compute_turbulence_series(closes: pd.DataFrame) -> pd.DataFrame | None:

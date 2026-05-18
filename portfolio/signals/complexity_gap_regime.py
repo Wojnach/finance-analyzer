@@ -89,7 +89,7 @@ def _fetch_multi_asset_closes() -> pd.DataFrame | None:
             logger.warning("complexity_gap: multi-asset fetch failed: %s", e)
             return None
 
-    return _cached("complexity_gap_closes", _do_fetch, ttl=_CACHE_TTL)
+    return _cached("complexity_gap_closes", _CACHE_TTL, _do_fetch)
 
 
 def _compute_complexity_gap_series(closes: pd.DataFrame) -> pd.DataFrame | None:
