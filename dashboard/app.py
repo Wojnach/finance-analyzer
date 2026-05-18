@@ -1685,6 +1685,64 @@ def api_loop_processes():
         }), 500
 
 
+@app.route("/api/pickups")
+@require_auth
+def api_pickups():
+    """Pending and completed scheduled pickups from data/pending_pickups.json.
+
+    Each pickup is a one-shot verification job processed by
+    scripts/process_pending_pickups.py (registered as PF-PendingPickups
+    Windows scheduled task, daily 08:00 CET). The pickup file is the
+    source of truth for "what auto-runs in N days" so the dashboard tile
+    can show "due today / due in 2d / completed yesterday" without
+    relying on session memory.
+
+    Read-only endpoint. Mutations happen on the cron path.
+    """
+    try:
+        data = _read_json(DATA_DIR / "pending_pickups.json")
+    except Exception as exc:  # noqa: BLE001 — dashboard must degrade
+        logger.exception("pickups read failed: %s", exc)
+        return jsonify({"error": "pickups read failed", "pickups": []}), 500
+    if not isinstance(data, dict):
+        return jsonify({"pickups": []})
+    out = []
+    now = datetime.now(UTC)
+    for p in data.get("pickups", []):
+        if not isinstance(p, dict):
+            continue
+        due_raw = p.get("due_ts")
+        due_dt = None
+        if isinstance(due_raw, str):
+            try:
+                due_dt = datetime.fromisoformat(due_raw)
+                if due_dt.tzinfo is None:
+                    due_dt = due_dt.replace(tzinfo=UTC)
+            except ValueError:
+                due_dt = None
+        days_until = None
+        if due_dt is not None:
+            days_until = round((due_dt - now).total_seconds() / 86400.0, 2)
+        last_verdict = None
+        history = p.get("history") or []
+        if history and isinstance(history[-1], dict):
+            last_verdict = history[-1].get("verdict")
+        out.append({
+            "id": p.get("id"),
+            "title": p.get("title"),
+            "due_ts": due_raw,
+            "days_until_due": days_until,
+            "status": p.get("status", "pending"),
+            "handler": p.get("handler"),
+            "last_verdict": last_verdict,
+            "last_run_ts": p.get("last_run_ts"),
+        })
+    out.sort(
+        key=lambda r: (r["days_until_due"] is None, r["days_until_due"] or 0),
+    )
+    return jsonify({"pickups": out, "updated_ts": now.isoformat()})
+
+
 @app.route("/api/oil")
 @require_auth
 def api_oil():
