@@ -1280,7 +1280,25 @@ def _compute_llm_leaderboard():
 
     Scans the full llm_probability_log.jsonl + llm_probability_outcomes.jsonl.
     Cached at the /api/ layer because the join touches ~85K rows.
+
+    Accuracy methodology (must match
+    ``scripts/review_shadow_signals.py:_compute_signal_stats`` or the
+    leaderboard and the auto-promotion gate disagree on which shadows
+    are eligible — premortem N1 in
+    ``.worktrees/shadow-gate-lora-20260518/docs/PLAN.md``):
+
+    * ``n_samples`` counts every log row (incl. abstains) so callers
+      can see the model's emission cadence.
+    * ``n_with_outcome`` and ``accuracy`` count only directional
+      predictions (``confidence > 0`` AND ``chosen in {BUY, SELL}``)
+      that joined to an outcome — see
+      ``portfolio.llm_probability_log.is_directional_prediction``.
+    * Brier is reported over the same directional set so its
+      denominator equals ``n_with_outcome``. Including abstains would
+      score the canonical ``{0.25, 0.5, 0.25}`` distribution and
+      systematically penalise models with high abstain rates.
     """
+    from portfolio.llm_probability_log import is_directional_prediction
     from portfolio.shadow_registry import days_in_shadow, load_registry
 
     registry = load_registry()
@@ -1302,8 +1320,14 @@ def _compute_llm_leaderboard():
         sig = row.get("signal")
         if not sig:
             continue
-        d = per_sig.setdefault(sig, {"n": 0, "n_matched": 0, "correct": 0, "brier_sum": 0.0})
+        d = per_sig.setdefault(
+            sig,
+            {"n": 0, "n_matched": 0, "correct": 0, "brier_sum": 0.0, "n_directional": 0},
+        )
         d["n"] += 1
+        if not is_directional_prediction(row):
+            continue
+        d["n_directional"] += 1
         key = (row.get("ts"), sig, row.get("ticker"), row.get("horizon"))
         actual = outcomes.get(key)
         if actual is None:
@@ -1324,7 +1348,9 @@ def _compute_llm_leaderboard():
 
     leaderboard = []
     for sig in sorted(set(per_sig.keys()) | set(shadows.keys())):
-        agg = per_sig.get(sig) or {"n": 0, "n_matched": 0, "correct": 0, "brier_sum": 0.0}
+        agg = per_sig.get(sig) or {
+            "n": 0, "n_matched": 0, "correct": 0, "brier_sum": 0.0, "n_directional": 0,
+        }
         entry = shadows.get(sig, {})
         accuracy = (agg["correct"] / agg["n_matched"]) if agg["n_matched"] else None
         brier = (agg["brier_sum"] / agg["n_matched"]) if agg["n_matched"] else None
@@ -1333,6 +1359,7 @@ def _compute_llm_leaderboard():
             "name": sig,
             "status": entry.get("status"),
             "n_samples": agg["n"],
+            "n_directional": agg["n_directional"],
             "n_with_outcome": agg["n_matched"],
             "join_rate": round(agg["n_matched"] / agg["n"], 4) if agg["n"] else None,
             "accuracy": round(accuracy, 4) if accuracy is not None else None,

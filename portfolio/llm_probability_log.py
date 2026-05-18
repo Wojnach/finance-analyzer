@@ -184,6 +184,53 @@ def log_vote(
         return False
 
 
+def is_directional_prediction(row: dict) -> bool:
+    """Return True iff `row` (one entry from ``llm_probability_log.jsonl``)
+    represents a directional prediction worth scoring against the outcome.
+
+    A row is directional when BOTH:
+
+    * ``confidence > 0`` — abstain rows emitted by the canonical
+      ``_abstain()`` helper in scaffold/error paths set ``confidence=0``
+      and ``chosen="HOLD"``. Counting them in the accuracy denominator
+      inflates HOLD-biased shadows because outcome backfill labels
+      ~64% of 1d windows as HOLD; a model that always picks HOLD/conf=0
+      then "scores" 64% on garbage and would auto-promote.
+    * ``chosen in {"BUY","SELL"}`` — HOLD is non-information for trading
+      direction. The existing ``data/accuracy_cache.json`` pipeline
+      already excludes HOLD predictions from its denominator
+      (``total = total_buy + total_sell``); this helper enforces the
+      same methodology when reading the probability log.
+
+    Used by:
+    * ``scripts/review_shadow_signals.py`` (auto-promotion gate)
+    * ``dashboard/app.py:_compute_llm_leaderboard`` (LLM scorecard)
+
+    Both consumers MUST share this filter or they will disagree about
+    which shadows are eligible for promotion — exactly the dashboard /
+    gate drift documented as premortem narrative #1 in the
+    2026-05-18 plan (worktree ``fix/shadow-gate-lora-20260518``).
+
+    Why a row-shape check vs schema validation: the log is append-only
+    and historical rows are immutable. Some legacy rows pre-date the
+    ``confidence`` field — those return False (treated as abstain) so
+    only post-2026-04 rows count toward accuracy, which is the
+    conservative choice for a calibration metric.
+    """
+    if not isinstance(row, dict):
+        return False
+    conf = row.get("confidence")
+    if conf is None:
+        return False
+    try:
+        if float(conf) <= 0.0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    chosen = row.get("chosen")
+    return chosen in ("BUY", "SELL")
+
+
 def is_llm_signal(name: str) -> bool:
     """Public helper: check whether a signal name belongs to the LLM set this
     module tracks. Useful for gating integration points without having to

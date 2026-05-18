@@ -3773,6 +3773,35 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             else:
                 conf = extra_info.get(f"{sig_name}_confidence", 0.0)
                 indicators = extra_info.get(f"{sig_name}_indicators")
+            # 2026-05-18: extend the throttle-skip pattern above to abstain
+            # results. Any scaffold / error path that returns the canonical
+            # _abstain() shape sets confidence=0 and indicators.feature_unavailable=True
+            # (see portfolio/signals/{finance_llama,cryptotrader_lm,meta_trader}.py).
+            # Logging those rows poisoned the auto-promotion gate: the join
+            # against outcome backfill labels ~64% of 1d windows HOLD, so any
+            # always-HOLD/conf=0 scaffold "passed" promotion at 64% accuracy
+            # (cryptotrader_lm + meta_trader + finance_llama all triggered
+            # the same false positive on 2026-05-18 — see
+            # docs/PLAN.md@e0f13449). The read-side filter in
+            # portfolio.llm_probability_log.is_directional_prediction handles
+            # historical rows; this guard stops new pollution at the source.
+            try:
+                conf_f = float(conf or 0.0)
+            except (TypeError, ValueError):
+                conf_f = 0.0
+            feature_unavailable = bool(
+                isinstance(indicators, dict)
+                and indicators.get("feature_unavailable") is True
+            )
+            if conf_f <= 0.0 or feature_unavailable:
+                logger.info(
+                    "[log_vote_skipped] signal=%s ticker=%s reason=%s conf=%s",
+                    sig_name,
+                    ticker or "",
+                    "feature_unavailable" if feature_unavailable else "abstain_conf_zero",
+                    conf_f,
+                )
+                continue
             probs = derive_probs_from_result(
                 sig_name, action, conf, indicators=indicators,
             )

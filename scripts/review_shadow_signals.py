@@ -48,6 +48,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from portfolio.file_utils import load_jsonl  # noqa: E402
+from portfolio.llm_probability_log import is_directional_prediction  # noqa: E402
 from portfolio.shadow_registry import (  # noqa: E402
     _invalidate_promoted_cache,
     days_in_shadow,
@@ -59,11 +60,25 @@ from portfolio.shadow_registry import (  # noqa: E402
 
 
 def _compute_signal_stats(window_days: float | None = None) -> dict:
-    """Return per-signal {n, n_matched, correct, brier_sum} from log+outcomes.
+    """Return per-signal {n, n_matched, correct, n_directional} from log+outcomes.
 
-    When `window_days` is provided, only log rows within that lookback are
-    counted — used by --retire to focus on recent performance instead of
-    all-time accuracy.
+    Only DIRECTIONAL predictions (``confidence > 0`` AND
+    ``chosen in {BUY, SELL}``) count toward ``n_matched`` and ``correct``.
+    Abstain rows (``confidence=0`` from canonical ``_abstain()`` helpers
+    in ``portfolio/signals/*``) and HOLD votes (non-information for trade
+    direction) are excluded — see
+    ``portfolio.llm_probability_log.is_directional_prediction`` for the
+    rationale and the 2026-05-18 plan for the failure mode this guards
+    against.
+
+    ``n`` still counts every log row including abstains so the missing-
+    outcome rate is computed on the full sample, but the promotion gate
+    (accuracy = correct / n_matched) only fires when the model actually
+    emitted directional predictions.
+
+    When ``window_days`` is provided, only log rows within that lookback
+    are counted — used by ``--retire`` to focus on recent performance
+    instead of all-time accuracy.
     """
     data_dir = _REPO_ROOT / "data"
     log_rows = load_jsonl(str(data_dir / "llm_probability_log.jsonl")) or []
@@ -99,8 +114,13 @@ def _compute_signal_stats(window_days: float | None = None) -> dict:
                     continue
             except (TypeError, ValueError):
                 continue
-        d = per_sig.setdefault(sig, {"n": 0, "n_matched": 0, "correct": 0})
+        d = per_sig.setdefault(
+            sig, {"n": 0, "n_matched": 0, "correct": 0, "n_directional": 0},
+        )
         d["n"] += 1
+        if not is_directional_prediction(row):
+            continue
+        d["n_directional"] += 1
         key = (row.get("ts"), sig, row.get("ticker"), row.get("horizon"))
         actual = outcomes.get(key)
         if actual is None:
@@ -190,8 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         all_stats = _compute_signal_stats()
         retire_stats = _compute_signal_stats(window_days=30) if args.retire else {}
 
+        _default_stats = {"n": 0, "n_matched": 0, "correct": 0, "n_directional": 0}
         for sig, entry in sorted(reg["shadows"].items()):
-            stats = all_stats.get(sig, {"n": 0, "n_matched": 0, "correct": 0})
+            stats = all_stats.get(sig, dict(_default_stats))
             if args.promote:
                 ok, reason = _eligible_for_promotion(entry, stats)
                 if ok:
@@ -206,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"[OK] promoted {sig}: {reason}")
                     actions_taken += 1
             if args.retire:
-                r_stats = retire_stats.get(sig, {"n": 0, "n_matched": 0, "correct": 0})
+                r_stats = retire_stats.get(sig, dict(_default_stats))
                 retire, reason = _should_retire(entry, r_stats)
                 if retire:
                     if args.dry_run:
