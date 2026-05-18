@@ -1,5 +1,89 @@
 # Session Progress
 
+## 2026-05-19 — 3-tier bias penalty (rebalance toward direction-balanced voters)
+
+**Problem:** User asked "what happened to the 60-70% accuracy". Investigation
+showed the 60-70% was real BUT during the 2026-05-06 to 2026-05-12 rally
+tailwind. 5 BUY-biased signals (sentiment, crypto_macro, econ_calendar,
+structure, macro_regime) showed 60-92% in the rally then collapsed to
+33-47% after the 5/11-5/13 regime flip. Net consensus across all weeks =
+47-53% (coin flip). Math is honest — these signals are directionally biased
+and looked great in rally, terrible in pullback.
+
+**Fix (branch `fix-tighten-bias-penalty-threshold`):**
+Existing bias-penalty infrastructure at `_BIAS_THRESHOLD=0.85` was too
+lenient. Added moderate tier at 0.65 + lowered extreme threshold:
+
+```python
+# portfolio/signal_engine.py
+_BIAS_MODERATE_THRESHOLD = 0.65  # NEW: 0.65 < bias <= 0.85
+_BIAS_MODERATE_PENALTY = 0.7     # NEW: 0.7x on votes in bias direction
+_BIAS_THRESHOLD = 0.85           # unchanged trigger (now "high")
+_BIAS_PENALTY = 0.5              # unchanged
+_BIAS_EXTREME_THRESHOLD = 0.90   # was 0.95 (catches crypto_macro 0.91)
+_BIAS_EXTREME_PENALTY = 0.2      # unchanged
+```
+
+Extracted pure helper `_resolve_bias_penalty(bias)` with highest-first
+cascade. Stamped `BIAS_POLICY_VERSION = "2026-05-19"` into
+`agent_summary.json` so dashboard / backtester consumers can mark the
+"before / after" line on accuracy-history charts.
+
+**Net effect on active 17 signals:**
+- sentiment (bias 0.81): 1.0x → 0.7x on BUY votes
+- crypto_macro (bias 0.91): 0.5x → 0.2x on BUY votes (promoted to extreme)
+- Direction-balanced voters unchanged (rsi 0.11, bb 0.15, momentum 0.04,
+  mean_reversion 0.20, statistical_jump_regime 0.02, macro_regime 0.26,
+  structure 0.37, momentum_factors). These now carry more relative weight.
+- Contrarian votes (e.g., sentiment SELL, crypto_macro SELL) — UNCHANGED
+  at 1.0x. They're rare and informative.
+
+**Premortem (6 narratives via fresh general-purpose agent):**
+- F1: tier ordering bug → mitigated by pure helper + 7 boundary tests
+- F2: stale activation_cache after restart → mitigated by deleting
+  `data/activation_cache.json` between merge and `schtasks /run` (in
+  restart runbook step below)
+- F3: backtester replays old data with new weights → mitigated by
+  `BIAS_POLICY_VERSION` stamp
+- F4: Layer 2 hardcoded confidence floors → grepped; only one site
+  `entry_confidence_threshold` defaults to 0.65 (lower than typical
+  weighted_confidence). Documented expected ~0.05-0.10 drop here.
+- F5: pending unidirectional signals → ACCEPT (disabled now); inline
+  TODO comment in helper for future
+- F6: `apply_confidence_penalties` re-apply check → confirmed
+  single-application; inline comment in helper
+
+**Adversarial review (caveman:cavecrew-reviewer):** 1 P3 nit on a
+comment, fixed in commit fb92982a. No P1/P2.
+
+**Tests:** 16/16 new bias tests pass:
+- TestResolveBiasPenaltyBoundaries (6 boundary values incl. tier-ordering
+  regression guard)
+- TestModerateTierEndToEnd (sentiment loses to balanced opponent;
+  crypto_macro promoted to extreme)
+- TestBiasPolicyVersion (constant exists, ISO-8601 format)
+
+Full suite via worktree: 37 worktree-symlink pre-existing failures
+(documented in `reference_worktree_symlinks` memory). Targeted tests all
+green.
+
+**Operational sequence post-push:**
+1. `rm data/activation_cache.json` (or `cmd.exe /c "del Q:\finance-analyzer\data\activation_cache.json"`)
+2. Restart PF-DataLoop so cycle 1 recomputes bias from current samples
+3. First-day audit: `grep "bias_penalty" data/portfolio.log | head -20`
+
+**Risk acknowledged:** Weighted_confidence numbers on BTC/ETH (where
+sentiment+crypto_macro were carrying votes) will drop ~0.05-0.10
+post-merge. Layer 2 `entry_confidence_threshold=0.65` may suppress
+some trigger invocations. That's the desired honest behavior — we were
+over-trading on biased votes during the rally.
+
+**Does NOT touch:** trade gates (`ACCURACY_GATE_THRESHOLD`,
+`GRID_MIN_SIGNAL_CONFIDENCE`, penalty multipliers). Accuracy-degradation
+14d window (separate change from 2026-05-18).
+
+---
+
 ## 2026-05-19 00:30 UTC — accuracy degradation root cause + _cached ttl fix + tail of hide-windows
 
 **Pre-existing install bugs (commit 5d3c79e9, pushed):**
@@ -5058,4 +5142,8 @@ scripts/session_start_bottle.py
 
 ### 2026-05-18 23:19 UTC | main
 c92a09e7 docs: address review findings on remote-sweep TODO
+docs/SESSION_PROGRESS.md
+
+### 2026-05-18 23:24 UTC | main
+599a9973 docs(session): bold-state cp1252 em-dash fix + admin reinstall plate
 docs/SESSION_PROGRESS.md
