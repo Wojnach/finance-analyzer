@@ -170,4 +170,74 @@ multiplier (extreme > high > moderate > none).
 
 ## Premortem
 
-(To be filled by fresh agent — see step 2.)
+Fresh agent ran step 2. Six narratives, all actionable:
+
+### F1 — Silent wrong: 3-tier ordering bug (extreme never fires)
+If implementer writes `if bias>0.65: 0.7 elif bias>0.85: 0.5 elif bias>0.90: 0.2`,
+the 0.65 branch swallows everything. crypto_macro 0.91 gets 0.7x
+instead of 0.2x. Existing tests pass on direction, not multiplier
+value.
+**Mitigation:** extract a pure helper `_resolve_bias_penalty(bias) -> float`
+that checks highest-first. Add boundary unit tests at 0.64, 0.66,
+0.84, 0.86, 0.89, 0.91, 0.99.
+
+### F2 — Stale activation_cache after restart
+`ACTIVATION_CACHE_TTL = 3600`. Post-merge restart loads pre-merge cache
+for ~45 min. Cache has rounded `bias` from prior window. Tests mock
+`activation_rates={}` so don't exercise live cache.
+**Mitigation:** delete `data/activation_cache.json` between merge and
+`schtasks /run PF-DataLoop` so cycle 1 recomputes with current data.
+
+### F3 — Backtester replays old data with NEW weights
+`backtester.py` imports `_weighted_consensus` directly. After merge,
+`/api/accuracy-history` recomputes all historical points with new
+weights → dashboard chart shows a step-function drop interpreted as
+regression.
+**Mitigation:** stamp `agent_summary.json` with
+`bias_policy_version: "2026-05-19"`. Document the visual shift in
+SESSION_PROGRESS so the next person reading the chart isn't confused.
+Dashboard render-time marker out of scope (separate work).
+
+### F4 — Layer 2 prompts have hardcoded confidence thresholds
+TRADING_PLAYBOOK.md may say "Patient: act only on weighted_confidence
+≥ 0.70". After merge, sentiment+crypto_macro BUY-voted tickers drop
+~0.05-0.10. Patient could go mute for 1-2 weeks → looks like silent
+outage (March-April pattern memory).
+**Mitigation:** grep Layer 2 prompt + PLAYBOOK for hardcoded confidence
+floors. If found, document the expected drop magnitude inline so the
+LLM recalibrates. If not found, ACCEPT (LLM judges in context).
+
+### F5 — `_BIAS_MIN_ACTIVE = 30` and pending unidirectional signals
+Pending-validation signals (futures_basis, hurst_regime, etc.) have
+bias=1.0 by design (regime gates that emit one direction). If enabled
+later they'd hit extreme penalty immediately. They're DISABLED today
+so no live impact.
+**Mitigation:** ACCEPT for this PR. Add inline TODO comment at the
+helper: "if enabling unidirectional-by-design signals later, add a
+BIAS_PENALTY_EXEMPT set."
+
+### F6 — `apply_confidence_penalties` cascade re-apply check
+Confirmed by reading: bias penalty lives only in `_weighted_consensus`.
+`apply_confidence_penalties` doesn't re-apply it.
+**Mitigation:** ACCEPT. Add inline comment at the helper:
+"single application point — apply_confidence_penalties does NOT
+re-apply."
+
+## Updated Execution Order
+
+1. Plan + premortem committed (this step)
+2. Implement `_resolve_bias_penalty(bias)` pure helper with
+   highest-first check + 4 new constants
+3. Update `_weighted_consensus` to call the helper
+4. Stamp `agent_summary.json` with `bias_policy_version`
+5. Add boundary unit tests (7 boundary values)
+6. Grep Layer 2 prompt + PLAYBOOK for hardcoded confidence floors;
+   document if found
+7. Run targeted tests
+8. Run full suite from worktree
+9. Adversarial review
+10. Address P1/P2
+11. Commit + merge + push
+12. **Pre-restart step:** delete `data/activation_cache.json` so cycle 1
+    of restarted loop recomputes with fresh data
+13. Restart PF-DataLoop
