@@ -1117,6 +1117,83 @@ class GridFisher:
             return None
         return max(0.0, (time.time() * 1000.0 - t_ms) / 1000.0)
 
+    # ---- Gate B: rapid-cancel back-off ----------------------------------
+
+    def _maybe_arm_rapid_cancel_cooldown(
+        self, inst: InstrumentState, *, tier_idx: int,
+    ) -> None:
+        """Increment Gate B counter and arm a cooldown if the threshold is hit.
+
+        Triggered for every ``external_cancel_buy`` discovered by
+        ``reconcile_against_live``. The just-cancelled tier still lives
+        in ``inst.buy_ladder`` (status=CANCELLED, pruned later in the
+        tick) so we can read its ``placed_ts``. If the cancel age is
+        below ``GRID_RAPID_CANCEL_THRESHOLD_S``, the cancel is treated
+        as a silent broker reject and counted toward the consecutive
+        streak. Two in a row arms a 6 h cooldown (default). Anything
+        slower than the threshold resets the streak.
+
+        Persists state immediately so a process restart between this
+        write and the end-of-tick ``_persist`` doesn't lose the counter
+        (premortem N6).
+        """
+        from portfolio.grid_fisher_config import (
+            GRID_RAPID_CANCEL_COOLDOWN_S,
+            GRID_RAPID_CANCEL_MAX_CONSECUTIVE,
+            GRID_RAPID_CANCEL_THRESHOLD_S,
+        )
+
+        # Find the CANCELLED tier so we can compute the cancel age.
+        target: Optional[TierOrder] = None
+        for o in inst.buy_ladder:
+            if o.tier == tier_idx and o.status == ORDER_CANCELLED:
+                target = o
+                break
+        if target is None or not target.placed_ts:
+            return
+
+        try:
+            placed_dt = _dt.datetime.fromisoformat(
+                target.placed_ts.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return
+        if placed_dt.tzinfo is None:
+            placed_dt = placed_dt.replace(tzinfo=_dt.timezone.utc)
+        now_utc = _dt.datetime.now(_dt.timezone.utc)
+        age_s = (now_utc - placed_dt).total_seconds()
+
+        if age_s >= GRID_RAPID_CANCEL_THRESHOLD_S:
+            # Slow cancel — orderbook is alive; clear the streak.
+            if inst.rapid_cancel_count:
+                inst.rapid_cancel_count = 0
+                inst.last_rapid_cancel_ts = None
+                self._persist()
+            return
+
+        inst.rapid_cancel_count += 1
+        inst.last_rapid_cancel_ts = _utcnow_iso()
+
+        if inst.rapid_cancel_count >= GRID_RAPID_CANCEL_MAX_CONSECUTIVE:
+            cooldown_dt = now_utc + _dt.timedelta(
+                seconds=GRID_RAPID_CANCEL_COOLDOWN_S
+            )
+            inst.cooldown_until = cooldown_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            self._log(
+                "rapid_cancel_backoff",
+                ob_id=inst.ob_id,
+                ticker=inst.ticker,
+                tier=tier_idx,
+                age_s=round(age_s, 1),
+                count=inst.rapid_cancel_count,
+                cooldown_until=inst.cooldown_until,
+                threshold_s=GRID_RAPID_CANCEL_THRESHOLD_S,
+            )
+
+        # Persist immediately so a restart between this write and the
+        # end-of-tick ``_persist`` preserves the streak (premortem N6).
+        self._persist()
+
     def _is_quote_stale(self, ob_id: str) -> tuple[bool, Optional[float]]:
         """Gate A check. Returns ``(is_stale, age_s)``.
 
@@ -1518,6 +1595,8 @@ class GridFisher:
             inst = self.state.by_instrument[ob]
             self._log("external_cancel_buy", ob_id=ob, ticker=inst.ticker,
                       tier=tier)
+            # Gate B — rapid-cancel back-off.
+            self._maybe_arm_rapid_cancel_cooldown(inst, tier_idx=tier)
         for ob, tier in reconcile.cancelled_sells:
             inst = self.state.by_instrument[ob]
             self._log("external_cancel_sell", ob_id=ob,
