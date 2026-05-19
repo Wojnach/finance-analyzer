@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -48,9 +49,15 @@ _HEADLINES_PATH = os.path.join(
     "data", "headlines_latest.json",
 )
 
+_headlines_lock = threading.Lock()
+
 
 def _persist_headlines(ticker: str, headlines: list[dict]) -> None:
-    """Write top 10 scored headlines to disk for fish monitor consumption."""
+    """Write top 10 scored headlines to disk for fish monitor consumption.
+
+    Serialized via _headlines_lock because 8 worker threads call this
+    concurrently for different tickers (P1.10).
+    """
     if not headlines:
         return
     try:
@@ -93,7 +100,8 @@ def _persist_headlines(ticker: str, headlines: list[dict]) -> None:
             "ticker": ticker,
             "headlines": top,
         }
-        atomic_write_json(_HEADLINES_PATH, payload)
+        with _headlines_lock:
+            atomic_write_json(_HEADLINES_PATH, payload)
     except Exception:
         logger.debug("Failed to persist headlines for %s", ticker, exc_info=True)
 
