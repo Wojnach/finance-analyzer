@@ -313,8 +313,8 @@ class TestDirectionProbability:
         r = direction_probability("XAG-USD", {"rsi": "BUY"})
         assert r["direction"] == "up"
 
-        # accuracy 0.47 → sub-50% signals filtered out → neutral
-        mock_acc.return_value = {"rsi": {"accuracy": 0.47, "samples": 100, "correct": 47}}
+        # accuracy below ACCURACY_GATE_THRESHOLD → gated out → neutral
+        mock_acc.return_value = {"rsi": {"accuracy": 0.46, "samples": 100, "correct": 46}}
         r = direction_probability("XAG-USD", {"rsi": "BUY"})
         assert r["direction"] == "neutral"
 
