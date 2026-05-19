@@ -1,5 +1,45 @@
 # Session Progress
 
+## 2026-05-19 — Auto-improve: 7 P1 adversarial review fixes
+
+**Context:** 2026-05-17 adversarial review found 12 P1 issues. 05-18
+session fixed 3. This session closes the remaining 7 actionable P1s
+(2 deferred as TODOs — too structural for auto-session).
+
+**Branch:** `improve/auto-session-2026-05-19` (6 commits via worktree)
+
+**Fixes implemented:**
+| P1 | File | Fix |
+|----|------|-----|
+| P1.4 | `file_utils.py` | `_resolve_write_path()` — atomic writes resolve symlinks before `os.replace()`, protecting config.json symlink |
+| P1.5 | `http_retry.py` | `_redact_url()` — Telegram bot tokens no longer leak into retry logs |
+| P1.7 | `agent_invocation.py` | `timeout=10` on taskkill subprocess — prevents indefinite hang |
+| P1.8 | `main.py` | `_TICKER_PAT` regex now matches `sentiment` trigger reasons |
+| P1.9 | `price_source.py` | Empty yfinance DF raises `SourceUnavailableError` instead of silent return |
+| P1.10 | `signals/news_event.py` | `_headlines_lock` threading.Lock for concurrent headline file writes |
+| P1.11 | `ticker_accuracy.py` | Replaced hardcoded `0.50` gate with `ACCURACY_GATE_THRESHOLD` (0.47) |
+
+**Deferred (TODO comments only):**
+| P1 | File | Reason |
+|----|------|--------|
+| P1.6 | `backtester.py` | Look-ahead bias — needs walk-forward accuracy rebuild, too structural |
+| P1.12 | `signal_engine.py` | Horizon mismatch (3d/5d/10d → 1d stats) — needs per-horizon accuracy data |
+
+**Tests:** 25 new tests across 6 files. Full suite: 10023 passed, 75
+failed (all pre-existing). One test (`test_direction_thresholds`)
+required update — its 0.47 accuracy expectation conflicted with P1.11
+threshold alignment.
+
+**Commits:**
+1. `8f622cee` docs(plan): improvement plan
+2. `4ea8c46e` fix(security): P1.5 token redaction + P1.4 symlink-safe writes
+3. `0fb103e6` fix(reliability): P1.7 taskkill timeout + P1.9 empty DF raise
+4. `5d5bf49f` fix(signals): P1.8 sentiment regex + P1.11 gate alignment
+5. `d1e18ab8` fix(thread-safety): P1.10 news_event lock + P1.6/P1.12 TODOs
+6. `ac6568f0` fix(test): align direction_thresholds with gate change
+
+---
+
 ## 2026-05-19 — 3-tier bias penalty (rebalance toward direction-balanced voters)
 
 **Problem:** User asked "what happened to the 60-70% accuracy". Investigation
