@@ -14,3 +14,8 @@
 {"name": "rvol_exhaustion_reversal", "score": 6.3, "source": "plus500.com", "date": "2026-05-17", "notes": "RVOL>4x at extremes = exhaustion reversal. Volume climax."}
 {"name": "eth_btc_rotation_zscore", "score": 6.0, "source": "dobermanvc.com", "date": "2026-05-17", "notes": "ETH/BTC ratio z-score >2 = rotation. ETF outflow confirmation."}
 {"name": "bpgdm_contrarian_metals", "score": 5.5, "source": "discoveryalert.com.au", "date": "2026-05-17", "notes": "Gold miners bullish % <10% = contrarian BUY. 2-3 year cycle."}
+{"name": "absorption_ratio_regime", "score": 8.55, "source": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1633027", "date": "2026-05-19", "notes": "Cross-asset Absorption Ratio: fraction of total variance explained by top-N/5 PCA eigenvectors from "}
+{"name": "geometric_berry_phase_regime", "score": 8.05, "source": "https://arxiv.org/abs/2605.17117", "date": "2026-05-19", "notes": "Berry Phase Rate from spectral embedding. Quantum-geometry regime detector. Cohen d=0.72 OOS."}
+{"name": "differential_entropy_regime", "score": 6.55, "source": "https://doi.org/10.1016/j.chaos.2025.116568", "date": "2026-05-19", "notes": "Rolling differential entropy with heavy-tailed Pareto kernel for regime detection."}
+{"name": "mstr_mnav_premium_mr", "score": 6.2, "source": "https://bitcoinquant.co/company/MSTR", "date": "2026-05-19", "notes": "MSTR mNAV ratio mean reversion. BUY at discount, SELL at excessive premium."}
+{"name": "stablecoin_supply_ratio_btc", "score": 5.8, "source": "https://cryptoquant.com", "date": "2026-05-19", "notes": "SSR: BTC mcap / stablecoin mcap. Low SSR = buying power (BUY)."}

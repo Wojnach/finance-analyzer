@@ -1,40 +1,55 @@
-# After-Hours Research Plan — 2026-05-18
+# Research Implementation Plan — 2026-05-19 After-Hours Session
 
 ## Context
 
-After-hours research session. Risk-off day: Dow -1.1%, Nasdaq -1.5%, 10Y yield
->4.60%, oil $108 WTI (Iran/Hormuz), $657M crypto liquidations. System ranging
-all day with 30 Layer 2 invocations, only 2-3 actual trades.
+System accuracy at ~50% consensus across all Tier 1 tickers — near coin-flip.
+Bond rout (30Y at 5.198%) driving metals down, crypto range-bound.
+XAG -5.6% today, XAU -1.7%. Signal system better at SELL than BUY (80.2% vs 41.8% RSI).
 
 ## Bugs & Problems Found
 
-1. **credit_spread_risk unclustered** (signal_engine.py:1737): After futures_flow
-   disabled (2026-05-07), credit_spread_risk voted at full 1.0x weight despite
-   100% correlation with crypto_macro and econ_calendar.
-   FIX: Moved to fundamental_cluster.
+1. **crypto_macro + credit_spread_risk ungrouped** despite 100% agreement (60 samples).
+   Double-counting at 3h for BTC. (`signal_engine.py` correlation groups)
+2. **XAG trigger persistence at 1 cycle** (relaxed 2026-05-11) causes consensus
+   flip-flop with only 6-7 effective voters after gating. (`trigger.py`)
+3. **BTC 12h phantom BUY** — no 12h-specific regime gate for mean_reversion/RSI.
+   False oversold readings in ranging regime. (`signal_engine.py`)
+4. **Overtriggering** — 20 invocations today, mostly HOLD. Trigger threshold calibrated
+   for 17 voters but only 7-9 effective. (`trigger.py`)
 
-2. **crypto_evrp disabled but best recent performer** (tickers.py:94): 80.5%
-   1d_recent (77 sam), 92.4% 3d. Anti-correlated with crypto_macro (32.8%).
-   FIX: Re-enabled.
+## Improvements Prioritized
 
-3. **btc_proxy unprotected in ranging**: 46.5% all-time, MSTR dropped 8.8% on
-   BTC -1.5%. Leverage amplifies noise in sideways markets.
-   FIX: Added to ranging regime gate.
+### Batch 1: Signal System Fixes (signal_engine.py + trigger.py)
+1. Add correlation group: crypto_macro + credit_spread_risk
+2. Raise XAG/XAU trigger persistence from 1 → 2 cycles
+3. Add 12h regime gate for mean_reversion + RSI on BTC
+4. Scale ranging trigger threshold by effective voter ratio
 
-## Improvements Implemented
+### Batch 2: New Signal — ConnorsRSI(2) for Crypto
+- New module: `portfolio/signals/connors_rsi2.py`
+- RSI(2) < 10 = BUY, > 90 = SELL for BTC/ETH only
+- Register in `portfolio/signal_registry.py`
+- Add to DISABLED_SIGNALS initially (shadow mode)
+- Tests: `tests/test_signal_connors_rsi2.py`
 
-### Batch 1 (committed: 03d1b0cf)
-- Enable crypto_evrp signal
-- Move credit_spread_risk to fundamental_cluster
+### Batch 3: New Signal — ADX Dual Regime Meta-Signal
+- New module: `portfolio/signals/adx_regime_switch.py`
+- ADX <= 25: emit mean-reversion context, ADX > 25: trending context
+- Register, disable initially, tests
 
-### Batch 2
-- Gate btc_proxy in ranging regime
-- Update RESEARCH_PLAN.md
+## Deferred
 
-## Deferred to Improvement Backlog
+- Walk-forward signal reweighting (medium risk, 2+ days)
+- Absorption Ratio regime detection (already added as module, pending validation)
+- MSTR mNAV premium signal (needs BTC treasury data source)
+- Multi-LLM disagreement meta-signal (0.5 day, lower urgency)
 
-1. Walk-forward signal reweighting — effort: 2 days, impact: high
-2. Signal correlation pruning (mean_reversion cluster) — effort: 2 days
-3. HMM regime detection (3-state) — effort: 3 days
-4. Adaptive MSTR-BTC beta (rolling OLS) — effort: 1 day
-5. LLM multi-agent debate for Layer 2 — effort: 5+ days
+## Execution Order
+
+1. Create worktree: `research/daily-2026-05-19`
+2. Batch 1: signal_engine.py + trigger.py fixes → test → commit
+3. Batch 2: ConnorsRSI(2) signal → test → commit
+4. Batch 3: ADX regime switch → test → commit
+5. Full test suite
+6. Merge into main, push
+7. Clean up worktree

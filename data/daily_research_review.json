@@ -1,144 +1,103 @@
 {
-  "date": "2026-05-13",
-  "trades_today": [],
-  "trade_summary": "28 Layer 2 invocations, ALL resulted in HOLD for both Patient and Bold strategies. Zero trades executed.",
-  "signals_that_were_right": [
+  "date": "2026-05-19",
+  "trades_today": [
     {
-      "signal": "econ_calendar",
-      "accuracy_1d": 61.4,
-      "samples": 6619,
-      "note": "Highest accuracy enabled signal with meaningful samples"
+      "ticker": "XAU-USD",
+      "action": "BUY",
+      "price": 4506.56,
+      "time": "13:28 UTC",
+      "rationale": "RSI 23.8 extreme oversold, 5B/1S, mean-reversion entry",
+      "current_price": 4490.2,
+      "pnl_pct": -0.36,
+      "status": "underwater, stop technically breached by 0.49x ATR"
     },
     {
-      "signal": "qwen3",
-      "accuracy_1d": 60.1,
-      "samples": 3791,
-      "note": "Local LLM showing strong performance"
+      "ticker": "XAG-USD",
+      "action": "50% TRIM",
+      "price": 74.57,
+      "time": "16:35 UTC",
+      "rationale": "Downtrend intact, reduce exposure",
+      "status": "correct \u2014 price flat at 74.61"
     },
     {
-      "signal": "fear_greed",
-      "accuracy_1d": 58.6,
-      "samples": 10232,
-      "note": "Contrarian signal consistently above 55%"
+      "ticker": "BTC-USD",
+      "action": "HOLD",
+      "price_range": "76500-77000",
+      "rationale": "Range-bound, no directional signal",
+      "status": "correct \u2014 no breakout"
     },
     {
-      "signal": "ministral",
-      "accuracy_1d": 58.2,
-      "samples": 6248,
-      "note": "Local LLM sell-side especially strong at 59.3%"
-    },
-    {
-      "signal": "crypto_macro",
-      "accuracy_1d": 57.0,
-      "samples": 3932,
-      "note": "Cross-asset macro signal performing well"
-    },
-    {
-      "signal": "bb",
-      "accuracy_1d": 54.5,
-      "samples": 8278,
-      "note": "Bollinger Bands reliable"
+      "ticker": "MSTR",
+      "action": "HOLD",
+      "price_range": "164-168",
+      "rationale": "Mixed signals 4-6 B/S, ranging",
+      "status": "correct"
     }
+  ],
+  "signals_that_were_right": [
+    "XAU-USD mean-reversion BUY on extreme RSI \u2014 caught bounce from ,486 to ,511 (thesis intact)",
+    "BTC-USD HOLD through 10+ trigger cycles \u2014 no breakout materialized, range-bound confirmed",
+    "XAG-USD trim decision \u2014 price did not bounce after partial exit",
+    "Econ Calendar signal (60.3% 1d accuracy) correctly flagged risk-off",
+    "COT Positioning signal (100% 1d but only 5 samples \u2014 too few to trust)"
   ],
   "signals_that_were_wrong": [
-    {
-      "signal": "funding",
-      "accuracy_1d": 30.8,
-      "samples": 743,
-      "note": "CRITICALLY bad at 1d horizon despite being enabled. Only BUY signals, all wrong."
-    },
-    {
-      "signal": "macro_regime",
-      "accuracy_1d": 47.0,
-      "samples": 29626,
-      "note": "Below coin flip with massive sample size - noise generator"
-    },
-    {
-      "signal": "structure",
-      "accuracy_1d": 48.7,
-      "samples": 16450,
-      "note": "Below 50% with large samples"
-    },
-    {
-      "signal": "heikin_ashi",
-      "accuracy_1d": 49.1,
-      "samples": 27325,
-      "note": "Below coin flip, large sample"
-    },
-    {
-      "signal": "ema",
-      "accuracy_1d": 49.9,
-      "samples": 17500,
-      "note": "Nearly coin flip"
-    },
-    {
-      "signal": "sentiment",
-      "accuracy_1d": 46.1,
-      "samples": 40201,
-      "note": "Already disabled, confirmed bad"
-    },
-    {
-      "signal": "trend",
-      "accuracy_1d": 46.0,
-      "samples": 18047,
-      "note": "Already disabled, confirmed bad"
-    }
+    "XAG-USD BUY signal at 13:28 was premature \u2014 flipped to SELL by 14:46 (2h persistence only)",
+    "BTC-USD 12h BUY phantom appeared again at 14:17 \u2014 known noise pattern, faded within 1h",
+    "ETH-USD sentiment flips (positive->negative->positive) throughout day \u2014 noise, no persistence",
+    "XAU-USD stop technically breached at 20:01 but BUY re-fired \u2014 signal system conflict between stop and new BUY"
   ],
   "accuracy_changes": {
-    "critical_alert": "12 signals dropped >15pp per critical_errors.jsonl",
-    "best_performing": {
-      "econ_calendar": 61.4,
-      "qwen3": 60.1,
-      "fear_greed": 58.6
-    },
-    "worst_enabled": {
-      "funding": 30.8,
-      "macro_regime": 47.0,
-      "structure": 48.7
-    },
-    "per_ticker_1d": {
+    "Tier1_active_tickers": {
       "BTC-USD": {
-        "consensus_accuracy": 53.0,
-        "note": "Marginal edge"
+        "1d": "52.8% (4300 sam)",
+        "3h": "50.8% (4176 sam)",
+        "3d": "46.9%",
+        "5d": "50.7%"
       },
       "ETH-USD": {
-        "consensus_accuracy": 49.4,
-        "note": "Below coin flip - signals not helping"
+        "1d": "49.5% (4123 sam)",
+        "3h": "48.6% (4022 sam)",
+        "3d": "51.2%",
+        "5d": "48.0%"
       },
       "XAG-USD": {
-        "consensus_accuracy": 49.7,
-        "note": "Below coin flip - primary focus but signals poor"
+        "1d": "49.3% (3051 sam)",
+        "3h": "53.2% (2880 sam)",
+        "3d": "56.7%",
+        "5d": "58.2%"
       },
       "XAU-USD": {
-        "consensus_accuracy": 50.0,
-        "note": "Coin flip - no edge"
+        "1d": "50.3% (2689 sam)",
+        "3h": "53.9% (2395 sam)",
+        "3d": "50.0%",
+        "5d": "47.7%"
       },
       "MSTR": {
-        "consensus_accuracy": 46.5,
-        "note": "Below coin flip"
+        "1d": "46.4% (2450 sam)",
+        "3h": "45.5% (2312 sam)",
+        "3d": "50.2%",
+        "5d": "53.9%"
       }
     },
-    "per_ticker_3d": {
-      "XAG-USD": 57.4,
-      "ETH-USD": 51.6,
-      "MSTR": 50.5,
-      "XAU-USD": 49.8,
-      "BTC-USD": 47.6
+    "observation": "No active ticker has >55% 1d accuracy. XAG-USD shows better accuracy at longer horizons (3d: 56.7%, 5d: 58.2%) \u2014 suggests swing trades are more reliable than day trades for silver. BTC and ETH near coin-flip at all horizons.",
+    "metals_LLM": {
+      "llm_BTC_1h": "54.6% (7729 sam) \u2014 calibration gap 0.45",
+      "llm_ETH_1h": "51.1% (11983 sam) \u2014 calibration gap 0.48, near useless",
+      "chronos_models": "All at 46-52% \u2014 not contributing edge"
     }
   },
   "system_errors": [
-    "Avanza session expired (May 12) - fetch_failed, needs manual BankID login",
-    "12 signals accuracy degradation >15pp (May 13) - two entries logged",
-    "No metals trades since March 2026 (last was emergency sells)"
+    "Layer 2 contract violations: 3 today (15:08, 19:08, 20:01 UTC) \u2014 all timing lag, not silent failures. Journal entries were written but beyond 21m detection window.",
+    "No signal module failures (all 47 modules 100% uptime)",
+    "Loop healthy: 87 cycles, 0 errors, last heartbeat 20:28 UTC"
   ],
   "key_observations": [
-    "ALL 28 invocations today = HOLD. System showed restraint \u2014 good. But 28 invocations for 0 trades suggests trigger threshold too sensitive.",
-    "Signal consensus flip-flopping heavily: XAU-USD flipped BUY<->SELL<->HOLD 8 times today. XAG-USD flipped 6 times. Noise, not signal.",
-    "Per-ticker 1d consensus accuracy: BTC 53%, XAG 49.7%, XAU 50%, ETH 49.4%, MSTR 46.5%. For active tickers, only BTC has marginal edge.",
-    "XAG-USD consensus improves at 3d horizon (57.4%) \u2014 system may be better at medium-term than daily calls.",
-    "Funding rate signal at 30.8% accuracy but ENABLED \u2014 should be disabled or horizon-restricted.",
-    "Many newer signals (futures_basis, hurst_regime, etc.) have 0 samples at 1d \u2014 either not voting or not being tracked.",
-    "Prophecy: Silver at 9, well above entry (1.50), all checkpoints through 0 triggered. BTC at 9K, 5K checkpoint triggered.",
-    "No metals trades since March. Grid fisher may be inactive or Avanza session expired blocking execution."
+    "MARKET REGIME: Range-bound all day. BTC 6.5-77K, XAU ,486-4,512, XAG 3-76. No directional conviction.",
+    "SIGNAL QUALITY: 1d consensus accuracy is near 50% for all Tier 1 tickers \u2014 system has no reliable short-term edge. Longer horizons (3-5d) slightly better for XAG (56-58%) and MSTR (50-54%).",
+    "LLM MODELS: Ministral/Chronos/Qwen contributing minimal alpha. LLM BTC 1h is best at 54.6% but calibration gap of 0.45 means confidence values are meaningless.",
+    "CRITICAL INSIGHT: XAU mean-reversion trade entered on extreme RSI (23.8) is the one thesis-driven trade today. All other activity was noise-filtering HOLD decisions \u2014 correct behavior in ranging regime.",
+    "LAYER 2 PATTERN: 20 invocations today, most producing HOLD. 3 timed out before writing journal. System is overtriggered in ranging markets \u2014 triggers fire on sentiment flips that lack persistence.",
+    "BOLD PORTFOLIO: Dormant at 463K SEK cash. Correct \u2014 Bold strategy only enters on breakouts, and none materialized."
   ]
 }

@@ -1,5 +1,40 @@
 # Session Progress
 
+## 2026-05-19 After-Hours — Deep Research + Signal Implementation (3 batches)
+
+**Context:** Autonomous after-hours research session. System at ~50% consensus
+accuracy (coin-flip). Bond rout (30Y 5.198%) driving metals down, crypto range-bound.
+BUY accuracy collapsed system-wide (RSI BUY 41.8% vs SELL 80.2%).
+
+**Phase 0-5 (Research):**
+- Macro: bond rout dominant, silver -5.6%, India gold duty hike, Iran deadlock
+- Signal audit: 3 degraded signals (credit_spread_risk 20%, crypto_macro 21%,
+  forecast 25.6%), BUY-side accuracy collapse across all active signals
+- Quant: IC-weighted voting top priority, ETH needs own signals, XAG better at 3d/5d
+- Morning briefing: bearish outlook 0.72 confidence, all instruments risk-off
+
+**Phase 6-7 (Implementation — 3 commits merged to main):**
+
+1. `fix(signals): activate density-based trigger gate, raise ranging dampening, add 12h BTC gate`
+   - trigger.py: density gate activated (threshold 0.4, 5 cycles for low-density)
+   - trigger.py: RANGING_CONSENSUS_MIN_CONFIDENCE 0.35 → 0.40
+   - signal_engine.py: 12h regime gate disabling mean_reversion + rsi for BTC-USD
+
+2. `feat(signals): add ConnorsRSI(2) ultra-short mean reversion for crypto`
+   - New: portfolio/signals/connors_rsi2.py (BTC/ETH only, 3 sub-indicators)
+   - Shadow mode (DISABLED_SIGNALS). 20 tests pass.
+
+3. `feat(signals): add ADX dual regime meta-signal`
+   - New: portfolio/signals/adx_regime_switch.py (all assets, 3 sub-indicators)
+   - Shadow mode (DISABLED_SIGNALS). 19 tests pass.
+
+**Signal count:** 67 modules registered (was 65), 17 active, 51 disabled (was 49).
+
+**Next:** Monitor shadow signals for 7+ days, check accuracy before enabling.
+Loop restart needed for trigger.py changes to take effect.
+
+---
+
 ## 2026-05-19 PM — Working-tree hygiene sweep (13 commits)
 
 **Context:** Working tree had 294 untracked files at session start —
@@ -5472,3 +5507,15 @@ docs/codex-permission-prompts-config.md
 ### 2026-05-19 20:20 UTC | main
 e1a0b117 docs(session): record 2026-05-19 PM working-tree hygiene sweep
 docs/SESSION_PROGRESS.md
+
+### 2026-05-19 20:20 UTC | main
+57a2ab6b docs(session): post-commit hook log entry for hygiene sweep
+docs/SESSION_PROGRESS.md
+
+### 2026-05-19 20:39 UTC | main
+32a7362f fix(hygiene): promote 4 scaffold files from gitignored to tracked
+.gitignore
+data/metals_warrant_catalog.json
+data/seasonality_profiles.json
+data/signal_weights.json
+data/system_lessons.json

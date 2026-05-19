@@ -1,28 +1,32 @@
 {
-  "date": "2026-05-13",
-  "market_summary": "Mixed session. S&P -0.15%, Dow -0.48%, Nasdaq +0.12%. PPI surged 6% YoY (Iran war energy costs). Tech outperformed on Nvidia/AMD/MU strength. Trump arrived in Beijing for Xi summit (May 14-15). Markets weighing inflation spike vs trade detente hopes. Gold fell to $4,690 (-0.5%), silver $85.44 (-1.1%) as hot inflation killed rate-cut expectations. BTC held ~$80.5K, ETH ~$2,250. Oil steadied around WTI $102, Brent $107.",
+  "date": "2026-05-19",
+  "generated_at": "2026-05-19T22:30:00+02:00",
+  "market_summary": "Third straight losing session for US equities amid a bond rout. S&P 500 -0.67% (7,353), Nasdaq -0.84% (25,870), Dow -0.65% (49,375). 30-year Treasury yield hit 5.198% — highest since July 2007 — on persistent inflation fears tied to Iran-driven oil shock. 10Y yield rose 6bps to 4.687%. Gold fell $78 to $4,489 (-1.7%), silver cratered $4.37 to $73.36 (-5.6%) as rising real yields undercut safe-haven bid. Oil eased (Brent ~$110, WTI ~$103) after Trump cancelled planned Iran strike following Gulf ally intervention. BTC held $76.8K, ETH at $2,296. India hiked gold/silver import duty from 6% to 15%, adding structural headwind to physical demand.",
   "key_events_tomorrow": [
-    "Trump-Xi summit Day 1 in Beijing (May 14) \u2014 trade deal progress, tariff discussions",
-    "Weekly jobless claims (May 14, 8:30 AM ET)",
-    "Import/export price index (May 14)",
-    "Business delegations: Musk, Cook, Fink, Boeing CEO in China \u2014 potential purchase agreements",
-    "Continued Iran-US ceasefire/Strait of Hormuz monitoring"
+    "106 economic events scheduled for May 20 — busy data day, check econoday.com for specifics",
+    "40 earnings reports on May 20 — no mega-cap confirmed but heavy mid-cap slate",
+    "US-Iran negotiations: Trump paused attack but Iran rejects latest draft terms — deadlock risk",
+    "Treasury yield pressure: 30Y at 5.2%, BofA survey shows 62% of fund managers expect 6% — any further spike hammers risk assets",
+    "Japan GDP surprise: Q1 annualized 2.1% vs 1.7% expected — could boost Nikkei, JPY implications for carry trades",
+    "UK Hormuz deployment: drones, fighters, warship — any confrontation escalates oil immediately"
   ],
   "overnight_risks": [
-    "Trump-Xi summit headlines could whipsaw markets \u2014 any tariff surprise or Iran mediation news",
-    "Asian markets reacting to US PPI inflation surge and rate-cut repricing",
-    "Iran ceasefire on \"massive life support\" per Trump \u2014 Strait of Hormuz disruption risk remains",
-    "India raised gold/silver import tariffs to 15% from 6% \u2014 demand dampener for precious metals",
-    "UAE departure from OPEC effective May 1 \u2014 oil supply dynamics shifting"
+    "Iran deadlock: despite Trump pausing attack, Tehran says US conditions 'overly demanding' — breakdown sends oil back toward $120+",
+    "Bond vigilantes: 30Y at 19-year high, 10Y at 4.69% — if Asia/Europe sell continues overnight, equity futures gap down",
+    "Silver flash crash risk: -5.6% today, India duty hike removes structural demand, gold-silver ratio widened to 61.2:1",
+    "Crypto liquidation continuation: $657M liquidated yesterday, BTC holding $76.8K but 10Y yield pressure could break $75K support",
+    "Oil supply: OPEC production still down 9.7M bpd from pre-Iran-war, inventories falling 8.5M b/d in Q2 per EIA",
+    "Asia open: Nikkei at 62K+ may react to US bond rout; strong Japan GDP data is double-edged (growth but BoJ tightening fears)"
   ],
   "instrument_news": {
-    "XAG-USD": "Silver $85.44, down 1.1%. Hot inflation killing rate-cut hopes pressures metals. But COT positioning still bullish, central banks buying 700-900t gold/yr, BofA target $135-309 silver. Industrial demand (solar/EV/AI) intact. India tariff hike (15%) dampens short-term demand.",
-    "XAU-USD": "Gold $4,690, down 0.5%. JP Morgan targets $5K by Q4 2026, SSGA sees structural bull to $5K. Central bank buying 16th straight year. ETF flows mixed \u2014 US outflows but global record AUM $701B. Producer COT positions bullish.",
-    "BTC-USD": "BTC $80.5K, steady. RSI 50, consolidation regime. Trump-Xi summit adding uncertainty. BitMEX Hayes predicts $126K rally on AI spending + geopolitics. Inverse H&S pattern targeting $84K.",
-    "ETH-USD": "ETH $2,250, down 2.8% from Tuesday. Golden Cross pattern targeting $2,680. Still lagging BTC. ETH/BTC ratio compressed.",
-    "MSTR": "MSTR ~$178, 818K BTC treasury ($61.8B, avg cost $75.5K). Q1 revenue +11.9% YoY. Major shift: will sell BTC for preferred stock dividends (ending \"never sell\" approach). Stock +40% past month. Analyst consensus \"Strong Buy\", target range $176-228."
+    "BTC-USD": "Holding $76.8K, range-bound $76.5-77K all day. ETF recovery real but incomplete — $3.29B inflows over past 2 months, cumulative $58.72B since launch. SEC approved options on spot BTC ETFs (IBIT covered calls/protective puts now live). Bitcoin Depot filed Chapter 11. Macro headwind from 30Y yield at 5.2% and strong USD. Support $75K, resistance $80K.",
+    "ETH-USD": "Trading $2,296, below 200-day MA of $2,367, 53% below ATH. BlackRock staked ETH ETF pulled $100M on first day. Exchange supply at yearly low 14.9M ETH. Staking ratio up to 31%. Ronin migrated to Ethereum L2. SBI/Rakuten planning regulated crypto trusts in Japan. Grayscale staking ETF live on NYSE Arca.",
+    "MSTR": "At ~$165, down from $177 area. Holds 843,738 BTC at avg $66,384 ($33.1B total cost). Recent 24,869 BTC purchase caused 6% stock drop — market punishing aggressive treasury expansion at these BTC prices. Tracking BTC weakness. Stock +35% since Feb but vulnerable if BTC breaks $75K.",
+    "XAG-USD": "Cratered 5.6% to $73.36 — worst day in weeks. India duty hike from 6% to 15% structurally negative for second-largest consumer. Gold-silver ratio widened to 61.2:1 reflecting industrial demand sensitivity. Rising real yields (30Y at 5.2%) undercut metals broadly. Silver ETF AUM in India rose 7% to ~₹95K crore despite duty — price appreciation not inflows.",
+    "XAU-USD": "Down $78 to $4,489 (-1.7%), pulled back from $4,512 earlier. India duty hike headline negative. Central bank buying continues but insufficient to offset real yield pressure from 30Y at 5.2%. BofA survey: 62% expect 30Y to hit 6%. At 5%+ real yields, gold faces significant headwinds. Support $4,450, resistance $4,550."
   },
-  "metals_outlook": "Short-term bearish pressure from hot inflation killing rate-cut expectations. India tariff hike dampens demand. But structural bull thesis intact: central banks buying record pace, COT bullish, gold targeting $5K by Q4, silver has 150%+ gain past year. Trump-Xi summit could reduce geopolitical premium if Iran mediation progresses. Key: silver 3d consensus accuracy 57.4% \u2014 better than 1d (49.7%), suggesting medium-term signals more reliable than daily noise.",
-  "oil_outlook": "WTI $102, Brent $107. Iran ceasefire on life support. Saudi warns 100M bbl/week supply loss. IEA: global inventories falling 8.5M b/d in Q2. UAE left OPEC May 1. EIA expects Brent to drop to $89/b Q4 2026 as production normalizes. Key risk: Strait of Hormuz closure duration.",
-  "sentiment_shift": "Risk-off tilt. Hot PPI + Iran uncertainty + rate-cut repricing = cautious positioning. But Trump-Xi summit creates potential positive catalyst. Tech resilience suggests selective risk appetite remains. Overall: neutral-to-cautious for Thursday."
+  "metals_outlook": "Metals under serious pressure from dual headwinds: (1) 30Y yield at 19-year high of 5.2% with expectations of 6% — rising real yields are gold's kryptonite; (2) India raised import duty from 6% to 15%, removing structural physical demand from world's #2 consumer. Silver hit harder (-5.6% vs gold -1.7%) as industrial demand expectations fall in restrictive rate environment. Gold-silver ratio widened to 61.2:1. Central bank buying remains a floor but insufficient to offset macro headwinds. Near-term bearish tilt for both metals until yields stabilize or Iran escalation reignites safe-haven bid. Key level: gold $4,450 support, silver $70 psychological.",
+  "oil_outlook": "Brent eased to ~$110, WTI ~$103 after Trump cancelled planned Iran strike on Gulf allies' request. Strait of Hormuz still effectively closed (5% of pre-conflict shipping). OPEC production down 9.7M bpd from pre-war levels. EIA expects inventories to fall 8.5M b/d in Q2. Iran says US conditions 'overly demanding' — deadlock persists. UK deploying military assets to Hormuz. Any negotiation breakdown immediately retests $120+ Brent. Oil above $100 is structurally inflationary and negative for risk assets. OPEC cut demand growth forecast to 1.2M bpd from 1.4M.",
+  "crypto_outlook": "BTC range-bound at $76.8K, ETH at $2,296. Bond market is the biggest headwind — 30Y at 5.2% makes risk-free return attractive vs crypto. ETF flows recovering ($3.29B over 2 months) but not enough to overcome macro drag. SEC options approval on spot BTC ETFs adds institutional tools. CLARITY Act progressing toward federal crypto framework by mid-2026. Key risk: if 10Y breaks 5%, crypto likely reprices lower. Support BTC $75K, ETH $2,100. Upside catalyst needed — either yields reversing or Iran deal boosting risk appetite.",
+  "sentiment_shift": "Decidedly risk-off, driven by the bond market. The 30Y yield hitting a 19-year high is the dominant story — it pressures every risk asset simultaneously. Equities down for third straight session, metals selling off despite geopolitical uncertainty (unusual — means real yield pressure > safe-haven demand), crypto holding but fragile. India gold duty hike adds a structural negative for metals. The only bullish catalyst would be a credible Iran deal (oil drops, yields drop, risk-on) or a sudden Fed pivot signal. Neither appears imminent. Position for continued volatility with downside bias across all instruments."
 }
