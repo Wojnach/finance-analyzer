@@ -49,10 +49,14 @@ class TestExtractTriggeredTickers:
         reasons = ["F&G crossed 80 (45->82)"]
         assert _extract_triggered_tickers(reasons) == set()
 
-    def test_sentiment_reason_ignored(self):
+    def test_sentiment_reason_extracts_ticker(self):
+        """P1.8: sentiment reversal reasons must extract the triggered ticker."""
         reasons = ["BTC-USD sentiment bullish->bearish (sustained)"]
-        # "sentiment" is not in the regex pattern (consensus|moved|flipped)
-        assert _extract_triggered_tickers(reasons) == set()
+        assert _extract_triggered_tickers(reasons) == {"BTC-USD"}
+
+    def test_sentiment_reason_metals(self):
+        reasons = ["XAG-USD sentiment bearish->bullish (sustained)"]
+        assert _extract_triggered_tickers(reasons) == {"XAG-USD"}
 
     def test_empty_list(self):
         assert _extract_triggered_tickers([]) == set()

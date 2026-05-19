@@ -89,7 +89,9 @@ def run_backtest(horizon="1d", days=None):
     if not entries:
         return {"error": "No entries found", "entries": 0}
 
-    # Pre-build accuracy_data for new consensus (based on the target horizon)
+    # TODO: MANUAL REVIEW — P1.6 look-ahead bias. accuracy_data is built from
+    # the FULL signal_log (including future outcomes). Walk-forward rebuild
+    # needed: accuracy_at[entry_day] = _build_accuracy_data(horizon, upto=entry_ts).
     accuracy_data = _build_accuracy_data(horizon)
 
     # Collect results per horizon and per signal (1d only for signal breakdown)

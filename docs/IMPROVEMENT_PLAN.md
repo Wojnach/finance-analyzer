@@ -1,145 +1,137 @@
-# Improvement Plan — Auto-Session 2026-05-18
+# Improvement Plan — Auto-Session 2026-05-19
 
-Created: 2026-05-18
-Branch: `improve/auto-session-2026-05-18`
+Created: 2026-05-19
+Branch: `improve/auto-session-2026-05-19`
 
 ## Exploration Summary
 
-5 parallel agents covered full codebase (core orchestration, portfolio/risk, metals/Avanza,
-infrastructure/dashboard, signal modules). Inherited unimplemented B10-B14 from 2026-05-17
-session. New bugs found and verified with exact line references.
+Inherited 9 unresolved P1s from the 2026-05-17 adversarial review (P1.4–P1.12).
+The 2026-05-18 session fixed P1.1 (trailing stop TypeError), P1.2 (trigger baseline
+wipe), and P1.3 (multi-agent gate bypass). All remaining P1s verified against current
+`main` at commit `17df25d3`.
 
 ---
 
-## 1. Bugs & Improvements Found
+## 1. Bugs to Fix (all verified open)
 
-### B10 [P2] health.py signal rolling window uses list + del slice (O(n) per cycle)
-**File:** `portfolio/health.py:292-296`
-**Bug:** `recent.append(success); del recent[:-50]` creates unnecessary copies under 85
-appends/min (17 signals × 5 tickers).
-**Fix:** Replace with `collections.deque(maxlen=50)`.
-**Risk:** Very low. Deque supports same iteration patterns.
+### P1.5 [CRITICAL] Telegram bot token leaked to retry logs
+**File:** `portfolio/http_retry.py:50,54,63,67`
+**Bug:** `logger.warning("HTTP %s from %s, ...")` logs full URL. Telegram callers
+construct `https://api.telegram.org/bot{token}/sendMessage` — every 429/500/timeout
+dumps the token into `agent.log`.
+**Fix:** Add `_redact_url()` helper that masks `/bot[0-9]+:[A-Za-z0-9_-]+/`.
+**Risk:** Very low. Pure string masking before logging. No behavioral change.
+**Tests:** Unit test for `_redact_url` covering Telegram URLs, non-Telegram URLs,
+and edge cases.
 
-### B12 [P1] signal_engine.py broad Exception in enhanced signal dispatch
-**File:** `portfolio/signal_engine.py` — enhanced signal try/except block
-**Bug:** Catches bare `Exception` and returns HOLD at DEBUG level. Crashing signals are
-invisible for days/weeks.
-**Fix:** Log at WARNING with `exc_info=True`. Keep HOLD return for safety.
-**Risk:** None — behavior unchanged, only visibility improved.
+### P1.4 [HIGH] atomic_write_json silently destroys symlinks
+**File:** `portfolio/file_utils.py:59`
+**Bug:** `os.replace(tmp, str(path))` replaces symlinks themselves, not their targets.
+`config.json` is a symlink. `telegram_poller.py:361` writes config via atomic_write_json.
+**Fix:** In `atomic_write_json` and `atomic_write_text`, resolve symlinks before replace:
+`path = Path(os.path.realpath(path))`.
+**Risk:** Low. `os.path.realpath()` is a no-op for non-symlinks. All callers benefit.
+**Tests:** Unit test that creates a symlink, writes via atomic_write_json, and verifies
+the symlink still exists and target was updated.
 
-### B14 [P2] Hardcoded correlation priors duplicated across modules
-**Files:** `portfolio/monte_carlo_risk.py`, `portfolio/risk_management.py`
-**Bug:** Both files define correlation priors independently. Values can drift.
-**Fix:** Extract to `portfolio/correlation_priors.py` (already exists, verify imports).
-**Risk:** Low. Pure extraction.
+### P1.7 [HIGH] taskkill in agent_invocation has no timeout
+**File:** `portfolio/agent_invocation.py:623`
+**Bug:** `subprocess.run(["taskkill", ...], capture_output=True)` — no `timeout=`.
+If target hangs, blocks indefinitely while holding `_completion_lock`.
+**Fix:** Add `timeout=10`. On `TimeoutExpired`, log critical and return False.
+**Risk:** Very low. Adds safety net to existing kill path.
+**Tests:** Existing kill tests cover this; add one for timeout scenario.
 
-### N1 [P1] trade_guards.py ticker_trades grows unbounded
-**File:** `portfolio/trade_guards.py:269-273`
-**Bug:** `state["ticker_trades"][key] = now_str` accumulates forever. `new_position_timestamps`
-has pruning (298-310) but `ticker_trades` does not.
-**Fix:** Add pruning for entries older than 90 days in `record_trade()`.
-**Risk:** Low. Only removes stale data that's never accessed.
+### P1.8 [HIGH] Sentiment-triggered Layer 2 misses ticker context
+**File:** `portfolio/main.py:244`
+**Bug:** `_TICKER_PAT` regex only matches `consensus|moved|flipped`. Sentiment reversal
+reasons fall through, so Layer 2 gets no triggered ticker.
+**Fix:** Extend regex to `consensus|moved|flipped|sentiment`.
+**Risk:** Very low. Only adds one more match keyword.
+**Tests:** Unit test for sentiment reason string extraction.
 
-### N3 [P1] risk_management.py FX cache persist silently swallowed
-**File:** `portfolio/risk_management.py:160-161`
-**Bug:** `logger.debug("fx cache persist failed: %s", e)` — DEBUG level means invisible in
-production. Operator can't detect broken disk writes.
-**Fix:** Upgrade to `logger.warning()`.
-**Risk:** None. Purely a log level change.
+### P1.9 [HIGH] Empty yfinance DataFrame returned, crashes downstream
+**File:** `portfolio/price_source.py:152-153`
+**Bug:** `if df.empty: return df` — returns empty DF instead of raising
+`SourceUnavailableError`. Downstream `.iloc[-1]` crashes.
+**Fix:** `if df.empty: raise SourceUnavailableError(...)`.
+**Risk:** Low. The outer `fetch_klines` try/except already handles this error type.
+**Tests:** Unit test verifying SourceUnavailableError raised on empty result.
 
-### N4 [P2] reporting.py _module_warnings list allows theoretical duplicates
-**File:** `portfolio/reporting.py:152, 780-781`
-**Bug:** `_module_warnings` is a list; same module name could appear if multiple failure paths
-exist per module. Layer 2 sees duplicated warnings.
-**Fix:** Use `sorted(set(_module_warnings))` before writing to summary.
-**Risk:** None.
+### P1.11 [MEDIUM] Hidden 50% accuracy gate in Mode B probability
+**File:** `portfolio/ticker_accuracy.py:130`
+**Bug:** Hardcoded `if accuracy < 0.50: continue` drops signals at 47-49.9% from
+probability computation. Should use `ACCURACY_GATE_THRESHOLD` (0.47).
+**Fix:** Import and use `ACCURACY_GATE_THRESHOLD` from signal_engine.
+**Risk:** Low. May slightly change Mode B probability values (more signals included).
+**Tests:** Unit test verifying a signal at 48% is included.
 
-### N5 [P1] trade_guards.py naive datetime comparison on every access
-**File:** `portfolio/trade_guards.py:142-145` (approximate)
-**Bug:** `if last_trade.tzinfo is None: last_trade = last_trade.replace(tzinfo=UTC)` is
-checked every time a trade timestamp is accessed. Should parse once at load time.
-**Fix:** Add `_normalize_timestamps()` to `_load_state()` that enforces UTC awareness.
-**Risk:** Low. Purely defensive code movement.
+### P1.10 [MEDIUM] News event signal does shared-file disk I/O from worker threads
+**File:** `portfolio/signals/news_event.py:96`
+**Bug:** `atomic_write_json(_HEADLINES_PATH, payload)` called from 8 worker threads.
+Last-write-wins race causes cross-ticker pollution.
+**Fix:** Add a threading.Lock around the persist call, or better: accumulate
+headlines in-memory and let a single post-cycle consumer write them.
+**Risk:** Medium. Lock approach is simpler but adds synchronization to signal path.
+Will use lock approach (simpler, proven pattern in this codebase).
+**Tests:** Verify lock prevents concurrent writes.
 
-### N6 [P2] signal_engine.py enhanced signal dispatch exception detail
-**File:** `portfolio/signal_engine.py` — same block as B12
-**Bug:** When enhanced signal crashes, error message doesn't include signal name in the
-log line. Hard to grep for which signal is broken.
-**Fix:** Include `signal_name` in the warning log format.
-**Risk:** None.
+### P1.6 [MEDIUM] Backtester look-ahead bias
+**File:** `portfolio/backtester.py:93`
+**Bug:** `accuracy_data = _build_accuracy_data(horizon)` built ONCE from full signal_log
+including future outcomes. Every scored entry has look-ahead.
+**Risk assessment:** This is a structural fix that changes backtester behavior. All
+existing comparisons would need re-running. High complexity, moderate risk.
+**Decision:** SKIP for auto-session. Document with TODO comment. Needs dedicated
+backtester overhaul session.
+
+### P1.12 [LOW-MEDIUM] Horizon mismatch: 3d/5d/10d uses 1d accuracy
+**File:** `portfolio/signal_engine.py:4026`
+**Bug:** `acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"` collapses
+multi-day horizons to 1d accuracy stats.
+**Risk assessment:** Fixing requires multi-day accuracy data to exist in the cache.
+If it doesn't, gate falls back to 1d anyway. The horizon-disabled list at L875
+already manually handles the worst cases. Partial fix possible.
+**Decision:** SKIP for auto-session. Complex data dependency. Document with TODO.
 
 ---
 
-## 2. False Positives Investigated
+## 2. False Positives / Deferred
 
-- **B11** shared_state.py redundant time.time(): The second call is in `_loading_timestamps`
-  dict write, not the same as outer `now`. Different purpose. Not worth changing.
-- **B15** health.py DST comparison: Already uses UTC epoch on both sides. DST-immune.
-- **B13** grid_fisher state lock: `atomic_write_json` already uses tempfile+rename (atomic on
-  NTFS). Dashboard reads complete files. Not a real race.
-- **message_store.py truncation BUG-131**: Working as designed. When no newline found, cuts at
-  byte boundary (max-20 chars). Not ideal but not a bug.
-- **health.py del recent[:-50]**: Correctly keeps LAST 50 entries. But still O(n) per delete.
-- **portfolio_mgr.py update_state return**: Return is inside `with lock:` context. Safe.
+- **P1.6** (backtester look-ahead): Too structural for auto-session. Needs walk-forward redesign.
+- **P1.12** (horizon mismatch): Requires multi-day accuracy cache infrastructure.
+- **ARCH-18** (metals_loop monolith): 7800+ line file, needs dedicated session.
+- **ARCH-17** (main.py re-exports): Breaks 10+ test files, too risky.
 
 ---
 
 ## 3. Implementation Batches
 
-### Batch 1: Visibility & Logging (3 files, no dependencies)
-1. `portfolio/signal_engine.py` — B12+N6: upgrade exception logging to WARNING + include signal name
-2. `portfolio/risk_management.py` — N3: FX cache persist `debug` → `warning`
-3. `portfolio/reporting.py` — N4: dedup _module_warnings before writing to summary
+### Batch 1: Security & Logging (2 files)
+1. `portfolio/http_retry.py` — P1.5: URL redaction before logging
+2. `portfolio/file_utils.py` — P1.4: symlink-safe atomic writes
 
-### Batch 2: Data Integrity (2 files)
-1. `portfolio/trade_guards.py` — N1: add ticker_trades 90-day pruning
-2. `portfolio/trade_guards.py` — N5: normalize timestamps at load time
+### Batch 2: Reliability (2 files)
+1. `portfolio/agent_invocation.py` — P1.7: taskkill timeout
+2. `portfolio/price_source.py` — P1.9: raise on empty yfinance
 
-### Batch 3: Performance & Refactoring (3 files)
-1. `portfolio/health.py` — B10: deque for signal rolling window
-2. `portfolio/correlation_priors.py` — B14: verify single source of truth + update imports
-3. `portfolio/monte_carlo_risk.py` + `portfolio/risk_management.py` — B14: import from priors
+### Batch 3: Signal Accuracy (2 files)
+1. `portfolio/main.py` — P1.8: extend trigger ticker regex
+2. `portfolio/ticker_accuracy.py` — P1.11: use ACCURACY_GATE_THRESHOLD
 
----
+### Batch 4: Thread Safety (1 file)
+1. `portfolio/signals/news_event.py` — P1.10: lock around headline persist
 
-## 4. Skipped (Out of Scope)
-
-- **ARCH-18** metals_loop.py monolith: 7882 lines, needs dedicated design session
-- **ARCH-17** main.py re-exports: 100+ symbols, breaks 10+ test files
-- **Grid fisher partial fill**: Complex state machine change, too risky for auto-session
-- **price_targets.py fill_probability_buy**: GBM symmetry assumption, needs quant validation
-- **Dashboard blueprint split**: 1600 lines → blueprints, dedicated session
-- **Any config.json or live trading logic changes**
-
-### Batch 4: Adversarial Review P1 Fixes (from REVIEW_2026-05-17)
-1. `portfolio/trigger.py` — P1.2: guard _save_state against empty ticker set
-2. `data/metals_loop.py` — P1.1: trailing stop TypeError (wrong API, wrong kwargs)
-3. `portfolio/claude_gate.py` + `portfolio/multi_agent_layer2.py` — P1.3: specialist gate bypass
-
-### Batch 5: Resource Cleanup
-1. `data/crypto_monitor.py` — file handle leak on inline open()
-2. `portfolio/gpu_gate.py` — psutil missing warning
+### Batch 5: Documentation
+1. `portfolio/backtester.py` — P1.6: TODO comment for look-ahead bias
+2. `portfolio/signal_engine.py` — P1.12: TODO comment for horizon mismatch
 
 ---
 
-## 5. Implementation Status
+## 4. Success Criteria
 
-All batches completed:
-- **Batch 1** (3 files): signal_engine shadow logging, risk_management FX warning, reporting dedup
-- **Batch 2** (1 file): trade_guards ticker_trades 90-day pruning
-- **Batch 3** (2 files): gpu_gate psutil warning, message_store triple-sanitize removal
-- **Batch 4** (4 files): P1.2 trigger baseline wipe, P1.1 trailing stop, P1.3 specialist gate
-- **Batch 5** (1 file): crypto_monitor file handle leak
-
-N5 (timestamp normalization at load time) deferred — defensive checks already in place at
-every access site, refactoring them would touch many paths without functional benefit.
-
-B10 (health.py deque) confirmed false positive — list never exceeds 51 entries, O(n) at n=51
-is sub-microsecond. B14 (correlation_priors) already extracted in a prior session.
-
-## 6. Success Criteria
-
-- [x] All batches implemented with passing tests
+- [ ] All batches implemented with passing tests
 - [ ] Full test suite green (`pytest tests/ -n auto`)
 - [ ] No new test failures introduced
+- [ ] Adversarial review passes
 - [ ] Merged to main and pushed

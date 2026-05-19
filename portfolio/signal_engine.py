@@ -4023,6 +4023,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     activation_rates = {}
     # H3: Define acc_horizon before the try/except so the except block and
     # subsequent code can reference it even if the import fails.
+    # TODO: MANUAL REVIEW — P1.12 horizon mismatch. 3d/5d/10d horizons collapse
+    # to "1d" accuracy stats. Need per-horizon accuracy cache infrastructure.
     acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
     try:
         from portfolio.accuracy_stats import (

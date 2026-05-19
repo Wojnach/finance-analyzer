@@ -138,6 +138,17 @@ class TestFailoverBehavior:
             fetch_klines("^VIX", interval="1d", limit=60)
 
 
+class TestYfinanceEmptyDataFrame:
+    """P1.9: yfinance returning empty DF must raise, not return silently."""
+
+    @patch("portfolio.price_source._fetch_binance_fapi")
+    def test_empty_yfinance_raises_source_unavailable(self, mock_fapi):
+        mock_fapi.side_effect = ConnectionError("Binance down")
+        with patch("yfinance.download", return_value=pd.DataFrame()):
+            with pytest.raises(SourceUnavailableError, match="yfinance returned empty"):
+                fetch_klines("XAG-USD", interval="1h", limit=10)
+
+
 class TestReturnContract:
     """The dispatcher must return the DataFrame as-is from the backend;
     lowercase OHLCV columns are the contract."""

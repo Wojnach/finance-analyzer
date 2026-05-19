@@ -8,6 +8,7 @@ import logging
 import math
 from datetime import UTC
 
+from portfolio.signal_engine import ACCURACY_GATE_THRESHOLD
 from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 logger = logging.getLogger("portfolio.ticker_accuracy")
@@ -127,7 +128,7 @@ def direction_probability(ticker, current_votes, horizon="1d", days=7, min_sampl
         accuracy = sig_acc["accuracy"]
         samples = sig_acc["samples"]
 
-        if accuracy < 0.50:
+        if accuracy < ACCURACY_GATE_THRESHOLD:
             continue
 
         if vote == "BUY":

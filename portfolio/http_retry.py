@@ -2,6 +2,7 @@
 
 import logging
 import random
+import re
 import time
 
 import requests
@@ -12,6 +13,13 @@ DEFAULT_RETRIES = 3
 DEFAULT_BACKOFF = 1.0  # seconds
 DEFAULT_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+_SECRET_URL_RE = re.compile(r"/bot[0-9]+:[A-Za-z0-9_-]+/")
+
+
+def _redact_url(url):
+    """Mask Telegram bot tokens and similar secrets in URLs before logging."""
+    return _SECRET_URL_RE.sub("/bot***/", url)
 
 
 def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
@@ -48,11 +56,11 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
                         retry_after = wait
                     wait = retry_after
                 logger.warning("HTTP %s from %s, retry %d/%d in %.1fs",
-                               resp.status_code, url, attempt + 1, retries, wait)
+                               resp.status_code, _redact_url(url), attempt + 1, retries, wait)
                 time.sleep(wait)
             else:
                 logger.error("HTTP %s from %s after %d retries",
-                             resp.status_code, url, retries)
+                             resp.status_code, _redact_url(url), retries)
                 return None
 
         except (requests.ConnectionError, requests.Timeout) as e:
@@ -61,11 +69,11 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
                 jitter = random.uniform(0, wait * 0.1)
                 wait += jitter
                 logger.warning("%s from %s, retry %d/%d in %.1fs",
-                               e.__class__.__name__, url, attempt + 1, retries, wait)
+                               e.__class__.__name__, _redact_url(url), attempt + 1, retries, wait)
                 time.sleep(wait)
             else:
                 logger.error("Request failed after %d retries: %s - %s",
-                             retries, url, e)
+                             retries, _redact_url(url), e)
                 return None
 
     return None

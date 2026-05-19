@@ -150,7 +150,7 @@ def _fetch_yfinance(
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
     if df.empty:
-        return df
+        raise SourceUnavailableError(f"yfinance returned empty DataFrame for {ticker}")
     # Normalize column casing (yfinance uses capitalized; our downstream
     # code expects lowercase after the alpaca/binance path).
     df = df.rename(columns={

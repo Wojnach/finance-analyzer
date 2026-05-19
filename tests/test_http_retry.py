@@ -25,6 +25,7 @@ from portfolio.http_retry import (
     DEFAULT_BACKOFF_FACTOR,
     DEFAULT_RETRIES,
     RETRYABLE_STATUS,
+    _redact_url,
     fetch_json,
     fetch_with_retry,
 )
@@ -904,3 +905,44 @@ class TestFetchJsonLogging:
             fetch_json("https://api.example.com/data")
 
         mock_logger.warning.assert_not_called()
+
+
+class TestRedactUrl:
+    """P1.5: Telegram bot token must never appear in logs."""
+
+    def test_redacts_telegram_bot_token(self):
+        url = "https://api.telegram.org/bot123456789:ABCdef_GHIjkl-MNOpqr/sendMessage"
+        assert _redact_url(url) == "https://api.telegram.org/bot***/sendMessage"
+
+    def test_preserves_non_telegram_url(self):
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT"
+        assert _redact_url(url) == url
+
+    def test_redacts_multiple_occurrences(self):
+        url = "https://api.telegram.org/bot111:AAA/x?redirect=/bot222:BBB/"
+        result = _redact_url(url)
+        assert "111:AAA" not in result
+        assert "222:BBB" not in result
+
+    def test_preserves_path_after_token(self):
+        url = "https://api.telegram.org/bot99:XYZ_abc-123/getUpdates"
+        assert _redact_url(url) == "https://api.telegram.org/bot***/getUpdates"
+
+    def test_empty_url(self):
+        assert _redact_url("") == ""
+
+    def test_retry_log_uses_redacted_url(self):
+        """Integration: verify retry warning uses redacted URL."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+
+        tg_url = "https://api.telegram.org/bot123:SECRET/sendMessage"
+        with patch("portfolio.http_retry.requests") as mock_req, \
+             patch("portfolio.http_retry.time.sleep"), \
+             patch("portfolio.http_retry.logger") as mock_logger:
+            mock_req.get.return_value = mock_resp
+            fetch_with_retry(tg_url, retries=1)
+
+        logged_args = mock_logger.warning.call_args[0]
+        assert "123:SECRET" not in str(logged_args)
+        assert "bot***" in str(logged_args)

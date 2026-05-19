@@ -313,8 +313,8 @@ class TestDirectionProbability:
         r = direction_probability("XAG-USD", {"rsi": "BUY"})
         assert r["direction"] == "up"
 
-        # accuracy 0.47 → sub-50% signals filtered out → neutral
-        mock_acc.return_value = {"rsi": {"accuracy": 0.47, "samples": 100, "correct": 47}}
+        # accuracy below ACCURACY_GATE_THRESHOLD → gated out → neutral
+        mock_acc.return_value = {"rsi": {"accuracy": 0.46, "samples": 100, "correct": 46}}
         r = direction_probability("XAG-USD", {"rsi": "BUY"})
         assert r["direction"] == "neutral"
 
@@ -749,3 +749,17 @@ class TestVoteCorrectNeutralFilter:
         result = accuracy_by_ticker_signal("XAG-USD", horizon="1d")
         # All three were neutral or None — no usable samples → dropped.
         assert "rsi" not in result
+
+
+class TestAccuracyGateThreshold:
+    """P1.11: Mode B probability must use ACCURACY_GATE_THRESHOLD, not 0.50."""
+
+    def test_threshold_matches_signal_engine(self):
+        """Verify ticker_accuracy uses the canonical threshold from signal_engine."""
+        from portfolio.signal_engine import ACCURACY_GATE_THRESHOLD as engine_threshold
+        from portfolio import ticker_accuracy
+        import inspect
+        source = inspect.getsource(ticker_accuracy)
+        assert "ACCURACY_GATE_THRESHOLD" in source
+        assert "< 0.50" not in source
+        assert engine_threshold == 0.47

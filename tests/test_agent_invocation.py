@@ -607,6 +607,34 @@ class TestInvokeAgentTimeout:
         # BUG-92: stubborn process that won't die blocks new spawn
         assert result is False
 
+    def test_taskkill_timeout_does_not_hang(self):
+        """P1.7: taskkill with timeout=10 prevents indefinite hang."""
+        import subprocess as _subprocess
+
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 600
+        proc.wait.return_value = 0
+        ai._agent_proc = proc
+        ai._agent_start = time.monotonic() - 1000
+        ai._agent_timeout = 120
+
+        with patch("portfolio.agent_invocation.platform.system", return_value="Windows"), \
+             patch("portfolio.agent_invocation.subprocess.run") as mock_run, \
+             patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen") as mock_p, \
+             patch("portfolio.agent_invocation._load_config", return_value={}), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"), \
+             patch("builtins.open", mock_open()):
+            mock_run.side_effect = _subprocess.TimeoutExpired(cmd="taskkill", timeout=10)
+            mock_p.return_value = MagicMock(pid=601)
+            result = invoke_agent(["test"], tier=1)
+
+        # Should not hang — taskkill timeout caught, logged critical, returns False
+        assert result is False
+
 
 # ===========================================================================
 # invoke_agent — CLAUDECODE env var cleanup

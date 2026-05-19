@@ -241,7 +241,7 @@ CONFIG_FILE = BASE_DIR / "config.json"
 
 import re as _re
 
-_TICKER_PAT = _re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped)')
+_TICKER_PAT = _re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped|sentiment)')
 
 
 def _extract_triggered_tickers(reasons):
