@@ -157,13 +157,49 @@ over-trading on biased votes during the rally.
   investigation -- backlog for whoever sees the next occurrence in
   `data/contract_violations.jsonl`.
 
+**Post-user-rerun audit (2026-05-19 ~01:35 UTC):** user ran the
+elevated reinstall launcher. Verification survey of all 41 PF-* tasks
+shows 25 are now wrapped via `wscript.exe -> run-hidden.vbs`, but 16
+are still bare. The three the user actually cares about (always-on,
+always-visible windows) are in the bare list:
+- `PF-DataLoop` (main 60s loop, runs `pf-loop.bat`)
+- `PF-Dashboard` (Flask server, runs `python -m dashboard.app`)
+- `PF-Loop` (one-time at 00:00:00, also `pf-loop.bat`, likely an
+  obsolete duplicate of PF-DataLoop)
+
+Root cause: these three pre-existed the hide-windows merge but had
+no `install-*.ps1` script in `scripts/win/`, so neither the merge nor
+tonight's launcher knew about them. Wrote two new install scripts:
+- `scripts/win/install-data-loop-task.ps1`
+- `scripts/win/install-dashboard-task.ps1`
+Both follow the canonical pattern from `install-metals-loop-task.ps1`
+(wscript.exe wrapper, AtLogOn trigger, ExecutionTimeLimit 3d,
+RestartCount 3). Skipped PF-Loop deliberately -- it's a possibly-
+obsolete duplicate; writing an install script for it would entrench
+legacy. User should review and either delete it
+(`Unregister-ScheduledTask -TaskName PF-Loop -Confirm:$false`) or
+copy install-data-loop-task.ps1 -> install-loop-task.ps1 and adapt.
+
+Other 13 bare tasks left alone for now (PF-AutoImprove, PF-CpuBench,
+PF-DashboardSync, PF-ForceShutdown, PF-HWMonitor, PF-LLMBackfill,
+PF-LoraTraining, PF-MLRetrain, PF-OutcomeCheck,
+PF-SettingsCleanup-20260508, PF-SilverORB, PF-VerifyTunnel,
+PF-WakeUp). Most are periodic short-running tasks; a few are no-ops
+(WakeUp echoes one line, ForceShutdown is destructive on purpose).
+None pop persistent visible windows the way DataLoop / Dashboard /
+Loop did.
+
 **Still on user's plate:**
-- Double-click `scripts/win/reinstall-all-tasks-elevated.bat` and click
-  Yes on the UAC prompt. Review the PS1 output for any task that
-  failed to register.
+- Re-run `scripts/win/reinstall-all-tasks-elevated.bat` so the two
+  new install scripts get picked up. After that, every always-on
+  PF-* task is wrapped. Confirm via:
+  `Get-ScheduledTask PF-DataLoop, PF-Dashboard | % { ([xml](Export-ScheduledTask $_.TaskName)).Task.Actions.Exec.Command }`
+  -- both should print `wscript.exe`.
+- Decide what to do with `PF-Loop` (delete it, or have me write its
+  install script next session).
 - Open `https://<dashboard>/?#loop-processes` and spot-check the tile
   renders correctly (it polls `/api/loop-processes` every 30s).
-- (Optional) Push 2 local commits on `main` once you're back at a
+- (Optional) Push N local commits on `main` once you're back at a
   terminal -- I cannot push from this session per the classifier.
 
 ## 2026-05-19 — TODO: finish remote branch sweep (BLOCKED on classifier)
@@ -5179,4 +5215,8 @@ docs/SESSION_PROGRESS.md
 
 ### 2026-05-18 23:24 UTC | main
 599a9973 docs(session): bold-state cp1252 em-dash fix + admin reinstall plate
+docs/SESSION_PROGRESS.md
+
+### 2026-05-18 23:53 UTC | main
+a5e9c4bb docs: SESSION_PROGRESS — record grid_fisher Gate A/B live verification
 docs/SESSION_PROGRESS.md
