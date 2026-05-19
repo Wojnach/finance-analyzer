@@ -207,3 +207,279 @@ training/lora/logs/
 .venv-train/
 llama.cpp/
 nul
+
+# ---------------------------------------------------------------------------
+# 2026-05-19 cleanup triage — runtime state, scratch, openclaw templates.
+# All additions verified untracked + not snapshots that should remain tracked
+# (daily_research_macro/quant/review/etc + morning_briefing stay tracked per
+# the snapshot exception documented above).
+# ---------------------------------------------------------------------------
+
+# Runtime state (loop-written or LLM-written)
+data/agent_context_t1.json
+data/agent_context_t2.json
+data/autonomous_throttle.json
+data/contract_state.json
+data/contract_violations.jsonl
+data/cot_history.jsonl
+data/claude_fundamental_log.jsonl
+data/claude_invocations.jsonl
+data/elongir_state.json
+data/elongir_log.jsonl
+data/elongir_trades.jsonl
+data/exchange_netflow_history.jsonl
+data/accuracy_snapshot_state.json
+data/accuracy_snapshot_*.json
+data/calibration_analysis_*.json
+data/disabled_signal_rescue_*.json
+data/algo_trading_research_*.json
+data/weekly_research_*.json
+data/daily_research_next_batch.json
+data/digest_state.json
+data/daily_digest_state.json
+data/crypto_scheduler_state.json
+data/avanza_instruments_live.json
+data/avanza_search_all.json
+data/avanza_search_result.json
+data/avanza_silver_warrants.json
+data/backtest_new_signals_out.json
+data/backtest_sjm_results.json
+data/backtest_conf_threshold/
+data/bench_history.jsonl
+data/trade_guard_state.json
+data/tune_new_signals_out.json
+data/docx_extract.txt
+data/fin_command_lessons.json
+data/degradation_alert_state.json
+data/archive/
+data/fgl-logs/
+
+# Local PowerShell scratch under data/
+data/check_processes.ps1
+data/cpu_check.ps1
+data/cpu_monitor.ps1
+
+# Scratch underscore-prefix artifacts in data/ (existing _*.py/_*.ps1 covers
+# code, this covers payload scratch). Note: _test_/_tmp_ already covered above.
+data/_arxiv_*.xml
+data/_mini_s_*.txt
+data/_signal_report_tmp.txt
+data/_silver_warrants_report.txt
+data/_new_warrant_details.json
+data/_semgrep_scan.json
+data/_ss_*.json
+data/_x.json
+
+# Dev caches + ephemeral toolchain dirs
+.openclaw/
+worktrees/
+memory/
+.pytest_tmp/
+.playwright-cli/
+.playwright-mcp/
+.venv-unsloth/
+unsloth_compiled_cache/
+training/unsloth/
+
+# Single-character stray (May 2 artifact)
+/0
+
+# Local CLAUDE override (machine-specific; documented as non-committed in CLAUDE.md)
+CLAUDE.local.md
+
+# openclaw personality templates (workspace-state files, not project artifacts)
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+
+# Mobile dashboard screenshots (UI dev capture, not docs)
+phone-*.png
+home_phone_full.png
+portfolio_phone.png
+
+# ---------------------------------------------------------------------------
+# 2026-05-19 cleanup triage — second sweep. Covers data/* runtime that the
+# loop, metals subsystem, golddigger, fish engine, grid_fisher, mstr_loop,
+# llm rotation, signal-research agent, and ad-hoc scripts write.
+#
+# Exception watch: data/metals_warrant_catalog.json + data/seasonality_profiles.json
+# + data/signal_weights.json + data/system_lessons.json may be intentional
+# scaffolds. Flagged in docs/cleanup-triage-20260519.md — promote to tracked
+# if confirmed.
+# ---------------------------------------------------------------------------
+
+# Layer 2 / decision outcomes
+data/layer2_decisions.jsonl
+data/layer2_decision_outcomes.jsonl
+data/journal_outcomes.jsonl
+
+# Loop stdout/stderr + rotated logs + lock + pid files
+data/loop_stdout.txt
+data/loop_stderr.txt
+data/portfolio.log.*
+data/*.singleton.lock
+data/*.pid
+data/llama_server.pid
+
+# Auto-improve / after-hours research output
+data/auto-improve-*
+data/after-hours-*
+data/adversarial_review_out.txt
+data/shadow_review_out.txt
+data/outcome_check_out.txt
+data/meta_learner_retrain_out.txt
+data/llm_backfill_out.txt
+data/monitor_silver_exit.stdout
+
+# fin_* command runtime
+data/fin_command_log.jsonl
+data/fin_evolve_state.json
+data/fin_fish_log.jsonl
+data/fin_fish_monitor.jsonl
+data/fin_snipe_fills.jsonl
+data/fin_snipe_manager_log.jsonl
+data/fin_snipe_manager_out.txt
+data/fin_snipe_predictions.jsonl
+data/fin_snipe_state.json
+
+# Fish engine runtime
+data/fish_engine_state.json
+data/fish_heartbeat.txt
+data/fish_monitor_log.jsonl
+data/fish_monitor_state.json
+data/fish_precomputed.json
+data/fish_trades.jsonl
+data/fishing_context.json
+
+# GoldDigger runtime
+data/golddigger_state.json
+data/golddigger_log.jsonl
+data/golddigger_trades.jsonl
+data/golddigger_out.txt
+data/golddigger_contract_state.json
+data/golddigger.singleton.lock
+
+# Grid Fisher runtime
+data/grid_fisher_state.json
+data/grid_fisher_decisions.jsonl
+data/grid_fisher_probe_state.json
+data/grid_fisher_probe_decisions.jsonl
+
+# Metals subsystem runtime (catalog intentionally untracked here pending
+# confirmation — see watch above)
+data/metals_agent_summary.json
+data/metals_contract_state.json
+data/metals_decisions.jsonl
+data/metals_ghost_positions.json
+data/metals_guard_state.json
+data/metals_llm_outcomes.jsonl
+data/metals_llm_predictions.jsonl
+data/metals_loop_out.txt
+data/metals_news_summary.json
+data/metals_precompute_state.json
+data/metals_refresh_state.json
+data/metals_signal_accuracy.json
+data/metals_signal_log.jsonl
+data/metals_signal_outcomes.jsonl
+data/metals_spike_state.json
+data/metals_swing_decisions.jsonl
+data/metals_swing_trades.jsonl
+data/metals_trades.jsonl
+data/metals_value_history.jsonl
+data/metals_warrant_catalog.json
+
+# Oil deep context + grid signal runtime
+data/oil_cot_history.jsonl
+data/oil_deep_context.json
+data/oil_grid_signal.json
+data/oil_pdf_text.txt
+data/oil_pdf2_text.txt
+data/oil_precompute_state.json
+data/oil_refresh_state.json
+
+# MSTR loop runtime (Phase A shadow)
+data/mstr_loop_backtest_results.json
+data/mstr_loop_poll.jsonl
+data/mstr_loop_shadow.jsonl
+data/mstr_loop_state.json
+data/mstr_loop_telegram_state.json
+
+# Silver runtime
+data/silver_analysis.json
+data/silver_deep_context.json
+data/silver_monitor_err.txt
+data/silver_monitor_out.txt
+data/silver_refresh_state.json
+data/silver_research.md
+data/silver_research.md.tmp.*
+
+# Gold runtime
+data/gold_btc_ratio_history.jsonl
+data/gold_deep_context.json
+data/gold_refresh_state.json
+
+# Local LLM rotation + reports
+data/llm_rotation_state.jsonl
+data/llm_probability_outcomes.jsonl
+data/llm_probability_outcomes.jsonl.bak-*
+data/local_llm_report_history.jsonl
+data/local_llm_report_latest.json
+data/local_llm_report_export_state.json
+
+# Signal research agent state
+data/signal-research-log.jsonl
+data/signal-research-progress.json
+data/signal_candidates.db
+data/signal_postmortem.json
+data/signal_research_*.json
+data/signal_research_*.db
+data/signal_research_*.jsonl
+data/signal_research_out.txt
+data/signal_research_backlog.db
+data/signal_research_papers.json
+data/signal_research_ranked.json
+data/signal_research_summary.json
+data/signal_research_web.json
+data/signal_state_since.json
+data/signal_utility_cache.json
+data/signal_weights.json
+data/quant_research_findings.json
+
+# Hardware monitor runtime
+data/hw_monitor.json
+data/hw_history/
+
+# Caches + analysis snapshots (dated)
+data/fundamentals_cache.json
+data/onchain_cache.json
+data/ticker_signal_accuracy_cache.json
+data/ic_analysis_*.json
+data/ic_cache.json
+data/mrmr_analysis_*.json
+data/regime_analysis_*.json
+data/per_ticker_ic_summary_*.json
+data/research_literature_scan_*.json
+data/seasonality_profiles.json
+data/system_lessons.json
+data/stack_overflow_counter.json
+data/price_snapshots_hourly.jsonl
+data/sentiment_shadow_outcomes.jsonl
+data/semgrep_baseline.json
+data/microstructure_state.json
+
+# Local sub-dirs
+data/models/
+data/kronos_training/
+
+# rc-server (remote control) stdout
+data/rc-server_out.txt
+data/rc-server-2_out.txt
+data/rc-server-3_out.txt
+
+# Local PowerShell + batch scratch under data/
+data/list_python_procs.ps1
+data/read_temps.ps1
+data/start_loops.bat
