@@ -213,6 +213,8 @@ DISABLED_SIGNALS = {
     "structure",        # 2026-05-15: 45.7% blended 1d (16652 sam). 42% activation.
                         # BUY-biased (25.5% vs 16.6%). High/Low breakout and Donchian
                         # signals fail in ranging markets. 49.9% at 3h (marginal).
+    "connors_rsi2",     # 2026-05-19: NEW. RSI(2) ultra-short MR for BTC/ETH only.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.

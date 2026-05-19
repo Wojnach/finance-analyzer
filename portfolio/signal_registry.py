@@ -358,6 +358,10 @@ def _register_defaults():
                       "portfolio.signals.absorption_ratio_regime",
                       "compute_absorption_ratio_regime_signal",
                       requires_context=True, max_confidence=0.7)
+    register_enhanced("connors_rsi2",
+                      "portfolio.signals.connors_rsi2",
+                      "compute_connors_rsi2_signal",
+                      requires_context=True, max_confidence=0.75)
 
 
 _register_defaults()
