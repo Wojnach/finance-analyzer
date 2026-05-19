@@ -39,14 +39,14 @@ class TestCircuitBreakerConstants:
         ratio = _GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP
         assert ratio == pytest.approx(round(ratio), abs=1e-9)
 
-    def test_high_sample_min_at_10000(self):
-        """2026-04-16 review (Reviewer 3 P1-1): pin the tiered-gate sample
-        threshold. Was raised 5000 -> 10000 during the gating reconfig so
-        signals with 5-10K samples aren't caught by the tighter 0.50 gate
-        during regime transitions. Regression test against a silent revert.
+    def test_high_sample_min_at_7000(self):
+        """Pin tiered-gate sample threshold. 5000 → 10000 (2026-04-16) widened
+        the band so 5-10K-sample signals weren't caught by the 0.50 gate
+        during regime transitions. 10000 → 7000 (2026-05-XX) tightened it
+        slightly. Regression test against a silent revert in either direction.
         """
         from portfolio.signal_engine import _ACCURACY_GATE_HIGH_SAMPLE_MIN
-        assert _ACCURACY_GATE_HIGH_SAMPLE_MIN == 10000
+        assert _ACCURACY_GATE_HIGH_SAMPLE_MIN == 7000
 
     def test_high_sample_threshold_at_050(self):
         """Companion pin: the tiered gate at the high-sample tier stays 0.50."""

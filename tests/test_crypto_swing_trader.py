@@ -156,7 +156,11 @@ class TestEntryGates:
 
     def test_low_confidence_rejects(self, isolate_state):
         trader = cst.CryptoSwingTrader(page=None, executor=None)
-        sig = _fresh_signal(conf=0.40)
+        # 2026-05-19: 0.40 → 0.20. MIN_BUY_CONFIDENCE dropped to 0.30 on
+        # 2026-05-11 (Stage 2 follow-up: post-penalty conf lands 0.30-0.40
+        # after voter expansion). Test conf must stay strictly below the
+        # active threshold.
+        sig = _fresh_signal(conf=0.20)
         trader._update_history("BTC-USD", sig)
         allow, reason, _ = trader._evaluate_entry("BTC-USD", sig, is_momentum=False)
         assert not allow

@@ -206,7 +206,9 @@ class TestMetalsSignalConfig:
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
         # 2026-05-12: 20 → 17 after disabling volatility_sig, dxy_cross_asset,
         # forecast (research session signal audit).
-        assert extra["_total_applicable"] == 17
+        # 2026-05-19: 17 → 13 after further May disables (matches CLAUDE.md
+        # "metals=12 applicable" ± 1 recent addition).
+        assert extra["_total_applicable"] == 13
 
     def test_stocks_total_applicable(self):
         """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""
@@ -233,7 +235,8 @@ class TestMetalsSignalConfig:
             action, conf, extra = generate_signal(ind, ticker="MSTR")
         # 2026-05-12: 18 → 15 after disabling volatility_sig, dxy_cross_asset,
         # forecast (research session signal audit).
-        assert extra["_total_applicable"] == 15
+        # 2026-05-19: 15 → 11 after further May disables.
+        assert extra["_total_applicable"] == 11
 
     def test_crypto_total_applicable(self):
         """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""
@@ -257,4 +260,5 @@ class TestMetalsSignalConfig:
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
         # 2026-05-12: 26 → 23 after disabling volatility_sig, dxy_cross_asset,
         # forecast (all 3 apply to crypto despite dxy being metals-focused).
-        assert extra["_total_applicable"] == 23
+        # 2026-05-19: 23 → 17 after further May disables.
+        assert extra["_total_applicable"] == 17

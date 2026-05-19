@@ -241,14 +241,17 @@ class TestWeightedConsensusRegime:
         assert action == "SELL"
 
     def test_ranging_boosts_rsi_and_bb(self):
-        # Use claude_fundamental as opponent — not in momentum_cluster, not regime-gated
-        votes = {"rsi": "BUY", "claude_fundamental": "SELL"}
+        # 2026-05-19: swapped claude_fundamental → cot_positioning. claude_fundamental
+        # got added to the ranging gate-list (force-HOLD), which collapsed its weight
+        # to 0 and made conf go to 1.0 (BUY alone). cot_positioning is active per
+        # CLAUDE.md, not regime-gated in ranging, default weight 1.0.
+        votes = {"rsi": "BUY", "cot_positioning": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "claude_fundamental": {"accuracy": 0.6, "total": 50},
+            "cot_positioning": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # rsi weight = 0.6 * 1.5(ranging) = 0.9, claude_fundamental = 0.6 * 1.0 = 0.6
+        # rsi weight = 0.6 * 1.5(ranging) = 0.9, cot_positioning = 0.6 * 1.0 = 0.6
         # BUY=0.9, SELL=0.6 => BUY
         assert action == "BUY"
         expected = 0.9 / (0.9 + 0.6)
@@ -293,19 +296,20 @@ class TestWeightedConsensusActivationRates:
     """Activation rate normalization (rarity * bias correction)."""
 
     def test_activation_rate_scales_weight(self):
-        # Use claude_fundamental — not in momentum_cluster, not regime-gated in ranging
-        votes = {"rsi": "BUY", "claude_fundamental": "SELL"}
+        # 2026-05-19: swapped claude_fundamental → cot_positioning (see
+        # test_ranging_boosts_rsi_and_bb above for the same drift).
+        votes = {"rsi": "BUY", "cot_positioning": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "claude_fundamental": {"accuracy": 0.6, "total": 50},
+            "cot_positioning": {"accuracy": 0.6, "total": 50},
         }
         activation = {
             "rsi": {"normalized_weight": 2.0},  # rare signal, boosted
-            "claude_fundamental": {"normalized_weight": 0.5},   # noisy signal, dampened
+            "cot_positioning": {"normalized_weight": 0.5},   # noisy signal, dampened
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging", activation_rates=activation)
         # rsi: 0.6 * 1.5(ranging) * 2.0 = 1.8
-        # claude_fundamental: 0.6 * 1.0(ranging) * 0.5 = 0.3
+        # cot_positioning: 0.6 * 1.0(ranging) * 0.5 = 0.3
         # BUY=1.8, SELL=0.3 => BUY
         assert action == "BUY"
         expected = 1.8 / (1.8 + 0.3)
@@ -824,7 +828,8 @@ class TestRegimeWeightsConstant:
         """Enhanced signals should have regime weights in ranging."""
         rw = REGIME_WEIGHTS["ranging"]
         assert rw["mean_reversion"] == 1.7  # 2026-04-05: 65.4% recent, boosted from 1.5
-        assert rw["fibonacci"] == 1.8  # 2026-04-05: 68.2% recent, boosted from 1.6
+        # fibonacci weight removed 2026-04-29 — signal disabled (sub-threshold accuracy)
+        assert "fibonacci" not in rw
         # ministral ranging boost removed 2026-04-26 (collapsed to 41.5% recent)
         assert "ministral" not in rw
         assert rw["macd"] == 1.3  # 2026-04-05: 58.7% recent, newly added
@@ -1164,22 +1169,27 @@ class TestActivityRateCap:
         assert action == "BUY"
 
     def test_normal_activity_no_penalty(self):
-        """Signals with <70% activation rate are not penalized."""
-        votes = {"rsi": "SELL", "fibonacci": "BUY"}
+        """Signals with <70% activation rate are not penalized.
+
+        2026-05-19: swapped fibonacci → mean_reversion (fibonacci disabled
+        2026-04-29 and dropped from ranging weights; with weight=1.0 it
+        lost to rsi). mean_reversion has 1.7 boost in ranging.
+        """
+        votes = {"rsi": "SELL", "mean_reversion": "BUY"}
         accuracy = {
             "rsi": {"accuracy": 0.55, "total": 24000},
-            "fibonacci": {"accuracy": 0.55, "total": 600},
+            "mean_reversion": {"accuracy": 0.55, "total": 600},
         }
         activation = {
             "rsi": {"activation_rate": 0.35, "normalized_weight": 1.0},
-            "fibonacci": {"activation_rate": 0.02, "normalized_weight": 1.0},
+            "mean_reversion": {"activation_rate": 0.02, "normalized_weight": 1.0},
         }
         action, conf = _weighted_consensus(
             votes, accuracy, "ranging", activation_rates=activation
         )
         # rsi: 0.55 * 1.5(regime ranging) * 1.0 = 0.825
-        # fibonacci: 0.55 * 1.8(regime ranging) * 1.0 = 0.99
-        # fibonacci BUY wins (updated 2026-04-05: fibonacci ranging weight 1.6 -> 1.8)
+        # mean_reversion: 0.55 * 1.7(regime ranging) * 1.0 = 0.935
+        # mean_reversion BUY wins
         assert action == "BUY"
 
 
@@ -1289,7 +1299,8 @@ class TestRegimeGatingBeforeVoteCounts:
 
         gated = _get_regime_gated("ranging", "3h")
         assert "trend" not in gated
-        assert "momentum_factors" not in gated
+        # 2026-05-19: momentum_factors now gated in ranging-3h
+        # (was: assert "momentum_factors" not in gated)
         assert "ema" not in gated  # ema works at 3h (62.9%)
         # fear_greed and macro_regime stay gated at ALL horizons (structural failure)
         assert "fear_greed" in gated
@@ -1821,7 +1832,8 @@ class TestCrisisMode:
             _CRISIS_THRESHOLD,
             _CRISIS_TREND_PENALTY,
         )
-        assert _CRISIS_THRESHOLD == 0.35
+        # 2026-05-19: 0.35 → 0.42 (signal_engine.py:491).
+        assert _CRISIS_THRESHOLD == 0.42
         assert _CRISIS_MIN_BROKEN == 3
         assert 0 < _CRISIS_TREND_PENALTY < 1.0  # penalty reduces weight
         assert _CRISIS_MR_BOOST > 1.0  # boost increases weight

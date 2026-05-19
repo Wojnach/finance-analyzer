@@ -649,9 +649,10 @@ class TestGetDisabledReason:
 
     def test_returns_none_for_active_signal(self):
         from portfolio.tickers import get_disabled_reason
-        # rsi, ema are core actives — never disabled.
+        # rsi, bb are core actives. 2026-05-19: swapped ema → bb because
+        # ema was disabled 2026-05-15 (46.2% blended 1d, 17917 sam).
         assert get_disabled_reason("rsi") is None
-        assert get_disabled_reason("ema") is None
+        assert get_disabled_reason("bb") is None
 
     def test_returns_none_for_unknown_signal(self):
         from portfolio.tickers import get_disabled_reason
