@@ -1,0 +1,18 @@
+The new Avanza subsystem has multiple functional regressions: BankID-backed price reads report zeros, the session positions path bypasses the account whitelist, and the new confirmation flow can either fail outright or execute expired orders. These issues affect both existing reporting and the new trading workflow, so the patch is not correct.
+
+Full review comments:
+
+- [P1] Normalize BankID quote payloads before storing `price_sek` — Q:\finance-analyzer-fgl-review\portfolio\avanza_tracker.py:64-68
+  When `_try_session_auth()` succeeds, `portfolio.avanza_client.get_price()` returns the raw `/_api/market-guide/...` document, not the stock-info shape used by the TOTP path. In that case `lastPrice` and `changePercent` are absent here, so `fetch_avanza_prices()` silently records `0.0` for both fields and `portfolio/reporting.py` will publish every Avanza instrument with a zero price whenever a BankID session is active.
+
+- [P1] Enforce `ALLOWED_ACCOUNT_IDS` on the session positions path — Q:\finance-analyzer-fgl-review\portfolio\avanza_client.py:171-174
+  This early return bypasses the whitelist logic in the TOTP branch below. If a valid BankID session exists, `portfolio.avanza_client.get_positions()` will expose every account returned by `/_api/position-data/positions`, including pension or other non-trading accounts that `ALLOWED_ACCOUNT_IDS` is meant to exclude.
+
+- [P1] Make `place_buy_order`/`place_sell_order` honor BankID sessions — Q:\finance-analyzer-fgl-review\portfolio\avanza_client.py:333-341
+  Unlike `get_price()` and `get_positions()`, the trading helpers go straight to the TOTP client here. In the documented BankID-only setup (`data/avanza_session.json` exists but `avanza.username/password/totp_secret` are not configured), a confirmed order from `portfolio.avanza_orders._execute_confirmed_order()` fails in `_load_credentials()` instead of using the active session, so the new confirmation flow cannot place trades at all.
+
+- [P1] Reject CONFIRM messages for orders that have already expired — Q:\finance-analyzer-fgl-review\portfolio\avanza_orders.py:130-136
+  If Telegram polling is delayed or the user replies after `EXPIRY_MINUTES`, this branch executes the order before checking `now > expires`. That lets a stale order go live even though the module contract says timed-out requests should expire after 5 minutes, which is especially risky for real-money limit orders whose quoted price is no longer fresh.
+
+- [P2] Treat non-2xx stop-loss DELETE responses as failures — Q:\finance-analyzer-fgl-review\portfolio\avanza_control.py:397-404
+  `_api_delete()` reports HTTP failures via `{"http_status": ..., "ok": false}`, but this wrapper only looks for an `errorCode` field. For any 4xx/5xx stop-loss cancel that comes back without a JSON error body, callers receive `(True, result)` and may continue as if the stop was cleared even though the broker rejected the delete.

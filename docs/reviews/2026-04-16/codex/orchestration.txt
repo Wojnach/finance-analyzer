@@ -1,0 +1,21 @@
+The patch introduces several runtime regressions in the new orchestration layer: normal slow cycles are misclassified as contract failures, one monitoring invariant is inert, and timeout handling can leave duplicate or orphaned Claude processes. Those issues affect operational correctness enough that the patch should not be considered correct.
+
+Full review comments:
+
+- [P1] Raise the contract cycle-duration limit above 180s — Q:\finance-analyzer-fgl-review\portfolio\loop_contract.py:29-29
+  Any cycle that legitimately runs between 180s and the new 360s ticker-pool timeout will now be flagged as a contract violation even though `main.py` explicitly budgets for much slower cycles on a 600s cadence. After three such runs, `ViolationTracker` escalates this to CRITICAL and triggers alerts/self-heal, so slow-but-healthy production cycles will page continuously.
+
+- [P2] Preserve `_agent_proc` when timeout cleanup fails — Q:\finance-analyzer-fgl-review\portfolio\agent_invocation.py:203-206
+  If `taskkill` fails or the timed-out Claude process ignores the 15s wait, this branch logs that the old process may still be running and then clears `_agent_proc` anyway. On the next trigger `invoke_agent()` will think no Layer 2 agent exists and can spawn a second one while the first is still alive, leading to duplicate journal/Telegram side effects.
+
+- [P2] Kill specialist process trees on timeout — Q:\finance-analyzer-fgl-review\portfolio\multi_agent_layer2.py:199-202
+  When a specialist times out, `proc.kill()` only terminates the direct `claude` process. The same patch added tree-kill handling elsewhere because Claude's Node/MCP children survive plain kills; here those descendants will keep running after the timeout, so repeated specialist timeouts can leak background processes/VRAM and overlap with the synthesis step.
+
+- [P2] Read the existing voter-count field in contract tracking — Q:\finance-analyzer-fgl-review\portfolio\loop_contract.py:729-730
+  This invariant never actually records any counts because `report.signals[*].extra` uses fields like `_total_applicable`/`_voters`, not `active_voters` (see the existing reporting/Telegram codepaths). As written, `_previous_signal_counts` stays empty and `signal_count_stable` can never fire, so the new voter-drop regression check is effectively disabled.
+
+- [P2] Reload config before each post-cycle pass — Q:\finance-analyzer-fgl-review\portfolio\main.py:1084-1085
+  `run()` reloads `config.json` every cycle, but `_run_post_cycle()` is still fed the startup-time `config` object from `loop()`. If an operator changes digest schedules, throttles, crypto scheduler settings, or contract alert config while the daemon is running, those post-cycle behaviors keep using stale settings until the whole process is restarted.
+
+- [P3] Read crypto Fear & Greed from ticker keys — Q:\finance-analyzer-fgl-review\portfolio\crypto_scheduler.py:140-141
+  `write_agent_summary()` stores fear/greed entries under ticker symbols such as `BTC-USD` and `ETH-USD`, but `_build_crypto_report()` looks for `summary["fear_greed"]["crypto"]`. In practice `crypto_fg` is always `None`, so every scheduled crypto report drops the F&G headline even when the summary already contains that data.

@@ -1,0 +1,12 @@
+The patch introduces a partial SQLite read path that can hide all pre-existing signal history, and its outcome backfill records short-horizon prices from coarse candles/daily closes instead of the requested timestamp. It also adds noisy trigger behavior by escalating BUY/SELL→HOLD transitions as sustained flips.
+
+Full review comments:
+
+- [P1] Merge JSONL history before preferring SQLite snapshots — Q:\finance-analyzer-fgl-review\portfolio\accuracy_stats.py:81-83
+  On any deployment that already has historical `data/signal_log.jsonl`, this switches all readers to `signal_log.db` as soon as the DB contains a single snapshot. Because this commit only dual-writes new snapshots and does not migrate the old JSONL backlog, `load_entries()` will suddenly return only the post-deploy rows, which collapses every accuracy-based consumer (`signal_engine`, degradation checks, IC, postmortem, etc.) until the DB is fully backfilled or the two sources are merged.
+
+- [P2] Backfill short-horizon outcomes with point-in-time prices — Q:\finance-analyzer-fgl-review\portfolio\outcome_tracker.py:270-277
+  For stock tickers this branch calls `yfinance.Ticker.history()` with no intraday interval and then returns the last daily close on or before `target_ts`; the Binance branches above similarly return the close of a single 1h candle. When we backfill `3h`/`4h`/`12h` horizons, most targets are not at a bar close, so the stored outcome comes from the wrong timestamp, which feeds distorted returns into accuracy, gating, and degradation reports.
+
+- [P3] Exclude HOLD transitions from the sustained flip trigger — Q:\finance-analyzer-fgl-review\portfolio\trigger.py:225-228
+  Here any sustained action change is treated as a flip, so a ticker that decays from `BUY`/`SELL` back to `HOLD` for three cycles emits `"... flipped BUY->HOLD (sustained)"`. Section 1 already handles HOLD↔action transitions, and the module docs/comments describe section 2 as the BUY↔SELL flip path, so this adds unnecessary Layer-2 reviews/notifications whenever a consensus simply clears.

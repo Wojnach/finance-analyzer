@@ -1,0 +1,191 @@
+{
+  "baseline_commit": "80510b9c48144afa23cf914911e72e4af1811bf1",
+  "main_commit": "5b6141a",
+  "subsystems": [
+    {
+      "name": "signals-core",
+      "branch": "review/subsys-signals-core",
+      "description": "Voting engine, signal registry, accuracy tracking, outcome backfill, triggers",
+      "paths": [
+        "portfolio/signal_engine.py",
+        "portfolio/signal_registry.py",
+        "portfolio/signal_utils.py",
+        "portfolio/signal_weights.py",
+        "portfolio/signal_weight_optimizer.py",
+        "portfolio/signal_db.py",
+        "portfolio/signal_history.py",
+        "portfolio/signal_postmortem.py",
+        "portfolio/accuracy_stats.py",
+        "portfolio/accuracy_degradation.py",
+        "portfolio/outcome_tracker.py",
+        "portfolio/ticker_accuracy.py",
+        "portfolio/trigger.py",
+        "portfolio/ic_computation.py"
+      ]
+    },
+    {
+      "name": "orchestration",
+      "branch": "review/subsys-orchestration",
+      "description": "Layer-1 loop, Layer-2 agent invocation, gating, schedulers, locks",
+      "paths": [
+        "portfolio/main.py",
+        "portfolio/agent_invocation.py",
+        "portfolio/autonomous.py",
+        "portfolio/multi_agent_layer2.py",
+        "portfolio/market_timing.py",
+        "portfolio/claude_gate.py",
+        "portfolio/gpu_gate.py",
+        "portfolio/loop_contract.py",
+        "portfolio/perception_gate.py",
+        "portfolio/process_lock.py",
+        "portfolio/crypto_scheduler.py",
+        "portfolio/data_refresh.py"
+      ]
+    },
+    {
+      "name": "portfolio-risk",
+      "branch": "review/subsys-portfolio-risk",
+      "description": "Portfolio state, trade guards, risk management, Monte Carlo, Kelly sizing",
+      "paths": [
+        "portfolio/portfolio_mgr.py",
+        "portfolio/portfolio_validator.py",
+        "portfolio/warrant_portfolio.py",
+        "portfolio/trade_guards.py",
+        "portfolio/trade_validation.py",
+        "portfolio/trade_risk_classifier.py",
+        "portfolio/risk_management.py",
+        "portfolio/equity_curve.py",
+        "portfolio/monte_carlo.py",
+        "portfolio/monte_carlo_risk.py",
+        "portfolio/kelly_sizing.py",
+        "portfolio/kelly_metals.py",
+        "portfolio/cost_model.py",
+        "portfolio/circuit_breaker.py",
+        "portfolio/stats.py"
+      ]
+    },
+    {
+      "name": "metals-core",
+      "branch": "review/subsys-metals-core",
+      "description": "Metals subsystem: loop, swing trader, execution, warrants, orderbook, fish/snipe/ISK, exit optimizer",
+      "paths": [
+        "data/metals_loop.py",
+        "data/metals_swing_trader.py",
+        "data/metals_swing_config.py",
+        "data/metals_execution_engine.py",
+        "data/metals_llm.py",
+        "data/metals_risk.py",
+        "data/metals_shared.py",
+        "data/metals_signal_tracker.py",
+        "data/metals_history_fetch.py",
+        "data/metals_avanza_helpers.py",
+        "data/metals_warrant_refresh.py",
+        "portfolio/metals_orderbook.py",
+        "portfolio/metals_cross_assets.py",
+        "portfolio/metals_ladder.py",
+        "portfolio/metals_precompute.py",
+        "portfolio/silver_precompute.py",
+        "portfolio/gold_precompute.py",
+        "portfolio/fin_snipe.py",
+        "portfolio/fin_snipe_manager.py",
+        "portfolio/fin_fish.py",
+        "portfolio/fish_instrument_finder.py",
+        "portfolio/fish_monitor_smart.py",
+        "portfolio/iskbets.py",
+        "portfolio/orb_predictor.py",
+        "portfolio/exit_optimizer.py",
+        "portfolio/price_targets.py",
+        "portfolio/microstructure.py",
+        "portfolio/microstructure_state.py"
+      ]
+    },
+    {
+      "name": "avanza-api",
+      "branch": "review/subsys-avanza-api",
+      "description": "Avanza session auth (Playwright BankID), order flow, resilient page, order lock",
+      "paths": [
+        "portfolio/avanza_session.py",
+        "portfolio/avanza_orders.py",
+        "portfolio/avanza_client.py",
+        "portfolio/avanza_control.py",
+        "portfolio/avanza_order_lock.py",
+        "portfolio/avanza_resilient_page.py",
+        "portfolio/avanza_tracker.py"
+      ]
+    },
+    {
+      "name": "signals-modules",
+      "branch": "review/subsys-signals-modules",
+      "description": "All plugin signal modules under portfolio/signals/",
+      "paths": [
+        "portfolio/signals/"
+      ]
+    },
+    {
+      "name": "data-external",
+      "branch": "review/subsys-data-external",
+      "description": "External data collectors, sentiment, fundamentals, LLM signals, forecasting",
+      "paths": [
+        "portfolio/data_collector.py",
+        "portfolio/fear_greed.py",
+        "portfolio/sentiment.py",
+        "portfolio/bert_sentiment.py",
+        "portfolio/social_sentiment.py",
+        "portfolio/alpha_vantage.py",
+        "portfolio/futures_data.py",
+        "portfolio/funding_rate.py",
+        "portfolio/onchain_data.py",
+        "portfolio/fx_rates.py",
+        "portfolio/news_keywords.py",
+        "portfolio/earnings_calendar.py",
+        "portfolio/econ_dates.py",
+        "portfolio/fomc_dates.py",
+        "portfolio/crypto_macro_data.py",
+        "portfolio/macro_context.py",
+        "portfolio/price_source.py",
+        "portfolio/indicators.py",
+        "portfolio/forecast_signal.py",
+        "portfolio/forecast_accuracy.py",
+        "portfolio/ministral_signal.py",
+        "portfolio/qwen3_signal.py",
+        "portfolio/ml_signal.py",
+        "portfolio/ml_trainer.py",
+        "portfolio/meta_learner.py",
+        "portfolio/linear_factor.py",
+        "portfolio/feature_normalizer.py"
+      ]
+    },
+    {
+      "name": "infrastructure",
+      "branch": "review/subsys-infrastructure",
+      "description": "File I/O, HTTP retry, telegram, journaling, health, reporting, digests, prophecy",
+      "paths": [
+        "portfolio/file_utils.py",
+        "portfolio/http_retry.py",
+        "portfolio/api_utils.py",
+        "portfolio/health.py",
+        "portfolio/market_health.py",
+        "portfolio/shared_state.py",
+        "portfolio/subprocess_utils.py",
+        "portfolio/logging_config.py",
+        "portfolio/log_rotation.py",
+        "portfolio/backup.py",
+        "portfolio/telegram_notifications.py",
+        "portfolio/telegram_poller.py",
+        "portfolio/message_store.py",
+        "portfolio/message_throttle.py",
+        "portfolio/alert_budget.py",
+        "portfolio/notification_text.py",
+        "portfolio/journal.py",
+        "portfolio/journal_index.py",
+        "portfolio/reporting.py",
+        "portfolio/digest.py",
+        "portfolio/daily_digest.py",
+        "portfolio/weekly_digest.py",
+        "portfolio/prophecy.py",
+        "portfolio/reflection.py",
+        "portfolio/config_validator.py"
+      ]
+    }
+  ]
+}

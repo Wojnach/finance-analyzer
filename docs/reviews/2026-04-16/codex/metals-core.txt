@@ -1,0 +1,15 @@
+The patch introduces multiple correctness issues in live trading and analytics paths. Normal metals precompute runs drop previously fetched market data, BEAR instruments are handled as if they were long products in the snipe pipeline, and the ORB predictor uses the wrong hours during daylight saving time.
+
+Full review comments:
+
+- [P1] Reuse last successful payload when a source isn't refreshed — Q:\finance-analyzer-fgl-review\portfolio\metals_precompute.py:137-145
+  Because `_DEFAULT_INTERVAL_SEC` is 2h but most `_REFRESH_INTERVALS` are 4h+, many normal `precompute()` runs enter `_build_*_context()` with `result[...]` still left at these `None` defaults. That means `silver_deep_context.json` and `gold_deep_context.json` are rewritten without the previous futures/ETF/COT/FRED sections between refreshes, even though the last successful payload is still the freshest data available.
+
+- [P1] Pass instrument direction into fin_snipe ladder generation — Q:\finance-analyzer-fgl-review\portfolio\fin_snipe.py:160-167
+  If the managed orderbook is a `BEAR`/`MINI S` product, this call still uses `build_intraday_ladder()`'s long defaults: no direction is inferred from `name` or the market-guide response, so `direction_sign=1` and the long-side underlying targets are applied. The resulting working/flash/exit prices are mirrored for inverse instruments, which makes `fin_snipe` and any consumer of these snapshots maintain orders on the wrong side of the market.
+
+- [P1] Avoid long-only exit plans for BEAR positions in snipe manager — Q:\finance-analyzer-fgl-review\portfolio\fin_snipe_manager.py:445-454
+  When the manager is holding a `BEAR`/short certificate, `Position` is still constructed with a positive leverage and no direction, so `compute_exit_plan()` evaluates P&L as if rises in the underlying were favorable. The later target translation also defaults to `direction_sign=1`, so inverse products get exit prices on the wrong side of the book and can miss or reverse profitable exits.
+
+- [P2] Derive ORB hours from Europe/Stockholm instead of fixed UTC — Q:\finance-analyzer-fgl-review\portfolio\orb_predictor.py:32-35
+  These constants freeze the morning/day windows at winter UTC offsets. On CEST dates (roughly late March through late October), Stockholm is UTC+2, so the predictor reads 08:00-10:00/08:00-22:00 UTC candles instead of 07:00-09:00/07:00-21:00 UTC, skewing both backtests and live ORB predictions for about half the year.

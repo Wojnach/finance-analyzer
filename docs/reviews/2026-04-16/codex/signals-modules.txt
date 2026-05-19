@@ -1,0 +1,12 @@
+The snapshot introduces runtime issues in newly added signal modules: one silently disables itself on index-based OHLCV data, another crashes on common yfinance column casing, and the forecast module hard-codes machine-specific model paths. These are functional bugs, so the patch should not be considered correct as-is.
+
+Full review comments:
+
+- [P2] Handle DatetimeIndex input in calendar signal — Q:\finance-analyzer-fgl-review\portfolio\signals\calendar_seasonal.py:371-373
+  If `compute_calendar_signal()` is called with a standard OHLCV frame whose timestamps live in the index, this guard rejects it because there is no literal `time` column and the function returns the all-`HOLD` default before evaluating any seasonal rules. That makes the entire module a silent no-op for the most common pandas/yfinance-shaped input unless every caller materializes a duplicate timestamp column first.
+
+- [P2] Normalize OHLCV column casing before reading `close` — Q:\finance-analyzer-fgl-review\portfolio\signals\shannon_entropy.py:188-188
+  If this signal receives a yfinance-style frame (`Open/High/Low/Close/Volume`), `compute_shannon_entropy_signal()` raises `KeyError('close')` here because it indexes `df["close"]` directly instead of normalizing column names like several of the other signal modules do. In that input shape the entropy signal crashes instead of contributing a vote.
+
+- [P3] Remove machine-local Kronos paths from forecast module — Q:\finance-analyzer-fgl-review\portfolio\signals\forecast.py:76-81
+  When `forecast.kronos_enabled` is enabled (including `'shadow'` mode), `_run_kronos()` can only work on the author's exact machines because both the interpreter and inference script are hard-coded to `Q:\...` / `/home/deck/...` paths. In any other dev, CI, or production environment those files do not exist, so every Kronos call fails and the circuit breaker disables that sub-signal permanently.

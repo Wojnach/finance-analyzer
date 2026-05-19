@@ -1,0 +1,42 @@
+{
+  "signals-core": {
+    "pid": 28596,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\signals-core.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\signals-core.err"
+  },
+  "orchestration": {
+    "pid": 26812,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\orchestration.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\orchestration.err"
+  },
+  "portfolio-risk": {
+    "pid": 9212,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\portfolio-risk.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\portfolio-risk.err"
+  },
+  "metals-core": {
+    "pid": 10188,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\metals-core.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\metals-core.err"
+  },
+  "avanza-api": {
+    "pid": 12296,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\avanza-api.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\avanza-api.err"
+  },
+  "signals-modules": {
+    "pid": 2444,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\signals-modules.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\signals-modules.err"
+  },
+  "data-external": {
+    "pid": 26860,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\data-external.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\data-external.err"
+  },
+  "infrastructure": {
+    "pid": 24376,
+    "out": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\infrastructure.txt",
+    "err": "Q:\\finance-analyzer\\docs\\reviews\\2026-04-16\\codex\\infrastructure.err"
+  }
+}

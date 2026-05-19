@@ -1,0 +1,18 @@
+The patch introduces multiple functional issues: forecast backfill can delete prediction history, forecast accuracy tracking ignores the records produced by the new forecaster, and the new timeframe timeout still blocks on hung workers. There are also additional runtime problems in the Chronos v1 GPU path and Alpha Vantage quota accounting.
+
+Full review comments:
+
+- [P1] Avoid truncating the predictions file after `max_entries` — Q:\finance-analyzer-fgl-review\portfolio\forecast_accuracy.py:343-348
+  When `backfill_forecast_outcomes()` hits `max_entries`, the `break` stops iterating before the untouched tail of `entries` is copied into `modified_entries`, but `_write_predictions(modified_entries, path)` still rewrites the whole JSONL file. In any backlog run where more than 500 forecasts need backfilling, every newer row after the break is silently deleted instead of being left for the next pass.
+
+- [P1] Parse the forecast records that `run_forecasts()` writes — Q:\finance-analyzer-fgl-review\portfolio\forecast_accuracy.py:166-168
+  For rows produced by `forecast_signal.run_forecasts()`, there is never a `sub_signals` or `raw_sub_signals` map; those records only contain nested `chronos`/`prophet` forecasts. That means every backfilled prediction is skipped here and `get_forecast_accuracy_summary()` stays empty, so the new forecast tracking cannot evaluate the data this patch logs.
+
+- [P1] Don't wait on timed-out timeframe workers — Q:\finance-analyzer-fgl-review\portfolio\data_collector.py:334-339
+  This timeout handler does not actually cap `collect_timeframes()`. Once `as_completed()` raises, the surrounding `with ThreadPoolExecutor(...)` still performs `shutdown(wait=True)`, and `Future.cancel()` cannot stop fetches that are already running, so a wedged yfinance/HTTP call will still block the collector until it returns.
+
+- [P2] Move Chronos v1 tensors to CPU before calling `numpy()` — Q:\finance-analyzer-fgl-review\portfolio\forecast_signal.py:148-150
+  On CUDA hosts that fall back to `ChronosPipeline` v1, `pipeline.predict()` returns a CUDA tensor and `forecast[0].numpy()` raises `TypeError: can't convert cuda tensor to numpy`. Because `forecast_chronos()` catches that exception and returns `None`, the Chronos forecaster silently stops producing signals in the common "v1 installed, GPU available" setup.
+
+- [P2] Count unsuccessful Alpha Vantage calls against the quota — Q:\finance-analyzer-fgl-review\portfolio\alpha_vantage.py:279-281
+  The daily limit is request-based, but `_daily_budget_used` is only incremented after a normalized success. If Alpha Vantage returns a rate-limit `Note`, an error payload, or any other unusable response, the real quota is still consumed while the local counter stays unchanged, so later cycles keep sending requests long after the configured daily budget should have stopped them.

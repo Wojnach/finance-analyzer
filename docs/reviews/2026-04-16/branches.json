@@ -1,0 +1,62 @@
+{
+  "baseline_commit": "80510b9c48144afa23cf914911e72e4af1811bf1",
+  "main_commit": "5b6141a",
+  "subsystems": [
+    {
+      "name": "signals-core",
+      "branch": "review/subsys-signals-core",
+      "sha": "fabfae06dd0b2abb8abdb9fa06d04bbc93ff570e",
+      "file_count": 14,
+      "description": "Voting engine, signal registry, accuracy tracking, outcome backfill, triggers"
+    },
+    {
+      "name": "orchestration",
+      "branch": "review/subsys-orchestration",
+      "sha": "a8beb473a49fc0e32fcd52767739883356f84098",
+      "file_count": 12,
+      "description": "Layer-1 loop, Layer-2 agent invocation, gating, schedulers, locks"
+    },
+    {
+      "name": "portfolio-risk",
+      "branch": "review/subsys-portfolio-risk",
+      "sha": "d20762f080bafde4e795598c5bb8412723fea9d4",
+      "file_count": 15,
+      "description": "Portfolio state, trade guards, risk management, Monte Carlo, Kelly sizing"
+    },
+    {
+      "name": "metals-core",
+      "branch": "review/subsys-metals-core",
+      "sha": "6a174770d3341346dcbb8587b8ee1d662620416c",
+      "file_count": 28,
+      "description": "Metals subsystem: loop, swing trader, execution, warrants, orderbook, fish/snipe/ISK, exit optimizer"
+    },
+    {
+      "name": "avanza-api",
+      "branch": "review/subsys-avanza-api",
+      "sha": "a6433258b42402bf2dbb2c79abf5b7e17e5d13d8",
+      "file_count": 7,
+      "description": "Avanza session auth (Playwright BankID), order flow, resilient page, order lock"
+    },
+    {
+      "name": "signals-modules",
+      "branch": "review/subsys-signals-modules",
+      "sha": "52b367eeededff96ee33daeb308bd27aff39ea46",
+      "file_count": 25,
+      "description": "All plugin signal modules under portfolio/signals/"
+    },
+    {
+      "name": "data-external",
+      "branch": "review/subsys-data-external",
+      "sha": "b2a265f051983cf461d657ca5d5a9a98498c1203",
+      "file_count": 206,
+      "description": "External data collectors, sentiment, fundamentals, LLM signals, forecasting"
+    },
+    {
+      "name": "infrastructure",
+      "branch": "review/subsys-infrastructure",
+      "sha": "dc8c45d3213ec792b47eb8d30a74ade2c45e3e7b",
+      "file_count": 25,
+      "description": "File I/O, HTTP retry, telegram, journaling, health, reporting, digests, prophecy"
+    }
+  ]
+}

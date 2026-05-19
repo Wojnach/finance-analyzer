@@ -1,0 +1,18 @@
+The patch introduces several correctness issues in portfolio state recovery, warrant valuation, and sizing/guard logic. These can reset portfolio state, misprice warrant positions, and produce materially wrong trading decisions in common scenarios.
+
+Full review comments:
+
+- [P1] Recover from `.bak` files when the primary state file is missing — Q:\finance-analyzer-fgl-review\portfolio\portfolio_mgr.py:87-95
+  If `portfolio_state.json` is deleted or temporarily absent while `portfolio_state.json.bak*` still exists, this `if path.exists()` gate skips backup recovery entirely and falls through to a fresh default portfolio. Because `_rotate_backups()` creates backups on every save, the common failure mode here is a missing primary with valid backups, so `load_state()` can silently reset cash/holdings instead of restoring the latest backup.
+
+- [P1] Clamp knocked-out warrant values at zero — Q:\finance-analyzer-fgl-review\portfolio\warrant_portfolio.py:95-101
+  When the underlying moves more than `1 / leverage` against the position (for example, -30% on a 5x product), `implied_pnl_pct` drops below `-1` and these lines produce a negative `current_implied_sek`/`total_value_sek`. Leveraged warrants or certificates can go to zero but not below zero, so this can turn a wiped-out position into a negative asset and materially understate portfolio value.
+
+- [P2] Recompute the underlying basis when averaging into warrants — Q:\finance-analyzer-fgl-review\portfolio\warrant_portfolio.py:223-227
+  On a second `BUY`, the code averages `entry_price_sek` but leaves `underlying_entry_price_usd` unchanged. Since `warrant_pnl()` measures the whole position against `underlying_entry_price_usd`, any averaged-in position at a different underlying level will report the wrong P&L from that point onward.
+
+- [P2] Pair Kelly trade outcomes against open buy lots — Q:\finance-analyzer-fgl-review\portfolio\kelly_sizing.py:90-95
+  This computes every SELL against the weighted average of all historical BUYs for the ticker, including lots that were already closed. As soon as a name has multiple round trips, earlier trades distort later P&L (for example, buy 100→sell 110, then buy 200→sell 190 becomes `-26.7%` and `+26.7%` instead of `+10%` and `-5%`), so the Kelly sizing inputs can move in the wrong direction.
+
+- [P2] Count only true new positions toward the rate limit — Q:\finance-analyzer-fgl-review\portfolio\trade_guards.py:210-216
+  `record_trade()` appends every BUY to `new_position_timestamps`, but `check_overtrading_guards()` treats that list as “new positions opened in the window.” In practice, scaling into an already-open holding consumes the same quota as opening a fresh name, so strategies that pyramid or average in can hit `position_rate_limit` and get blocked even though they have not exceeded the configured new-position cap.

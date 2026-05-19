@@ -1,0 +1,3226 @@
+OpenAI Codex v0.120.0 (research preview)
+--------
+workdir: Q:\finance-analyzer-fgl-review
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR, C:\Users\Herc2\.codex\memories]
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019d96e9-50e8-7350-af51-b363bdbd03af
+--------
+user
+commit 393e2a8
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git show --stat --summary 393e2a8c509861df0efc5a69d0002efad60e80cc' in Q:\finance-analyzer-fgl-review
+2026-04-16T15:29:32.080517Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.8 seconds
+Output:
+fatal: detected dubious ownership in repository at 'Q:/finance-analyzer-fgl-review'
+'Q:/finance-analyzer-fgl-review/.git' is owned by:
+	HERC2/Herc2 (S-1-5-21-1167218111-2780401794-1724439369-1001)
+but the current user is:
+	HERC2/CodexSandboxOffline (S-1-5-21-1167218111-2780401794-1724439369-1004)
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory Q:/finance-analyzer-fgl-review
+
+ exited 1 in 784ms:
+fatal: detected dubious ownership in repository at 'Q:/finance-analyzer-fgl-review'
+'Q:/finance-analyzer-fgl-review/.git' is owned by:
+	HERC2/Herc2 (S-1-5-21-1167218111-2780401794-1724439369-1001)
+but the current user is:
+	HERC2/CodexSandboxOffline (S-1-5-21-1167218111-2780401794-1724439369-1004)
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory Q:/finance-analyzer-fgl-review
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show --stat --summary 393e2a8c509861df0efc5a69d0002efad60e80cc' in Q:\finance-analyzer-fgl-review
+ succeeded in 699ms:
+commit 393e2a8c509861df0efc5a69d0002efad60e80cc
+Author: wojnach <wojnach@users.noreply.github.com>
+Date:   Thu Apr 16 17:27:20 2026 +0200
+
+    review(signals-modules): subsystem snapshot
+    
+    All plugin signal modules under portfolio/signals/
+
+ portfolio/signals/__init__.py                |   4 +
+ portfolio/signals/calendar_seasonal.py       | 492 ++++++++++++++
+ portfolio/signals/candlestick.py             | 401 ++++++++++++
+ portfolio/signals/claude_fundamental.py      | 773 ++++++++++++++++++++++
+ portfolio/signals/cot_positioning.py         | 394 ++++++++++++
+ portfolio/signals/credit_spread.py           | 327 ++++++++++
+ portfolio/signals/cross_asset_tsmom.py       | 233 +++++++
+ portfolio/signals/crypto_macro.py            | 281 ++++++++
+ portfolio/signals/dxy_cross_asset.py         | 100 +++
+ portfolio/signals/econ_calendar.py           | 210 ++++++
+ portfolio/signals/fibonacci.py               | 528 +++++++++++++++
+ portfolio/signals/forecast.py                | 916 +++++++++++++++++++++++++++
+ portfolio/signals/futures_basis.py           | 267 ++++++++
+ portfolio/signals/futures_flow.py            | 304 +++++++++
+ portfolio/signals/gold_real_yield_paradox.py | 323 ++++++++++
+ portfolio/signals/heikin_ashi.py             | 647 +++++++++++++++++++
+ portfolio/signals/hurst_regime.py            | 334 ++++++++++
+ portfolio/signals/macro_regime.py            | 412 ++++++++++++
+ portfolio/signals/mean_reversion.py          | 578 +++++++++++++++++
+ portfolio/signals/metals_cross_asset.py      | 297 +++++++++
+ portfolio/signals/momentum.py                | 439 +++++++++++++
+ portfolio/signals/momentum_factors.py        | 503 +++++++++++++++
+ portfolio/signals/news_event.py              | 580 +++++++++++++++++
+ portfolio/signals/orderbook_flow.py          | 218 +++++++
+ portfolio/signals/oscillators.py             | 589 +++++++++++++++++
+ portfolio/signals/shannon_entropy.py         | 307 +++++++++
+ portfolio/signals/smart_money.py             | 562 ++++++++++++++++
+ portfolio/signals/structure.py               | 262 ++++++++
+ portfolio/signals/trend.py                   | 573 +++++++++++++++++
+ portfolio/signals/vix_term_structure.py      | 197 ++++++
+ portfolio/signals/volatility.py              | 458 ++++++++++++++
+ portfolio/signals/volume_flow.py             | 325 ++++++++++
+ 32 files changed, 12834 insertions(+)
+ create mode 100644 portfolio/signals/__init__.py
+ create mode 100644 portfolio/signals/calendar_seasonal.py
+ create mode 100644 portfolio/signals/candlestick.py
+ create mode 100644 portfolio/signals/claude_fundamental.py
+ create mode 100644 portfolio/signals/cot_positioning.py
+ create mode 100644 portfolio/signals/credit_spread.py
+ create mode 100644 portfolio/signals/cross_asset_tsmom.py
+ create mode 100644 portfolio/signals/crypto_macro.py
+ create mode 100644 portfolio/signals/dxy_cross_asset.py
+ create mode 100644 portfolio/signals/econ_calendar.py
+ create mode 100644 portfolio/signals/fibonacci.py
+ create mode 100644 portfolio/signals/forecast.py
+ create mode 100644 portfolio/signals/futures_basis.py
+ create mode 100644 portfolio/signals/futures_flow.py
+ create mode 100644 portfolio/signals/gold_real_yield_paradox.py
+ create mode 100644 portfolio/signals/heikin_ashi.py
+ create mode 100644 portfolio/signals/hurst_regime.py
+ create mode 100644 portfolio/signals/macro_regime.py
+ create mode 100644 portfolio/signals/mean_reversion.py
+ create mode 100644 portfolio/signals/metals_cross_asset.py
+ create mode 100644 portfolio/signals/momentum.py
+ create mode 100644 portfolio/signals/momentum_factors.py
+ create mode 100644 portfolio/signals/news_event.py
+ create mode 100644 portfolio/signals/orderbook_flow.py
+ create mode 100644 portfolio/signals/oscillators.py
+ create mode 100644 portfolio/signals/shannon_entropy.py
+ create mode 100644 portfolio/signals/smart_money.py
+ create mode 100644 portfolio/signals/structure.py
+ create mode 100644 portfolio/signals/trend.py
+ create mode 100644 portfolio/signals/vix_term_structure.py
+ create mode 100644 portfolio/signals/volatility.py
+ create mode 100644 portfolio/signals/volume_flow.py
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem -Recurse -Depth 2 portfolio | Select-Object FullName' in Q:\finance-analyzer-fgl-review
+ succeeded in 688ms:
+
+[32;1mFullName[0m
+[32;1m--------[0m
+Q:\finance-analyzer-fgl-review\portfolio\alert_budget.py
+Q:\finance-analyzer-fgl-review\portfolio\api_utils.py
+Q:\finance-analyzer-fgl-review\portfolio\backup.py
+Q:\finance-analyzer-fgl-review\portfolio\config_validator.py
+Q:\finance-analyzer-fgl-review\portfolio\daily_digest.py
+Q:\finance-analyzer-fgl-review\portfolio\digest.py
+Q:\finance-analyzer-fgl-review\portfolio\file_utils.py
+Q:\finance-analyzer-fgl-review\portfolio\health.py
+Q:\finance-analyzer-fgl-review\portfolio\http_retry.py
+Q:\finance-analyzer-fgl-review\portfolio\journal_index.py
+Q:\finance-analyzer-fgl-review\portfolio\journal.py
+Q:\finance-analyzer-fgl-review\portfolio\log_rotation.py
+Q:\finance-analyzer-fgl-review\portfolio\logging_config.py
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py
+Q:\finance-analyzer-fgl-review\portfolio\message_store.py
+Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py
+Q:\finance-analyzer-fgl-review\portfolio\notification_text.py
+Q:\finance-analyzer-fgl-review\portfolio\prophecy.py
+Q:\finance-analyzer-fgl-review\portfolio\reflection.py
+Q:\finance-analyzer-fgl-review\portfolio\reporting.py
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py
+Q:\finance-analyzer-fgl-review\portfolio\subprocess_utils.py
+Q:\finance-analyzer-fgl-review\portfolio\telegram_notifications.py
+Q:\finance-analyzer-fgl-review\portfolio\telegram_poller.py
+Q:\finance-analyzer-fgl-review\portfolio\weekly_digest.py
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse | Select-String -Pattern 'portfolio\\.signals|from portfolio\\.signals|import portfolio\\.signals|signals/' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 698ms:
+
+[32;1mPath                                                 [0m[32;1m LineNumber[0m[32;1m Line[0m
+[32;1m----                                                 [0m [32;1m----------[0m [32;1m----[0m
+Q:\finance-analyzer-fgl-review\portfolio\reporting.py        535             from portfolio.signals.forecast import (
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -m compileall portfolio/signals' in Q:\finance-analyzer-fgl-review
+ succeeded in 698ms:
+Listing 'portfolio/signals'...
+Can't list 'portfolio/signals'
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review ls-tree --name-only 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals' in Q:\finance-analyzer-fgl-review
+ succeeded in 699ms:
+__init__.py
+calendar_seasonal.py
+candlestick.py
+claude_fundamental.py
+cot_positioning.py
+credit_spread.py
+cross_asset_tsmom.py
+crypto_macro.py
+dxy_cross_asset.py
+econ_calendar.py
+fibonacci.py
+forecast.py
+futures_basis.py
+futures_flow.py
+gold_real_yield_paradox.py
+heikin_ashi.py
+hurst_regime.py
+macro_regime.py
+mean_reversion.py
+metals_cross_asset.py
+momentum.py
+momentum_factors.py
+news_event.py
+orderbook_flow.py
+oscillators.py
+shannon_entropy.py
+smart_money.py
+structure.py
+trend.py
+vix_term_structure.py
+volatility.py
+volume_flow.py
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review rev-parse --abbrev-ref HEAD; git -c safe.directory=Q:/finance-analyzer-fgl-review rev-parse HEAD' in Q:\finance-analyzer-fgl-review
+ succeeded in 559ms:
+review/subsys-infrastructure
+52b367eeededff96ee33daeb308bd27aff39ea46
+
+2026-04-16T15:30:03.111159Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$dst='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot'; if (Test-Path "'$dst) { Remove-Item -Recurse -Force $dst }; New-Item -ItemType Directory -Path $dst | Out-Null; git -c safe.directory=Q:/finance-analyzer-fgl-review archive 393e2a8c509861df0efc5a69d0002efad60e80cc | tar -x -C $dst; Write-Output $dst'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$dst='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot'; if (Test-Path "'$dst) { Remove-Item -Recurse -Force $dst }; New-Item -ItemType Directory -Path $dst | Out-Null; git -c safe.directory=Q:/finance-analyzer-fgl-review archive 393e2a8c509861df0efc5a69d0002efad60e80cc | tar -x -C $dst; Write-Output $dst' in Q:\finance-analyzer-fgl-review
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$dst='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot'; if (Test-Path "'$dst) { Remove-Item -Recurse -Force $dst }; New-Item -ItemType Directory -Path $dst | Out-Null; git -c safe.directory=Q:/finance-analyzer-fgl-review archive 393e2a8c509861df0efc5a69d0002efad60e80cc | tar -x -C $dst; Write-Output $dst'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$dst='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8'; New-Item -ItemType Directory -Path "'$dst -Force | Out-Null; git -c safe.directory=Q:/finance-analyzer-fgl-review archive 393e2a8c509861df0efc5a69d0002efad60e80cc | tar -x -C $dst; Write-Output $dst' in Q:\finance-analyzer-fgl-review
+ succeeded in 962ms:
+Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8
+      0 [main] tar (16992) C:\Program Files\Git\usr\bin\tar.exe: *** fatal error - couldn't create signal pipe, Win32 error 5
+[31;1mResourceUnavailable: [0m
+[31;1m[36;1mLine |[0m
+[31;1m[36;1m[36;1m   2 | [0m … | Out-Null; [36;1mgit -c safe.directory=Q:/finance-analyzer-fgl-review arch[0m …[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mProgram 'git.exe' failed to run: The pipe is being closed.At line:2 char:130[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m+ … | Out-Null; git -c safe.directory=Q:/finance-analyzer-fgl-review arch …[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m[31;1m+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$dst='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip'; "'$zip='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8.zip'; New-Item -ItemType Directory -Path "'$dst -Force | Out-Null; git -c safe.directory=Q:/finance-analyzer-fgl-review archive --format=zip --output=$zip 393e2a8c509861df0efc5a69d0002efad60e80cc; Expand-Archive -Path $zip -DestinationPath $dst -Force; Write-Output $dst' in Q:\finance-analyzer-fgl-review
+ succeeded in 1155ms:
+Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -m compileall portfolio/signals' in Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip
+2026-04-16T15:30:17.807785Z ERROR codex_core::exec: exec error: windows sandbox: setup refresh failed with status exit code: 1
+2026-04-16T15:30:17.820931Z ERROR codex_core::tools::router: error=execution error: Io(Custom { kind: Other, error: "windows sandbox: setup refresh failed with status exit code: 1" })
+ exited -1 in 0ms:
+execution error: Io(Custom { kind: Other, error: "windows sandbox: setup refresh failed with status exit code: 1" })
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals | Select-Object Name,Length | Format-Table -AutoSize' in Q:\finance-analyzer-fgl-review
+ succeeded in 582ms:
+
+[32;1mName                      [0m[32;1m Length[0m
+[32;1m----                      [0m [32;1m------[0m
+__init__.py                   141
+calendar_seasonal.py        15883
+candlestick.py              13019
+claude_fundamental.py       28670
+cot_positioning.py          13011
+credit_spread.py            11199
+cross_asset_tsmom.py         7265
+crypto_macro.py              9215
+dxy_cross_asset.py           3434
+econ_calendar.py             7273
+fibonacci.py                17599
+forecast.py                 37101
+futures_basis.py             9555
+futures_flow.py             10591
+gold_real_yield_paradox.py  10403
+heikin_ashi.py              21217
+hurst_regime.py             11411
+macro_regime.py             13635
+mean_reversion.py           19276
+metals_cross_asset.py       11479
+momentum_factors.py         17136
+momentum.py                 14304
+news_event.py               19904
+orderbook_flow.py            7445
+oscillators.py              19047
+shannon_entropy.py          10221
+smart_money.py              20315
+structure.py                 8608
+trend.py                    18794
+vix_term_structure.py        5993
+volatility.py               16532
+volume_flow.py              11340
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -m compileall Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals' in Q:\finance-analyzer-fgl-review
+ succeeded in 1093ms:
+Listing 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\__init__.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\calendar_seasonal.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\candlestick.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\claude_fundamental.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\cot_positioning.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\credit_spread.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\cross_asset_tsmom.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\crypto_macro.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\dxy_cross_asset.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\econ_calendar.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\fibonacci.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\forecast.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\futures_basis.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\futures_flow.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\gold_real_yield_paradox.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\heikin_ashi.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\hurst_regime.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\macro_regime.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\mean_reversion.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\metals_cross_asset.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\momentum.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\momentum_factors.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\news_event.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\orderbook_flow.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\oscillators.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\shannon_entropy.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\smart_money.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\structure.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\trend.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\vix_term_structure.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\volatility.py'...
+Compiling 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals\\volume_flow.py'...
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import ast, pathlib, json
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals')
+for path in sorted(root.glob('*.py')):
+    tree = ast.parse(path.read_text())
+    imps=[]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imps.append(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            imps.append((node.module or '') + ('' if node.level==0 else ' (rel)'))
+    print(path.name, sorted(set(imps)))
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 670ms:
+__init__.py []
+calendar_seasonal.py ['__future__', 'calendar', 'datetime', 'logging', 'pandas', 'portfolio.fomc_dates']
+candlestick.py ['numpy', 'pandas']
+claude_fundamental.py ['__future__', 'datetime', 'json', 'logging', 'pandas', 'pathlib', 'portfolio.alpha_vantage', 'portfolio.claude_gate', 'portfolio.file_utils', 'portfolio.market_timing', 'portfolio.signal_utils', 'portfolio.tickers', 're', 'threading', 'time', 'yfinance']
+cot_positioning.py ['__future__', 'logging', 'numpy', 'portfolio.file_utils', 'portfolio.signal_utils', 'requests', 'typing']
+credit_spread.py ['__future__', 'json', 'logging', 'portfolio.http_retry', 'portfolio.signal_utils', 'requests', 'time', 'typing']
+cross_asset_tsmom.py ['__future__', 'logging', 'numpy', 'pandas', 'portfolio.shared_state', 'portfolio.signal_utils', 'typing', 'yfinance']
+crypto_macro.py ['__future__', 'logging', 'pandas', 'portfolio.crypto_macro_data', 'portfolio.shared_state', 'portfolio.signal_utils', 'portfolio.tickers']
+dxy_cross_asset.py ['__future__', 'logging', 'portfolio.macro_context', 'typing']
+econ_calendar.py ['__future__', 'datetime', 'logging', 'pandas', 'portfolio.econ_dates', 'portfolio.news_keywords', 'portfolio.signal_utils']
+fibonacci.py ['__future__', 'numpy', 'pandas', 'portfolio.signal_utils']
+forecast.py ['__future__', 'concurrent.futures', 'datetime', 'json', 'logging', 'pandas', 'pathlib', 'platform', 'portfolio.data_collector', 'portfolio.file_utils', 'portfolio.forecast_accuracy', 'portfolio.forecast_signal', 'portfolio.gpu_gate', 'portfolio.shared_state', 'portfolio.signal_utils', 'portfolio.tickers', 'subprocess', 'threading', 'time']
+futures_basis.py ['__future__', 'logging', 'math', 'numpy', 'portfolio.api_utils', 'portfolio.http_retry', 'portfolio.signal_utils', 'portfolio.tickers']
+futures_flow.py ['__future__', 'logging', 'math', 'pandas', 'portfolio.futures_data', 'portfolio.shared_state', 'portfolio.signal_utils', 'portfolio.tickers']
+gold_real_yield_paradox.py ['__future__', 'json', 'logging', 'numpy', 'pandas', 'portfolio.file_utils', 'portfolio.http_retry', 'portfolio.signal_utils', 'threading', 'time', 'typing']
+heikin_ashi.py ['__future__', 'math', 'numpy', 'pandas', 'portfolio.signal_utils']
+hurst_regime.py ['__future__', 'numpy', 'pandas', 'portfolio.signal_utils']
+macro_regime.py ['__future__', 'contextlib', 'logging', 'numpy', 'pandas', 'portfolio.signal_utils']
+mean_reversion.py ['__future__', 'numpy', 'pandas', 'portfolio.seasonality', 'portfolio.signal_utils']
+metals_cross_asset.py ['__future__', 'logging', 'portfolio.metals_cross_assets', 'portfolio.signal_utils', 'typing']
+momentum.py ['__future__', 'numpy', 'pandas', 'portfolio.signal_utils']
+momentum_factors.py ['__future__', 'numpy', 'pandas', 'portfolio.seasonality', 'portfolio.signal_utils']
+news_event.py ['__future__', 'datetime', 'logging', 'os', 'pandas', 'portfolio.file_utils', 'portfolio.news_keywords', 'portfolio.prophecy', 'portfolio.sentiment', 'portfolio.shared_state', 'portfolio.signal_utils']
+orderbook_flow.py ['__future__', 'logging', 'portfolio.metals_orderbook', 'portfolio.microstructure', 'portfolio.microstructure_state', 'portfolio.signal_utils', 'typing']
+oscillators.py ['__future__', 'numpy', 'pandas', 'portfolio.signal_utils']
+shannon_entropy.py ['__future__', 'numpy', 'pandas', 'portfolio.signal_utils']
+smart_money.py ['__future__', 'logging', 'numpy', 'pandas', 'portfolio.signal_utils', 'typing']
+structure.py ['__future__', 'logging', 'numpy', 'pandas', 'portfolio.signal_utils']
+trend.py ['__future__', 'numpy', 'pandas', 'portfolio.signal_utils']
+vix_term_structure.py ['__future__', 'logging', 'numpy', 'portfolio.shared_state', 'portfolio.signal_utils', 'yfinance']
+volatility.py ['__future__', 'logging', 'numpy', 'pandas', 'portfolio.signal_utils', 'typing']
+volume_flow.py ['__future__', 'logging', 'numpy', 'pandas', 'portfolio.signal_utils', 'typing']
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import pathlib, ast
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio')
+existing = {p.stem for p in root.glob('*.py')}
+missing = {}
+for path in sorted((root/'signals').glob('*.py')):
+    tree = ast.parse(path.read_text())
+    miss=[]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith('portfolio.'):
+            mod = node.module.split('.',1)[1]
+            if mod not in existing and not (root/mod).is_dir():
+                miss.append(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith('portfolio.'):
+                    mod = alias.name.split('.',1)[1]
+                    if mod not in existing and not (root/mod).is_dir():
+                        miss.append(alias.name)
+    if miss:
+        missing[path.name]=sorted(set(miss))
+print(missing)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 729ms:
+{'calendar_seasonal.py': ['portfolio.fomc_dates'], 'claude_fundamental.py': ['portfolio.alpha_vantage', 'portfolio.claude_gate', 'portfolio.file_utils', 'portfolio.market_timing', 'portfolio.signal_utils', 'portfolio.tickers'], 'cot_positioning.py': ['portfolio.file_utils', 'portfolio.signal_utils'], 'credit_spread.py': ['portfolio.http_retry', 'portfolio.signal_utils'], 'cross_asset_tsmom.py': ['portfolio.shared_state', 'portfolio.signal_utils'], 'crypto_macro.py': ['portfolio.crypto_macro_data', 'portfolio.shared_state', 'portfolio.signal_utils', 'portfolio.tickers'], 'dxy_cross_asset.py': ['portfolio.macro_context'], 'econ_calendar.py': ['portfolio.econ_dates', 'portfolio.news_keywords', 'portfolio.signal_utils'], 'fibonacci.py': ['portfolio.signal_utils'], 'forecast.py': ['portfolio.data_collector', 'portfolio.file_utils', 'portfolio.forecast_accuracy', 'portfolio.forecast_signal', 'portfolio.gpu_gate', 'portfolio.shared_state', 'portfolio.signal_utils', 'portfolio.tickers'], 'futures_basis.py': ['portfolio.api_utils', 'portfolio.http_retry', 'portfolio.signal_utils', 'portfolio.tickers'], 'futures_flow.py': ['portfolio.futures_data', 'portfolio.shared_state', 'portfolio.signal_utils', 'portfolio.tickers'], 'gold_real_yield_paradox.py': ['portfolio.file_utils', 'portfolio.http_retry', 'portfolio.signal_utils'], 'heikin_ashi.py': ['portfolio.signal_utils'], 'hurst_regime.py': ['portfolio.signal_utils'], 'macro_regime.py': ['portfolio.signal_utils'], 'mean_reversion.py': ['portfolio.seasonality', 'portfolio.signal_utils'], 'metals_cross_asset.py': ['portfolio.metals_cross_assets', 'portfolio.signal_utils'], 'momentum.py': ['portfolio.signal_utils'], 'momentum_factors.py': ['portfolio.seasonality', 'portfolio.signal_utils'], 'news_event.py': ['portfolio.file_utils', 'portfolio.news_keywords', 'portfolio.prophecy', 'portfolio.sentiment', 'portfolio.shared_state', 'portfolio.signal_utils'], 'orderbook_flow.py': ['portfolio.metals_orderbook', 'portfolio.microstructure', 'portfolio.microstructure_state', 'portfolio.signal_utils'], 'oscillators.py': ['portfolio.signal_utils'], 'shannon_entropy.py': ['portfolio.signal_utils'], 'smart_money.py': ['portfolio.signal_utils'], 'structure.py': ['portfolio.signal_utils'], 'trend.py': ['portfolio.signal_utils'], 'vix_term_structure.py': ['portfolio.shared_state', 'portfolio.signal_utils'], 'volatility.py': ['portfolio.signal_utils'], 'volume_flow.py': ['portfolio.signal_utils']}
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio | Select-Object Name | Format-Table -AutoSize' in Q:\finance-analyzer-fgl-review
+ succeeded in 576ms:
+
+[32;1mName[0m
+[32;1m----[0m
+signals
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review ls-tree --name-only 393e2a8c509861df0efc5a69d0002efad60e80cc' in Q:\finance-analyzer-fgl-review
+ succeeded in 556ms:
+portfolio
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review ls-tree --name-only 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio | Select-Object -First 20' in Q:\finance-analyzer-fgl-review
+ succeeded in 645ms:
+signals
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review rev-list --parents -n 1 393e2a8c509861df0efc5a69d0002efad60e80cc' in Q:\finance-analyzer-fgl-review
+ succeeded in 579ms:
+393e2a8c509861df0efc5a69d0002efad60e80cc 80510b9c48144afa23cf914911e72e4af1811bf1
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review ls-tree --name-only 80510b9c48144afa23cf914911e72e4af1811bf1 | Select-Object -First 20' in Q:\finance-analyzer-fgl-review
+ succeeded in 617ms:
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import pathlib
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/portfolio')
+mods = {p.stem for p in root.glob('*.py')}
+print('signal_utils' in mods, 'tickers' in mods, 'file_utils' in mods, 'shared_state' in mods)
+print(sorted(list(mods))[:100])
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 625ms:
+False False True True
+['alert_budget', 'api_utils', 'backup', 'config_validator', 'daily_digest', 'digest', 'file_utils', 'health', 'http_retry', 'journal', 'journal_index', 'log_rotation', 'logging_config', 'market_health', 'message_store', 'message_throttle', 'notification_text', 'prophecy', 'reflection', 'reporting', 'shared_state', 'subprocess_utils', 'telegram_notifications', 'telegram_poller', 'weekly_digest']
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-Content portfolio/reporting.py -TotalCount 620 | Select-Object -Last 120' in Q:\finance-analyzer-fgl-review
+ succeeded in 614ms:
+    except Exception:
+        logger.warning("[reporting] avanza_tracker failed", exc_info=True)
+        _module_warnings.append("avanza_tracker")
+
+    # Focus probabilities (Mode B — directional probabilities for focus tickers)
+    focus_tickers = []
+    try:
+        focus_tickers = _report_config.get("notification", {}).get("focus_tickers", [])
+        if focus_tickers:
+            from portfolio.ticker_accuracy import get_focus_probabilities
+            focus_probs = get_focus_probabilities(focus_tickers, signals)
+            if focus_probs:
+                summary["focus_probabilities"] = focus_probs
+    except Exception:
+        logger.warning("[reporting] focus_probabilities failed", exc_info=True)
+        _module_warnings.append("focus_probabilities")
+
+    # Forecast accuracy (model health + sub-signal accuracy for focus tickers)
+    try:
+        from portfolio.forecast_accuracy import (
+            get_all_ticker_accuracies,
+            get_forecast_accuracy_summary,
+        )
+        _fa_focus = focus_tickers if focus_tickers else None
+        fa_summary = get_forecast_accuracy_summary(
+            focus_tickers=_fa_focus,
+            days=7,
+        )
+        if fa_summary and (fa_summary.get("health") or fa_summary.get("accuracy")):
+            summary["forecast_accuracy"] = fa_summary
+
+        # Per-ticker gating summary — shows what action the forecast signal takes
+        # for each ticker (raw, held, insufficient_data)
+        try:
+            from portfolio.signals.forecast import (
+                _HOLD_THRESHOLD,
+                _MIN_SAMPLES,
+            )
+            all_acc = get_all_ticker_accuracies(horizon="24h", days=7)
+            if all_acc:
+                gating = {}
+                for t, tdata in all_acc.items():
+                    acc = tdata["accuracy"]
+                    samp = tdata["samples"]
+                    if samp < _MIN_SAMPLES:
+                        action = "insufficient_data"
+                    elif acc < _HOLD_THRESHOLD:
+                        action = "held"
+                    else:
+                        action = "raw"
+                    gating[t] = {
+                        "accuracy": acc,
+                        "samples": samp,
+                        "action": action,
+                    }
+                if gating:
+                    summary["forecast_gating"] = gating
+        except Exception:
+            logger.debug("[reporting] forecast_gating failed", exc_info=True)
+    except Exception:
+        logger.warning("[reporting] forecast_accuracy failed", exc_info=True)
+        _module_warnings.append("forecast_accuracy")
+
+    # Forecast signals (Chronos pct_move + confidence + gating for all tickers with forecasts)
+    try:
+        _forecast_signals = {}
+        for t_name, t_data in signals.items():
+            extra = t_data.get("extra", {})
+            # Forecast indicators are stored as forecast_indicators in extra by signal_engine
+            f_ind = extra.get("forecast_indicators", {})
+            if not f_ind:
+                continue
+            chronos_ok = f_ind.get("chronos_ok", False)
+            if chronos_ok or f_ind.get("chronos_1h_pct") is not None:
+                entry = {
+                    "action": extra.get("forecast_action", "HOLD"),
+                    "chronos_1h_pct": round(f_ind.get("chronos_1h_pct", 0) or 0, 3),
+                    "chronos_1h_conf": round(f_ind.get("chronos_1h_conf", 0) or 0, 3),
+                    "chronos_24h_pct": round(f_ind.get("chronos_24h_pct", 0) or 0, 3),
+                    "chronos_24h_conf": round(f_ind.get("chronos_24h_conf", 0) or 0, 3),
+                    "kronos_ok": f_ind.get("kronos_ok", False),
+                    "chronos_ok": chronos_ok,
+                }
+                # Per-ticker accuracy gating metadata
+                gating = f_ind.get("forecast_gating")
+                if gating:
+                    entry["gating"] = gating
+                    entry["accuracy"] = f_ind.get("forecast_accuracy")
+                    entry["samples"] = f_ind.get("forecast_samples", 0)
+                    entry["inverted"] = f_ind.get("forecast_inverted", False)
+                _forecast_signals[t_name] = entry
+        if _forecast_signals:
+            summary["forecast_signals"] = _forecast_signals
+    except Exception:
+        logger.warning("[reporting] forecast_signals failed", exc_info=True)
+        _module_warnings.append("forecast_signals")
+
+    # Cumulative price changes (rolling 1d/3d/7d)
+    try:
+        from portfolio.cumulative_tracker import get_cumulative_summary
+        cumulative = get_cumulative_summary()
+        if cumulative and cumulative.get("ticker_changes"):
+            summary["cumulative_gains"] = cumulative
+    except Exception:
+        logger.warning("[reporting] cumulative_tracker failed", exc_info=True)
+        _module_warnings.append("cumulative_tracker")
+
+    # Warrant portfolio summary
+    try:
+        from portfolio.warrant_portfolio import get_warrant_summary
+        warrant_summary = get_warrant_summary(prices_usd, fx_rate)
+        if warrant_summary and warrant_summary.get("positions"):
+            summary["warrant_portfolio"] = warrant_summary
+    except Exception:
+        logger.warning("[reporting] warrant_portfolio failed", exc_info=True)
+        _module_warnings.append("warrant_portfolio")
+
+    # Exit optimizer plans for warrant positions
+    try:
+        from portfolio.cost_model import get_cost_model
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import ast, pathlib, textwrap
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals')
+for path in sorted(root.glob('*.py')):
+    tree = ast.parse(path.read_text())
+    fns=[]
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            args=[a.arg for a in node.args.args]
+            fns.append(f\"{node.name}({', '.join(args)})\")
+        elif isinstance(node, ast.Assign):
+            pass
+    print('\\n'+path.name)
+    for fn in fns[:20]:
+        print(' ',fn)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 728ms:
+
+__init__.py
+
+calendar_seasonal.py
+  _day_of_week_effect(last_date)
+  _turnaround_tuesday(df, last_date)
+  _month_end_effect(last_date)
+  _sell_in_may(last_date)
+  _january_effect(last_date)
+  _pre_holiday_effect(last_date)
+  _fomc_drift(last_date)
+  _santa_claus_rally(last_date)
+  compute_calendar_signal(df)
+
+candlestick.py
+  compute_candlestick_signal(df)
+  _detect_trend(df)
+  _body(bar)
+  _range(bar)
+  _upper_shadow(bar)
+  _lower_shadow(bar)
+  _is_green(bar)
+  _is_red(bar)
+  _body_pct(bar)
+  _check_hammer_family(bar, trend)
+  _check_engulfing(prev, curr)
+  _check_doji(bar, trend)
+  _check_star(c0, c1, c2)
+  _collect_pattern_names(hammer_result, engulfing_result, doji_result, star_result, trend, c1, c2, c0, patterns)
+
+claude_fundamental.py
+  _get_cooldowns(config)
+  _get_models(config)
+  _get_timeouts(config)
+  _needs_refresh(tier, cooldowns)
+  _build_ticker_grid(summary)
+  _build_macro_block(macro)
+  _get_earnings_calendar()
+  _build_fundamentals_block(ticker, fundamentals, tier, earnings)
+  _get_fundamentals_data()
+  _build_haiku_prompt(summary, macro)
+  _build_sonnet_prompt(summary, macro)
+  _build_opus_prompt(summary, macro, portfolios)
+  _call_claude_cli(model, prompt, timeout)
+  _extract_json(text)
+  _parse_haiku_response(text)
+  _parse_sonnet_response(text)
+  _parse_opus_response(text)
+  _journal_refresh(tier, results)
+  _refresh_tier(tier, context)
+  _get_best_result(ticker)
+
+cot_positioning.py
+  _load_deep_context(ticker)
+  _load_cot_history(metal)
+  _fetch_cot_historical(commodity_name)
+  _int_safe(val)
+  _compute_cot_index(nc_net_history)
+  _sub_cot_index(cot_data, historical)
+  _sub_commercial_change(cot_data)
+  _sub_managed_money(cot_data, historical)
+  _sub_real_yield(deep_ctx, ticker)
+  compute_cot_positioning_signal(df, context)
+
+credit_spread.py
+  _fetch_hy_oas(fred_api_key)
+  _get_fred_key(context)
+  _is_safe_haven(ticker)
+  _oas_zscore_signal(values, safe_haven)
+  _oas_momentum_signal(values, safe_haven)
+  _oas_acceleration_signal(values, safe_haven)
+  _crisis_level_signal(values, safe_haven)
+  compute_credit_spread_signal(df, context)
+
+cross_asset_tsmom.py
+  _fetch_yf_returns()
+  _compute_own_tsmom(close)
+  _compute_cross_pair(ticker, yf_data)
+  _compute_bond_momentum(yf_data)
+  _compute_equity_momentum(yf_data)
+  compute_cross_asset_tsmom_signal(df, context)
+
+crypto_macro.py
+  _options_gravity(options, current_price)
+  _put_call_sentiment(options)
+  _gold_rotation(gold_btc_data)
+  _exchange_netflow_signal(netflow_data)
+  _expiry_proximity(options)
+  compute_crypto_macro_signal(df, context)
+
+dxy_cross_asset.py
+  compute_dxy_cross_asset_signal(df, context)
+
+econ_calendar.py
+  _get_current_date(df)
+  _event_proximity(ref_date)
+  _event_type_info(ref_date)
+  _pre_event_risk(ref_date)
+  _sector_exposure(ref_date, ticker)
+  compute_econ_calendar_signal(df, context)
+
+fibonacci.py
+  _detect_trend(close, period)
+  _find_swing_high_low(df, lookback)
+  _compute_fib_levels(swing_high, swing_low)
+  _compute_fib_extensions(swing_high, swing_low)
+  _near_level(price, level, tolerance)
+  _fib_retracement_signal(close, swing_high, swing_low, fib_levels, trend)
+  _golden_pocket_signal(close, swing_high, swing_low, fib_levels, trend)
+  _fib_extension_signal(close, swing_high, swing_low, extensions, trend)
+  _pivot_standard_signal(high_prev, low_prev, close_prev, close_now)
+  _pivot_camarilla_signal(high_prev, low_prev, close_prev, close_now)
+  compute_fibonacci_signal(df)
+
+forecast.py
+  _init_kronos_enabled()
+  _extract_json_from_stdout(stdout)
+  _kronos_circuit_open()
+  _trip_kronos()
+  _chronos_circuit_open()
+  _trip_chronos()
+  reset_circuit_breakers()
+  _log_health(model, ticker, success, duration_ms, error)
+  _load_candles_ohlcv(ticker, periods, interval)
+  _run_kronos(candles, horizons, _ticker)
+  _run_kronos_inner(candles, horizons, _ticker, t0)
+  _run_chronos(prices, horizons, _ticker, timeout)
+  _run_chronos_inner(prices, horizons, _ticker, timeout)
+  _health_weighted_vote(sub_signals, kronos_ok, chronos_ok)
+  _compute_atr_pct(close_prices, period)
+  _is_crypto_ticker(ticker)
+  _load_forecast_accuracy(cache_ttl)
+  _load_forecast_subsignal_accuracy(cache_ttl, days)
+  _gate_subsignal_votes_by_accuracy(sub_signals, ticker, config_forecast)
+  _regime_discount(regime, config_forecast)
+
+futures_basis.py
+  _fetch_premium_klines(symbol, interval, limit)
+  _basis_z_extreme(basis_values)
+  _basis_velocity(basis_values)
+  _sustained_regime(basis_values)
+  _basis_acceleration(basis_values)
+  compute_futures_basis_signal(df, context)
+
+futures_flow.py
+  _oi_trend(oi_history, df)
+  _oi_divergence(oi_history, df)
+  _ls_extreme(ls_ratio)
+  _top_vs_crowd(top_position_ratio, ls_ratio)
+  _funding_trend(funding_history)
+  _oi_acceleration(oi_history, df)
+  compute_futures_flow_signal(df, context)
+
+gold_real_yield_paradox.py
+  _get_fred_key(context)
+  _fetch_real_yield(fred_api_key)
+  _paradox_spread(gold_returns_30d, yield_change_30d)
+  _correlation_break(gold_daily_returns, yield_daily_changes, baseline_corr)
+  _momentum_split(gold_close, yield_values)
+  _compute_baseline_correlation(gold_daily_returns, yield_daily_changes, window)
+  compute_gold_real_yield_paradox_signal(df, context)
+
+heikin_ashi.py
+  _hma(series, period)
+  _compute_ha_candles(df)
+  _ha_trend_signal(ha)
+  _ha_doji_signal(ha)
+  _ha_color_change_signal(ha)
+  _hull_ma_signal(close)
+  _alligator_signal(close)
+  _elder_impulse_signal(close)
+  _ttm_squeeze_signal(high, low, close, bb_period, bb_mult, kc_period, kc_mult)
+  compute_heikin_ashi_signal(df)
+
+hurst_regime.py
+  _rescaled_range(returns, n)
+  _compute_hurst(returns, sub_windows)
+  _hurst_regime(h)
+  _trend_direction(close)
+  _mr_extreme(close)
+  _hurst_momentum(close, window, roc_lookback)
+  compute_hurst_regime_signal(df, context)
+
+macro_regime.py
+  _safe_sma(series, period)
+  _safe_get(d)
+  _sma_regime(df)
+  _dxy_risk(macro)
+  _yield_curve(macro)
+  _yield_10y_momentum(macro)
+  _fomc_proximity(macro)
+  _golden_death_cross(df)
+  compute_macro_regime_signal(df, macro)
+
+mean_reversion.py
+  _rsi2_mean_reversion(close)
+  _rsi3_mean_reversion(close)
+  _internal_bar_strength(high, low, close)
+  _consecutive_days(close)
+  _gap_fill(open_prices, close, high, low, gap_threshold)
+  _bb_pct_b(close, period, num_std)
+  _ibs_rsi2_combined(high, low, close)
+  _half_life_mr(close, lookback)
+  compute_mean_reversion_signal(df, context)
+
+metals_cross_asset.py
+  _get_cross_asset_context(ticker)
+  compute_metals_cross_asset_signal(df, context)
+
+momentum.py
+  _rsi_divergence(close, lookback)
+  _stochastic(high, low, close, k_period, d_period, smooth_k)
+  _stochasticrsi(close, period)
+  _cci(high, low, close, period)
+  _williams_r(high, low, close, period)
+  _rate_of_change(close, period)
+  _ppo(close, fast, slow, signal_period)
+  _bull_bear_power(high, low, close, period)
+  compute_momentum_signal(df)
+
+momentum_factors.py
+  _time_series_momentum(close)
+  _roc_20(close)
+  _high_proximity(close)
+  _low_reversal(df)
+  _consecutive_bars(df)
+  _price_acceleration(close)
+  _volume_weighted_momentum(df)
+  _apply_seasonality(df, context)
+  compute_momentum_factors_signal(df, context)
+
+news_event.py
+  _persist_headlines(ticker, headlines)
+  _fetch_headlines(ticker, config)
+  _headline_velocity(headlines)
+  _keyword_severity_vote(headlines)
+  _sentiment_shift(headlines)
+  _source_weight_vote(headlines)
+  _sector_impact_vote(headlines, ticker)
+  _dissemination_vote(headlines)
+  _thesis_alignment_vote(headlines, ticker, config)
+  compute_news_event_signal(df, context)
+
+orderbook_flow.py
+  _get_microstructure_context(ticker)
+  compute_orderbook_flow_signal(df, context)
+
+oscillators.py
+  _awesome_oscillator(high, low)
+  _aroon_oscillator(high, low, period)
+  _vortex_indicator(high, low, close, period)
+  _chande_momentum(close, period)
+  _know_sure_thing(close)
+  _schaff_trend_cycle(close, fast, slow, cycle)
+  _trix(close, period, signal_period)
+  _coppock_curve(close, roc_long, roc_short, wma_period)
+  compute_oscillator_signal(df)
+
+shannon_entropy.py
+  _compute_entropy(returns, n_bins)
+  _entropy_regime(close, lookback, n_bins)
+  _trend_direction(close, fast, slow)
+  _entropy_momentum(close, lookback, n_bins)
+  _trend_strength(close)
+  compute_shannon_entropy_signal(df, context)
+
+smart_money.py
+  _body(open_s, close_s)
+  _find_swing_highs(highs, lookback)
+  _find_swing_lows(lows, lookback)
+  _detect_bos(highs, lows, close, swing_highs, swing_lows)
+  _detect_choch(swing_highs, swing_lows)
+  _detect_fvg(highs, lows, close, scan_bars)
+  _detect_liquidity_sweep(highs, lows, opens, close, swing_highs, swing_lows, threshold_pct)
+  _detect_supply_demand(opens, highs, lows, close, lookback, strong_mult, proximity_pct)
+  compute_smart_money_signal(df)
+
+structure.py
+  _macd_histogram(close, fast, slow, signal)
+  _highlow_breakout(df)
+  _donchian_breakout(df, period)
+  _rsi_centerline(df)
+  _macd_zeroline(df)
+  compute_structure_signal(df)
+
+trend.py
+  _golden_cross(close)
+  _ma_ribbon(close)
+  _price_vs_ma200(close)
+  _supertrend(high, low, close, period, multiplier)
+  _supertrend_signal(high, low, close)
+  _parabolic_sar(high, low, close, af_start, af_max)
+  _sar_signal(high, low, close)
+  _ichimoku_signal(high, low, close)
+  _rolling_high(series, period)
+  _rolling_low(series, period)
+  _adx_di(high, low, close, period)
+  compute_trend_signal(df)
+
+vix_term_structure.py
+  _fetch_vix_data()
+  _backwardation_flag(ratio)
+  _contango_depth(ratio)
+  _ratio_zscore(ratio_series)
+  _ratio_slope_5d(ratio_series)
+  compute_vix_term_structure_signal(df, context)
+
+volatility.py
+  _atr(high, low, close, period)
+  _bb_squeeze(close, bb_upper, bb_lower, bb_middle)
+  _bb_breakout(close, bb_upper, bb_lower)
+  _atr_expansion(close, high, low)
+  _keltner_channel(close, high, low)
+  _historical_volatility(close)
+  _donchian_channel(high, low, close)
+  _garch_signal(close, lookback)
+  compute_volatility_signal(df)
+  _empty_result(reason)
+
+volume_flow.py
+  _safe_series(series)
+  _compute_obv(close, volume)
+  _compute_vwap(high, low, close, volume)
+  _compute_ad_line(high, low, close, volume)
+  _compute_cmf(high, low, close, volume, period)
+  _compute_mfi(high, low, close, volume, period)
+  _compute_volume_rsi(volume, period)
+  _vote_obv(obv_val, obv_sma_val)
+  _vote_vwap(close_val, vwap_val)
+  _vote_ad(ad_val, ad_sma_val)
+  _vote_cmf(cmf_val)
+  _vote_mfi(mfi_val)
+  _vote_volume_rsi(vrsi_val, price_up)
+  compute_volume_flow_signal(df)
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/__init__.py' in Q:\finance-analyzer-fgl-review
+ succeeded in 611ms:
+"""Enhanced signal modules — grouped technical indicators.
+
+Each module computes multiple sub-indicators and returns a composite vote.
+"""
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import importlib.util
+print(importlib.util.find_spec('pyflakes'))
+print(importlib.util.find_spec('flake8'))
+print(importlib.util.find_spec('ruff'))
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 714ms:
+None
+None
+None
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/forecast.py | Select-Object -First 220' in Q:\finance-analyzer-fgl-review
+ succeeded in 599ms:
+"""Forecast signal — price direction prediction from time-series models.
+
+Combines Kronos (K-line foundation model), Chronos (Amazon), and Prophet
+into a majority-vote composite signal with four sub-signals:
+  1. kronos_1h  — Kronos 1-hour prediction
+  2. kronos_24h — Kronos 24-hour prediction
+  3. chronos_1h — Chronos 1-hour prediction
+  4. chronos_24h — Chronos 24-hour prediction
+
+Reuses candle loading from portfolio.forecast_signal. Confidence capped at 0.7.
+Registered as enhanced signal #28 with weight=0 (shadow mode) initially.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import platform
+import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pandas as pd
+
+from portfolio.file_utils import atomic_append_jsonl
+from portfolio.gpu_gate import gpu_gate
+from portfolio.shared_state import _cached
+from portfolio.signal_utils import majority_vote
+
+logger = logging.getLogger("portfolio.signals.forecast")
+
+# Cache TTL — forecasts don't change fast
+_FORECAST_TTL = 300  # 5 minutes
+
+# Confidence cap (same as news_event, econ_calendar)
+_MAX_CONFIDENCE = 0.7
+
+# Default Chronos timeout (seconds) — reduced from 120 to avoid long hangs
+_CHRONOS_TIMEOUT = 60
+
+# Default Kronos subprocess timeout (seconds) — reduced from 90; fails fast
+_KRONOS_TIMEOUT = 30
+
+# Forecast models master switch. Set to True to disable all model calls (early-return HOLD).
+# Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.
+_FORECAST_MODELS_DISABLED = False
+
+# Kronos inference script — runs via subprocess calling Q:/models/kronos_infer.py
+# Enable via config.json → forecast.kronos_enabled = true | "shadow"
+# "shadow" = run inference + log predictions, but force HOLD in composite vote
+_KRONOS_ENABLED = False
+_KRONOS_SHADOW = False
+
+def _init_kronos_enabled():
+    """Read kronos_enabled from config.json at import time."""
+    global _KRONOS_ENABLED, _KRONOS_SHADOW
+    try:
+        from portfolio.file_utils import load_json as _load_json
+        _cfg = _load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
+        val = _cfg.get("forecast", {}).get("kronos_enabled", False)
+        if val == "shadow":
+            _KRONOS_ENABLED = True
+            _KRONOS_SHADOW = True
+        else:
+            _KRONOS_ENABLED = bool(val)
+            _KRONOS_SHADOW = False
+    except Exception as e:
+        logger.debug("Kronos init from config: %s", e)
+
+_init_kronos_enabled()
+
+if platform.system() == "Windows":
+    _KRONOS_PYTHON = r"Q:\finance-analyzer\.venv\Scripts\python.exe"
+    _KRONOS_SCRIPT = r"Q:\models\kronos_infer.py"
+else:
+    _KRONOS_PYTHON = "/home/deck/models/.venv/bin/python"
+    _KRONOS_SCRIPT = "/home/deck/models/kronos_infer.py"
+
+# Prediction log
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_PREDICTIONS_FILE = _DATA_DIR / "forecast_predictions.jsonl"
+_HEALTH_FILE = _DATA_DIR / "forecast_health.jsonl"
+
+# Circuit breaker — after first failure, skip remaining tickers in this loop cycle.
+# Prevents 27 x 6s GPU timeouts when CUDA is broken.
+_CIRCUIT_BREAKER_TTL = 30  # 30 seconds before retry
+_kronos_tripped_until = 0.0  # monotonic timestamp when breaker resets
+_chronos_tripped_until = 0.0
+
+# BUG-102: Lock protects circuit breaker state and dedup cache from ThreadPoolExecutor races.
+# The read-check-write pattern in _log_health() is not atomic without a lock.
+_forecast_lock = threading.Lock()
+
+# Prediction dedup — track last logged timestamp per ticker to avoid
+# logging cached replays. Key: ticker, value: ISO-8601 timestamp.
+_PREDICTION_DEDUP_TTL = 60  # seconds — don't re-log within this window
+_PREDICTION_DEDUP_EVICT_AGE = 600  # BUG-106: evict entries older than 10 minutes
+_last_prediction_ts: dict[str, float] = {}  # ticker -> monotonic timestamp
+
+
+def _extract_json_from_stdout(stdout: str | None) -> dict | None:
+    """Extract JSON from potentially contaminated subprocess stdout.
+
+    HuggingFace's from_pretrained() prints to stdout during model loading,
+    which contaminates the subprocess output before the JSON result.
+    This function handles that by finding the first '{' and parsing from there.
+
+    Returns parsed dict on success, None on failure.
+    """
+    if not stdout:
+        return None
+
+    text = stdout.strip()
+    if not text:
+        return None
+
+    # Fast path: stdout starts with '{' — clean JSON
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+    # Slow path: find first '{' and try parsing from there
+    brace_idx = text.find("{")
+    if brace_idx > 0:
+        try:
+            parsed = json.loads(text[brace_idx:])
+            logger.debug("JSON extracted via brace-offset fallback (offset=%d, len=%d)", brace_idx, len(text))
+            return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: scan lines in reverse for a JSON line
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                parsed = json.loads(line)
+                logger.debug("JSON extracted via reverse-line-scan fallback (len=%d)", len(text))
+                return parsed
+            except json.JSONDecodeError:
+                continue
+
+    logger.debug("JSON extraction failed — all 3 strategies exhausted (len=%d)", len(text) if text else 0)
+    return None
+
+
+def _kronos_circuit_open() -> bool:
+    with _forecast_lock:
+        return time.monotonic() < _kronos_tripped_until
+
+
+def _trip_kronos():
+    global _kronos_tripped_until
+    with _forecast_lock:
+        _kronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
+    logger.warning("Kronos circuit breaker TRIPPED — skipping for %ds", _CIRCUIT_BREAKER_TTL)
+
+
+def _chronos_circuit_open() -> bool:
+    with _forecast_lock:
+        return time.monotonic() < _chronos_tripped_until
+
+
+def _trip_chronos():
+    global _chronos_tripped_until
+    with _forecast_lock:
+        _chronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
+    logger.warning("Chronos circuit breaker TRIPPED — skipping for %ds", _CIRCUIT_BREAKER_TTL)
+
+
+def reset_circuit_breakers():
+    """Reset both circuit breakers (for testing or manual recovery)."""
+    global _kronos_tripped_until, _chronos_tripped_until
+    with _forecast_lock:
+        _kronos_tripped_until = 0.0
+        _chronos_tripped_until = 0.0
+
+
+def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error: str = ""):
+    """Append a line to forecast_health.jsonl for persistent success/failure tracking.
+
+    On success, auto-resets the relevant circuit breaker so recovered models
+    resume immediately instead of waiting for the full TTL (BUG-56 fix).
+    """
+    global _kronos_tripped_until, _chronos_tripped_until
+    try:
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "model": model,
+            "ticker": ticker,
+            "ok": success,
+            "ms": duration_ms,
+        }
+        if error:
+            entry["error"] = error[:200]
+        atomic_append_jsonl(_HEALTH_FILE, entry)
+    except Exception as e:
+        logger.debug("Forecast health logging failed: %s", e)
+
+    # Auto-reset circuit breaker on success — faster recovery from transient failures
+    # BUG-102: Use lock to make read-check-write atomic
+    if success:
+        with _forecast_lock:
+            if model == "kronos" and _kronos_tripped_until > 0:
+                _kronos_tripped_until = 0.0
+                logger.info("Kronos circuit breaker RESET on successful %s", ticker)
+            elif model == "chronos" and _chronos_tripped_until > 0:
+                _chronos_tripped_until = 0.0
+                logger.info("Chronos circuit breaker RESET on successful %s", ticker)
+
+
+def _load_candles_ohlcv(ticker: str, periods: int = 168,
+                        interval: str = "1h") -> list[dict] | None:
+    """Load recent OHLCV candles as list of dicts.
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals/*.py | Select-String -Pattern 'Q:\\\\|/home/' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 680ms:
+
+[32;1mPath                                                                                           [0m[32;1m LineNumber[0m[32;1m Line[0m
+[32;1m----                                                                                           [0m [32;1m----------[0m [32;1m----[0m
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\forecast.py         77     _KRONOS…
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\forecast.py         78     _KRONOS…
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\forecast.py         80     _KRONOS…
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\forecast.py         81     _KRONOS…
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import ast, pathlib, collections
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals')
+for path in sorted(root.glob('*.py')):
+    tree = ast.parse(path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module=='portfolio.signal_utils':
+            names = [a.name for a in node.names]
+            print(path.name, names)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 653ms:
+claude_fundamental.py ['majority_vote']
+cot_positioning.py ['majority_vote']
+credit_spread.py ['majority_vote']
+cross_asset_tsmom.py ['majority_vote', 'safe_float']
+crypto_macro.py ['majority_vote']
+econ_calendar.py ['majority_vote']
+fibonacci.py ['majority_vote', 'sma']
+forecast.py ['majority_vote']
+futures_basis.py ['majority_vote', 'safe_float']
+futures_flow.py ['majority_vote']
+gold_real_yield_paradox.py ['majority_vote']
+heikin_ashi.py ['ema', 'majority_vote', 'rma', 'safe_float', 'sma', 'true_range', 'wma']
+hurst_regime.py ['ema', 'majority_vote', 'rsi', 'safe_float']
+macro_regime.py ['majority_vote']
+mean_reversion.py ['majority_vote', 'rsi', 'safe_float', 'sma']
+metals_cross_asset.py ['majority_vote']
+momentum.py ['ema', 'majority_vote', 'rsi', 'sma']
+momentum_factors.py ['majority_vote']
+news_event.py ['majority_vote']
+orderbook_flow.py ['majority_vote']
+oscillators.py ['ema', 'majority_vote', 'roc', 'safe_float', 'sma', 'true_range', 'wma']
+shannon_entropy.py ['ema', 'safe_float']
+smart_money.py ['majority_vote']
+structure.py ['majority_vote', 'rsi']
+trend.py ['majority_vote', 'rma', 'safe_float', 'sma', 'true_range']
+vix_term_structure.py ['majority_vote', 'safe_float']
+volatility.py ['ema', 'majority_vote', 'sma', 'true_range']
+volume_flow.py ['majority_vote']
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals/*.py | Select-String -Pattern 'majority_vote\\(' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 655ms:
+
+[32;1mPath                                                                                                          [0m[32;1m LineNumb[0m
+[32;1m                                                                                                              [0m[32;1m       er[0m
+[32;1m----                                                                                                          [0m [32;1m--------[0m
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\claude_fundamental.py           581
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\claude_fundamental.py           612
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\cot_positioning.py              384
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\credit_spread.py                307
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\cross_asset_tsmom.py            197
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\crypto_macro.py                 261
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\econ_calendar.py                205
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\fibonacci.py                    521
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\forecast.py                     435
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\futures_basis.py                236
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\futures_flow.py                 273
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\gold_real_yield_paradox.py      300
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\heikin_ashi.py                  474
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\heikin_ashi.py                  640
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\hurst_regime.py                 327
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\macro_regime.py                 410
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\mean_reversion.py               571
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\metals_cross_asset.py           282
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\momentum_factors.py             496
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\momentum.py                     432
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\news_event.py                   575
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\orderbook_flow.py               190
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\oscillators.py                  582
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\smart_money.py                  551
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\structure.py                    260
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\trend.py                        556
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\vix_term_structure.py           171
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\volatility.py                   411
+Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\volume_flow.py                  314
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/momentum.py | Select-Object -Skip 410 -First 40' in Q:\finance-analyzer-fgl-review
+ succeeded in 756ms:
+        sub_signals["ppo"] = ppo_sig
+        indicators["ppo"] = round(ppo_val, 4) if not np.isnan(ppo_val) else float("nan")
+        indicators["ppo_signal"] = round(ppo_sig_val, 4) if not np.isnan(ppo_sig_val) else float("nan")
+    except Exception:
+        sub_signals["ppo"] = "HOLD"
+        indicators["ppo"] = float("nan")
+        indicators["ppo_signal"] = float("nan")
+
+    # 8. Bull/Bear Power
+    try:
+        bp_val, brp_val, bbp_sig = _bull_bear_power(high, low, close)
+        sub_signals["bull_bear_power"] = bbp_sig
+        indicators["bull_power"] = round(bp_val, 4) if not np.isnan(bp_val) else float("nan")
+        indicators["bear_power"] = round(brp_val, 4) if not np.isnan(brp_val) else float("nan")
+    except Exception:
+        sub_signals["bull_bear_power"] = "HOLD"
+        indicators["bull_power"] = float("nan")
+        indicators["bear_power"] = float("nan")
+
+    # -- Majority vote -----------------------------------------------------
+    votes = list(sub_signals.values())
+    action, confidence = majority_vote(votes)
+
+    return {
+        "action": action,
+        "confidence": confidence,
+        "sub_signals": sub_signals,
+        "indicators": indicators,
+    }
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import importlib.util, sys, types, pathlib, math, traceback
+import numpy as np, pandas as pd
+
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals')
+
+# stub package
+portfolio = types.ModuleType('portfolio')
+portfolio.__path__ = []
+sys.modules['portfolio'] = portfolio
+
+sig = types.ModuleType('portfolio.signal_utils')
+
+def safe_float(v, default=float('nan')):
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+def sma(series, period):
+    return pd.Series(series).rolling(period).mean()
+
+def ema(series, period):
+    return pd.Series(series).ewm(span=period, adjust=False).mean()
+
+def wma(series, period):
+    s = pd.Series(series)
+    weights = np.arange(1, period+1)
+    return s.rolling(period).apply(lambda x: np.dot(x, weights)/weights.sum(), raw=True)
+
+def rma(series, period):
+    s = pd.Series(series)
+    return s.ewm(alpha=1/period, adjust=False).mean()
+
+def true_range(high, low, close):
+    high = pd.Series(high); low = pd.Series(low); close = pd.Series(close)
+    prev_close = close.shift(1)
+    return pd.concat([(high-low), (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
+
+def rsi(close, period=14):
+    c = pd.Series(close)
+    delta = c.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    out = 100 - 100 / (1 + rs)
+    return out.fillna(50)
+
+def roc(series, period=1):
+    s = pd.Series(series)
+    return s.pct_change(periods=period)*100
+
+def majority_vote(votes):
+    vals = [v for v in votes if v in ('BUY','SELL','HOLD')]
+    if not vals:
+        return 'HOLD', 0.0
+    counts = {k: vals.count(k) for k in ('BUY','SELL','HOLD')}
+    action = max(counts, key=counts.get)
+    confidence = counts[action] / len(vals)
+    return action, round(confidence, 3)
+
+for n,v in list(locals().items()):
+    if n in {'safe_float','sma','ema','wma','rma','true_range','rsi','roc','majority_vote'}:
+        setattr(sig, n, v)
+sys.modules['portfolio.signal_utils'] = sig
+setattr(portfolio, 'signal_utils', sig)
+
+# other stubs
+fomc = types.ModuleType('portfolio.fomc_dates'); fomc.get_fomc_dates = lambda: []
+sys.modules['portfolio.fomc_dates'] = fomc
+season = types.ModuleType('portfolio.seasonality'); season.seasonal_bias = lambda *a, **k: 0; season.apply_seasonality = lambda action, conf, *a, **k: (action, conf)
+sys.modules['portfolio.seasonality'] = season
+macro_context = types.ModuleType('portfolio.macro_context'); macro_context.get_macro_context = lambda *a, **k: {}
+sys.modules['portfolio.macro_context'] = macro_context
+
+# Build df
+n=300
+idx = pd.date_range('2025-01-01', periods=n, freq='D')
+base = np.linspace(100, 130, n) + np.sin(np.arange(n)/10)*3
+open_ = pd.Series(base + np.random.default_rng(0).normal(0,1,n), index=idx)
+close = pd.Series(base + np.random.default_rng(1).normal(0,1,n), index=idx)
+high = pd.Series(np.maximum(open_, close) + np.random.default_rng(2).uniform(0,2,n), index=idx)
+low = pd.Series(np.minimum(open_, close) - np.random.default_rng(3).uniform(0,2,n), index=idx)
+vol = pd.Series(np.random.default_rng(4).integers(1000,2000,n), index=idx)
+df = pd.DataFrame({'Open':open_,'High':high,'Low':low,'Close':close,'Volume':vol})
+# also lowercase aliases maybe some modules expect lower
+for c in list(df.columns):
+    df[c.lower()] = df[c]
+
+files = [
+    'calendar_seasonal.py','candlestick.py','dxy_cross_asset.py','fibonacci.py',
+    'heikin_ashi.py','hurst_regime.py','macro_regime.py','mean_reversion.py',
+    'momentum.py','momentum_factors.py','oscillators.py','shannon_entropy.py',
+    'smart_money.py','structure.py','trend.py','volatility.py','volume_flow.py'
+]
+
+for file in files:
+    name = file[:-3]
+    spec = importlib.util.spec_from_file_location(f'portfolio.signals.{name}', root / file)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    try:
+        spec.loader.exec_module(mod)
+        fn = [getattr(mod, x) for x in dir(mod) if x.startswith('compute_')][0]
+        try:
+            argc = fn.__code__.co_argcount
+            if argc == 1:
+                result = fn(df)
+            elif argc == 2:
+                result = fn(df, {'ticker':'SPY', 'macro': {}})
+            else:
+                result = fn(df)
+            print(file, 'OK', type(result), (result if isinstance(result, tuple) else '') )
+        except Exception as e:
+            print(file, 'RUNTIME_ERROR', repr(e))
+            traceback.print_exc(limit=1)
+    except Exception as e:
+        print(file, 'IMPORT_ERROR', repr(e))
+        traceback.print_exc(limit=1)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 1250ms:
+calendar_seasonal.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+candlestick.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+dxy_cross_asset.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+fibonacci.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+heikin_ashi.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+hurst_regime.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+macro_regime.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+mean_reversion.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+momentum.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+momentum_factors.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+oscillators.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+shannon_entropy.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+smart_money.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+structure.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+trend.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+volatility.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+volume_flow.py IMPORT_ERROR FileNotFoundError(2, 'No such file or directory')
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\calendar_seasonal.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\candlestick.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\dxy_cross_asset.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\fibonacci.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\heikin_ashi.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\hurst_regime.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\macro_regime.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\mean_reversion.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\momentum.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\momentum_factors.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\oscillators.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\shannon_entropy.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\smart_money.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\structure.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\trend.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\volatility.py'
+Traceback (most recent call last):
+  File "<stdin>", line 104, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\volume_flow.py'
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+from pathlib import Path
+p=Path(r'Q:\\finance-analyzer-fgl-review\\.codex_review_snapshot_393e2a8_zip\\portfolio\\signals\\calendar_seasonal.py')
+print(p.exists(), p)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 593ms:
+False Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals\calendar_seasonal.py
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import os, glob
+print(glob.glob(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals/*')[:5])
+print(os.path.exists(r'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals/calendar_seasonal.py'))
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 711ms:
+[]
+False
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -c \"import os; p='Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals'; print(os.path.exists(p)); import os; print(os.listdir(p)[:5])\"" in Q:\finance-analyzer-fgl-review
+2026-04-16T15:33:18.508739Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.6 seconds
+Output:
+False
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+FileNotFoundError: [WinError 3] The system cannot find the path specified: 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals'
+
+ exited 1 in 553ms:
+False
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+FileNotFoundError: [WinError 3] The system cannot find the path specified: 'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals'
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$src='"'Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals'; "'$dst='"'Q:/finance-analyzer-fgl-review/reviewsnapshot393e/portfolio/signals'; New-Item -ItemType Directory -Path "'$dst -Force | Out-Null; Copy-Item -Path "$src/*" -Destination $dst -Force; Get-ChildItem $dst | Select-Object -First 3 -ExpandProperty Name' in Q:\finance-analyzer-fgl-review
+ succeeded in 762ms:
+[31;1mCopy-Item: [0m
+[31;1m[36;1mLine |[0m
+[31;1m[36;1m[36;1m   2 | [0m … | Out-Null; [36;1mCopy-Item -Path "$src/*" -Destination $dst -Force[0m; Get-Ch …[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot find path 'Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals' because it does not exist.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8_zip/portfolio/signals | Select-Object -First 3 -ExpandProperty Name' in Q:\finance-analyzer-fgl-review
+2026-04-16T15:33:30.027723Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.7 seconds
+Output:
+[31;1mGet-ChildItem: [0m
+[31;1m[36;1mLine |[0m
+[31;1m[36;1m[36;1m   2 | [0m [36;1mGet-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_3[0m …[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot find path 'Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals' because it does not exist.[0m
+
+ exited 1 in 693ms:
+[31;1mGet-ChildItem: [0m
+[31;1m[36;1mLine |[0m
+[31;1m[36;1m[36;1m   2 | [0m [36;1mGet-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_3[0m …[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot find path 'Q:\finance-analyzer-fgl-review\.codex_review_snapshot_393e2a8_zip\portfolio\signals' because it does not exist.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem Q:/finance-analyzer-fgl-review | Select-Object Name,Attributes | Format-Table -AutoSize' in Q:\finance-analyzer-fgl-review
+ succeeded in 662ms:
+
+[32;1mName                                            [0m[32;1m Attributes[0m
+[32;1m----                                            [0m [32;1m----------[0m
+_review_a54a7bd_22a87504799d45358920101fcd1d3ecc  Directory
+_review_a54a7bd_c3cc751be5a94977ab1723d0d7eaf6f5  Directory
+_review_commit_b680d5e6                           Directory
+.codex_review_snapshot_393e2a8                    Directory
+portfolio                                         Directory
+review_tmp_660ad                                  Directory
+review_tmp2                                       Directory
+reviewsnapshot393e                                Directory
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem Q:/finance-analyzer-fgl-review/.codex_review_snapshot_393e2a8 -Recurse | Select-Object -First 10 FullName' in Q:\finance-analyzer-fgl-review
+ succeeded in 535ms:
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$root='"'Q:/finance-analyzer-fgl-review/reviewsnapshot393e'; New-Item -ItemType Directory -Path \""'$root/portfolio/signals" -Force | Out-Null; $files = git -c safe.directory=Q:/finance-analyzer-fgl-review ls-tree --name-only 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals; foreach ($f in $files) { $content = git -c safe.directory=Q:/finance-analyzer-fgl-review show ("393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/" + $f); Set-Content -Path (Join-Path "$root/portfolio/signals" $f) -Value $content -Encoding UTF8 }; Get-ChildItem "$root/portfolio/signals" | Select-Object -First 5 -ExpandProperty Name' in Q:\finance-analyzer-fgl-review
+ succeeded in 1209ms:
+__init__.py
+calendar_seasonal.py
+candlestick.py
+claude_fundamental.py
+cot_positioning.py
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+from pathlib import Path
+p=Path(r'Q:/finance-analyzer-fgl-review/reviewsnapshot393e/portfolio/signals/calendar_seasonal.py')
+print(p.exists())
+print(p.read_text()[:30])
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 595ms:
+True
+"""Calendar-based and seasonal
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import importlib.util, sys, types, pathlib, math, traceback
+import numpy as np, pandas as pd
+
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/reviewsnapshot393e/portfolio/signals')
+
+# stub package
+portfolio = types.ModuleType('portfolio'); portfolio.__path__ = []
+sys.modules['portfolio'] = portfolio
+
+sig = types.ModuleType('portfolio.signal_utils')
+
+def safe_float(v, default=float('nan')):
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+def sma(series, period):
+    return pd.Series(series).rolling(period).mean()
+
+def ema(series, period):
+    return pd.Series(series).ewm(span=period, adjust=False).mean()
+
+def wma(series, period):
+    s = pd.Series(series)
+    weights = np.arange(1, period+1)
+    return s.rolling(period).apply(lambda x: np.dot(x, weights)/weights.sum(), raw=True)
+
+def rma(series, period):
+    s = pd.Series(series)
+    return s.ewm(alpha=1/period, adjust=False).mean()
+
+def true_range(high, low, close):
+    high = pd.Series(high); low = pd.Series(low); close = pd.Series(close)
+    prev_close = close.shift(1)
+    return pd.concat([(high-low), (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
+
+def rsi(close, period=14):
+    c = pd.Series(close)
+    delta = c.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    out = 100 - 100 / (1 + rs)
+    return out.fillna(50)
+
+def roc(series, period=1):
+    s = pd.Series(series)
+    return s.pct_change(periods=period)*100
+
+def majority_vote(votes):
+    vals = [v for v in votes if v in ('BUY','SELL','HOLD')]
+    if not vals:
+        return 'HOLD', 0.0
+    counts = {k: vals.count(k) for k in ('BUY','SELL','HOLD')}
+    action = max(counts, key=counts.get)
+    confidence = counts[action] / len(vals)
+    return action, round(confidence, 3)
+
+for n,v in list(locals().items()):
+    if n in {'safe_float','sma','ema','wma','rma','true_range','rsi','roc','majority_vote'}:
+        setattr(sig, n, v)
+sys.modules['portfolio.signal_utils'] = sig
+setattr(portfolio, 'signal_utils', sig)
+
+# other stubs
+fomc = types.ModuleType('portfolio.fomc_dates'); fomc.get_upcoming_fomc_dates = lambda *a, **k: [] ; fomc.get_fomc_dates = lambda *a, **k: []
+sys.modules['portfolio.fomc_dates'] = fomc
+setattr(portfolio,'fomc_dates',fomc)
+season = types.ModuleType('portfolio.seasonality'); season.seasonal_bias = lambda *a, **k: 0; season.apply_seasonality = lambda action, conf, *a, **k: (action, conf)
+sys.modules['portfolio.seasonality'] = season
+setattr(portfolio,'seasonality',season)
+macro_context = types.ModuleType('portfolio.macro_context'); macro_context.get_macro_context = lambda *a, **k: {}
+sys.modules['portfolio.macro_context'] = macro_context
+setattr(portfolio,'macro_context',macro_context)
+
+# Build df
+n=300
+rng=np.random.default_rng(0)
+idx = pd.date_range('2025-01-01', periods=n, freq='D')
+base = np.linspace(100, 130, n) + np.sin(np.arange(n)/10)*3
+open_ = pd.Series(base + rng.normal(0,1,n), index=idx)
+close = pd.Series(base + rng.normal(0,1,n), index=idx)
+high = pd.Series(np.maximum(open_, close) + rng.uniform(0,2,n), index=idx)
+low = pd.Series(np.minimum(open_, close) - rng.uniform(0,2,n), index=idx)
+vol = pd.Series(rng.integers(1000,2000,n), index=idx)
+df = pd.DataFrame({'Open':open_,'High':high,'Low':low,'Close':close,'Volume':vol})
+for c in list(df.columns):
+    df[c.lower()] = df[c]
+
+files = [
+    'calendar_seasonal.py','candlestick.py','dxy_cross_asset.py','fibonacci.py',
+    'heikin_ashi.py','hurst_regime.py','macro_regime.py','mean_reversion.py',
+    'momentum.py','momentum_factors.py','oscillators.py','shannon_entropy.py',
+    'smart_money.py','structure.py','trend.py','volatility.py','volume_flow.py'
+]
+
+for file in files:
+    name = file[:-3]
+    spec = importlib.util.spec_from_file_location(f'portfolio.signals.{name}', root / file)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    try:
+        spec.loader.exec_module(mod)
+        fns = [getattr(mod, x) for x in dir(mod) if x.startswith('compute_')]
+        fn = fns[0]
+        try:
+            argc = fn.__code__.co_argcount
+            if argc == 1:
+                result = fn(df)
+            elif argc == 2:
+                result = fn(df, {'ticker':'SPY', 'macro': {}})
+            else:
+                result = fn(df)
+            print(file, 'OK', result.get('action') if isinstance(result, dict) else type(result), result.get('confidence') if isinstance(result, dict) else '')
+        except Exception as e:
+            print(file, 'RUNTIME_ERROR', repr(e))
+            traceback.print_exc(limit=2)
+    except Exception as e:
+        print(file, 'IMPORT_ERROR', repr(e))
+        traceback.print_exc(limit=2)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 1263ms:
+calendar_seasonal.py IMPORT_ERROR ImportError("cannot import name 'FOMC_ANNOUNCEMENT_DATES' from 'portfolio.fomc_dates' (unknown location)")
+candlestick.py OK HOLD 0.0
+dxy_cross_asset.py OK HOLD 0.0
+fibonacci.py OK HOLD 0.6
+heikin_ashi.py OK HOLD 0.429
+hurst_regime.py OK HOLD 1.0
+macro_regime.py OK HOLD 0.833
+mean_reversion.py OK HOLD 0.875
+momentum.py OK HOLD 0.875
+momentum_factors.py OK SELL 0.429
+oscillators.py OK HOLD 0.625
+shannon_entropy.py OK HOLD 0.0
+smart_money.py RUNTIME_ERROR TypeError('arg must be a list, tuple, 1-d array, or Series')
+structure.py OK HOLD 1.0
+trend.py OK HOLD 0.571
+volatility.py RUNTIME_ERROR ValueError('cannot reindex on an axis with duplicate labels')
+volume_flow.py RUNTIME_ERROR TypeError('arg must be a list, tuple, 1-d array, or Series')
+Traceback (most recent call last):
+  File "<stdin>", line 106, in <module>
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+ImportError: cannot import name 'FOMC_ANNOUNCEMENT_DATES' from 'portfolio.fomc_dates' (unknown location)
+Traceback (most recent call last):
+  File "<stdin>", line 112, in <module>
+  File "Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\smart_money.py", line 460, in compute_smart_money_signal
+    df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: arg must be a list, tuple, 1-d array, or Series
+Traceback (most recent call last):
+  File "<stdin>", line 112, in <module>
+  File "Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\volatility.py", line 326, in compute_volatility_signal
+    df = df[df["close"] > 0]
+         ~~^^^^^^^^^^^^^^^^^
+ValueError: cannot reindex on an axis with duplicate labels
+Traceback (most recent call last):
+  File "<stdin>", line 112, in <module>
+  File "Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\volume_flow.py", line 258, in compute_volume_flow_signal
+    df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: arg must be a list, tuple, 1-d array, or Series
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse portfolio | Select-String -Pattern 'rename\\(columns=.*lower|str\\.lower|\\[\"close\"\\]|\\[\"Close\"\\]|to_numeric\\(df\\[col\\]' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 592ms:
+
+[32;1mPath                                                     [0m[32;1m LineNumber[0m[32;1m Line[0m
+[32;1m----                                                     [0m [32;1m----------[0m [32;1m----[0m
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py         65                 "closes": df["close"].tolist(),
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py         87             "closes": hist["close"].tolist(),
+Q:\finance-analyzer-fgl-review\portfolio\reporting.py            112             "price_usd": ind["close"],
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/volatility.py | Select-Object -Skip 300 -First 50' in Q:\finance-analyzer-fgl-review
+ succeeded in 705ms:
+    Returns
+    -------
+    dict with keys:
+        action : str        -- 'BUY', 'SELL', or 'HOLD'
+        confidence : float  -- 0.0-1.0 agreement ratio among sub-signals
+        sub_signals : dict  -- per-indicator votes
+        indicators : dict   -- numeric indicator values
+    """
+    # -- Validate input -------------------------------------------------------
+    required_cols = {"open", "high", "low", "close", "volume"}
+    missing = required_cols - set(c.lower() for c in df.columns)
+    if missing:
+        logger.warning("volatility signal: missing columns %s", missing)
+        return _empty_result(f"missing columns: {missing}")
+
+    # Normalise column names to lowercase
+    df = df.copy()
+    df.columns = [c.lower() for c in df.columns]
+
+    if len(df) < MIN_ROWS:
+        logger.warning("volatility signal: only %d rows (need %d)", len(df), MIN_ROWS)
+        return _empty_result(f"insufficient data ({len(df)} rows, need {MIN_ROWS})")
+
+    # Drop rows where close is NaN or zero (bad data)
+    df = df.dropna(subset=["close"])
+    df = df[df["close"] > 0]
+    if len(df) < MIN_ROWS:
+        return _empty_result("insufficient valid data after cleaning")
+
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
+
+    # -- Bollinger Bands (shared by squeeze + breakout) -----------------------
+    bb_period = 20
+    bb_std = 2.0
+    bb_middle = sma(close, bb_period)
+    rolling_std = close.rolling(window=bb_period, min_periods=bb_period).std()
+    bb_upper = bb_middle + bb_std * rolling_std
+    bb_lower = bb_middle - bb_std * rolling_std
+
+    if np.isnan(bb_upper.iloc[-1]) or np.isnan(bb_lower.iloc[-1]):
+        return _empty_result("BB calculation produced NaN (insufficient data)")
+
+    # -- Compute all 6 sub-signals -------------------------------------------
+    sub_signals: dict[str, str] = {}
+    indicators: dict[str, Any] = {}
+
+    try:
+        action, ind = _bb_squeeze(close, bb_upper, bb_lower, bb_middle)
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import importlib.util, sys, types, pathlib, traceback
+import numpy as np, pandas as pd
+
+root = pathlib.Path(r'Q:/finance-analyzer-fgl-review/reviewsnapshot393e/portfolio/signals')
+# reset sys modules helpers maybe isolated script
+portfolio = types.ModuleType('portfolio'); portfolio.__path__ = []
+sys.modules['portfolio'] = portfolio
+sig = types.ModuleType('portfolio.signal_utils')
+
+def safe_float(v, default=float('nan')):
+    try: return float(v)
+    except: return default
+
+def sma(series, period): return pd.Series(series).rolling(period).mean()
+def ema(series, period): return pd.Series(series).ewm(span=period, adjust=False).mean()
+def wma(series, period):
+    s=pd.Series(series); w=np.arange(1,period+1)
+    return s.rolling(period).apply(lambda x:(x*w).sum()/w.sum(), raw=True)
+def rma(series, period): return pd.Series(series).ewm(alpha=1/period, adjust=False).mean()
+def true_range(high,low,close):
+    h,l,c = pd.Series(high), pd.Series(low), pd.Series(close); pc=c.shift(1)
+    return pd.concat([(h-l),(h-pc).abs(),(l-pc).abs()],axis=1).max(axis=1)
+def rsi(close, period=14):
+    c=pd.Series(close); d=c.diff(); gain=d.clip(lower=0); loss=-d.clip(upper=0)
+    ag=gain.ewm(alpha=1/period,adjust=False).mean(); al=loss.ewm(alpha=1/period,adjust=False).mean(); rs=ag/al.replace(0,np.nan)
+    return (100-100/(1+rs)).fillna(50)
+def roc(series, period=1): return pd.Series(series).pct_change(periods=period)*100
+def majority_vote(votes):
+    vals=[v for v in votes if v in {'BUY','SELL','HOLD'}]
+    if not vals: return 'HOLD',0.0
+    counts={k:vals.count(k) for k in ('BUY','SELL','HOLD')}
+    a=max(counts,key=counts.get); return a, counts[a]/len(vals)
+for n in ['safe_float','sma','ema','wma','rma','true_range','rsi','roc','majority_vote']:
+    setattr(sig,n,locals()[n])
+sys.modules['portfolio.signal_utils']=sig
+sys.modules['portfolio.fomc_dates']=types.SimpleNamespace(FOMC_ANNOUNCEMENT_DATES=[], get_upcoming_fomc_dates=lambda *a,**k:[])
+sys.modules['portfolio.seasonality']=types.SimpleNamespace(seasonal_bias=lambda *a,**k:0, apply_seasonality=lambda action,conf,*a,**k:(action,conf), get_monthly_bias=lambda *a,**k:0)
+sys.modules['portfolio.macro_context']=types.SimpleNamespace(get_macro_context=lambda *a,**k:{})
+
+n=300; rng=np.random.default_rng(0); idx=pd.date_range('2025-01-01', periods=n, freq='D')
+base=np.linspace(100,130,n)+np.sin(np.arange(n)/10)*3
+open_=pd.Series(base+rng.normal(0,1,n), index=idx)
+close=pd.Series(base+rng.normal(0,1,n), index=idx)
+high=pd.Series(np.maximum(open_,close)+rng.uniform(0,2,n), index=idx)
+low=pd.Series(np.minimum(open_,close)-rng.uniform(0,2,n), index=idx)
+vol=pd.Series(rng.integers(1000,2000,n), index=idx)
+for label, df in {
+    'upper': pd.DataFrame({'Open':open_,'High':high,'Low':low,'Close':close,'Volume':vol}),
+    'lower': pd.DataFrame({'open':open_,'high':high,'low':low,'close':close,'volume':vol}),
+}.items():
+    print('---', label, '---')
+    for file in ['candlestick.py','fibonacci.py','heikin_ashi.py','hurst_regime.py','macro_regime.py','mean_reversion.py','momentum.py','momentum_factors.py','oscillators.py','shannon_entropy.py','smart_money.py','structure.py','trend.py','volatility.py','volume_flow.py','calendar_seasonal.py','dxy_cross_asset.py']:
+        name=file[:-3]
+        spec=importlib.util.spec_from_file_location(f'portfolio.signals.{name}', root/file)
+        mod=importlib.util.module_from_spec(spec); sys.modules[spec.name]=mod
+        spec.loader.exec_module(mod)
+        fn=[getattr(mod,x) for x in dir(mod) if x.startswith('compute_')][0]
+        try:
+            res=fn(df) if fn.__code__.co_argcount==1 else fn(df, {'ticker':'SPY','macro':{}})
+            print(file, 'OK')
+        except Exception as e:
+            print(file, 'ERR', type(e).__name__, e)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 1313ms:
+--- upper ---
+candlestick.py OK
+fibonacci.py OK
+heikin_ashi.py OK
+hurst_regime.py OK
+macro_regime.py OK
+mean_reversion.py OK
+momentum.py OK
+momentum_factors.py OK
+oscillators.py OK
+shannon_entropy.py ERR KeyError 'close'
+smart_money.py OK
+structure.py OK
+trend.py OK
+volatility.py OK
+volume_flow.py OK
+calendar_seasonal.py OK
+dxy_cross_asset.py OK
+--- lower ---
+candlestick.py OK
+fibonacci.py OK
+heikin_ashi.py OK
+hurst_regime.py OK
+macro_regime.py OK
+mean_reversion.py OK
+momentum.py OK
+momentum_factors.py OK
+oscillators.py OK
+shannon_entropy.py OK
+smart_money.py OK
+structure.py OK
+trend.py OK
+volatility.py OK
+volume_flow.py OK
+calendar_seasonal.py OK
+dxy_cross_asset.py OK
+volume_flow _safe_series: 19/300 values (6%) needed forward-fill
+volume_flow _safe_series: 19/300 values (6%) needed forward-fill
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/shannon_entropy.py | Select-Object -First 220' in Q:\finance-analyzer-fgl-review
+ succeeded in 667ms:
+"""Shannon Entropy signal module.
+
+Uses Shannon entropy of price returns to measure market noise vs predictability.
+Low entropy = trending/predictable regime (follow the trend). High entropy =
+noisy/random regime (HOLD — no edge). This is fundamentally different from
+volatility: a market can be volatile but trending (low entropy) or calm but
+choppy (high entropy).
+
+Sub-signals:
+    1. Entropy Regime     — normalized entropy classification (trending/noisy/neutral)
+    2. Trend Direction    — EMA(10) vs EMA(30) crossover direction
+    3. Entropy Momentum   — is entropy rising or falling? (regime transition detection)
+    4. Trend Strength     — magnitude of EMA spread as percentage of price
+
+Source: Richard Shu (2025), Shannon Entropy breakout filter (29.6% Sharpe improvement).
+        Preprints.org 202502.1717, entropy + LVQ on BTC (14.3% net profit).
+
+Requires a pandas DataFrame with columns: open, high, low, close, volume
+and at least 60 rows of data.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from portfolio.signal_utils import ema, safe_float
+
+MIN_ROWS = 60
+
+
+def _compute_entropy(returns: np.ndarray, n_bins: int = 10) -> float:
+    """Compute normalized Shannon entropy of return distribution.
+
+    Returns value in [0, 1] where 0 = perfectly predictable, 1 = maximum noise.
+    """
+    if len(returns) < 10 or np.all(np.isnan(returns)):
+        return float("nan")
+
+    clean = returns[~np.isnan(returns)]
+    if len(clean) < 10:
+        return float("nan")
+
+    counts, _ = np.histogram(clean, bins=n_bins)
+    total = counts.sum()
+    if total == 0:
+        return float("nan")
+
+    probs = counts / total
+    probs = probs[probs > 0]
+
+    entropy = -np.sum(probs * np.log2(probs))
+    max_entropy = np.log2(n_bins)
+
+    if max_entropy == 0:
+        return float("nan")
+
+    return float(entropy / max_entropy)
+
+
+# ---- sub-signal 1: Entropy Regime -------------------------------------------
+
+def _entropy_regime(close: pd.Series, lookback: int = 50, n_bins: int = 10) -> tuple[float, str]:
+    """Classify current entropy regime.
+
+    Returns (normalized_entropy, regime_label).
+    regime_label: "trending" (<0.65), "neutral" (0.65-0.82), "noisy" (>0.82)
+    """
+    returns = close.pct_change().dropna().values
+    if len(returns) < lookback:
+        return float("nan"), "unknown"
+
+    window = returns[-lookback:]
+    ent = _compute_entropy(window, n_bins)
+
+    if np.isnan(ent):
+        return float("nan"), "unknown"
+
+    if ent < 0.65:
+        return ent, "trending"
+    if ent > 0.82:
+        return ent, "noisy"
+    return ent, "neutral"
+
+
+# ---- sub-signal 2: Trend Direction ------------------------------------------
+
+def _trend_direction(close: pd.Series, fast: int = 10, slow: int = 30) -> tuple[float, str]:
+    """EMA crossover trend direction.
+
+    Returns (spread_pct, direction).
+    """
+    if len(close) < slow + 5:
+        return 0.0, "HOLD"
+
+    ema_fast = ema(close, fast)
+    ema_slow = ema(close, slow)
+
+    fast_val = safe_float(ema_fast.iloc[-1])
+    slow_val = safe_float(ema_slow.iloc[-1])
+
+    if np.isnan(fast_val) or np.isnan(slow_val) or slow_val == 0:
+        return 0.0, "HOLD"
+
+    spread_pct = (fast_val - slow_val) / slow_val
+
+    # Require minimum 0.1% spread to avoid noise
+    if spread_pct > 0.001:
+        return float(spread_pct), "BUY"
+    if spread_pct < -0.001:
+        return float(spread_pct), "SELL"
+    return float(spread_pct), "HOLD"
+
+
+# ---- sub-signal 3: Entropy Momentum -----------------------------------------
+
+def _entropy_momentum(close: pd.Series, lookback: int = 50, n_bins: int = 10) -> tuple[float, str]:
+    """Is entropy rising (becoming noisier) or falling (becoming more predictable)?
+
+    Compare current entropy to entropy 10 bars ago.
+    Returns (delta, signal).
+    """
+    returns = close.pct_change().dropna().values
+    if len(returns) < lookback + 10:
+        return 0.0, "HOLD"
+
+    ent_now = _compute_entropy(returns[-lookback:], n_bins)
+    ent_prev = _compute_entropy(returns[-(lookback + 10):-10], n_bins)
+
+    if np.isnan(ent_now) or np.isnan(ent_prev):
+        return 0.0, "HOLD"
+
+    delta = ent_now - ent_prev
+
+    # Falling entropy = market becoming more predictable = follow trend
+    if delta < -0.05:
+        return float(delta), "trending_strengthening"
+    # Rising entropy = market becoming noisier = reduce confidence
+    if delta > 0.05:
+        return float(delta), "noise_increasing"
+    return float(delta), "stable"
+
+
+# ---- sub-signal 4: Trend Strength ------------------------------------------
+
+def _trend_strength(close: pd.Series) -> tuple[float, str]:
+    """Magnitude of recent directional move using ROC(10).
+
+    Returns (roc_pct, strength_label).
+    """
+    if len(close) < 11:
+        return 0.0, "weak"
+
+    current = safe_float(close.iloc[-1])
+    past = safe_float(close.iloc[-11])
+
+    if np.isnan(current) or np.isnan(past) or past == 0:
+        return 0.0, "weak"
+
+    roc = (current - past) / past
+
+    if abs(roc) > 0.03:
+        return float(roc), "strong"
+    if abs(roc) > 0.01:
+        return float(roc), "moderate"
+    return float(roc), "weak"
+
+
+# ---- Main composite signal --------------------------------------------------
+
+def compute_shannon_entropy_signal(df: pd.DataFrame, context: dict = None) -> dict:
+    """Compute Shannon entropy-based market regime signal.
+
+    Low entropy + trend → follow trend (BUY/SELL).
+    High entropy → HOLD (no edge in noisy markets).
+    Entropy momentum adds confidence adjustment.
+
+    Args:
+        df: DataFrame with columns: open, high, low, close, volume (min 60 rows)
+        context: Optional dict with keys: ticker, config, asset_class, regime
+
+    Returns:
+        dict with keys: action, confidence, sub_signals, indicators
+    """
+    if df is None or len(df) < MIN_ROWS:
+        return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}, "indicators": {}}
+
+    close = df["close"].copy()
+
+    # Drop NaN rows from close
+    if close.isna().sum() > len(close) * 0.3:
+        return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}, "indicators": {}}
+
+    close = close.ffill()
+
+    # Compute sub-signals
+    entropy_val, regime = _entropy_regime(close)
+    spread_pct, trend_dir = _trend_direction(close)
+    ent_delta, ent_momentum_label = _entropy_momentum(close)
+    roc_val, strength_label = _trend_strength(close)
+
+    # Build indicators dict
+    indicators = {
+        "normalized_entropy": safe_float(entropy_val),
+        "entropy_regime": regime,
+        "ema_spread_pct": safe_float(spread_pct),
+        "entropy_delta": safe_float(ent_delta),
+        "entropy_momentum": ent_momentum_label,
+        "roc_10": safe_float(roc_val),
+        "trend_strength": strength_label,
+    }
+
+    # Decision logic
+    if regime == "unknown" or np.isnan(entropy_val):
+        return {
+            "action": "HOLD", "confidence": 0.0,
+            "sub_signals": {"entropy_regime": "HOLD", "trend": "HOLD",
+                            "entropy_momentum": "HOLD", "trend_strength": "HOLD"},
+            "indicators": indicators,
+        }
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/shannon_entropy.py | Select-Object -Skip 220 -First 120' in Q:\finance-analyzer-fgl-review
+ succeeded in 579ms:
+
+    # High entropy → HOLD (noisy market, no edge)
+    if regime == "noisy":
+        return {
+            "action": "HOLD", "confidence": 0.0,
+            "sub_signals": {"entropy_regime": "HOLD", "trend": trend_dir,
+                            "entropy_momentum": "HOLD", "trend_strength": "HOLD"},
+            "indicators": indicators,
+        }
+
+    # Low entropy → follow the trend
+    if regime == "trending":
+        base_confidence = 0.5
+
+        # Stronger trend = higher confidence
+        if strength_label == "strong":
+            base_confidence += 0.15
+        elif strength_label == "moderate":
+            base_confidence += 0.08
+
+        # Entropy falling (becoming more predictable) = boost
+        if ent_momentum_label == "trending_strengthening":
+            base_confidence += 0.10
+        # Entropy rising even though still low = reduce
+        elif ent_momentum_label == "noise_increasing":
+            base_confidence -= 0.10
+
+        # How far below the trending threshold? Lower = more predictable
+        entropy_depth = max(0, 0.65 - entropy_val)  # 0 to ~0.65
+        base_confidence += entropy_depth * 0.3  # up to +0.195
+
+        base_confidence = max(0.1, min(0.7, base_confidence))
+
+        if trend_dir == "BUY":
+            action = "BUY"
+        elif trend_dir == "SELL":
+            action = "SELL"
+        else:
+            action = "HOLD"
+            base_confidence = 0.0
+
+        sub_signals = {
+            "entropy_regime": action,
+            "trend": trend_dir,
+            "entropy_momentum": action if ent_momentum_label == "trending_strengthening" else "HOLD",
+            "trend_strength": action if strength_label in ("strong", "moderate") else "HOLD",
+        }
+
+        return {
+            "action": action,
+            "confidence": round(base_confidence, 4),
+            "sub_signals": sub_signals,
+            "indicators": indicators,
+        }
+
+    # Neutral entropy → use trend but with reduced confidence
+    if trend_dir in ("BUY", "SELL") and strength_label in ("strong", "moderate"):
+        base_confidence = 0.3
+
+        if ent_momentum_label == "trending_strengthening":
+            base_confidence += 0.10
+        elif ent_momentum_label == "noise_increasing":
+            base_confidence -= 0.15
+
+        base_confidence = max(0.1, min(0.5, base_confidence))
+
+        sub_signals = {
+            "entropy_regime": "HOLD",
+            "trend": trend_dir,
+            "entropy_momentum": trend_dir if ent_momentum_label == "trending_strengthening" else "HOLD",
+            "trend_strength": trend_dir if strength_label == "strong" else "HOLD",
+        }
+
+        return {
+            "action": trend_dir,
+            "confidence": round(base_confidence, 4),
+            "sub_signals": sub_signals,
+            "indicators": indicators,
+        }
+
+    # Default: neutral entropy, weak/no trend → HOLD
+    return {
+        "action": "HOLD", "confidence": 0.0,
+        "sub_signals": {"entropy_regime": "HOLD", "trend": trend_dir,
+                        "entropy_momentum": "HOLD", "trend_strength": "HOLD"},
+        "indicators": indicators,
+    }
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/calendar_seasonal.py | Select-Object -First 120' in Q:\finance-analyzer-fgl-review
+ succeeded in 711ms:
+"""Calendar-based and seasonal trading signals.
+
+Combines eight sub-indicators into a majority-vote composite:
+  1. Day-of-Week Effect       (Monday=SELL, Friday=BUY)
+  2. Turnaround Tuesday       (Tuesday reversal after red Monday)
+  3. Month-End Effect          (Last 3 calendar days bullish)
+  4. Sell in May / Halloween   (May-Oct=SELL, Nov-Apr=BUY)
+  5. January Effect            (Jan=BUY, Dec=SELL)
+  6. Pre-Holiday Effect        (Day before multi-day gap=BUY)
+  7. FOMC Drift                (2 days before FOMC=BUY, day of/after=HOLD)
+  8. Santa Claus Rally         (Last 5 trading days Dec + first 2 Jan=BUY)
+
+Each sub-indicator votes BUY / SELL / HOLD.  The composite action is the
+majority vote; confidence is the fraction of non-HOLD votes that agree with
+the majority direction.  Maximum confidence is capped at 0.6 because
+calendar signals are inherently weak.
+"""
+
+from __future__ import annotations
+
+import calendar
+import logging
+from datetime import date, datetime, timedelta
+
+import pandas as pd
+
+logger = logging.getLogger("portfolio.signals.calendar_seasonal")
+
+# ---------------------------------------------------------------------------
+# FOMC meeting dates — imported from shared constant
+# ---------------------------------------------------------------------------
+from portfolio.fomc_dates import (
+    FOMC_ANNOUNCEMENT_DATES as _FOMC_ANNOUNCEMENT_DATES,
+)
+
+# H14: Cache max() at module level — was recomputed on every call (420 calls/cycle).
+_FOMC_MAX_DATE = max(_FOMC_ANNOUNCEMENT_DATES) if _FOMC_ANNOUNCEMENT_DATES else None
+
+# Maximum confidence for any calendar signal
+_MAX_CONFIDENCE = 0.6
+
+# Minimum rows needed for Turnaround Tuesday check
+_MIN_BARS = 2
+
+
+# ---------------------------------------------------------------------------
+# Sub-signal functions
+# ---------------------------------------------------------------------------
+
+def _day_of_week_effect(last_date: date) -> tuple[str, dict]:
+    """Monday historically bearish for equities (SELL), Friday bullish (BUY).
+
+    Parameters
+    ----------
+    last_date : date
+        Date of the last bar.
+
+    Returns
+    -------
+    tuple[str, dict]
+        Vote and indicators.
+    """
+    dow = last_date.weekday()  # 0=Mon, 4=Fri
+    indicators = {"day_of_week": dow, "day_name": last_date.strftime("%A")}
+
+    if dow == 0:  # Monday
+        return "SELL", indicators
+    if dow == 4:  # Friday
+        return "BUY", indicators
+    return "HOLD", indicators
+
+
+def _turnaround_tuesday(df: pd.DataFrame, last_date: date) -> tuple[str, dict]:
+    """Tuesday reversal after a red Monday.
+
+    If the last bar is Tuesday AND the prior bar closed below its open
+    (red candle on Monday), signal BUY.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV data with at least 2 rows.
+    last_date : date
+        Date of the last bar.
+
+    Returns
+    -------
+    tuple[str, dict]
+        Vote and indicators.
+    """
+    indicators = {"is_tuesday": False, "prior_bar_red": False}
+
+    if last_date.weekday() != 1:  # Not Tuesday
+        return "HOLD", indicators
+
+    indicators["is_tuesday"] = True
+
+    if len(df) < 2:
+        return "HOLD", indicators
+
+    prior_close = float(df["close"].iloc[-2])
+    prior_open = float(df["open"].iloc[-2])
+    prior_red = prior_close < prior_open
+    indicators["prior_bar_red"] = prior_red
+
+    if prior_red:
+        return "BUY", indicators
+    return "HOLD", indicators
+
+
+def _month_end_effect(last_date: date) -> tuple[str, dict]:
+    """Last 3 calendar days of the month tend to be bullish.
+
+    Parameters
+    ----------
+    last_date : date
+        Date of the last bar.
+
+    Returns
+    -------
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git -c safe.directory=Q:/finance-analyzer-fgl-review show 393e2a8c509861df0efc5a69d0002efad60e80cc:portfolio/signals/calendar_seasonal.py | Select-Object -Skip 330 -First 120' in Q:\finance-analyzer-fgl-review
+ succeeded in 679ms:
+    -------
+    dict
+        ``action`` (BUY / SELL / HOLD), ``confidence`` (0.0-0.6),
+        ``sub_signals`` dict, and ``indicators`` dict.
+    """
+    result: dict = {
+        "action": "HOLD",
+        "confidence": 0.0,
+        "sub_signals": {
+            "day_of_week": "HOLD",
+            "turnaround_tuesday": "HOLD",
+            "month_end": "HOLD",
+            "sell_in_may": "HOLD",
+            "january_effect": "HOLD",
+            "pre_holiday": "HOLD",
+            "fomc_drift": "HOLD",
+            "santa_claus_rally": "HOLD",
+        },
+        "indicators": {
+            "day_of_week": None,
+            "day_name": None,
+            "is_tuesday": False,
+            "prior_bar_red": False,
+            "is_month_end": False,
+            "days_remaining_in_month": None,
+            "month": None,
+            "is_weak_period": None,
+            "is_pre_holiday": False,
+            "is_pre_fomc": False,
+            "is_fomc_day": False,
+            "is_post_fomc": False,
+            "days_to_fomc": None,
+            "is_santa_rally": False,
+        },
+    }
+
+    # ---- Validate input ----
+    if df is None or not isinstance(df, pd.DataFrame):
+        return result
+
+    required_cols = {"open", "high", "low", "close", "volume", "time"}
+    if not required_cols.issubset(set(df.columns)):
+        return result
+
+    if len(df) < _MIN_BARS:
+        return result
+
+    # ---- Extract date from last bar ----
+    try:
+        time_col = df["time"]
+        if not pd.api.types.is_datetime64_any_dtype(time_col):
+            time_col = pd.to_datetime(time_col)
+        last_time = time_col.iloc[-1]
+        if isinstance(last_time, (pd.Timestamp, datetime)):
+            last_date = last_time.date()
+        elif isinstance(last_time, date):
+            last_date = last_time
+        else:
+            last_date = pd.Timestamp(last_time).date()
+    except Exception:
+        logger.debug("calendar: failed to extract last_date from DataFrame", exc_info=True)
+        return result
+
+    # ---- Compute each sub-signal ----
+    # BUG-104: All exception handlers now log failures instead of silently swallowing.
+    try:
+        dow_action, dow_ind = _day_of_week_effect(last_date)
+    except Exception:
+        logger.debug("calendar: day_of_week_effect failed", exc_info=True)
+        dow_action, dow_ind = "HOLD", {}
+
+    try:
+        tt_action, tt_ind = _turnaround_tuesday(df, last_date)
+    except Exception:
+        logger.debug("calendar: turnaround_tuesday failed", exc_info=True)
+        tt_action, tt_ind = "HOLD", {}
+
+    try:
+        me_action, me_ind = _month_end_effect(last_date)
+    except Exception:
+        logger.debug("calendar: month_end_effect failed", exc_info=True)
+        me_action, me_ind = "HOLD", {}
+
+    try:
+        sim_action, sim_ind = _sell_in_may(last_date)
+    except Exception:
+        logger.debug("calendar: sell_in_may failed", exc_info=True)
+        sim_action, sim_ind = "HOLD", {}
+
+    try:
+        jan_action, jan_ind = _january_effect(last_date)
+    except Exception:
+        logger.debug("calendar: january_effect failed", exc_info=True)
+        jan_action, jan_ind = "HOLD", {}
+
+    try:
+        ph_action, ph_ind = _pre_holiday_effect(last_date)
+    except Exception:
+        logger.debug("calendar: pre_holiday_effect failed", exc_info=True)
+        ph_action, ph_ind = "HOLD", {}
+
+    try:
+        fomc_action, fomc_ind = _fomc_drift(last_date)
+    except Exception:
+        logger.debug("calendar: fomc_drift failed", exc_info=True)
+        fomc_action, fomc_ind = "HOLD", {}
+
+    try:
+        santa_action, santa_ind = _santa_claus_rally(last_date)
+    except Exception:
+        logger.debug("calendar: santa_claus_rally failed", exc_info=True)
+        santa_action, santa_ind = "HOLD", {}
+
+    # ---- Populate sub-signals and indicators ----
+    result["sub_signals"]["day_of_week"] = dow_action
+    result["sub_signals"]["turnaround_tuesday"] = tt_action
+    result["sub_signals"]["month_end"] = me_action
+    result["sub_signals"]["sell_in_may"] = sim_action
+    result["sub_signals"]["january_effect"] = jan_action
+    result["sub_signals"]["pre_holiday"] = ph_action
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse portfolio | Select-String -Pattern '\\btime\\b' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 558ms:
+
+[32;1mPath                                                                             [0m[32;1m LineNumber[0m[32;1m Line[0m
+[32;1m----                                                                             [0m [32;1m----------[0m [32;1m----[0m
+Q:\finance-analyzer-fgl-review\portfolio\alert_budget.py                                  11 import time
+Q:\finance-analyzer-fgl-review\portfolio\alert_budget.py                                  32         cutoff = time.tim…
+Q:\finance-analyzer-fgl-review\portfolio\alert_budget.py                                  39             self._sent_ti…
+Q:\finance-analyzer-fgl-review\portfolio\alert_budget.py                                  43             self._sent_ti…
+Q:\finance-analyzer-fgl-review\portfolio\daily_digest.py                                  11 import time
+Q:\finance-analyzer-fgl-review\portfolio\daily_digest.py                                  51     """Check if it's time…
+Q:\finance-analyzer-fgl-review\portfolio\daily_digest.py                                  79     return not (last and …
+Q:\finance-analyzer-fgl-review\portfolio\daily_digest.py                                 258     """Send daily digest …
+Q:\finance-analyzer-fgl-review\portfolio\daily_digest.py                                 270             _set_last_dai…
+Q:\finance-analyzer-fgl-review\portfolio\digest.py                                         9 import time
+Q:\finance-analyzer-fgl-review\portfolio\digest.py                                       263     if last and (time.tim…
+Q:\finance-analyzer-fgl-review\portfolio\digest.py                                       268         _set_last_digest_…
+Q:\finance-analyzer-fgl-review\portfolio\health.py                                         5 import time
+Q:\finance-analyzer-fgl-review\portfolio\health.py                                        29         state["uptime_sec…
+Q:\finance-analyzer-fgl-review\portfolio\health.py                                        49     return {"start_time":…
+Q:\finance-analyzer-fgl-review\portfolio\health.py                                        53     """Reset start_time t…
+Q:\finance-analyzer-fgl-review\portfolio\health.py                                        60         state["start_time…
+Q:\finance-analyzer-fgl-review\portfolio\health.py                                       264     now = time.time()
+Q:\finance-analyzer-fgl-review\portfolio\http_retry.py                                     5 import time
+Q:\finance-analyzer-fgl-review\portfolio\http_retry.py                                    52                 time.slee…
+Q:\finance-analyzer-fgl-review\portfolio\http_retry.py                                    65                 time.slee…
+Q:\finance-analyzer-fgl-review\portfolio\journal_index.py                                214     - Time decay: more re…
+Q:\finance-analyzer-fgl-review\portfolio\journal_index.py                                227     # Time decay: entries…
+Q:\finance-analyzer-fgl-review\portfolio\log_rotation.py                                  16     if time.time() - _las…
+Q:\finance-analyzer-fgl-review\portfolio\log_rotation.py                                  19             _last_rotatio…
+Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py                               8 import time
+Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py                              24     """Check if enough ti…
+Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py                              41     return (time.time() -…
+Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py                              63     state["pending_ts"] =…
+Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py                             108     state["last_analysis_…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                   9 import time
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  48     now = time.time()
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  50         if key in _tool_c…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  56                        if…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  62                     _tool…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  69         _now_evict = time…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  81                 age = now…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  90         _loading_timestam…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                  95             _tool_cache[k…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 108                 age = now…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 116                 _tool_cac…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 146     now = time.time()
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 151         if key in _tool_c…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 168             age = now - _…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 195             # C11/SS1: Tr…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 196             _loading_time…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 227             "time": time.…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 257             now = time.ti…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 261                 time.slee…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 262             self.last_cal…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 310     now = time.time()
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 334     """Dynamic TTL based …
+Q:\finance-analyzer-fgl-review\portfolio\telegram_poller.py                               11 import time
+Q:\finance-analyzer-fgl-review\portfolio\telegram_poller.py                               34         self._startup_tim…
+Q:\finance-analyzer-fgl-review\portfolio\telegram_poller.py                               50             time.sleep(5)
+Q:\finance-analyzer-fgl-review\portfolio\weekly_digest.py                                 68     """Count trades withi…
+Q:\finance-analyzer-fgl-review\portfolio\__pycache__\http_retry.cpython-312.pyc           44 parameters�retry_afterz%…
+Q:\finance-analyzer-fgl-review\portfolio\__pycache__\shared_state.cpython-312.pyc         39     �time�dataN�ttli…
+Q:\finance-analyzer-fgl-review\portfolio\__pycache__\shared_state.cpython-312.pyc        153 ���s   �6A�A�t…
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Test-Path portfolio/__init__.py; if (Test-Path portfolio/__init__.py) { Get-Content portfolio/__init__.py }' in Q:\finance-analyzer-fgl-review
+ succeeded in 663ms:
+False
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content reviewsnapshot393e/portfolio/signals/volatility.py | Select-String -Pattern 'arch|GARCH|import ' | Select-Object LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 753ms:
+
+[32;1mLineNumber[0m[32;1m Line[0m
+[32;1m----------[0m [32;1m----[0m
+        10     7. GARCH(1,1): conditional volatility vs realized — regime detection
+        13 from __future__ import annotations
+        15 import logging
+        16 from typing import Any
+        18 import numpy as np
+        19 import pandas as pd
+        21 from portfolio.signal_utils import ema, majority_vote, sma, true_range
+       230 # Sub-indicator 7: GARCH(1,1) Conditional Volatility
+       233 def _garch_signal(close: pd.Series, lookback: int = 100) -> tuple[str, dict]:
+       234     """Simple GARCH(1,1) volatility estimator without external libraries.
+       237     Uses fixed alpha=0.1, beta=0.85 (standard GARCH(1,1) parameters).
+       240         GARCH vol rising AND above realized vol -> volatility expansion -> SELL (caution)
+       241         GARCH vol falling AND below realized vol -> compression -> BUY (breakout setup)
+       245         return "HOLD", {"garch_vol": 0.0, "realized_vol": 0.0, "garch_ratio": 0.0}
+       251         return "HOLD", {"garch_vol": 0.0, "realized_vol": 0.0, "garch_ratio": 0.0}
+       253     # GARCH(1,1) with fixed parameters
+       259     garch_variances = []
+       262         garch_variances.append(sigma2)
+       264     current_garch_vol = float(np.sqrt(garch_variances[-1]) * np.sqrt(252) * 100)
+       265     prev_garch_vol = float(np.sqrt(garch_variances[-2]) * np.sqrt(252) * 100) if len(garch_variances) >= 2 …
+       270     ratio = current_garch_vol / realized_vol if realized_vol > 0 else 1.0
+       273         "garch_vol": round(current_garch_vol, 2),
+       275         "garch_ratio": round(ratio, 3),
+       278     # Rising GARCH above realized = expanding risk = SELL (caution)
+       279     if current_garch_vol > prev_garch_vol and ratio > 1.2:
+       281     # Falling GARCH below realized = compression = BUY (breakout setup)
+       282     if current_garch_vol < prev_garch_vol and ratio < 0.8:
+       401         action, ind = _garch_signal(close)
+       402         sub_signals["garch"] = action
+       405         logger.error("garch failed: %s", exc)
+       406         sub_signals["garch"] = "HOLD"
+       407         indicators.update({"garch_vol": 0.0, "realized_vol": 0.0, "garch_ratio": 0.0})
+       427         # A-SM-2 (2026-04-11): "garch" was missing from this schema. The
+       428         # main compute path adds it via sub_signals["garch"] = ..., so any
+       439             "garch": "HOLD",
+       451             # A-SM-2: also include the GARCH indicator keys produced by
+       454             "garch_vol": 0.0,
+       456             "garch_ratio": 0.0,
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content reviewsnapshot393e/portfolio/signals/claude_fundamental.py | Select-String -Pattern 'subprocess|Path\\(|Q:\\\\|/home/' | Select-Object LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 629ms:
+
+[32;1mLineNumber[0m[32;1m Line[0m
+[32;1m----------[0m [32;1m----[0m
+        28 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+       495     rate limiting, and invocation logging.  Falls back to raw subprocess
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content reviewsnapshot393e/portfolio/signals/forecast.py | Select-String -Pattern 'forecast_signal|data_collector|forecast_accuracy|tickers|gpu_gate|majority_vote|subprocess' | Select-Object LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 585ms:
+
+[32;1mLineNumber[0m[32;1m Line[0m
+[32;1m----------[0m [32;1m----[0m
+        10 Reuses candle loading from portfolio.forecast_signal. Confidence capped at 0.7.
+        19 import subprocess
+        30 from portfolio.gpu_gate import gpu_gate
+        32 from portfolio.signal_utils import majority_vote
+        45 # Default Kronos subprocess timeout (seconds) — reduced from 90; fails fast
+        52 # Kronos inference script — runs via subprocess calling Q:/models/kronos_infer.py
+        88 # Circuit breaker — after first failure, skip remaining tickers in this loop cycle.
+       106     """Extract JSON from potentially contaminated subprocess stdout.
+       109     which contaminates the subprocess output before the JSON result.
+       227     from portfolio.tickers import SYMBOLS
+       251             from portfolio.data_collector import binance_klines
+       255             from portfolio.data_collector import binance_fapi_klines
+       260             from portfolio.data_collector import alpaca_klines
+       284     """Run Kronos inference via subprocess with GPU gating."""
+       291         with gpu_gate("kronos", timeout=90) as acquired:
+       322         proc = subprocess.run(
+       333             logger.warning("Kronos subprocess failed: %s", err)
+       357         logger.warning("Kronos subprocess error (v2): %s", e)
+       369     with gpu_gate("chronos", timeout=120) as acquired:
+       381         from portfolio.forecast_signal import forecast_chronos
+       435     return majority_vote(alive_votes)
+       485         from portfolio.tickers import CRYPTO_SYMBOLS
+       491 def _load_forecast_accuracy(cache_ttl=None):
+       500             from portfolio.forecast_accuracy import get_all_ticker_accuracies
+       516             from portfolio.forecast_accuracy import compute_forecast_accuracy
+       519                 "1h": compute_forecast_accuracy(
+       522                 "24h": compute_forecast_accuracy(
+       613     Bad tickers abstain (HOLD) rather than invert — inversion games the
+       629         "forecast_accuracy": None,
+       652     all_acc = _load_forecast_accuracy(cfg.get("accuracy_cache_ttl"))
+       658             gating_info["forecast_accuracy"] = ticker_acc["accuracy"]
+       664     gating_info["forecast_accuracy"] = acc
+       691 def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
+       731             from portfolio.forecast_signal import set_chronos_model
+       872     result["indicators"]["forecast_accuracy"] = gating_info.get("forecast_accuracy")
+       898                 "per_ticker_accuracy": gating_info.get("forecast_accuracy"),
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse portfolio | Select-String -Pattern 'yfinance|yf\\.download|history\\(' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 734ms:
+
+[32;1mPath                                                                             [0m[32;1m LineNumber[0m[32;1m Line[0m
+[32;1m----                                                                             [0m [32;1m----------[0m [32;1m----[0m
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py                                  4 confidence in unhealthy m…
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py                                 54     """Fetch daily OHLCV …
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py                                 72         logger.debug("Alp…
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py                                 75     # Alpaca retry + yfin…
+Q:\finance-analyzer-fgl-review\portfolio\market_health.py                                 76     # 2026-04-14: swapped…
+Q:\finance-analyzer-fgl-review\portfolio\reporting.py                                    130         # Mark extended-h…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 235 # Current market state — …
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 265 # H11/DC-R3-4: yfinance i…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 269 yfinance_lock = threading…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 275 # Yahoo Finance (yfinance…
+Q:\finance-analyzer-fgl-review\portfolio\shared_state.py                                 276 _yfinance_limiter = _Rate…
+Q:\finance-analyzer-fgl-review\portfolio\__pycache__\shared_state.cpython-312.pyc        141 __module__�__qualname__�…
+Q:\finance-analyzer-fgl-review\portfolio\__pycache__\shared_state.cpython-312.pyc        164 yfinance_lock�_alpaca_li…
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-Content portfolio/market_health.py -First 140' in Q:\finance-analyzer-fgl-review
+ succeeded in 630ms:
+"""Market health module — distribution days, FTD detection, breadth score.
+
+Provides market-level context that the signal engine uses to penalize BUY
+confidence in unhealthy markets.  All data comes from yfinance (SPY/QQQ),
+cached hourly to avoid rate limits.
+
+Key concepts:
+- Distribution day (O'Neil): index closes down >=0.2% on higher volume
+- Follow-Through Day: >=1.25% gain on day 4+ of rally on higher volume
+- Breadth score: composite 0-100 from distribution days, FTD state, SMAs, trend
+"""
+
+import logging
+from datetime import UTC, datetime
+
+from portfolio.file_utils import atomic_write_json, load_json
+from portfolio.shared_state import _cached
+
+logger = logging.getLogger("portfolio.market_health")
+
+# Cache TTL: 1 hour — market health doesn't need minute-level freshness
+MARKET_HEALTH_TTL = 3600
+
+# Distribution day thresholds (O'Neil standard)
+DIST_DAY_PRICE_DROP_PCT = -0.002  # >=0.2% decline
+DIST_DAY_ROLLING_WINDOW = 25  # trading days
+STALLING_UPPER_RANGE_PCT = 0.25  # top 25% of daily range
+
+# FTD thresholds
+FTD_CORRECTION_PCT = -0.05  # 5% drop from high = correction
+FTD_MIN_RALLY_DAYS = 4  # FTD cannot occur before day 4
+FTD_MIN_GAIN_PCT = 0.0125  # 1.25% gain minimum
+FTD_FAILURE_WINDOW = 10  # days after FTD to watch for failure
+
+# Breadth score component weights (sum = 100)
+_WEIGHT_DIST_DAYS = 25
+_WEIGHT_FTD_STATE = 25
+_WEIGHT_SMA200 = 20
+_WEIGHT_SMA50 = 15
+_WEIGHT_TREND_10D = 15
+
+# Zone thresholds
+ZONE_DANGER = 30
+ZONE_CAUTION = 50
+
+# State file for FTD state machine persistence
+import pathlib
+
+_DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
+_STATE_FILE = _DATA_DIR / "market_health_state.json"
+
+
+def _fetch_index_data(symbol: str, period: str = "90d") -> dict | None:
+    """Fetch daily OHLCV for an index via Alpaca (primary) or yfinance (fallback).
+
+    Returns dict with keys: closes, volumes, highs, lows, opens
+    as lists of floats (oldest first).
+    """
+    # Primary: Alpaca — already integrated with rate limiters and circuit breaker
+    try:
+        from portfolio.data_collector import alpaca_klines
+        df = alpaca_klines(symbol, interval="1d", limit=90)
+        if df is not None and len(df) >= 10:
+            return {
+                "closes": df["close"].tolist(),
+                "volumes": df["volume"].tolist(),
+                "highs": df["high"].tolist(),
+                "lows": df["low"].tolist(),
+                "opens": df["open"].tolist(),
+            }
+    except Exception:
+        logger.debug("Alpaca fetch failed for %s, trying yfinance fallback", symbol)
+
+    # Fallback path via the canonical price-source router. Handles
+    # Alpaca retry + yfinance emergency fallback internally.
+    # 2026-04-14: swapped direct yfinance call for price_source router.
+    try:
+        from portfolio.price_source import fetch_klines
+
+        _LIMIT = {"1d": 2, "5d": 10, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365}
+        limit = _LIMIT.get(period, 90)
+        hist = fetch_klines(symbol, interval="1d", limit=limit, period=period)
+        if hist is None or hist.empty or len(hist) < 10:
+            return None
+
+        return {
+            "closes": hist["close"].tolist(),
+            "volumes": hist["volume"].tolist(),
+            "highs": hist["high"].tolist(),
+            "lows": hist["low"].tolist(),
+            "opens": hist["open"].tolist(),
+        }
+    except Exception:
+        logger.warning("Failed to fetch %s data", symbol, exc_info=True)
+        return None
+
+
+def count_distribution_days(
+    closes: list[float],
+    volumes: list[float],
+    highs: list[float],
+    lows: list[float],
+    window: int = DIST_DAY_ROLLING_WINDOW,
+) -> dict:
+    """Count distribution days in the trailing window.
+
+    A distribution day: price closes down >=0.2% AND volume >= previous day.
+    A stalling day: price closes in upper 25% of range on higher volume
+    (institutions selling into strength — counts as distribution).
+
+    Returns dict with distribution_days count, stalling_days, and detail list.
+    """
+    if len(closes) < 2:
+        return {"distribution_days": 0, "stalling_days": 0, "details": []}
+
+    n = len(closes)
+    lookback_start = max(1, n - window)
+
+    dist_days = 0
+    stall_days = 0
+    details = []
+
+    for i in range(lookback_start, n):
+        pct_change = (closes[i] / closes[i - 1]) - 1
+        vol_higher = volumes[i] >= volumes[i - 1]
+        day_range = highs[i] - lows[i]
+
+        # Distribution day: down >=0.2% on higher volume
+        if pct_change <= DIST_DAY_PRICE_DROP_PCT and vol_higher:
+            dist_days += 1
+            details.append({
+                "day_offset": i - n + 1,  # negative offset from today
+                "type": "distribution",
+                "pct_change": round(pct_change * 100, 2),
+            })
+        # Stalling day: closes in upper 25% of range on higher volume
+        # (but price didn't meaningfully advance — <0.2% gain)
+        elif (
+            vol_higher
+            and day_range > 0
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content reviewsnapshot393e/portfolio/signals/forecast.py | Select-String -Pattern '_HOLD_THRESHOLD|_MIN_SAMPLES' | Select-Object LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 697ms:
+
+[32;1mLineNumber[0m[32;1m Line[0m
+[32;1m----------[0m [32;1m----[0m
+       442 _HOLD_THRESHOLD = 0.55        # Below this: force HOLD (signal can't predict)
+       443 _MIN_SAMPLES = 10             # Below this: use raw vote (insufficient data)
+       536     hold_threshold = cfg.get("subsignal_hold_threshold", cfg.get("hold_threshold", _HOLD_THRESHOLD))
+       537     min_samples = cfg.get("subsignal_min_samples", cfg.get("min_samples", _MIN_SAMPLES))
+       620     hold_thresh = cfg.get("hold_threshold", _HOLD_THRESHOLD)
+       621     min_samples = cfg.get("min_samples", _MIN_SAMPLES)
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-Content reviewsnapshot393e/portfolio/signals/forecast.py | Select-Object -Skip 600 -First 90' in Q:\finance-analyzer-fgl-review
+ succeeded in 769ms:
+
+def _accuracy_weighted_vote(sub_signals, kronos_ok, chronos_ok, ticker="",
+                            config_forecast=None, atr_pct=None, regime=None):
+    """Vote with per-ticker accuracy gating, volatility gate, and regime discount.
+
+    Extends _health_weighted_vote with:
+    - Volatility gate: high ATR% → force HOLD (Chronos can't predict big moves)
+    - Regime discount: trending markets → reduce confidence (mean-reversion bias)
+    - Accuracy gate: accuracy < hold_threshold → force HOLD
+    - Good accuracy: use raw vote, scale confidence by accuracy
+    - Insufficient samples: use raw vote (not enough data to judge)
+
+    Bad tickers abstain (HOLD) rather than invert — inversion games the
+    accuracy metric without fixing the underlying prediction quality.
+
+    Returns (action, confidence, gating_info) where gating_info is a dict with
+    accuracy metadata for logging.
+    """
+    cfg = config_forecast or {}
+    hold_thresh = cfg.get("hold_threshold", _HOLD_THRESHOLD)
+    min_samples = cfg.get("min_samples", _MIN_SAMPLES)
+
+    # Start with health-weighted vote as baseline
+    base_action, base_conf = _health_weighted_vote(
+        sub_signals, kronos_ok, chronos_ok
+    )
+
+    gating_info = {
+        "forecast_accuracy": None,
+        "forecast_samples": 0,
+        "forecast_gating": "raw",
+        "forecast_inverted": False,
+        "base_action": base_action,
+        "base_confidence": base_conf,
+        "atr_pct": atr_pct,
+    }
+
+    if not ticker:
+        return base_action, base_conf, gating_info
+
+    # Volatility gate — Chronos predicts negligible moves (~0.1% avg),
+    # so high-vol environments make the signal useless
+    if atr_pct is not None:
+        vol_thresh = cfg.get("vol_gate_crypto", _VOL_GATE_CRYPTO) \
+            if _is_crypto_ticker(ticker) \
+            else cfg.get("vol_gate_default", _VOL_GATE_DEFAULT)
+        if atr_pct > vol_thresh:
+            gating_info["forecast_gating"] = "vol_gated"
+            return "HOLD", 0.0, gating_info
+
+    # Load per-ticker accuracy
+    all_acc = _load_forecast_accuracy(cfg.get("accuracy_cache_ttl"))
+    ticker_acc = all_acc.get(ticker) if all_acc else None
+
+    if ticker_acc is None or ticker_acc.get("samples", 0) < min_samples:
+        gating_info["forecast_gating"] = "insufficient_data"
+        if ticker_acc:
+            gating_info["forecast_accuracy"] = ticker_acc["accuracy"]
+            gating_info["forecast_samples"] = ticker_acc["samples"]
+        return base_action, base_conf, gating_info
+
+    acc = ticker_acc["accuracy"]
+    samples = ticker_acc["samples"]
+    gating_info["forecast_accuracy"] = acc
+    gating_info["forecast_samples"] = samples
+
+    if acc < hold_thresh:
+        # Below threshold — signal can't predict this ticker, abstain
+        gating_info["forecast_gating"] = "held"
+        return "HOLD", 0.0, gating_info
+
+    else:
+        # Good accuracy — use raw vote, scale confidence by accuracy
+        gating_info["forecast_gating"] = "raw"
+        # Apply regime discount (trending → lower confidence for mean-reversion bias)
+        r_discount = _regime_discount(regime, cfg)
+        gating_info["regime_discount"] = r_discount
+        scaled_conf = base_conf * acc * r_discount
+        return base_action, min(scaled_conf, _MAX_CONFIDENCE), gating_info
+
+
+def _direction_to_action(direction: str) -> str:
+    """Convert direction string to action."""
+    if direction in ("up", "BUY"):
+        return "BUY"
+    if direction in ("down", "SELL"):
+        return "SELL"
+    return "HOLD"
+
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Test-Path portfolio/data_collector.py; Test-Path portfolio/price_source.py; Test-Path portfolio/forecast_accuracy.py; Test-Path portfolio/ticker_accuracy.py' in Q:\finance-analyzer-fgl-review
+ succeeded in 568ms:
+False
+False
+False
+False
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem reviewsnapshot393e/portfolio/signals/*.py | Select-String -Pattern '_cached\\(' | Select-Object Path,LineNumber,Line | Format-Table -AutoSize" in Q:\finance-analyzer-fgl-review
+ succeeded in 637ms:
+
+[32;1mPath                                                                                     [0m[32;1m LineNumber[0m[32;1m Line[0m
+[32;1m----                                                                                     [0m [32;1m----------[0m [32;1m----[0m
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\cross_asset_tsmom.py         104     return _cache…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\crypto_macro.py              226     macro_data = …
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  492     """Load per-t…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  506     return _cache…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  530     return _cache…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  740     candles = _ca…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  747         kronos_ca…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  797     kronos = _cac…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\forecast.py                  832     chronos = _ca…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\futures_flow.py              241     futures = _ca…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\news_event.py                116             artic…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\news_event.py                124             artic…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\news_event.py                157             peer_…
+Q:\finance-analyzer-fgl-review\reviewsnapshot393e\portfolio\signals\vix_term_structure.py        158     data = _cache…
+
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-Content reviewsnapshot393e/portfolio/signals/cross_asset_tsmom.py | Select-Object -Skip 80 -First 40' in Q:\finance-analyzer-fgl-review
+ succeeded in 702ms:
+                series = close[col].dropna()
+                if len(series) < _CROSS_PAIR_LOOKBACK + 1:
+                    continue
+
+                cur = float(series.iloc[-1])
+                idx_63 = max(0, len(series) - _CROSS_PAIR_LOOKBACK - 1)
+                idx_252 = max(0, len(series) - _TSMOM_LOOKBACK - 1)
+                prev_63 = float(series.iloc[idx_63])
+                prev_252 = float(series.iloc[idx_252])
+
+                ret_63d = (cur / prev_63 - 1) if prev_63 > 0 else 0.0
+                ret_252d = (cur / prev_252 - 1) if prev_252 > 0 else 0.0
+
+                result[t] = {"ret_63d": ret_63d, "ret_252d": ret_252d}
+
+            missing = set(_YF_TICKERS) - set(result)
+            if missing:
+                logger.warning("cross_asset_tsmom: missing tickers %s", missing)
+            return result if result else None
+        except Exception as e:
+            logger.warning("cross_asset_tsmom yfinance fetch failed: %s", e)
+            return None
+
+    return _cached("cross_asset_tsmom_yf", _CACHE_TTL, _do_fetch)
+
+
+def _compute_own_tsmom(close: pd.Series) -> str:
+    """Sub-indicator 1: target asset's own 252d momentum."""
+    n = len(close)
+    lookback = min(_TSMOM_LOOKBACK, n - 1)
+    if lookback < 20:
+        return "HOLD"
+
+    try:
+        cur = float(close.iloc[-1])
+        prev = float(close.iloc[-lookback - 1])
+    except (TypeError, ValueError):
+        return "HOLD"
+    if prev <= 0 or not np.isfinite(cur) or not np.isfinite(prev):
+        return "HOLD"
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import ast, pathlib
+root=pathlib.Path('reviewsnapshot393e/portfolio/signals')
+for path in sorted(root.glob('*.py')):
+    tree=ast.parse(path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith('portfolio.'):
+            if node.module "'!= '"'portfolio.signal_utils':
+                print(path.name, node.module, [a.name for a in node.names])
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 835ms:
+calendar_seasonal.py portfolio.fomc_dates ['FOMC_ANNOUNCEMENT_DATES']
+claude_fundamental.py portfolio.file_utils ['load_json']
+cross_asset_tsmom.py portfolio.shared_state ['_cached']
+crypto_macro.py portfolio.shared_state ['_cached']
+econ_calendar.py portfolio.econ_dates ['EVENT_SECTOR_MAP', 'events_within_hours', 'next_event']
+econ_calendar.py portfolio.news_keywords ['TICKER_SECTORS']
+forecast.py portfolio.file_utils ['atomic_append_jsonl']
+forecast.py portfolio.gpu_gate ['gpu_gate']
+forecast.py portfolio.shared_state ['_cached']
+futures_basis.py portfolio.api_utils ['BINANCE_FAPI_BASE']
+futures_basis.py portfolio.http_retry ['fetch_json']
+futures_basis.py portfolio.tickers ['BINANCE_FAPI_MAP', 'BINANCE_SPOT_MAP']
+futures_flow.py portfolio.shared_state ['_cached']
+news_event.py portfolio.file_utils ['atomic_write_json']
+news_event.py portfolio.news_keywords ['dissemination_score', 'get_sector_impact', 'is_credible_source', 'keyword_severity', 'score_headline']
+news_event.py portfolio.shared_state ['_cached']
+vix_term_structure.py portfolio.shared_state ['_cached']
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+from pathlib import Path
+for file, start, end in [
+('reviewsnapshot393e/portfolio/signals/calendar_seasonal.py', 350, 370),
+('reviewsnapshot393e/portfolio/signals/shannon_entropy.py', 170, 182),
+('reviewsnapshot393e/portfolio/signals/forecast.py', 72, 82)
+]:
+    path=Path(file)
+    lines=path.read_text().splitlines()
+    print('\\nFILE', file)
+    for i in range(start, min(end, len(lines))+1):
+        print(f'{i}: {lines[i-1]}')
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 558ms:
+
+FILE reviewsnapshot393e/portfolio/signals/calendar_seasonal.py
+350:             "day_of_week": None,
+351:             "day_name": None,
+352:             "is_tuesday": False,
+353:             "prior_bar_red": False,
+354:             "is_month_end": False,
+355:             "days_remaining_in_month": None,
+356:             "month": None,
+357:             "is_weak_period": None,
+358:             "is_pre_holiday": False,
+359:             "is_pre_fomc": False,
+360:             "is_fomc_day": False,
+361:             "is_post_fomc": False,
+362:             "days_to_fomc": None,
+363:             "is_santa_rally": False,
+364:         },
+365:     }
+366: 
+367:     # ---- Validate input ----
+368:     if df is None or not isinstance(df, pd.DataFrame):
+369:         return result
+370: 
+
+FILE reviewsnapshot393e/portfolio/signals/shannon_entropy.py
+170: 
+171: def compute_shannon_entropy_signal(df: pd.DataFrame, context: dict = None) -> dict:
+172:     """Compute Shannon entropy-based market regime signal.
+173: 
+174:     Low entropy + trend → follow trend (BUY/SELL).
+175:     High entropy → HOLD (no edge in noisy markets).
+176:     Entropy momentum adds confidence adjustment.
+177: 
+178:     Args:
+179:         df: DataFrame with columns: open, high, low, close, volume (min 60 rows)
+180:         context: Optional dict with keys: ticker, config, asset_class, regime
+181: 
+182:     Returns:
+
+FILE reviewsnapshot393e/portfolio/signals/forecast.py
+72:         logger.debug("Kronos init from config: %s", e)
+73: 
+74: _init_kronos_enabled()
+75: 
+76: if platform.system() == "Windows":
+77:     _KRONOS_PYTHON = r"Q:\finance-analyzer\.venv\Scripts\python.exe"
+78:     _KRONOS_SCRIPT = r"Q:\models\kronos_infer.py"
+79: else:
+80:     _KRONOS_PYTHON = "/home/deck/models/.venv/bin/python"
+81:     _KRONOS_SCRIPT = "/home/deck/models/kronos_infer.py"
+82: 
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+from pathlib import Path
+path=Path('reviewsnapshot393e/portfolio/signals/calendar_seasonal.py')
+lines=path.read_text().splitlines()
+for i in range(367, 379):
+    print(f'{i}: {lines[i-1]}')
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 550ms:
+367:     # ---- Validate input ----
+368:     if df is None or not isinstance(df, pd.DataFrame):
+369:         return result
+370: 
+371:     required_cols = {"open", "high", "low", "close", "volume", "time"}
+372:     if not required_cols.issubset(set(df.columns)):
+373:         return result
+374: 
+375:     if len(df) < _MIN_BARS:
+376:         return result
+377: 
+378:     # ---- Extract date from last bar ----
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+from pathlib import Path
+path=Path('reviewsnapshot393e/portfolio/signals/shannon_entropy.py')
+lines=path.read_text().splitlines()
+for i in range(186, 198):
+    print(f'{i}: {lines[i-1]}')
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 540ms:
+186:         return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}, "indicators": {}}
+187: 
+188:     close = df["close"].copy()
+189: 
+190:     # Drop NaN rows from close
+191:     if close.isna().sum() > len(close) * 0.3:
+192:         return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}, "indicators": {}}
+193: 
+194:     close = close.ffill()
+195: 
+196:     # Compute sub-signals
+197:     entropy_val, regime = _entropy_regime(close)
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import pathlib,re
+root=pathlib.Path('reviewsnapshot393e/portfolio/signals')
+for path in root.glob('*.py'):
+    text=path.read_text()
+    if 'df.columns = [c.lower() for c in df.columns]' not in text and 'set(c.lower() for c in df.columns)' not in text:
+        # modules that may not normalize
+        if 'df[\"close\"]' in text or 'required_cols' in text:
+            print(path.name)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 678ms:
+calendar_seasonal.py
+candlestick.py
+cross_asset_tsmom.py
+crypto_macro.py
+fibonacci.py
+forecast.py
+futures_flow.py
+gold_real_yield_paradox.py
+heikin_ashi.py
+macro_regime.py
+mean_reversion.py
+momentum.py
+momentum_factors.py
+oscillators.py
+shannon_entropy.py
+smart_money.py
+structure.py
+trend.py
+volume_flow.py
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import importlib.util, sys, types, pathlib
+import pandas as pd, numpy as np
+root = pathlib.Path('reviewsnapshot393e/portfolio/signals')
+portfolio = types.ModuleType('portfolio'); portfolio.__path__=[]; sys.modules['portfolio']=portfolio
+sys.modules['portfolio.fomc_dates']=types.SimpleNamespace(FOMC_ANNOUNCEMENT_DATES=[])
+spec=importlib.util.spec_from_file_location('portfolio.signals.calendar_seasonal', root/'calendar_seasonal.py')
+mod=importlib.util.module_from_spec(spec); sys.modules[spec.name]=mod; spec.loader.exec_module(mod)
+idx=pd.date_range('2026-05-04', periods=5, freq='D')  # Friday is 2026-05-08
+base=np.arange(5)+100
+common={'open':base,'high':base+1,'low':base-1,'close':base+0.5,'volume':[100]*5}
+df_index=pd.DataFrame(common, index=idx)
+df_time=df_index.reset_index(names='time')
+print('no time', mod.compute_calendar_signal(df_index))
+print('with time', mod.compute_calendar_signal(df_time))
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 1143ms:
+no time {'action': 'HOLD', 'confidence': 0.0, 'sub_signals': {'day_of_week': 'HOLD', 'turnaround_tuesday': 'HOLD', 'month_end': 'HOLD', 'sell_in_may': 'HOLD', 'january_effect': 'HOLD', 'pre_holiday': 'HOLD', 'fomc_drift': 'HOLD', 'santa_claus_rally': 'HOLD'}, 'indicators': {'day_of_week': None, 'day_name': None, 'is_tuesday': False, 'prior_bar_red': False, 'is_month_end': False, 'days_remaining_in_month': None, 'month': None, 'is_weak_period': None, 'is_pre_holiday': False, 'is_pre_fomc': False, 'is_fomc_day': False, 'is_post_fomc': False, 'days_to_fomc': None, 'is_santa_rally': False}}
+with time {'action': 'HOLD', 'confidence': 0.0, 'sub_signals': {'day_of_week': 'BUY', 'turnaround_tuesday': 'HOLD', 'month_end': 'HOLD', 'sell_in_may': 'SELL', 'january_effect': 'HOLD', 'pre_holiday': 'HOLD', 'fomc_drift': 'HOLD', 'santa_claus_rally': 'HOLD'}, 'indicators': {'day_of_week': 4, 'day_name': 'Friday', 'is_tuesday': False, 'prior_bar_red': False, 'is_month_end': False, 'days_remaining_in_month': 23, 'month': 5, 'is_weak_period': True, 'is_pre_holiday': False, 'is_pre_fomc': False, 'is_fomc_day': False, 'is_post_fomc': False, 'days_to_fomc': None, 'is_santa_rally': False, 'day': 8}}
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+import importlib.util, sys, types, pathlib, numpy as np, pandas as pd
+root = pathlib.Path('reviewsnapshot393e/portfolio/signals')
+portfolio=types.ModuleType('portfolio'); portfolio.__path__=[]; sys.modules['portfolio']=portfolio
+sig=types.ModuleType('portfolio.signal_utils')
+sig.ema=lambda s,p: pd.Series(s).ewm(span=p, adjust=False).mean()
+sig.safe_float=lambda v: float(v) if pd.notna(v) else float('nan')
+sys.modules['portfolio.signal_utils']=sig
+spec=importlib.util.spec_from_file_location('portfolio.signals.shannon_entropy', root/'shannon_entropy.py')
+mod=importlib.util.module_from_spec(spec); sys.modules[spec.name]=mod; spec.loader.exec_module(mod)
+idx=pd.date_range('2025-01-01', periods=100, freq='D')
+close=pd.Series(np.linspace(100,120,100), index=idx)
+df_upper=pd.DataFrame({'Open':close,'High':close+1,'Low':close-1,'Close':close,'Volume':1000})
+try:
+    print(mod.compute_shannon_entropy_signal(df_upper))
+except Exception as e:
+    print(type(e).__name__, e)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 1326ms:
+KeyError 'close'
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "@'
+from pathlib import Path
+for file in ['calendar_seasonal.py','shannon_entropy.py','forecast.py']:
+    path=Path('reviewsnapshot393e/portfolio/signals')/file
+    lines=path.read_text().splitlines()
+    for idx,line in enumerate(lines,1):
+        if line.startswith('def compute_calendar_signal') or line.startswith('def compute_shannon_entropy_signal'):
+            print(file, idx, line)
+'@ | python -" in Q:\finance-analyzer-fgl-review
+ succeeded in 680ms:
+calendar_seasonal.py 319 def compute_calendar_signal(df: pd.DataFrame) -> dict:
+shannon_entropy.py 171 def compute_shannon_entropy_signal(df: pd.DataFrame, context: dict = None) -> dict:
+
+codex
+The snapshot introduces runtime issues in newly added signal modules: one silently disables itself on index-based OHLCV data, another crashes on common yfinance column casing, and the forecast module hard-codes machine-specific model paths. These are functional bugs, so the patch should not be considered correct as-is.
+
+Full review comments:
+
+- [P2] Handle DatetimeIndex input in calendar signal — Q:\finance-analyzer-fgl-review\portfolio\signals\calendar_seasonal.py:371-373
+  If `compute_calendar_signal()` is called with a standard OHLCV frame whose timestamps live in the index, this guard rejects it because there is no literal `time` column and the function returns the all-`HOLD` default before evaluating any seasonal rules. That makes the entire module a silent no-op for the most common pandas/yfinance-shaped input unless every caller materializes a duplicate timestamp column first.
+
+- [P2] Normalize OHLCV column casing before reading `close` — Q:\finance-analyzer-fgl-review\portfolio\signals\shannon_entropy.py:188-188
+  If this signal receives a yfinance-style frame (`Open/High/Low/Close/Volume`), `compute_shannon_entropy_signal()` raises `KeyError('close')` here because it indexes `df["close"]` directly instead of normalizing column names like several of the other signal modules do. In that input shape the entropy signal crashes instead of contributing a vote.
+
+- [P3] Remove machine-local Kronos paths from forecast module — Q:\finance-analyzer-fgl-review\portfolio\signals\forecast.py:76-81
+  When `forecast.kronos_enabled` is enabled (including `'shadow'` mode), `_run_kronos()` can only work on the author's exact machines because both the interpreter and inference script are hard-coded to `Q:\...` / `/home/deck/...` paths. In any other dev, CI, or production environment those files do not exist, so every Kronos call fails and the circuit breaker disables that sub-signal permanently.

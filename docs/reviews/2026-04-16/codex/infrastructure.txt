@@ -1,0 +1,24 @@
+The patch introduces multiple functional regressions in notification delivery, backup retention, log rotation, and portfolio reporting. Several new features either silently fail under common configurations or produce materially incorrect output.
+
+Full review comments:
+
+- [P1] Keep queued analysis when Telegram delivery fails — Q:\finance-analyzer-fgl-review\portfolio\message_throttle.py:105-111
+  When `send_or_store()` returns `False` (for example on a Telegram 429/network error or bad credentials), `_send_now()` still clears `pending_text` and advances `last_analysis_sent`. In that failure mode the queued analysis is silently dropped and the 3-hour cooldown prevents an immediate retry, so operators miss the message entirely.
+
+- [P2] Copy backups without preserving stale source mtimes — Q:\finance-analyzer-fgl-review\portfolio\backup.py:36-36
+  `backup_all()` uses `shutil.copy2()`, which preserves the source file's modification time. Because `cleanup_old_backups()` deletes backups based on mtime, any newly created backup of a file that has not changed in more than 7 days will be deleted on the same run, leaving exactly the stale-but-important files without a retained backup.
+
+- [P1] Return smart-journal hits in chronological order — Q:\finance-analyzer-fgl-review\portfolio\journal_index.py:316-316
+  With `journal.smart_retrieval` defaulting to `True`, this now returns entries in relevance order, but `build_context()` treats its input as a time-ordered history (`entries[-1]` becomes the latest regime/prices, consecutive HOLDs are compressed, and spans are derived from first/last elements). As soon as an older entry ranks above a newer one, the generated memory context misstates the latest market state and can scramble the recent decision sequence.
+
+- [P1] Don't use the layer1-gated sender for weekly digests — Q:\finance-analyzer-fgl-review\portfolio\weekly_digest.py:290-291
+  `send_digest()` calls `telegram_notifications.send_telegram()` directly. That helper intentionally no-ops when `telegram.layer1_messages` is `false`, so in the common setup where Layer 1 Telegram sends are disabled the weekly digest reports success but never reaches chat. This needs to go through the same routing path as the other digest categories instead of the layer1-gated helper.
+
+- [P2] Include holdings when computing weekly portfolio P&L — Q:\finance-analyzer-fgl-review\portfolio\weekly_digest.py:52-53
+  `_portfolio_summary()` computes P&L as `cash_sek - initial_value_sek`, which ignores all open holdings. Any week where capital is deployed into positions will therefore show a large loss even if the portfolio value is flat or up (for example, 100k cash plus 400k of holdings on a 500k account reports -80%), so the digest's headline performance numbers are materially wrong.
+
+- [P2] Include open positions in reflection total P&L — Q:\finance-analyzer-fgl-review\portfolio\reflection.py:80-80
+  `_compute_strategy_metrics()` uses the same cash-only formula for `total_pnl_pct`. When a strategy still has open positions, reflections will report drawdowns/profits that are off by the entire marked value of those holdings, which then feeds misleading `up/down X%` insights back into Layer 2.
+
+- [P2] Honor JSONL max_size_mb in rotate_jsonl — Q:\finance-analyzer-fgl-review\portfolio\log_rotation.py:199-200
+  `rotate_jsonl()` records `size_mb` and the policies define `max_size_mb`, but the function only archives entries older than `max_age_days` and returns `nothing_to_archive` whenever there are no old lines. A fast-growing file like `signal_log.jsonl` can therefore grow far past the configured size cap as long as its contents are recent, so the size-based rotation promised by the policy never happens.
