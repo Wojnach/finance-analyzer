@@ -1,5 +1,93 @@
 # Session Progress
 
+## 2026-05-19 PM — Working-tree hygiene sweep (13 commits)
+
+**Context:** Working tree had 294 untracked files at session start —
+some genuine unfinished work, some runtime state never gitignored, some
+dated one-shots. Triaged, gitignored runtime, committed COMMIT-READY,
+flagged residual.
+
+**Sequence:**
+
+1. `chore(hygiene): extend .gitignore + add cleanup triage report` —
+   244 lines of new gitignore rules sweep runtime state (loop/metals/
+   golddigger/grid_fisher/mstr_loop/llm/signal-research). Drops
+   untracked count 294 → 57. `docs/cleanup-triage-20260519.md` is the
+   per-file classification (32 commit-ready / 12 needs-work / 6 stale).
+
+2. `fix(dashboard): commit cost.js (imported by main.js but missing in git)`
+   — hot fix; build would fail without it.
+
+3. `chore(commands)` — `.claude/commands/{avanza-search,digest-project,time}.md`.
+
+4. `chore(scripts): commit RC/loop infra + fin_snipe launchers + sysmon` —
+   11 files: rc-keepalive/rc-watchdog/pf-loop-ensure/add-cloudflared-path,
+   sysmon.py, fin_snipe[_manager].py + .bat wrappers,
+   avanza_metals_check/ladder.
+
+5. `chore(scripts): commit signal research + ML tooling` — 9 files
+   (signal_research_*, signal_correlation_audit emits a tracked daily
+   snapshot, backtest/tune_new_signals, write_research_outputs,
+   benchmark_gpu_models, prepare_kronos_training_data, setup_wsl_claude).
+
+6. `chore(auto-improve)` — codex bat + matching prompt.
+
+7. `docs(review): dual adversarial review 2026-05-16` — 17 files
+   (synthesis + 8 claude + 8 codex per-subsystem reports).
+
+8. `docs: long-form design docs + oil deep research + golddigger final` —
+   8 files (GOLDDIGGER_FINAL, PLUGINS_AND_SKILLS, SYSTEM_HEALTH_CONTRACT,
+   UNSLOTH_RUNTIME_LEARNINGS, oil-deep-research × 2 md, oil PDFs × 2).
+
+9. `docs(review): commit 2026-04-16 adversarial review infrastructure` —
+   30 files, predecessor of the 2026-05-16 review committed in step 7.
+
+10. `docs: commit deep-research (renamed from 'deep research/')` — ASCII
+    slugs.
+
+11. `docs(plans): archive shipped + shelved plans` — 5 plans whose code is
+    in the tree (ic-weighting, strategy-orchestrator, metals-microstructure)
+    plus 2 shelved (merge-triage, unsloth-finetune).
+
+12. `docs(plans): archive deferred/unshipped plans` — 5 specs preserved
+    for future implementation decisions (PLAN-trigger-noise DEFERRED,
+    gemma4-loop, 3h-signal-optimization, dashboard-ops-board plan + spec).
+
+13. `docs: commit codex docs with ASCII slugs` — renamed two docs that had
+    spaces / Unicode ellipsis in their filenames.
+
+**Side moves (out of repo, not commits here):**
+
+- `docs/superpowers/plans/2026-03-30-househunting.md` → moved to
+  `/mnt/q/househunting/docs/superpowers/plans/` (correct repo).
+- `docs/superpowers/specs/2026-03-30-househunting-design.md` → same.
+
+**Pending — STALE one-shots NOT deleted (user said "don't delete yet"):**
+
+Four files survive untracked. All are dated past-purpose, safe-to-`rm`:
+
+| File | Why stale |
+|------|-----------|
+| `scripts/cleanup_settings_20260508.sh` | One-shot scheduled for 2026-05-08 09:00 CEST. Already run. Header literally says "After this runs successfully, the task and this script can be deleted." |
+| `scripts/win/settings-cleanup-20260508.bat` | Companion to above. |
+| `scripts/monitor_silver_exit.py` | One-shot monitor for the *2026-04-23* BULL SILVER X5 exit. Date hard-coded, long past. |
+| `scripts/win/metals-arm-stop-once.bat` | Invokes `data/arm_stop_orders_once.py` which does not exist. BROKEN. |
+
+To finish: `rm scripts/cleanup_settings_20260508.sh scripts/win/settings-cleanup-20260508.bat scripts/monitor_silver_exit.py scripts/win/metals-arm-stop-once.bat`
+
+**Side effect — ops-board surfaced:**
+
+`docs/superpowers/plans/2026-04-28-dashboard-ops-board.md` is "Approved for
+implementation" per its spec but no `/api/ops-status` endpoint exists in
+`dashboard/app.py`. Concrete two-endpoint scope; good backlog candidate.
+Recommend adding to `docs/IMPROVEMENT_BACKLOG.md`.
+
+**Push:** 13 commits queued on `main`. Classifier blocks me on `git push
+origin main`; user runs `! git push`. Origin already at `9a543694` before
+this session — fast-forward.
+
+---
+
 ## 2026-05-19 — Auto-improve: 7 P1 adversarial review fixes
 
 **Context:** 2026-05-17 adversarial review found 12 P1 issues. 05-18
@@ -5260,3 +5348,123 @@ docs/SESSION_PROGRESS.md
 ### 2026-05-18 23:53 UTC | main
 a5e9c4bb docs: SESSION_PROGRESS — record grid_fisher Gate A/B live verification
 docs/SESSION_PROGRESS.md
+
+### 2026-05-19 20:13 UTC | main
+c901348a chore(hygiene): extend .gitignore + add cleanup triage report
+.gitignore
+docs/cleanup-triage-20260519.md
+
+### 2026-05-19 20:13 UTC | main
+87c6b77b fix(dashboard): commit cost.js (imported by main.js but missing in git)
+dashboard/static/js/views/cost.js
+
+### 2026-05-19 20:13 UTC | main
+6b431692 chore(commands): commit avanza-search, digest-project, time slash commands
+.claude/commands/avanza-search.md
+.claude/commands/digest-project.md
+.claude/commands/time.md
+
+### 2026-05-19 20:14 UTC | main
+8ebb6272 chore(scripts): commit RC/loop infra + fin_snipe launchers + sysmon
+scripts/avanza_metals_check.py
+scripts/avanza_metals_ladder.py
+scripts/fin_snipe.py
+scripts/fin_snipe_manager.py
+scripts/sysmon.py
+scripts/win/add-cloudflared-path.ps1
+scripts/win/fin-snipe-manager.bat
+scripts/win/fin-snipe.bat
+scripts/win/pf-loop-ensure.ps1
+scripts/win/rc-keepalive.ps1
+scripts/win/rc-watchdog.ps1
+
+### 2026-05-19 20:14 UTC | main
+e0b1e32b chore(scripts): commit signal research + ML tooling
+scripts/backtest_new_signals.py
+scripts/benchmark_gpu_models.py
+scripts/prepare_kronos_training_data.py
+scripts/setup_wsl_claude.ps1
+scripts/signal_correlation_audit.py
+scripts/signal_research_extract.py
+scripts/signal_research_phase34.py
+scripts/tune_new_signals.py
+scripts/write_research_outputs.py
+
+### 2026-05-19 20:14 UTC | main
+a042bcfb chore(auto-improve): commit Codex auto-improve runner + prompt
+docs/auto-improve-prompt-codex.md
+scripts/auto-improve-codex.bat
+
+### 2026-05-19 20:14 UTC | main
+0e40221c docs(review): dual adversarial review 2026-05-16 — claude + codex sides
+docs/adversarial-review/SYNTHESIS-2026-05-16.md
+docs/adversarial-review/claude/2026-05-16-avanza-api.md
+docs/adversarial-review/claude/2026-05-16-data-external.md
+docs/adversarial-review/claude/2026-05-16-infrastructure.md
+docs/adversarial-review/claude/2026-05-16-metals-core.md
+docs/adversarial-review/claude/2026-05-16-orchestration.md
+docs/adversarial-review/claude/2026-05-16-portfolio-risk.md
+docs/adversarial-review/claude/2026-05-16-signals-core.md
+docs/adversarial-review/claude/2026-05-16-signals-modules.md
+docs/adversarial-review/codex/2026-05-16-avanza-api.md
+docs/adversarial-review/codex/2026-05-16-data-external.md
+docs/adversarial-review/codex/2026-05-16-infrastructure.md
+docs/adversarial-review/codex/2026-05-16-metals-core.md
+docs/adversarial-review/codex/2026-05-16-orchestration.md
+docs/adversarial-review/codex/2026-05-16-portfolio-risk.md
+
+### 2026-05-19 20:14 UTC | main
+a0074c72 docs: long-form design docs + oil deep research + golddigger final
+docs/GOLDDIGGER_FINAL.md
+docs/Oil-research-2.pdf
+docs/Oil-research.pdf
+docs/PLUGINS_AND_SKILLS.md
+docs/SYSTEM_HEALTH_CONTRACT.md
+docs/UNSLOTH_RUNTIME_LEARNINGS_2026-03-17.md
+docs/oil-deep-research-report-2.md
+docs/oil-deep-research-report.md
+
+### 2026-05-19 20:16 UTC | main
+61be859a docs(review): commit 2026-04-16 adversarial review infrastructure + outputs
+docs/reviews/2026-04-16/branches.json
+docs/reviews/2026-04-16/claude/avanza-api.md
+docs/reviews/2026-04-16/claude/data-external.md
+docs/reviews/2026-04-16/claude/infrastructure.md
+docs/reviews/2026-04-16/claude/metals-core.md
+docs/reviews/2026-04-16/claude/orchestration.md
+docs/reviews/2026-04-16/claude/portfolio-risk.md
+docs/reviews/2026-04-16/claude/signals-core.md
+docs/reviews/2026-04-16/claude/signals-modules.md
+docs/reviews/2026-04-16/codex/avanza-api.err
+docs/reviews/2026-04-16/codex/avanza-api.txt
+docs/reviews/2026-04-16/codex/data-external.err
+docs/reviews/2026-04-16/codex/data-external.txt
+docs/reviews/2026-04-16/codex/infrastructure.err
+docs/reviews/2026-04-16/codex/infrastructure.txt
+
+### 2026-05-19 20:17 UTC | main
+137a23a7 docs: commit deep-research (renamed from 'deep research/' to ASCII slug)
+docs/deep-research/deep-research-report.md
+docs/deep-research/quant-exit-engine-design-gold-silver-mini.docx
+docs/deep-research/quant-exit-engine-design-gold-silver-mini.pdf
+
+### 2026-05-19 20:17 UTC | main
+03b9f34c docs(plans): archive shipped + shelved plans from Mar-Apr
+docs/plans/2026-03-17-merge-triage-plan.md
+docs/plans/2026-03-18-unsloth-finetune-plan.md
+docs/plans/2026-04-18-ic-weighting-integration.md
+docs/superpowers/plans/2026-03-31-metals-microstructure-signals.md
+docs/superpowers/plans/2026-04-04-strategy-orchestrator-merge.md
+
+### 2026-05-19 20:17 UTC | main
+1829baed docs(plans): archive deferred/unshipped plans (none of these are in code yet)
+docs/PLAN-trigger-noise.md
+docs/plans/2026-04-16-gemma4-loop-plan.md
+docs/superpowers/plans/2026-03-27-3h-signal-optimization.md
+docs/superpowers/plans/2026-04-28-dashboard-ops-board.md
+docs/superpowers/specs/2026-04-28-dashboard-ops-board-design.md
+
+### 2026-05-19 20:18 UTC | main
+7fba8390 docs: commit codex docs with ASCII slugs (renamed from spaces/Unicode)
+docs/codex-guidelines.md
+docs/codex-permission-prompts-config.md
