@@ -354,6 +354,10 @@ def _register_defaults():
                       "portfolio.signals.amihud_illiquidity_regime",
                       "compute_amihud_illiquidity_regime_signal",
                       max_confidence=0.7)
+    register_enhanced("absorption_ratio_regime",
+                      "portfolio.signals.absorption_ratio_regime",
+                      "compute_absorption_ratio_regime_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
