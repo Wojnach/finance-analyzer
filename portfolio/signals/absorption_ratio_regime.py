@@ -68,6 +68,9 @@ def _fetch_multi_asset_closes() -> pd.DataFrame | None:
             else:
                 close = data[["Close"]]
                 close.columns = _YF_TICKERS[:1]
+            if close.shape[1] < 3:
+                logger.warning("absorption_ratio_regime: only %d columns", close.shape[1])
+                return None
             close = close.dropna(how="all")
             if len(close) < MIN_ROWS:
                 return None
@@ -116,6 +119,9 @@ def _compute_absorption_ratio_series(closes: pd.DataFrame) -> pd.Series | None:
         try:
             corr = valid_cols.corr().values
             if np.any(np.isnan(corr)):
+                nan_frac = np.isnan(corr).sum() / corr.size
+                if nan_frac > 0.1:
+                    continue
                 corr = np.nan_to_num(corr, nan=0.0)
                 np.fill_diagonal(corr, 1.0)
             eigenvalues = np.linalg.eigvalsh(corr)
