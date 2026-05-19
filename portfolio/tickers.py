@@ -215,6 +215,9 @@ DISABLED_SIGNALS = {
                         # signals fail in ranging markets. 49.9% at 3h (marginal).
     "connors_rsi2",     # 2026-05-19: NEW. RSI(2) ultra-short MR for BTC/ETH only.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "adx_regime_switch",  # 2026-05-19: NEW. ADX dual regime meta-signal. Detects
+                        # trend/range transitions via ADX + DI spread. All assets.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.

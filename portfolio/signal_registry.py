@@ -362,6 +362,10 @@ def _register_defaults():
                       "portfolio.signals.connors_rsi2",
                       "compute_connors_rsi2_signal",
                       requires_context=True, max_confidence=0.75)
+    register_enhanced("adx_regime_switch",
+                      "portfolio.signals.adx_regime_switch",
+                      "compute_adx_regime_switch_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
