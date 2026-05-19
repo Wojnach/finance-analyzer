@@ -34,8 +34,8 @@ logger = logging.getLogger("portfolio.trigger")
 # ---------------------------------------------------------------------------
 _CLAUDE_BUDGET_DEFAULTS = {
     "consensus_min_pct": 0,             # item 1: drop low-confidence consensus
-    "sustained_checks_low_density": 3,  # item 4: same as SUSTAINED_CHECKS = no-op
-    "sustained_density_threshold": 0.0, # item 4: density gate disabled
+    "sustained_checks_low_density": 5,  # item 4: low-density tickers need 5 cycles
+    "sustained_density_threshold": 0.4, # item 4: <40% voter density = low-density
     "min_weighted_confidence": 0.0,     # item 5: confidence floor disabled
     "min_atr_multiple": 0.0,            # item 5: ATR floor disabled
 }
@@ -118,7 +118,7 @@ FLIP_COOLDOWN_S = 1800  # 30 min
 # markets, consensus oscillates between HOLD and weak BUY/SELL, producing 20+
 # Layer 2 invocations per day that all return HOLD — wasting compute and token
 # budget. Setting this to 0.0 disables dampening without code change.
-RANGING_CONSENSUS_MIN_CONFIDENCE = 0.35
+RANGING_CONSENSUS_MIN_CONFIDENCE = 0.40
 
 # Startup grace period — after a restart, the first loop iteration updates the
 # baseline without triggering Layer 2. This prevents spurious T3 full reviews

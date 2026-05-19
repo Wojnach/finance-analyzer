@@ -847,7 +847,9 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
                            }),
     },
     "4h": {},
-    "12h": {},
+    "12h": {
+        "BTC-USD": frozenset({"mean_reversion", "rsi"}),
+    },
     "1d": {
         # 2026-04-24 audit: added econ_calendar (1.8% BTC/ETH), ema (BTC),
         # funding (ETH 12.5%), econ_calendar (XAG 29.5%).

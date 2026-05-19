@@ -87,7 +87,7 @@ class TestSustainedFirstCallNotOk:
 
 
 class TestRangingDampeningConstant:
-    """RANGING_CONSENSUS_MIN_CONFIDENCE must be 0.35."""
+    """RANGING_CONSENSUS_MIN_CONFIDENCE must be 0.40."""
 
     def test_value(self):
-        assert RANGING_CONSENSUS_MIN_CONFIDENCE == 0.35
+        assert RANGING_CONSENSUS_MIN_CONFIDENCE == 0.40
