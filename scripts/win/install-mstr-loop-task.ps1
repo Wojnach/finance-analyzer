@@ -16,14 +16,19 @@ if ($existing) {
     Write-Host "Removed existing $TaskName"
 }
 
-# Hidden launch via run-hidden.vbs. The phase env var is injected inside
-# a wrapper bat invocation: cmd /c "set VAR=x && bat". We give that whole
-# string to cmd as a single /c argument so wscript→cmd parses it correctly.
-# (set/&& inside one /c-string is the standard cmd pattern.)
+# Hidden launch via run-hidden.vbs. PHASE default ("shadow") is now baked
+# INSIDE mstr-loop.bat (`if "%MSTR_LOOP_PHASE%"=="" set MSTR_LOOP_PHASE=shadow`)
+# so the task command no longer needs a `set X=Y && bat` preamble — that
+# preamble produced a triple-quote collision that cmd.exe parsed as empty
+# command, silent-exiting before the bat ever ran (root cause of the
+# 2026-05-19 stale-heartbeat incident). Direct bat invocation is simpler
+# and survives wscript's argument re-quoting.
+#
+# Override the phase by editing the task env or running the bat with
+# MSTR_LOOP_PHASE set in the shell.
 $vbs = "$scriptDir\run-hidden.vbs"
-$cmdInner = "set MSTR_LOOP_PHASE=shadow && `"$scriptDir\mstr-loop.bat`""
 $action = New-ScheduledTaskAction -Execute "wscript.exe" `
-    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$cmdInner`"" `
+    -Argument "`"$vbs`" `"cmd.exe`" `"/c`" `"$scriptDir\mstr-loop.bat`"" `
     -WorkingDirectory "Q:\finance-analyzer"
 
 $trigger1 = New-ScheduledTaskTrigger -AtLogOn
