@@ -38,6 +38,8 @@ MAX_CONSECUTIVE_ERRORS = 5
 BACKOFF_BASE = 10  # seconds
 BACKOFF_MAX = 300  # 5 minutes
 SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+EXIT_LOCK_CONFLICT = 11  # Mirrors metals/crypto/oil/mstr/main loop conventions —
+# bat wrapper short-circuits restart on this exit code.
 HEARTBEAT_FILE = "data/golddigger_loop.heartbeat"
 _singleton_lock_fh = None
 
@@ -222,12 +224,17 @@ def _execute_order(page, action: dict, config: dict, account_id: str, cfg=None) 
         return False
 
 
-def run(live: bool = False, once: bool = False):
-    """Main loop — runs until killed or market close."""
+def run(live: bool = False, once: bool = False) -> int:
+    """Main loop — runs until killed or market close.
+
+    Returns:
+        0  on graceful shutdown (market close, --once, signal).
+        EXIT_LOCK_CONFLICT (11) if another instance already holds the lock.
+    """
     lock_mode = "once" if once else ("live" if live else "dry-run")
     if not acquire_singleton_lock(mode=lock_mode):
-        logger.warning("Duplicate GoldDigger instance detected; exiting.")
-        return
+        logger.warning("Duplicate GoldDigger instance detected; exiting (code %d).", EXIT_LOCK_CONFLICT)
+        return EXIT_LOCK_CONFLICT
 
     config = None
     cfg = None
@@ -432,3 +439,5 @@ def run(live: bool = False, once: bool = False):
 
         release_singleton_lock()
         logger.info("GoldDigger shutdown complete")
+
+    return 0

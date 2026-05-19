@@ -1021,7 +1021,10 @@ class TestRunnerSingleton:
              patch.object(golddigger_runner, "_send_telegram") as mock_tg:
             result = golddigger_runner.run(live=False, once=True)
 
-        assert result is None
+        # 2026-05-19: contract changed — run() now returns EXIT_LOCK_CONFLICT (11)
+        # on duplicate-instance so scripts/win/golddigger-loop.bat can short-circuit
+        # restart (matches crypto/oil/mstr/metals/main loop conventions).
+        assert result == golddigger_runner.EXIT_LOCK_CONFLICT == 11
         mock_tg.assert_not_called()
 
 

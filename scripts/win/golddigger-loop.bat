@@ -8,6 +8,12 @@ echo [%date% %time%] Starting GoldDigger...
 set EXIT_CODE=%ERRORLEVEL%
 echo [%date% %time%] GoldDigger exited (code %EXIT_CODE%).
 
+REM Duplicate instance detected -- do not loop-restart into the active bot
+if %EXIT_CODE% EQU 11 (
+    echo [%date% %time%] Another GoldDigger instance already holds the lock -- stopping wrapper.
+    goto :eof
+)
+
 REM Check if within market hours (07:00-22:00 CET)
 for /f "tokens=1-2 delims=:" %%a in ("%time: =0%") do set HOUR=%%a
 if %HOUR% GEQ 22 (

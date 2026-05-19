@@ -7,7 +7,7 @@ import sys
 from portfolio.golddigger.runner import run
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="GoldDigger — Intraday gold certificate trading bot")
     parser.add_argument("--live", action="store_true", help="Live execution via Avanza (default: dry-run)")
     parser.add_argument("--dry-run", action="store_true", default=True, help="Paper trade (default)")
@@ -27,8 +27,11 @@ def main():
             "Starting in live request mode; runner will resolve LIVE vs SIGNAL-ONLY"
         )
 
-    run(live=live, once=args.once)
+    # Propagate exit code so scripts/win/golddigger-loop.bat can short-circuit
+    # restarts on EXIT_LOCK_CONFLICT (11) — matches the pattern used by
+    # data/crypto_loop.py + data/oil_loop.py.
+    return run(live=live, once=args.once) or 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
