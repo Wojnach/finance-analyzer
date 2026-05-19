@@ -1,0 +1,270 @@
+{
+  "generated_at": "2026-05-19T20:39:23.693584+00:00",
+  "total_verdicts": 1486,
+  "total_fin_command": 465,
+  "total_journal": 1021,
+  "total_logged": 3749,
+  "min_sample_for_lesson": 3,
+  "by_source": {
+    "fin-silver": {
+      "accuracy_3d": 0.8,
+      "n_evaluable": 10,
+      "n_total": 11
+    },
+    "fin-gold": {
+      "accuracy_3d": 0.667,
+      "n_evaluable": 3,
+      "n_total": 5
+    },
+    "fin-crypto": {
+      "accuracy_3d": 0.8,
+      "n_evaluable": 10,
+      "n_total": 45
+    },
+    "fin-mstr": {
+      "accuracy_3d": 0.0,
+      "n_evaluable": 1,
+      "n_total": 1
+    },
+    "layer2": {
+      "accuracy_3d": 0.414,
+      "n_evaluable": 1020,
+      "n_total": 1021
+    }
+  },
+  "by_command": {
+    "crypto-scheduler": {
+      "accuracy_3d": null,
+      "n_evaluable": 0,
+      "n_total": 403,
+      "avg_confidence": 0,
+      "calibration_error": null
+    },
+    "fin-crypto": {
+      "accuracy_3d": 0.8,
+      "n_evaluable": 10,
+      "n_total": 45,
+      "avg_confidence": 0.232,
+      "calibration_error": -0.568
+    },
+    "fin-gold": {
+      "accuracy_3d": 0.667,
+      "n_evaluable": 3,
+      "n_total": 5,
+      "avg_confidence": 0.41,
+      "calibration_error": -0.257
+    },
+    "fin-mstr": {
+      "accuracy_3d": 0.0,
+      "n_evaluable": 1,
+      "n_total": 1,
+      "avg_confidence": 0.5,
+      "calibration_error": 0.5
+    },
+    "fin-silver": {
+      "accuracy_3d": 0.8,
+      "n_evaluable": 10,
+      "n_total": 11,
+      "avg_confidence": 0.418,
+      "calibration_error": -0.382
+    }
+  },
+  "by_regime": {
+    "ranging": {
+      "accuracy": 0.495,
+      "n": 93,
+      "lesson": "Verdicts in ranging regime are weak (49%) -- reduce confidence by 0.15"
+    },
+    "trending-up": {
+      "accuracy": 1.0,
+      "n": 3,
+      "lesson": "Verdicts in trending-up regime are reliable (100%)"
+    },
+    "trending-down": {
+      "accuracy": 0.75,
+      "n": 16,
+      "lesson": "Verdicts in trending-down regime are reliable (75%)"
+    },
+    "range-bound": {
+      "accuracy": 0.407,
+      "n": 932,
+      "lesson": "Verdicts in range-bound regime are weak (41%) -- reduce confidence by 0.15"
+    }
+  },
+  "by_confidence": {
+    "medium (0.4-0.7)": {
+      "accuracy": 0.366,
+      "n": 290,
+      "calibrated": false
+    },
+    "low (<0.4)": {
+      "accuracy": 0.443,
+      "n": 754,
+      "calibrated": false
+    }
+  },
+  "anti_patterns": [],
+  "confirmed_patterns": [
+    "Verdict aligned with 1d probability (>65% or <35%): 83% correct"
+  ],
+  "signal_trust": {
+    "BUY": {
+      "accuracy": 0.667,
+      "n": 6
+    },
+    "SELL": {
+      "accuracy": 0.857,
+      "n": 7
+    },
+    "HOLD": {
+      "accuracy": 0.418,
+      "n": 1029
+    }
+  },
+  "calibration_advice": "WELL CALIBRATED: avg confidence 0.32, accuracy 0.42.",
+  "execution_stats": {
+    "avg_sec": 185.2,
+    "min_sec": 60,
+    "max_sec": 660,
+    "n": 48
+  },
+  "by_ticker": {
+    "AAPL": {
+      "accuracy_3d": 0.25,
+      "n_evaluable": 40,
+      "n_total": 40
+    },
+    "AMD": {
+      "accuracy_3d": 0.429,
+      "n_evaluable": 21,
+      "n_total": 21
+    },
+    "AMZN": {
+      "accuracy_3d": 0.789,
+      "n_evaluable": 38,
+      "n_total": 38
+    },
+    "AVGO": {
+      "accuracy_3d": 0.533,
+      "n_evaluable": 30,
+      "n_total": 30
+    },
+    "BTC-USD": {
+      "accuracy_3d": 0.204,
+      "n_evaluable": 162,
+      "n_total": 316
+    },
+    "ETH-USD": {
+      "accuracy_3d": 0.264,
+      "n_evaluable": 182,
+      "n_total": 334
+    },
+    "GOOGL": {
+      "accuracy_3d": 0.545,
+      "n_evaluable": 33,
+      "n_total": 33
+    },
+    "LMT": {
+      "accuracy_3d": 0.612,
+      "n_evaluable": 49,
+      "n_total": 49
+    },
+    "META": {
+      "accuracy_3d": 0.378,
+      "n_evaluable": 37,
+      "n_total": 37
+    },
+    "MSTR": {
+      "accuracy_3d": 0.533,
+      "n_evaluable": 30,
+      "n_total": 162
+    },
+    "MU": {
+      "accuracy_3d": 0.398,
+      "n_evaluable": 93,
+      "n_total": 93
+    },
+    "NVDA": {
+      "accuracy_3d": 0.348,
+      "n_evaluable": 23,
+      "n_total": 23
+    },
+    "PLTR": {
+      "accuracy_3d": 0.231,
+      "n_evaluable": 13,
+      "n_total": 13
+    },
+    "SMCI": {
+      "accuracy_3d": 0.778,
+      "n_evaluable": 27,
+      "n_total": 27
+    },
+    "SOUN": {
+      "accuracy_3d": 0.52,
+      "n_evaluable": 25,
+      "n_total": 25
+    },
+    "TSM": {
+      "accuracy_3d": 0.538,
+      "n_evaluable": 26,
+      "n_total": 26
+    },
+    "TTWO": {
+      "accuracy_3d": 0.892,
+      "n_evaluable": 37,
+      "n_total": 37
+    },
+    "VRT": {
+      "accuracy_3d": 0.372,
+      "n_evaluable": 43,
+      "n_total": 43
+    },
+    "XAG-USD": {
+      "accuracy_3d": 0.47,
+      "n_evaluable": 83,
+      "n_total": 85
+    },
+    "XAU-USD": {
+      "accuracy_3d": 0.615,
+      "n_evaluable": 52,
+      "n_total": 54
+    }
+  },
+  "cross_asset": {
+    "gold_bullish_silver_follows": {
+      "pct": 0.353,
+      "n": 17,
+      "note": "When gold outlook is bullish, silver is correct 35% of the time"
+    }
+  },
+  "layer2_patterns": {
+    "by_trigger": {
+      "other": {
+        "accuracy": 0.488,
+        "n": 123
+      },
+      "consensus": {
+        "accuracy": 0.406,
+        "n": 864
+      },
+      "sentiment": {
+        "accuracy": 0.321,
+        "n": 28
+      },
+      "post_trade": {
+        "accuracy": 0.4,
+        "n": 5
+      }
+    },
+    "by_conviction": {
+      "medium (0.4-0.7)": {
+        "accuracy": 0.357,
+        "n": 277
+      },
+      "low (<0.4)": {
+        "accuracy": 0.435,
+        "n": 743
+      }
+    }
+  }
+}

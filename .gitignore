@@ -368,8 +368,9 @@ data/grid_fisher_decisions.jsonl
 data/grid_fisher_probe_state.json
 data/grid_fisher_probe_decisions.jsonl
 
-# Metals subsystem runtime (catalog intentionally untracked here pending
-# confirmation — see watch above)
+# Metals subsystem runtime (metals_warrant_catalog.json INTENTIONALLY tracked
+# as scaffold — used by data/metals_loop.py + data/metals_warrant_refresh.py,
+# matches the crypto_warrant_catalog + oil_warrant_catalog pattern)
 data/metals_agent_summary.json
 data/metals_contract_state.json
 data/metals_decisions.jsonl
@@ -389,7 +390,6 @@ data/metals_swing_decisions.jsonl
 data/metals_swing_trades.jsonl
 data/metals_trades.jsonl
 data/metals_value_history.jsonl
-data/metals_warrant_catalog.json
 
 # Oil deep context + grid signal runtime
 data/oil_cot_history.jsonl
@@ -445,7 +445,8 @@ data/signal_research_summary.json
 data/signal_research_web.json
 data/signal_state_since.json
 data/signal_utility_cache.json
-data/signal_weights.json
+# signal_weights.json INTENTIONALLY tracked — used by outcome_tracker.py
+# + signal_weights.py at startup; stable scaffold last touched 2026-04-06
 data/quant_research_findings.json
 
 # Hardware monitor runtime
@@ -462,8 +463,10 @@ data/mrmr_analysis_*.json
 data/regime_analysis_*.json
 data/per_ticker_ic_summary_*.json
 data/research_literature_scan_*.json
-data/seasonality_profiles.json
-data/system_lessons.json
+# seasonality_profiles.json INTENTIONALLY tracked — used by
+# seasonality_updater.py, seasonality.py, multi_agent_layer2.py, metals_loop.py
+# system_lessons.json INTENTIONALLY tracked — used by fin_evolve.py,
+# reporting.py, mstr_loop/config.py (accumulated lessons, not regenerable)
 data/stack_overflow_counter.json
 data/price_snapshots_hourly.jsonl
 data/sentiment_shadow_outcomes.jsonl
