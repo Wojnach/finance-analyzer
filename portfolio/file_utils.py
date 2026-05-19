@@ -21,13 +21,21 @@ except ImportError:  # pragma: no cover - Windows
 logger = logging.getLogger("portfolio.file_utils")
 
 
+def _resolve_write_path(path):
+    """Resolve symlinks so os.replace() targets the real file, not the link."""
+    path = Path(path)
+    if path.is_symlink():
+        path = Path(os.path.realpath(path))
+    return path
+
+
 def atomic_write_text(path, text, encoding="utf-8"):
     """Atomically write text to a file using tempfile + os.replace.
 
     Same safety guarantees as atomic_write_json: fsync before replace,
     no partial writes on crash.
     """
-    path = Path(path)
+    path = _resolve_write_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
@@ -48,7 +56,7 @@ def atomic_write_json(path, data, indent=2, ensure_ascii=True):
     Ensures the file is never left in a partially-written state.
     Fsyncs before replace to guarantee durability on power loss (H34).
     """
-    path = Path(path)
+    path = _resolve_write_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:

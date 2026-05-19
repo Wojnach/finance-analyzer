@@ -6,8 +6,10 @@ from unittest.mock import patch
 import pytest
 
 from portfolio.file_utils import (
+    _resolve_write_path,
     atomic_append_jsonl,
     atomic_write_json,
+    atomic_write_text,
     count_jsonl_lines,
     load_json,
     load_jsonl,
@@ -377,3 +379,48 @@ class TestCountJsonlLines:
         path.write_text('{"a":1}\n', encoding="utf-8")
         after = count_jsonl_lines(path)
         assert after < before
+
+
+class TestSymlinkSafeWrites:
+    """P1.4: atomic_write_json must not destroy symlinks."""
+
+    @pytest.fixture
+    def symlink_setup(self, tmp_path):
+        """Create a target file and a symlink pointing to it."""
+        target = tmp_path / "real" / "config.json"
+        target.parent.mkdir()
+        target.write_text('{"original": true}', encoding="utf-8")
+        link = tmp_path / "config.json"
+        link.symlink_to(target)
+        return target, link
+
+    def test_resolve_write_path_follows_symlink(self, symlink_setup):
+        target, link = symlink_setup
+        resolved = _resolve_write_path(link)
+        assert resolved == target
+
+    def test_resolve_write_path_noop_for_regular_file(self, tmp_path):
+        regular = tmp_path / "regular.json"
+        regular.write_text("{}", encoding="utf-8")
+        resolved = _resolve_write_path(regular)
+        assert resolved == regular
+
+    def test_atomic_write_json_preserves_symlink(self, symlink_setup):
+        target, link = symlink_setup
+        atomic_write_json(link, {"updated": True})
+        assert link.is_symlink(), "symlink was destroyed"
+        assert json.loads(target.read_text(encoding="utf-8")) == {"updated": True}
+
+    def test_atomic_write_text_preserves_symlink(self, symlink_setup):
+        target, link = symlink_setup
+        atomic_write_text(link, "new content")
+        assert link.is_symlink(), "symlink was destroyed"
+        assert target.read_text(encoding="utf-8") == "new content"
+
+    def test_resolve_nonexistent_symlink(self, tmp_path):
+        """Symlink to nonexistent target — realpath returns the target path."""
+        link = tmp_path / "broken_link.json"
+        target = tmp_path / "nonexistent.json"
+        link.symlink_to(target)
+        resolved = _resolve_write_path(link)
+        assert resolved == target
