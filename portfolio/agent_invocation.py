@@ -620,18 +620,24 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
     if platform.system() == "Windows":
         # BUG-92: Check taskkill return code to detect kill failure
         # BUG-189: rc=128 means process already exited — treat as success
-        result = subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)],
-            capture_output=True,
-        )
-        if result.returncode not in (0, 128):
+        try:
+            result = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            logger.critical("taskkill hung for pid=%s — giving up", pid)
+            kill_ok = False
+            result = None
+        if result is not None and result.returncode not in (0, 128):
             logger.error(
                 "taskkill failed (rc=%d): %s",
                 result.returncode,
                 result.stderr.decode(errors="replace").strip(),
             )
             kill_ok = False
-        elif result.returncode == 128:
+        elif result is not None and result.returncode == 128:
             logger.info("Agent pid=%s already exited (rc=128)", pid)
     else:
         _agent_proc.kill()
