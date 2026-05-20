@@ -117,7 +117,9 @@ def update_cusum(
                     ),
                 }
                 sig["last_alert_n"] = sig["n"]
-                state.setdefault("alerts", []).append(alert)
+                alerts_list = state.setdefault("alerts", [])
+                alerts_list.append(alert)
+                state["alerts"] = alerts_list[-100:]
                 logger.warning("CUSUM alert: %s", alert["message"])
 
             elif sig["s_pos"] > CONTROL_LIMIT_H:
@@ -135,7 +137,9 @@ def update_cusum(
                     ),
                 }
                 sig["last_alert_n"] = sig["n"]
-                state.setdefault("alerts", []).append(alert)
+                alerts_list = state.setdefault("alerts", [])
+                alerts_list.append(alert)
+                state["alerts"] = alerts_list[-100:]
                 logger.info("CUSUM improvement: %s", alert["message"])
 
         _save_state(state)
@@ -144,7 +148,8 @@ def update_cusum(
 
 def get_cusum_state() -> dict:
     """Return current CUSUM state for all signals."""
-    return _load_state()
+    with _lock:
+        return _load_state()
 
 
 def reset_signal(signal_name: str) -> None:
