@@ -31,70 +31,65 @@ def _reset_module_state():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _redirect_signal_utility_disk_cache(tmp_path_factory):
-    """Redirect SIGNAL_UTILITY_CACHE_FILE to a session-scoped tmp path so the
-    pytest suite NEVER touches the production data/signal_utility_cache.json.
+def _redirect_accuracy_disk_caches(tmp_path_factory):
+    """Redirect ALL accuracy cache file paths to session-scoped tmp paths.
 
-    Added 2026-05-04 after the L2 disk cache landed: invalidate_signal_utility_cache()
-    now deletes the disk file, and the per-test in-memory clearing fixture below
-    was indiscriminately wiping the production L2 cache every test run. With
-    this session-level monkeypatch, the production file path is replaced once
-    at session start with a tmpdir that gets cleaned up automatically when
-    pytest exits.
+    Prevents the test suite from reading/writing production cache files:
+    - ACCURACY_CACHE_FILE (main accuracy)
+    - REGIME_ACCURACY_CACHE_FILE (regime-conditioned accuracy)
+    - TICKER_ACCURACY_CACHE_FILE (per-ticker accuracy)
+    - SIGNAL_UTILITY_CACHE_FILE (signal utility scores)
 
-    Session-scoped because file path doesn't need per-test isolation (the
-    in-memory clear below handles that), and a per-test redirect would burn
-    a tmpdir per test for thousands of tests.
+    Without this, generate_signal() calls accuracy_stats functions directly
+    (bypassing any _cached mock), loading production accuracy data that gates
+    signals below 47% — changing voter counts and breaking consensus tests.
     """
     try:
         import portfolio.accuracy_stats as acc_mod
     except ImportError:
         yield
         return
-    tmp_dir = tmp_path_factory.mktemp("signal_utility_disk")
-    original = acc_mod.SIGNAL_UTILITY_CACHE_FILE
+    tmp_dir = tmp_path_factory.mktemp("accuracy_disk_caches")
+    originals = {
+        "ACCURACY_CACHE_FILE": acc_mod.ACCURACY_CACHE_FILE,
+        "REGIME_ACCURACY_CACHE_FILE": acc_mod.REGIME_ACCURACY_CACHE_FILE,
+        "TICKER_ACCURACY_CACHE_FILE": acc_mod.TICKER_ACCURACY_CACHE_FILE,
+        "SIGNAL_UTILITY_CACHE_FILE": acc_mod.SIGNAL_UTILITY_CACHE_FILE,
+    }
+    acc_mod.ACCURACY_CACHE_FILE = tmp_dir / "accuracy_cache.json"
+    acc_mod.REGIME_ACCURACY_CACHE_FILE = tmp_dir / "regime_accuracy_cache.json"
+    acc_mod.TICKER_ACCURACY_CACHE_FILE = tmp_dir / "ticker_signal_accuracy_cache.json"
     acc_mod.SIGNAL_UTILITY_CACHE_FILE = tmp_dir / "signal_utility_cache.json"
     try:
         yield
     finally:
-        acc_mod.SIGNAL_UTILITY_CACHE_FILE = original
+        for attr, orig in originals.items():
+            setattr(acc_mod, attr, orig)
 
 
 @pytest.fixture(autouse=True)
-def _isolate_signal_utility_cache():
-    """Clear the signal_utility in-memory cache around each test.
+def _isolate_accuracy_caches():
+    """Clear all in-memory accuracy caches around each test.
 
-    Added 2026-04-15 alongside the BUG-178 TTL cache on signal_utility().
-    Many existing tests in tests/test_signal_utility.py (and any future
-    tests that do the same) patch portfolio.accuracy_stats.load_entries
-    and then call signal_utility("1d") WITHOUT passing entries=
-    explicitly. Before the cache landed, each such call went through
-    load_entries and saw the patched data. After the cache landed the
-    FIRST test in the worker populated _signal_utility_cache with its
-    mocked result, and every subsequent test in the same worker read
-    that stale value and silently ignored its own load_entries patch.
-
-    Clearing before AND after each test makes the fixture order-
-    independent:
-      - before: protects against state leaked from a prior test or
-        module import
-      - after: protects against this test's state leaking into others
-
-    2026-05-04: invalidate_signal_utility_cache() now also deletes the L2
-    disk file. The session-scoped fixture above redirects the file path to
-    a tmpdir, so per-test invalidate calls are safe (they delete the
-    tmpdir's file, not production's).
+    Covers signal_utility (L1+L2) and regime_accuracy (L1) caches.
+    The session-scoped _redirect_accuracy_disk_caches fixture above
+    redirects disk paths to tmpdir, so per-test invalidate calls are safe.
     """
     try:
-        from portfolio.accuracy_stats import invalidate_signal_utility_cache
+        from portfolio.accuracy_stats import (
+            invalidate_regime_accuracy_cache,
+            invalidate_signal_utility_cache,
+        )
     except ImportError:
         yield
         return
     invalidate_signal_utility_cache()
+    invalidate_regime_accuracy_cache()
     try:
         yield
     finally:
         invalidate_signal_utility_cache()
+        invalidate_regime_accuracy_cache()
 
 
 # ---------------------------------------------------------------------------
