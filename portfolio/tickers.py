@@ -113,6 +113,7 @@ DISABLED_SIGNALS = {
     "tsi_chop_mr",  # pending live validation (added 2026-05-17)
     "amihud_illiquidity_regime",  # pending live validation (added 2026-05-18)
     "absorption_ratio_regime",  # pending live validation (added 2026-05-19)
+    "sentiment_extremity_gate",  # pending live validation (added 2026-05-20)
     "funding",          # 2026-05-13: 30.8% at 1d (743 sam). BUY-only signal, all wrong.
                         # 0% activation on all tickers in last 50 entries — phantom voter
                         # that escapes accuracy gate because it rarely votes. When it does
@@ -385,4 +386,5 @@ SIGNAL_NAMES = [
     "tsi_chop_mr",
     "amihud_illiquidity_regime",
     "absorption_ratio_regime",
+    "sentiment_extremity_gate",
 ]
