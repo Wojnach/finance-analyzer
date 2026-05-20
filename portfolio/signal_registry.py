@@ -366,6 +366,15 @@ def _register_defaults():
                       "portfolio.signals.adx_regime_switch",
                       "compute_adx_regime_switch_signal",
                       max_confidence=0.7)
+    # Sentiment Extremity Gate — F&G intensity (not direction) as regime gate
+    # 2026-05-20: Farzulla 2026 (arxiv:2602.07018). Extreme sentiment causes
+    # adverse selection (wider spreads, worse fills). BUYs work better in
+    # moderate F&G (30-70), not extreme fear. Counter-intuitive vs existing
+    # fear_greed signal. Crypto-only (alt.me F&G is crypto-specific).
+    register_enhanced("sentiment_extremity_gate",
+                      "portfolio.signals.sentiment_extremity_gate",
+                      "compute_sentiment_extremity_gate_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
