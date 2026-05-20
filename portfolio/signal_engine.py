@@ -1229,6 +1229,12 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             # MSTR-BTC leverage ratio expands in ranging — MSTR dropped 8.8% on
             # BTC -1.5% (2026-05-18). Static proxy is noise in sideways markets.
             "btc_proxy",
+            # 2026-05-20: crypto_macro 28.2% recent (387 sam), 100% BUY bias in
+            # ranging (188 BUY, 0 SELL across 50 snapshots). Options gravity and
+            # gold rotation sub-signals produce momentum-following votes that are
+            # noise in range-bound markets. Already in fundamental_cluster (0.3x)
+            # but still contributes false BUY consensus when ungated.
+            "crypto_macro",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
@@ -1764,14 +1770,13 @@ _STATIC_CORRELATION_GROUPS = {
     # candlestick now votes unclustered at full weight.
     # "pattern_based" removed: single-member groups are invalid.
     # 2026-04-26: bb removed from all clusters — now unclustered (full 1.0x weight).
-    # BB thrives in ranging (+15.2pp to 69.5% recent) independently of ema/macd
-    # (which are regime-gated). Correlation with ema/macd is superficial (BB bands
-    # track MA) but BB's edge is overbought/oversold detection. Putting it in
-    # trend_direction (0.12x) destroyed its edge; standalone cluster is semantically
-    # wrong (1 member). Unclustered = full weight, which matches its value.
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
-    # 2026-04-25: Moved bb to trend_direction, 2026-04-26: removed from all clusters.
-    "momentum_cluster": frozenset({"mean_reversion", "rsi", "momentum"}),
+    # 2026-05-20: Re-added bb. 50 snapshot correlation audit confirms 100% agreement
+    # with mean_reversion (n=99). Unclustered bb at 1.0x + momentum_cluster at
+    # 1.0+2*0.15=1.30x = 2.30x total for one opinion. With bb in cluster:
+    # 1.0 + 3*0.15 = 1.45x — still generous but no longer double-counting.
+    # BB's edge in ranging is real (57.6% recent) but so is the redundancy.
+    "momentum_cluster": frozenset({"mean_reversion", "rsi", "momentum", "bb"}),
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
     # 2026-05-18: Added credit_spread_risk. Signal correlation analysis shows 100%
@@ -1791,8 +1796,8 @@ _STATIC_CORRELATION_GROUPS = {
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 # Per-cluster overrides: momentum_cluster signals agree 88-100% of the time.
-# 2026-04-25: momentum_cluster now 3 members (bb moved to trend_direction).
-# At 0.15x: 1.0 + 2*0.15 = 1.30x effective weight (was 1.45x with 4 members).
+# 2026-05-20: momentum_cluster back to 4 members (bb re-added, 100% agreement confirmed).
+# At 0.15x: 1.0 + 3*0.15 = 1.45x effective weight.
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
     # 2026-04-30: split trend_direction (9 members, 0.12x) into 3 sub-clusters.

@@ -480,11 +480,11 @@ class TestRegimeWeights:
         assert conf_up == conf_down
 
     def test_ranging_boosts_rsi(self):
-        # candlestick is now regime-gated in ranging (BUG-161); use sentiment (1.0x, not gated)
-        votes = {"rsi": "BUY", "sentiment": "SELL"}
-        acc = _acc_dict(["rsi", "sentiment"], 0.6, 50)
+        # sentiment is regime-gated in ranging (2026-04-27); use statistical_jump_regime (1.0x, ungated)
+        votes = {"rsi": "BUY", "statistical_jump_regime": "SELL"}
+        acc = _acc_dict(["rsi", "statistical_jump_regime"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "ranging")
-        # rsi: 0.6 * 1.5 = 0.9, sentiment: 0.6 * 1.0 = 0.6
+        # rsi: 0.6 * 1.5 = 0.9, statistical_jump_regime: 0.6 * 1.0 = 0.6
         assert action == "BUY"
         assert conf == pytest.approx(0.9 / (0.9 + 0.6), abs=0.01)
 
