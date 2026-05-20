@@ -316,9 +316,8 @@ _NEWSAPI_SEARCH_QUERIES = {
     "MSTR": "MicroStrategy OR MSTR",
 }
 
-# Active monitoring: 08:00-22:00 CET = 07:00-21:00 UTC
-_NEWSAPI_ACTIVE_START_UTC = 7
-_NEWSAPI_ACTIVE_END_UTC = 21
+_NEWSAPI_ACTIVE_START_CET = 8
+_NEWSAPI_ACTIVE_END_CET = 22
 
 
 def newsapi_quota_ok() -> bool:
@@ -360,8 +359,9 @@ def newsapi_ttl_for_ticker(ticker: str):
         return None
 
     from datetime import datetime
-    hour_utc = datetime.now(UTC).hour
-    is_active = _NEWSAPI_ACTIVE_START_UTC <= hour_utc < _NEWSAPI_ACTIVE_END_UTC
+    from zoneinfo import ZoneInfo
+    hour_cet = datetime.now(ZoneInfo("Europe/Stockholm")).hour
+    is_active = _NEWSAPI_ACTIVE_START_CET <= hour_cet < _NEWSAPI_ACTIVE_END_CET
 
     if is_active:
         if priority == 1:
