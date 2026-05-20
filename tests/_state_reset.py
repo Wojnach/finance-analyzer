@@ -32,6 +32,8 @@ def reset_agent_invocation():
         ai._agent_reasons = None
         ai._journal_ts_before = None
         ai._telegram_ts_before = None
+        ai._journal_count_before = 0
+        ai._telegram_count_before = 0
         # Don't reset _consecutive_stack_overflows — it's loaded from disk
         # and resetting it could mask a real stack overflow in tests.
     except ImportError:

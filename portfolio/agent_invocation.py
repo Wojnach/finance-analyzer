@@ -54,6 +54,8 @@ _agent_tier = None  # tier of the currently running agent
 _agent_reasons = None  # trigger reasons for the current invocation
 _journal_ts_before = None  # last journal timestamp before agent started
 _telegram_ts_before = None  # last telegram timestamp before agent started
+_journal_count_before = 0  # non-blank JSONL line count before agent started
+_telegram_count_before = 0  # non-blank JSONL line count before agent started
 
 # BUG-219: Transaction counts at invoke time — used by check_agent_completion()
 # to detect new trades and call record_trade() for overtrading prevention.
@@ -679,6 +681,7 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
 def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_start_wall, _agent_timeout
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
+    global _journal_count_before, _telegram_count_before
 
     # Check if Layer 2 is auto-disabled due to consecutive stack overflows
     if _consecutive_stack_overflows >= _MAX_STACK_OVERFLOWS:
@@ -1344,6 +1347,7 @@ def _check_agent_completion_locked():
     """
     global _agent_proc, _agent_log, _agent_start, _agent_start_wall
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
+    global _journal_count_before, _telegram_count_before
 
     if _agent_proc is None:
         return None

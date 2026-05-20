@@ -251,6 +251,8 @@ class TestCheckAgentIncomplete:
         """Status is 'incomplete' when exit=0 but no journal written."""
         ai._journal_ts_before = "2026-03-10T09:00:00+00:00"
         ai._telegram_ts_before = "2026-03-10T09:00:00+00:00"
+        ai._journal_count_before = 1
+        ai._telegram_count_before = 1
 
         # Journal has no new entry (same timestamp as before)
         tmp_journal.write_text('{"ts": "2026-03-10T09:00:00+00:00"}\n')
@@ -276,6 +278,8 @@ class TestCheckAgentIncomplete:
         """Status is 'incomplete' when exit=0 but no telegram sent."""
         ai._journal_ts_before = "2026-03-10T09:00:00+00:00"
         ai._telegram_ts_before = "2026-03-10T09:00:00+00:00"
+        ai._journal_count_before = 1
+        ai._telegram_count_before = 1
 
         # Journal has a new entry
         tmp_journal.write_text(
@@ -385,7 +389,7 @@ class TestCheckAgentCleanup:
 
 class TestCheckAgentLogging:
 
-    def test_logs_completion_to_invocations_file(self, tmp_invocations):
+    def test_logs_completion_to_invocations_file(self, tmp_invocations, tmp_journal, tmp_telegram):
         """Completion is logged to INVOCATIONS_FILE."""
         proc = MagicMock()
         proc.poll.return_value = 0
@@ -406,7 +410,7 @@ class TestCheckAgentLogging:
         assert "journal_written" in entry
         assert "telegram_sent" in entry
 
-    def test_handles_invocation_log_write_failure(self):
+    def test_handles_invocation_log_write_failure(self, tmp_journal, tmp_telegram):
         """Completion still returns result even if log write fails."""
         proc = MagicMock()
         proc.poll.return_value = 0
