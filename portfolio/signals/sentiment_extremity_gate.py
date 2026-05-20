@@ -4,10 +4,10 @@ Uses Fear & Greed intensity (distance from neutral) as a regime gate rather
 than using F&G directionally. Academic basis: Farzulla 2026
 (arxiv:2602.07018) — extreme sentiment (BOTH fear and greed) causes wider
 spreads and adverse selection. BUYs execute better in moderate sentiment
-(F&G 30-70) than in extreme zones.
+(F&G 31-69) than in extreme zones.
 
 Three sub-signals:
-    1. Intensity Zone    — moderate (|FG-50| < 20) vs extreme (>= 30)
+    1. Intensity Zone    — moderate (|FG-50| < 20) vs extreme (>= 20)
     2. Price-in-Range    — position within recent high-low range
     3. Range Compression — ATR-based volatility filter
 
@@ -23,7 +23,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import majority_vote, safe_float
+from portfolio.signal_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,10 @@ def _intensity_zone(fg_value: int) -> tuple[float, str]:
     """Classify F&G into moderate vs extreme intensity zone.
 
     Returns (intensity, zone_vote).
-    Moderate (|FG-50| < 20, i.e. FG 30-70): signal passes through.
-    Transition (20-30): reduced confidence.
-    Extreme (|FG-50| >= 30, i.e. FG <20 or >80): force HOLD.
+    Moderate (|FG-50| < 20, i.e. FG 31-69): signal passes through.
+    Extreme (|FG-50| >= 20, i.e. FG <=30 or >=70): force HOLD.
     """
     intensity = abs(fg_value - 50)
-
-    if intensity >= 30:
-        return float(intensity), "HOLD"
     if intensity >= 20:
         return float(intensity), "HOLD"
     return float(intensity), "PASS"
