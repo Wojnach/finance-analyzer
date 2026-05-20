@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-05-17
-Branch: improve/auto-session-2026-05-17
+Updated: 2026-05-20
+Branch: improve/auto-session-2026-05-20
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 65 signal modules (17 active, 49 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 69 signal modules (18 active, 51 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -28,12 +28,12 @@ Two-layer autonomous trading system with 65 signal modules (17 active, 49 disabl
 ### Orchestration (5 modules)
 - `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
 - `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen so watchdog never sees stale start time.
-- `trigger.py` (330 lines): Change detection — consensus flip (with clock-skew guard), price >2%, F&G threshold, sentiment reversal, post-trade
+- `trigger.py` (330 lines): Change detection — consensus flip (with clock-skew guard), price >2%, F&G threshold, sentiment reversal, post-trade, density gate (dampening + cooldown)
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
-### Signal System (65 modules: 12 core + 53 enhanced, 17 active + 49 disabled)
-- `signal_engine.py` (~4,280 lines): 65-module voting (17 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache
+### Signal System (69 modules: 12 core + 57 enhanced, 18 active + 51 disabled)
+- `signal_engine.py` (~4,280 lines): 69-module voting (18 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, ADX dual-regime meta-signal
 - `signal_registry.py` (~300 lines): Plugin-based signal discovery via importlib, lazy loading. All signals registered as "enhanced" via `register_enhanced()`. 5-min import-failure cooldown.
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
@@ -77,7 +77,7 @@ Two-layer autonomous trading system with 65 signal modules (17 active, 49 disabl
 
 ### Infrastructure (10 modules)
 - `file_utils.py` (~250 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, load_jsonl_tail, last_jsonl_entry
-- `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor)
+- `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor, full-delay jitter)
 - `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
 - `health.py` (~340 lines): Heartbeat, error ring buffer, module failure tracking, signal health, dead signal detection
 - `logging_config.py` (48 lines): RotatingFileHandler (10MB, 3 backups)
@@ -138,12 +138,9 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (52 total: 33 active, 19 disabled)
-- **Core active (10)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume, Funding Rate (3h-only, 74.2%)
-- **Core active BTC-only (1)**: On-Chain BTC (MVRV, SOPR, NUPL, Netflow)
-- **Core disabled (1)**: ML Classifier (41.7%)
-- **Enhanced active (22)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Metals Cross-Asset, DXY Cross-Asset, COT Positioning, Credit Spread Risk
-- **Enhanced disabled (19)**: ML, Oscillators (below 45%), Orderbook Flow (51.1%), Smart Money (2026-04-24), Mahalanobis Turbulence, Crypto EVRP, Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio, Statistical Jump Regime, Network Momentum, OVX Metals Spillover, XTrend Equity Spillover, Complexity Gap Regime, Realized Skewness (all pending live validation, added Apr 2026)
+### Signal Inventory (69 total: 18 active, 51 disabled)
+- **Active (18)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, Momentum Factors, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, Credit Spread Risk, On-Chain BTC, Statistical Jump Regime, BTC Proxy, Crypto EVRP
+- **Disabled (51)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, plus 29 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, etc.)
 
 ## 6) Configuration
 
@@ -199,9 +196,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-05-04)
+## 9) Known Issues (as of 2026-05-20)
 
-**244 bugs fixed** across 70+ sessions (BUG-15 through BUG-244).
+**244+ bugs fixed** across 70+ sessions (BUG-15 through BUG-244).
 Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 
 ### Open Issues
@@ -240,3 +237,16 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - **B4 (fixed)**: `alert_budget.py` `AlertBudget` class had no thread safety. Added `threading.Lock()` around all public methods.
 - **B5 (fixed)**: `reporting.py` `_module_failure_streaks` dict and `_module_escalated` set mutated from ThreadPoolExecutor threads without synchronization. Added `_module_lock`; escalation I/O moved outside lock.
 - **B6 (fixed)**: `data_collector._fetch_one_timeframe()` returned `None` on `compute_indicators()` failure, silently dropping timeframes. Now returns `(label, {"error": ...})` for explicit error visibility.
+
+### Findings from 2026-05-19 Auto Session
+
+- 7 P1 fixes implemented and merged (ConnorsRSI signal, ADX dual-regime meta-signal, trigger density gate with dampening, EXIT_LOCK_CONFLICT propagation in golddigger, MSTR loop singleton + auto-restart, and more).
+- Signal count: 65→67 modules, 17→17 active (two added, two disabled).
+
+### Findings from 2026-05-20 Auto Session
+
+- **B0 (CRITICAL, fixed)**: `agent_invocation.py` — `_journal_count_before` and `_telegram_count_before` were local vars in `invoke_agent()` but referenced as globals in `_check_agent_completion_locked()`. Every agent completion since commit 28af2f73 (May 17) silently raised NameError, swallowed by watchdog `except Exception`. Completion detection, invocation logging, and new-trade detection all broken for 3 days.
+- **B1 (fixed)**: Consensus test flakes — production accuracy cache files leaked into tests. `_null_cached` mock didn't intercept `accuracy_stats.get_or_compute_accuracy()` called directly inside `generate_signal()`. Fixed by redirecting all 4 accuracy cache file paths to session-scoped tmp dirs.
+- **B2 (fixed)**: `http_retry.py` jitter was 10% of delay — marginal for thundering herd. Bumped to full-delay uniform distribution. Also fixed 429 path that replaced jittered wait with raw `retry_after`.
+- **B4 (fixed)**: `shared_state.py` newsapi TTL used hardcoded UTC offsets (07:00-21:00 UTC). During CEST (summer), 08:00 CET = 06:00 UTC, shifting the active window by 1h. Replaced with timezone-aware `Europe/Stockholm` check.
+- Signal count: 67→69 modules, 17→18 active, 49→51 disabled.
