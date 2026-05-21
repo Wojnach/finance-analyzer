@@ -201,9 +201,32 @@ This is the value of the multi-reviewer pattern: depth-then-breadth.
 | data-external | 4 | 24 | 18 | 46 total |
 | infrastructure | 7 | 12+ | rest | 40+ total |
 | avanza-api | 5 (P1) | 10 (P2) | — | 15 total, smaller scope |
-| **signals-modules** | _pending_ | | | |
+| signals-modules | 2 | 33+ | 23+ | 67+ total + 9 patterns |
 
-**Total (so far): 73 P0 + 188 P1 + 100+ P2/P3 = ~360 findings**
+**Total: 75 P0 + 221 P1 + ~123 P2/P3 = ~419 findings across all 8 subsystems + lead.**
+
+### Signals-modules add-ons (final-arrival findings)
+
+- **`portfolio/signals/gold_real_yield_paradox.py`** P0: calendar misalignment.
+- **`portfolio/signals/metals_vrp.py`** P0: z-score is mathematically wrong VRP formula.
+- **`portfolio/signals/statistical_jump_regime.py:240-241, 191-208`** P1: confidence not capped at 0.7; vol_vote/trend_vote collinear in low_vol regime — duplicate-vote inflation pattern.
+- **`portfolio/signals/momentum_factors.py:332-362`** P1: same compounding bug already fixed in mean_reversion, still present here.
+- **`portfolio/signals/cot_positioning.py:144,173-178,257,354-358`** P1: multiple correctness issues that will only manifest as samples accumulate (today 5 samples, 100% accuracy — sample-size illusion).
+- **`portfolio/signals/news_event.py:303`** P1: sentiment_shift defaults to negative, producing SELL bias on missing data.
+- **`portfolio/signals/econ_calendar.py:140-146`** P1: post_event_relief BUY permanent during Fed pause periods → fires every cycle indefinitely.
+- **`portfolio/signals/crypto_macro.py:188-192`** P1: expiry-day BUY bias.
+- **`portfolio/qwen3_trader.py:188-190`** P1: regex fallback can misattribute votes from reasoning text.
+
+**Systemic patterns flagged by signals-modules (9):**
+1. Duplicate-vote inflation across collinear sub-signals.
+2. Confidence-cap inconsistency (some signals cap at 0.7, others at 0.8, others uncapped).
+3. BUY-bias asymmetry in fallback paths.
+4. Unlocked module-level caches across modules.
+5. yfinance staleness (per-module, no shared TTL).
+6. `sub_signals` contract violations (some modules emit different shape than the protocol).
+7. Current-bar included in z-score → bias.
+8. Detrending compounding across modules that all detrend the same series.
+9. Threshold/comment drift — thresholds in code don't match docstring values.
 
 ---
 
@@ -246,7 +269,8 @@ P0 + multi-reviewer P1 findings should become immediate backlog items. The full 
 - **Lead pass** emphasized cross-cutting integration risks (trigger contract gaps, Layer 2 silent-failure surface, SHORT-position future-proofing) — strengths of context awareness.
 - **Subagent passes** found deep arithmetic / type / cache-race bugs the lead pass did not have time to drill into. They were sometimes too narrow to connect across subsystems.
 - **Caveman:cavecrew-reviewer** (avanza-api) produced terser output and fewer findings (15 vs avg 50) — but every finding was tight and actionable. Recommend cavecrew for ≤8-file scopes; pr-review-toolkit:code-reviewer for larger.
-- **No subagent found a fix that broke another subsystem** — partition was clean. The signals-modules subsystem is the only place where active vs disabled signals could cross-leak findings (still pending).
+- **No subagent found a fix that broke another subsystem** — partition was clean.
+- **Signals-modules** found only 2 P0s (both in disabled signals), confirming the active-signal P0 surface is mostly in signals-core (gating semantics), not in the per-signal modules. Plus 9 systemic patterns that suggest a signals/* contract refactor pass would pay off.
 
 ## Out-of-scope but spotted (composite)
 
