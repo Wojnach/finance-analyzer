@@ -334,3 +334,109 @@ HTML/JS update optional — the field is consumable via curl regardless.
 ### Why deferred
 
 Low impact. Wait until we have a concrete question that needs it.
+
+---
+
+## ARCH-17 — main.py re-exports 100+ symbols at module level
+
+**Discovered:** 2026-05-21 auto-session.
+**Scope:** L — refactor touches every import site in the codebase.
+
+### What
+
+`portfolio/main.py` (1532 lines) imports and re-exports 100+ symbols
+from submodules. Downstream code does `from portfolio.main import X`
+instead of importing from the owning module directly. This creates a
+single-file dependency bottleneck, slows import time, and makes the
+module boundary unclear.
+
+### Acceptance criteria
+
+Move consumers to import from the owning module. `main.py` should only
+import what it uses for loop orchestration.
+
+### Why deferred
+
+High-risk refactor across dozens of files. No functional impact — purely
+structural. Needs a dedicated session with full test coverage verification.
+
+---
+
+## ARCH-18 — metals_loop.py is a 7,880-line monolith
+
+**Discovered:** 2026-05-21 auto-session (previously noted informally).
+**Scope:** XL — split into 5-8 focused modules.
+
+### What
+
+`data/metals_loop.py` (7,880 lines) contains market data collection,
+signal computation, warrant selection, order execution, position
+management, exit optimization, and Telegram reporting in a single file.
+Functions are well-separated internally but the file is too large for
+effective review, testing, or parallel development.
+
+### Suggested split
+
+* `metals_data.py` — price feeds, orderbook, cross-asset
+* `metals_signals.py` — signal computation, voting
+* `metals_warrants.py` — warrant selection, grid logic
+* `metals_execution.py` — order placement, position tracking
+* `metals_reporting.py` — Telegram, logging, journal
+
+### Why deferred
+
+Working code that runs 24/7 in production. A monolith split has high
+regression risk and needs careful integration testing. No functional bug.
+
+---
+
+## ARCH-19 — No CI/CD pipeline
+
+**Discovered:** 2026-05-21 auto-session.
+**Scope:** M — GitHub Actions workflow + pre-push hook.
+
+### What
+
+The repo has 430 test files and 5,994+ tests but no automated CI.
+Tests run locally via `pytest -n auto` (~5.5 min). Pre-commit hooks
+exist but there's no pre-push gate or PR check. Regressions are caught
+manually or by the auto-improve sessions.
+
+### Acceptance criteria
+
+GitHub Actions workflow that runs `pytest -n auto` on push/PR to main.
+Optional: lint pass, type-check pass.
+
+### Why deferred
+
+Needs GitHub repo admin access and decisions about runner environment
+(Windows-specific tests, GPU models, external API mocking). Not a
+code-level fix.
+
+---
+
+## ARCH-20 — Signal schema validation missing
+
+**Discovered:** 2026-05-21 auto-session.
+**Scope:** M — schema definition + validation in signal_engine.py.
+
+### What
+
+Signal modules return dicts with inconsistent `sub_signal` key
+structures. Some use flat keys (`rsi_14`), others use nested dicts
+(`{momentum: {stoch: ...}}`), and some omit `sub_signals` entirely.
+`signal_engine.py` tolerates all variants via `.get()` with defaults,
+but there's no schema enforcement. A signal module can return malformed
+data that silently degrades consensus quality.
+
+### Acceptance criteria
+
+TypedDict or dataclass for signal return values. Validation at the
+`_compute_single_signal` boundary. Malformed returns logged and
+force-HOLD (same as current exception path, but explicit).
+
+### Why deferred
+
+63 signal modules would need return-type updates. Risk of breaking
+working signals during migration. Better done incrementally — validate
+new signals immediately, migrate existing ones in batches.
