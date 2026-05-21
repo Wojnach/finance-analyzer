@@ -242,5 +242,109 @@
       "mean_volatility": 0.0011901087048344545,
       "count": 21
     }
+  },
+  "monthly_seasonality": {
+    "XAG-USD": {
+      "1": {
+        "positive_pct": 0.695,
+        "label": "strong"
+      },
+      "2": {
+        "positive_pct": 0.545,
+        "label": "neutral"
+      },
+      "3": {
+        "positive_pct": 0.5,
+        "label": "neutral"
+      },
+      "4": {
+        "positive_pct": 0.568,
+        "label": "neutral"
+      },
+      "5": {
+        "positive_pct": 0.523,
+        "label": "neutral"
+      },
+      "6": {
+        "positive_pct": 0.432,
+        "label": "weak"
+      },
+      "7": {
+        "positive_pct": 0.636,
+        "label": "strong"
+      },
+      "8": {
+        "positive_pct": 0.545,
+        "label": "neutral"
+      },
+      "9": {
+        "positive_pct": 0.432,
+        "label": "weak"
+      },
+      "10": {
+        "positive_pct": 0.568,
+        "label": "neutral"
+      },
+      "11": {
+        "positive_pct": 0.545,
+        "label": "neutral"
+      },
+      "12": {
+        "positive_pct": 0.523,
+        "label": "neutral"
+      }
+    },
+    "XAU-USD": {
+      "1": {
+        "positive_pct": 0.614,
+        "label": "strong"
+      },
+      "2": {
+        "positive_pct": 0.568,
+        "label": "neutral"
+      },
+      "3": {
+        "positive_pct": 0.477,
+        "label": "weak"
+      },
+      "4": {
+        "positive_pct": 0.545,
+        "label": "neutral"
+      },
+      "5": {
+        "positive_pct": 0.5,
+        "label": "neutral"
+      },
+      "6": {
+        "positive_pct": 0.477,
+        "label": "weak"
+      },
+      "7": {
+        "positive_pct": 0.545,
+        "label": "neutral"
+      },
+      "8": {
+        "positive_pct": 0.568,
+        "label": "neutral"
+      },
+      "9": {
+        "positive_pct": 0.636,
+        "label": "strong"
+      },
+      "10": {
+        "positive_pct": 0.591,
+        "label": "neutral"
+      },
+      "11": {
+        "positive_pct": 0.614,
+        "label": "strong"
+      },
+      "12": {
+        "positive_pct": 0.568,
+        "label": "neutral"
+      }
+    },
+    "source": "USAGOLD 1986-2024, QuantifiedStrategies backtest, LBMA seasonal studies",
+    "updated": "2026-05-21"
   }
 }
