@@ -1,5 +1,40 @@
 # Session Progress
 
+## 2026-05-21 After-Hours Research Session
+
+**Context:** Autonomous 8-phase research + implementation session (22:30 CET).
+System at 96% ranging, 48.6% overall 1d consensus (below coin flip).
+
+**Commits (branch `research/2026-05-21`, merged to main):**
+
+1. `fix(signals): disable credit_spread_risk` — 23% blended accuracy, actively harming consensus
+2. `data(research): +9 signal candidates, monthly seasonality profiles` — XAG/ETH deep dive outputs
+3. `feat(reporting): add blended accuracy to agent_summary` — makes runtime gate state visible
+4. `docs(research): after-hours research deliverables` — all phase 0-5 JSON deliverables
+
+**Key findings:**
+- Consensus 48.6% at 1d = net-negative predictions. Combination method destroying edge.
+- credit_spread_risk: 23% blended (disabled). 5 signals with severely degraded recent accuracy.
+- heikin_ashi 82.2% recent = survivorship bias (only votes during 4% non-ranging time).
+- Horizon divergence: ministral 62.6% at 3h but 30.8% at 1d.
+- ETH has zero on-chain data (BTC has MVRV/SOPR/NUPL/netflow).
+
+**Research backlog additions (9 candidates):**
+- eth_btc_ratio_roc_zscore (7.85), real_yield_level_velocity (7.5),
+  defi_tvl_price_divergence (7.4), eth_exchange_netflow_zscore (7.3),
+  cot_adx_trend_gate (7.25), funding_rate_extreme_contrarian (7.25),
+  monthly_seasonality_confidence (7.2), eth_upgrade_calendar (7.0),
+  slv_etf_flow_zscore (6.7)
+
+**Deferred (highest impact):**
+- IR-based signal weighting (3d, HIGH) — top quant recommendation
+- BOCPD regime detection (2d, HIGH)
+- Structured Bull/Bear debate in L2 prompt (1d, HIGH)
+
+**Next:** Verify loop picks up disable + blended field. Implement IR weighting this week.
+
+---
+
 ## 2026-05-21 /fgl Adversarial Review
 
 **Context:** Full adversarial review across 8 subsystems with parallel Claude Code subagents + lead independent pass. Read-only review; no code shipped.

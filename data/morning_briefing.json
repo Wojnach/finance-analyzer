@@ -1,89 +1,124 @@
 {
-  "date": "2026-05-20",
-  "generated_at": "2026-05-20T20:45:05.477088+00:00",
-  "market_outlook": "neutral",
-  "confidence": 0.55,
-  "regime": "range-bound (96% of recent observations)",
-  "macro_context": {
-    "30y_treasury": "5.198% \u2014 19-year high, risk-off signal",
-    "fed": "Holding 3.5-3.75%, Warsh takes chair, no June cut expected",
-    "cpi": "3.8% above forecast \u2014 killed metals rally",
-    "iran": "Ceasefire fragile, Hormuz disruption (5% shipping affected)",
-    "oil": "Brent ~$106 on geopolitical premium",
-    "fear_greed": "27 (Fear) \u2014 historically contrarian bullish but not extreme"
-  },
-  "key_levels": {
-    "XAG-USD": {
-      "support": 71.09,
-      "resistance": 87.92,
-      "current": 76.01,
-      "note": "Below consensus $79.50. May-June seasonally weak. India 15% duty headwind."
-    },
-    "XAU-USD": {
-      "support": 4400,
-      "resistance": 4600,
-      "current": 4548.12,
-      "note": "Fully exited. Mean-reversion captured. COT near net-flat."
-    },
-    "BTC-USD": {
-      "support": 62700,
-      "resistance": 82000,
-      "current": 77624,
-      "note": "Range-bound 75-82K. Only 1/5 on-chain bottom signals active. Need 82K break."
-    },
-    "ETH-USD": {
-      "support": 2000,
-      "resistance": 2300,
-      "current": 2136.19,
-      "note": "6/7 TF SELL structure. No position. Correctly avoided."
-    },
-    "MSTR": {
-      "support": 166,
-      "resistance": 192,
-      "current": 0,
-      "note": "Tracking BTC. Analyst targets $224-395. No position."
+  "ts": "2026-05-21T21:00:08.139910+00:00",
+  "session": "after-hours-research",
+  "date": "2026-05-21",
+  "summary": "After-hours research session completed 8 phases. System consensus accuracy at 48.6% (1d) — below coin flip. Root cause: weak signals diluting strong ones in combination. Disabled credit_spread_risk (23% blended). Added blended accuracy to agent_summary for audit visibility. 9 new signal candidates added to backlog. Monthly seasonality data added to profiles.",
+  "system_state": {
+    "regime": "ranging (96%)",
+    "consensus_1d_accuracy": 0.486,
+    "active_signals": 16,
+    "disabled_signals": 50,
+    "critical_errors": 11,
+    "critical_errors_breakdown": {
+      "accuracy_degradation": 2,
+      "contract_violation": 7,
+      "avanza_account_mismatch": 1,
+      "layer2_auth": 1
     }
   },
-  "trade_ideas": [
-    {
-      "instrument": "XAG-USD",
-      "direction": "HOLD",
-      "rationale": "Underwater -12%, but silver prophecy thesis intact (0.8 conviction). May-June seasonally weak. Wait for $71 retest to add or $84+ for partial profit. COT at 13-year speculative lows is contrarian bullish long-term.",
-      "entry_zone": "71-72 (add to position)",
-      "target": "84-86 (partial), 120 (full thesis)",
-      "stop": "68 (below structural support)",
-      "confidence": 0.45
+  "positions": {
+    "patient": {
+      "XAG-USD": "2.556 oz @ $86.43 avg (-13.2%)",
+      "BTC-USD": "0.01225 BTC dust (post 50% exit)",
+      "cash_pct": "~96%"
     },
-    {
-      "instrument": "BTC-USD",
-      "direction": "HOLD",
-      "rationale": "Range-bound $75-82K. Sentiment noise (6+ daily flips). Need $82K breakout with volume for bullish continuation. On-chain mixed (1/5 bottom signals).",
-      "entry_zone": "N/A \u2014 hold 0.0245 BTC dust position",
-      "target": "85K (range break), 100K (thesis target)",
-      "stop": "72K (range low)",
-      "confidence": 0.4
+    "bold": "DORMANT"
+  },
+  "implementation": {
+    "batch_1": {
+      "action": "Disabled credit_spread_risk",
+      "rationale": "23% blended accuracy (0.90x20% recent + 0.10x50% alltime)",
+      "files": [
+        "portfolio/tickers.py",
+        "tests/test_signal_engine.py"
+      ]
+    },
+    "batch_2": {
+      "action": "9 new signal candidates + monthly seasonality",
+      "candidates": [
+        "real_yield_level_velocity (XAG/XAU, 7.5)",
+        "cot_adx_trend_gate (XAG/XAU, 7.25)",
+        "slv_etf_flow_zscore (XAG, 6.7)",
+        "eth_exchange_netflow_zscore (ETH, 7.3)",
+        "eth_btc_ratio_roc_zscore (ETH, 7.85)",
+        "defi_tvl_price_divergence (ETH, 7.4)",
+        "funding_rate_extreme_contrarian (BTC/ETH, 7.25)",
+        "eth_upgrade_calendar (ETH, 7.0)",
+        "monthly_seasonality_confidence (all, 7.2)"
+      ],
+      "files": [
+        "data/signal_research_backlog.jsonl",
+        "data/seasonality_profiles.json"
+      ]
+    },
+    "batch_3": {
+      "action": "Blended accuracy in agent_summary",
+      "rationale": "Makes runtime gate state visible — alltime can show 54% while blended is 23%",
+      "files": [
+        "portfolio/reporting.py"
+      ]
     }
+  },
+  "research_highlights": {
+    "macro": {
+      "fomc": "Hawkish minutes, Kevin Warsh as new chair",
+      "oil": "WTI $99.5, elevated",
+      "gold": "$4,517",
+      "silver": "$76.68 (-13.1% from avg cost)",
+      "key_risk": "Iran deal whipsaw (bogus headline)"
+    },
+    "quant": {
+      "top_priority": "IR-based signal weighting (proportional weights by Information Ratio)",
+      "regime": "BOCPD (Bayesian Online Changepoint Detection) for faster regime switching",
+      "debate": "Structured Bull/Bear debate in Layer 2 prompt (TradingAgents, ICML 2025)"
+    },
+    "signal_audit": {
+      "worst_blended": [
+        "credit_spread_risk: 23% (DISABLED)",
+        "ministral: 33% at 1d (BUT 62.6% at 3h — horizon divergence)",
+        "crypto_macro: 36.3%",
+        "econ_calendar: 42.1%",
+        "momentum_factors: 44% at 1d (BUT 60.1% at 3h)"
+      ],
+      "best_recent": [
+        "qwen3: 69.4%",
+        "fear_greed: 58.6%",
+        "rsi: 61.1%",
+        "on_chain_btc: 60.0%"
+      ],
+      "survivorship_bias": "heikin_ashi 82.2% recent — but only votes during 4% non-ranging time"
+    },
+    "ticker_deep_dives": {
+      "XAG": {
+        "top_enhancers": [
+          "G/S ratio ML regime filter (SSRN 5710242, Sharpe 0.3->0.73)",
+          "Real yield level+velocity (not just direction)",
+          "COT with ADX trend-strength gate"
+        ],
+        "seasonality": "Jan/Jul strongest, Jun/Sep weakest"
+      },
+      "ETH": {
+        "gap": "Zero ETH-specific on-chain data (BTC has MVRV/SOPR/NUPL/netflow)",
+        "top_enhancers": [
+          "ETH exchange netflow z-score (10yr low at 19M ETH)",
+          "ETH/BTC ratio ROC z-score (rotation signal)",
+          "DeFi TVL growth divergence vs price"
+        ]
+      }
+    }
+  },
+  "deferred_to_backlog": [
+    "IR-based signal weighting (3d effort, HIGH impact)",
+    "BOCPD regime detection (2d effort, HIGH impact)",
+    "Structured Bull/Bear debate in Layer 2 (1d effort, HIGH impact)",
+    "LightGBM meta-learner for metals (3d effort, MEDIUM-HIGH)",
+    "Composite on-chain BTC meta-model (3d effort, HIGH)",
+    "Regime gate audit with current data (stale since Apr 2)"
   ],
-  "system_improvements_implemented": [],
-  "system_improvements_planned": [
-    "Add crypto_macro to regime gate for ranging (100% BUY bias, 28.2% recent accuracy)",
-    "Add bb back to momentum_cluster (100% agreement with mean_reversion, inflating weight)",
-    "Evaluate heikin_ashi (67.7% recent) and volume_flow (65.1% recent) for re-enabling",
-    "Investigate CUSUM-based signal degradation detector",
-    "Review econ_calendar accuracy in non-ranging contexts"
-  ],
-  "risk_warnings": [
-    "Iran ceasefire collapse could spike gold/oil, crush equities",
-    "30Y yield at 19-year high \u2014 continued rise is risk-off for all assets",
-    "XAG seasonal weakness May-June \u2014 patience required",
-    "BTC sentiment signal is pure noise \u2014 do not trade on flips",
-    "5 enabled signals produce zero votes in dominant regime"
-  ],
-  "research_highlights": [
-    "Signal correlation clusters: bb+mean_reversion+rsi+momentum agree 100% \u2014 effectively 1 signal casting 4 votes",
-    "econ_calendar and crypto_macro always vote BUY in ranging \u2014 systematic bias",
-    "3h horizon measurably better for metals (XAG 53.1% vs 49.1% 1d, XAU 54.1% vs 50.4% 1d)",
-    "CUSUM detector could catch accuracy degradation 3-7 days earlier",
-    "COT silver at 13-year speculative lows \u2014 contrarian bullish but needs confirmation"
+  "next_actions": [
+    "Morning: verify loop picked up credit_spread_risk disable (check agent_summary)",
+    "Morning: check if blended accuracy field appears in new summaries",
+    "This week: implement IR-based signal weighting (top quant recommendation)",
+    "This week: regime gate audit with May data (gates set Apr 2, now stale)"
   ]
 }
