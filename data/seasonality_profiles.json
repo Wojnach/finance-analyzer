@@ -1,245 +1,245 @@
 {
   "XAG-USD": {
     "0": {
-      "mean_return": -0.0021748749615030107,
-      "mean_volatility": 0.004099501313557788,
+      "mean_return": -0.0019248262479233443,
+      "mean_volatility": 0.004258649199939922,
       "count": 21
     },
     "1": {
-      "mean_return": 0.0003389916857588731,
-      "mean_volatility": 0.004747309865151325,
+      "mean_return": -0.00032100484551165316,
+      "mean_volatility": 0.004623003704846383,
       "count": 21
     },
     "2": {
-      "mean_return": -0.0002343925296095453,
-      "mean_volatility": 0.003182682482989194,
+      "mean_return": -0.0011355635114050381,
+      "mean_volatility": 0.003694172224039597,
       "count": 21
     },
     "3": {
-      "mean_return": -0.0004515152234927695,
-      "mean_volatility": 0.002391473268924548,
+      "mean_return": -0.0003117475069912979,
+      "mean_volatility": 0.0022647827621980927,
       "count": 21
     },
     "4": {
-      "mean_return": -0.0009335784957830585,
-      "mean_volatility": 0.0023261783437430144,
+      "mean_return": -0.000512881558756966,
+      "mean_volatility": 0.002178881092802663,
       "count": 21
     },
     "5": {
-      "mean_return": -0.0014882138625946096,
-      "mean_volatility": 0.004438770390215272,
+      "mean_return": -0.0014994434340176708,
+      "mean_volatility": 0.004533086407117248,
       "count": 21
     },
     "6": {
-      "mean_return": 0.001287713391290492,
-      "mean_volatility": 0.004623870296539883,
+      "mean_return": 0.001655477341834503,
+      "mean_volatility": 0.004535383886120704,
       "count": 21
     },
     "7": {
-      "mean_return": 5.931546725668202e-06,
-      "mean_volatility": 0.0032599043081083965,
+      "mean_return": 0.0001541471506512626,
+      "mean_volatility": 0.003101441640884939,
       "count": 20
     },
     "8": {
-      "mean_return": 0.0004435239873635366,
-      "mean_volatility": 0.002137862874458851,
+      "mean_return": 0.00032120561580773475,
+      "mean_volatility": 0.002425588905777104,
       "count": 20
     },
     "9": {
-      "mean_return": -0.0003934539851980112,
-      "mean_volatility": 0.0023793404326440948,
+      "mean_return": -0.00036927919142399344,
+      "mean_volatility": 0.0023515518515486887,
       "count": 20
     },
     "10": {
-      "mean_return": 0.0009153416316843632,
-      "mean_volatility": 0.0033652725016849903,
+      "mean_return": 0.0008824322287818487,
+      "mean_volatility": 0.0033323630987824758,
       "count": 20
     },
     "11": {
-      "mean_return": 0.0012522469659301872,
-      "mean_volatility": 0.004195777927086114,
+      "mean_return": 0.0014571520687038763,
+      "mean_volatility": 0.004083269867607026,
       "count": 20
     },
     "12": {
-      "mean_return": 0.0027418307991723297,
-      "mean_volatility": 0.006084360481444879,
+      "mean_return": 0.0022527591313102257,
+      "mean_volatility": 0.005304249597686035,
       "count": 21
     },
     "13": {
-      "mean_return": 0.0008655202345133036,
-      "mean_volatility": 0.007015183650291872,
+      "mean_return": 5.238058093249789e-05,
+      "mean_volatility": 0.007828323303872679,
       "count": 21
     },
     "14": {
-      "mean_return": -0.00022138123019433382,
-      "mean_volatility": 0.004072159279233344,
+      "mean_return": 0.00023400315107669463,
+      "mean_volatility": 0.0048474781379233955,
       "count": 21
     },
     "15": {
-      "mean_return": -0.0012475396669903212,
-      "mean_volatility": 0.005049041140222611,
+      "mean_return": -0.0012314305331187889,
+      "mean_volatility": 0.005129893720774341,
       "count": 21
     },
     "16": {
-      "mean_return": -0.0004829561849266639,
-      "mean_volatility": 0.0023122743904078306,
+      "mean_return": -0.0002229279614934851,
+      "mean_volatility": 0.002546006596409409,
       "count": 21
     },
     "17": {
-      "mean_return": 0.0011734258235180821,
-      "mean_volatility": 0.002324184589334572,
+      "mean_return": 0.0009765298590462981,
+      "mean_volatility": 0.0024430911213744557,
       "count": 21
     },
     "18": {
-      "mean_return": -0.0008638761508967278,
-      "mean_volatility": 0.00260289736127785,
+      "mean_return": -0.000802434749742493,
+      "mean_volatility": 0.002980746067310411,
       "count": 21
     },
     "19": {
-      "mean_return": 0.00023808748326006746,
-      "mean_volatility": 0.003230844583690342,
+      "mean_return": -0.00011489200332515632,
+      "mean_volatility": 0.003357605316740897,
       "count": 21
     },
     "20": {
-      "mean_return": -0.001470622039410481,
-      "mean_volatility": 0.0027293784772632413,
+      "mean_return": -0.0014356501221624812,
+      "mean_volatility": 0.0026944065600152415,
       "count": 21
     },
     "21": {
-      "mean_return": 0.0003982000224211648,
-      "mean_volatility": 0.0011916517723030494,
+      "mean_return": 0.0005380477471586252,
+      "mean_volatility": 0.0013314994970405098,
       "count": 21
     },
     "22": {
-      "mean_return": 0.001917364405231032,
-      "mean_volatility": 0.00323807321928002,
+      "mean_return": 0.001709829146021474,
+      "mean_volatility": 0.0031656532713227087,
       "count": 21
     },
     "23": {
-      "mean_return": 0.0013516409008631491,
-      "mean_volatility": 0.0025123698090493895,
+      "mean_return": 0.0013546000897688532,
+      "mean_volatility": 0.0025153289979550934,
       "count": 21
     }
   },
   "XAU-USD": {
     "0": {
-      "mean_return": -0.0004216006565150918,
-      "mean_volatility": 0.0018574296332073996,
+      "mean_return": -0.0004475252979041077,
+      "mean_volatility": 0.001854536672942669,
       "count": 21
     },
     "1": {
-      "mean_return": -4.3885898797208735e-05,
-      "mean_volatility": 0.0018692042762392669,
+      "mean_return": -3.460973247152813e-05,
+      "mean_volatility": 0.0019878754928998148,
       "count": 21
     },
     "2": {
-      "mean_return": -0.0002706705675482537,
-      "mean_volatility": 0.0012084373292611356,
+      "mean_return": -0.0006675903139504248,
+      "mean_volatility": 0.0014328419704711368,
       "count": 21
     },
     "3": {
-      "mean_return": -9.037576172133912e-05,
-      "mean_volatility": 0.0010408608831088723,
+      "mean_return": -8.482013058935018e-05,
+      "mean_volatility": 0.0009803908821296183,
       "count": 21
     },
     "4": {
-      "mean_return": -0.0002743704385544097,
-      "mean_volatility": 0.0012772513048954427,
+      "mean_return": -0.00014398198958218277,
+      "mean_volatility": 0.0011628298718048744,
       "count": 21
     },
     "5": {
-      "mean_return": -0.0004966263343485171,
-      "mean_volatility": 0.0019860259978047934,
+      "mean_return": -0.0005676820376530426,
+      "mean_volatility": 0.0018636839922300359,
       "count": 21
     },
     "6": {
-      "mean_return": 0.0007982357301925218,
-      "mean_volatility": 0.0020056035067163606,
+      "mean_return": 0.00077712339672568,
+      "mean_volatility": 0.001719195289767854,
       "count": 21
     },
     "7": {
-      "mean_return": -0.0005814537568548939,
-      "mean_volatility": 0.0012806065621119912,
+      "mean_return": -0.0003654401440453814,
+      "mean_volatility": 0.0011426641055774845,
       "count": 20
     },
     "8": {
-      "mean_return": 0.0002911283496648487,
-      "mean_volatility": 0.001262242628679644,
+      "mean_return": -6.228522299663863e-05,
+      "mean_volatility": 0.001217811475379016,
       "count": 20
     },
     "9": {
-      "mean_return": -0.0005011065979746487,
-      "mean_volatility": 0.0008819247204049863,
+      "mean_return": -0.00041231447883987026,
+      "mean_volatility": 0.000626971195771131,
       "count": 20
     },
     "10": {
-      "mean_return": 0.0005188081201602301,
-      "mean_volatility": 0.0015097432558081713,
+      "mean_return": 0.00036781222791772985,
+      "mean_volatility": 0.001358747363565671,
       "count": 20
     },
     "11": {
-      "mean_return": 0.00024372821433152892,
-      "mean_volatility": 0.001584460132776655,
+      "mean_return": 0.0003221274996844048,
+      "mean_volatility": 0.0015932190239502265,
       "count": 20
     },
     "12": {
-      "mean_return": 0.0008848577476467998,
-      "mean_volatility": 0.0018918106984726888,
+      "mean_return": 0.0008020844325466591,
+      "mean_volatility": 0.0014948853617849974,
       "count": 21
     },
     "13": {
-      "mean_return": -7.071804800246315e-05,
-      "mean_volatility": 0.0028751407757537186,
+      "mean_return": -0.0001959082913554331,
+      "mean_volatility": 0.0030003310191066886,
       "count": 21
     },
     "14": {
-      "mean_return": -1.8896854105763356e-05,
-      "mean_volatility": 0.001782810978513553,
+      "mean_return": 0.000260155665337087,
+      "mean_volatility": 0.0021601687564356117,
       "count": 21
     },
     "15": {
-      "mean_return": -0.0008459967547431143,
-      "mean_volatility": 0.0021499367274522762,
+      "mean_return": -0.0009171928061074221,
+      "mean_volatility": 0.0021159248391638486,
       "count": 21
     },
     "16": {
-      "mean_return": -0.0004482638902944245,
-      "mean_volatility": 0.001102028567346816,
+      "mean_return": -0.0004321903584645507,
+      "mean_volatility": 0.0010848229961301398,
       "count": 21
     },
     "17": {
-      "mean_return": 0.00031659752121132855,
-      "mean_volatility": 0.0010221355087003815,
+      "mean_return": 0.00015014175461330615,
+      "mean_volatility": 0.0010726933510704349,
       "count": 21
     },
     "18": {
-      "mean_return": -7.181456892173321e-05,
-      "mean_volatility": 0.0007744318116367275,
+      "mean_return": 7.797701834304822e-05,
+      "mean_volatility": 0.000862857301889561,
       "count": 21
     },
     "19": {
-      "mean_return": 0.00010442775594113726,
-      "mean_volatility": 0.0014528147693884266,
+      "mean_return": -8.103343525687836e-05,
+      "mean_volatility": 0.0014951969244553379,
       "count": 21
     },
     "20": {
-      "mean_return": -0.0001630953157226828,
-      "mean_volatility": 0.0008992903927356558,
+      "mean_return": -0.00018663230123436953,
+      "mean_volatility": 0.0009104034785156809,
       "count": 21
     },
     "21": {
-      "mean_return": 0.00016055298484829979,
-      "mean_volatility": 0.0004993535055467619,
+      "mean_return": 0.0001516643060354256,
+      "mean_volatility": 0.0004904648267338876,
       "count": 21
     },
     "22": {
-      "mean_return": 0.00028988681567875316,
-      "mean_volatility": 0.001519785958171974,
+      "mean_return": 0.0002527012927132855,
+      "mean_volatility": 0.0014895893924684652,
       "count": 21
     },
     "23": {
-      "mean_return": 0.00044474773213240164,
-      "mean_volatility": 0.0011901087048344545,
+      "mean_return": 0.0004489151326177258,
+      "mean_volatility": 0.0011942761053197787,
       "count": 21
     }
   },

@@ -1,139 +1,89 @@
 {
-  "date": "2026-05-19",
-  "generated_at": "2026-05-19T20:41:45.477475+00:00",
-  "market_outlook": "bearish",
-  "confidence": 0.72,
-  "macro_context": "Bond rout dominant: 30Y at 5.198% (2007 high), 10Y 4.687%. Rising real yields crushing all risk assets. India gold duty hike 6%\u219215% removes structural physical demand. Oil deadlock (Hormuz at 5% throughput). Third straight equity loss. Risk-off regime.",
+  "date": "2026-05-20",
+  "generated_at": "2026-05-20T20:45:05.477088+00:00",
+  "market_outlook": "neutral",
+  "confidence": 0.55,
+  "regime": "range-bound (96% of recent observations)",
+  "macro_context": {
+    "30y_treasury": "5.198% \u2014 19-year high, risk-off signal",
+    "fed": "Holding 3.5-3.75%, Warsh takes chair, no June cut expected",
+    "cpi": "3.8% above forecast \u2014 killed metals rally",
+    "iran": "Ceasefire fragile, Hormuz disruption (5% shipping affected)",
+    "oil": "Brent ~$106 on geopolitical premium",
+    "fear_greed": "27 (Fear) \u2014 historically contrarian bullish but not extreme"
+  },
   "key_levels": {
     "XAG-USD": {
-      "current": 73.36,
-      "support": [
-        70.0,
-        68.0
-      ],
-      "resistance": [
-        76.0,
-        80.0
-      ],
-      "notes": "Down 5.6% today \u2014 worst in weeks. India duty hike + real yield pressure. Below 20-day MA. Hard stop at 72 for existing position."
+      "support": 71.09,
+      "resistance": 87.92,
+      "current": 76.01,
+      "note": "Below consensus $79.50. May-June seasonally weak. India 15% duty headwind."
     },
     "XAU-USD": {
-      "current": 4489,
-      "support": [
-        4450,
-        4400
-      ],
-      "resistance": [
-        4550,
-        4600
-      ],
-      "notes": "Down 1.7%. Mean-reversion entry at 4506 slightly underwater. RSI recovering from 23.8 extreme. 2xATR stop at 4493 technically breached."
+      "support": 4400,
+      "resistance": 4600,
+      "current": 4548.12,
+      "note": "Fully exited. Mean-reversion captured. COT near net-flat."
     },
     "BTC-USD": {
-      "current": 76800,
-      "support": [
-        75000,
-        73000
-      ],
-      "resistance": [
-        80000,
-        85000
-      ],
-      "notes": "Range-bound 76.5-77K. ETF flows recovering but insufficient vs yield headwind. 75K = critical support."
+      "support": 62700,
+      "resistance": 82000,
+      "current": 77624,
+      "note": "Range-bound 75-82K. Only 1/5 on-chain bottom signals active. Need 82K break."
     },
     "ETH-USD": {
-      "current": 2296,
-      "support": [
-        2100,
-        2000
-      ],
-      "resistance": [
-        2367,
-        2500
-      ],
-      "notes": "Below 200-day MA (2367). 53% below ATH. Exchange supply at yearly low (bullish long-term). 2500 checkpoint still pending."
+      "support": 2000,
+      "resistance": 2300,
+      "current": 2136.19,
+      "note": "6/7 TF SELL structure. No position. Correctly avoided."
     },
     "MSTR": {
-      "current": 165,
-      "support": [
-        155,
-        145
-      ],
-      "resistance": [
-        177,
-        190
-      ],
-      "notes": "Tracking BTC weakness. 843K BTC treasury. Market punishing aggressive buying. Proxy signal at 46.6% \u2014 needs mNAV-based improvement."
+      "support": 166,
+      "resistance": 192,
+      "current": 0,
+      "note": "Tracking BTC. Analyst targets $224-395. No position."
     }
   },
   "trade_ideas": [
     {
-      "instrument": "XAU-USD",
-      "direction": "HOLD (existing LONG)",
-      "rationale": "Mean-reversion entry at 4506 with RSI 23.8 extreme still valid thesis. Stop technically breached by 0.49x ATR but BUY re-fired at RSI 35.7. Hold unless price breaks below 4450.",
-      "entry_zone": "Already entered at 4506",
-      "target": "4560-4600 (mean-reversion target)",
-      "stop": "4450 (revised from 4493)",
-      "confidence": 0.55
-    },
-    {
       "instrument": "XAG-USD",
-      "direction": "HOLD remaining position",
-      "rationale": "Remnant 20.45 oz at 6.43 avg, deeply underwater. India duty hike + 5.6% daily loss = bearish. But hard stop at 2 not hit. Trend exhaustion possible at 0.",
-      "entry_zone": "N/A (existing)",
-      "target": "8 (partial recovery)",
-      "stop": "0 (revised from 2 given momentum)",
-      "confidence": 0.35
+      "direction": "HOLD",
+      "rationale": "Underwater -12%, but silver prophecy thesis intact (0.8 conviction). May-June seasonally weak. Wait for $71 retest to add or $84+ for partial profit. COT at 13-year speculative lows is contrarian bullish long-term.",
+      "entry_zone": "71-72 (add to position)",
+      "target": "84-86 (partial), 120 (full thesis)",
+      "stop": "68 (below structural support)",
+      "confidence": 0.45
     },
     {
       "instrument": "BTC-USD",
       "direction": "HOLD",
-      "rationale": "Range-bound, no edge at 52.8% consensus accuracy. Wait for 85K breakout (Bold) or 73K capitulation (Patient). Signal system near coin-flip \u2014 no actionable signal.",
-      "entry_zone": "N/A",
-      "target": "N/A",
-      "stop": "N/A",
+      "rationale": "Range-bound $75-82K. Sentiment noise (6+ daily flips). Need $82K breakout with volume for bullish continuation. On-chain mixed (1/5 bottom signals).",
+      "entry_zone": "N/A \u2014 hold 0.0245 BTC dust position",
+      "target": "85K (range break), 100K (thesis target)",
+      "stop": "72K (range low)",
       "confidence": 0.4
     }
   ],
-  "signal_system_findings": {
-    "critical_asymmetry": "BUY accuracy collapsed across all signals (RSI BUY 41.8% vs SELL 80.2%). Market regime signature \u2014 downtrend makes BUY unreliable. System better at SELL detection right now.",
-    "degraded_signals": [
-      "credit_spread_risk: 20.0% recent (220 sam) \u2014 should be auto-gated",
-      "crypto_macro: 21.1% recent (332 sam) \u2014 should be auto-gated",
-      "econ_calendar: 32.2% recent (1006 sam) \u2014 should be auto-gated"
-    ],
-    "top_performers": [
-      "crypto_evrp: 72.6% recent (157 sam) \u2014 re-enabled May 18",
-      "statistical_jump_regime: 66.7% recent (775 sam)",
-      "vwap_zscore_mr: 67.6% recent (34 sam) \u2014 too few samples yet",
-      "news_event: 63.6% recent (280 sam)",
-      "RSI: 62.7% recent (437 sam), esp. SELL direction 80.2%"
-    ],
-    "xag_flipflop_cause": "Only 6-7 effective voters after regime gating. Persistence filter relaxed to 1 cycle for metals on May 11 \u2014 single-cycle flips cause consensus oscillation.",
-    "overtriggering": "20 Layer 2 invocations today in ranging market, most producing HOLD. Trigger threshold calibrated for 17 voters but only 7-9 effective."
-  },
-  "system_improvements_proposed": [
-    "TONIGHT: Add correlation group crypto_macro + credit_spread_risk (100% agreement, prevents double-counting)",
-    "TONIGHT: Raise XAG trigger persistence from 1 \u2192 2 cycles (prevents flip-flop)",
-    "TONIGHT: Add 12h regime gate for mean_reversion/RSI on BTC (fixes phantom BUY)",
-    "TONIGHT: Implement ConnorsRSI(2) signal for crypto (72% claimed WR, score 7.4)",
-    "TONIGHT: Scale ranging trigger threshold by effective voter count",
-    "MONITOR: Verify accuracy gate catching degraded credit_spread_risk/crypto_macro/econ_calendar",
-    "DEFERRED: Walk-forward signal reweighting (medium risk, needs careful parameter selection)",
-    "DEFERRED: Absorption Ratio regime detection (high potential but complex)"
+  "system_improvements_implemented": [],
+  "system_improvements_planned": [
+    "Add crypto_macro to regime gate for ranging (100% BUY bias, 28.2% recent accuracy)",
+    "Add bb back to momentum_cluster (100% agreement with mean_reversion, inflating weight)",
+    "Evaluate heikin_ashi (67.7% recent) and volume_flow (65.1% recent) for re-enabling",
+    "Investigate CUSUM-based signal degradation detector",
+    "Review econ_calendar accuracy in non-ranging contexts"
   ],
   "risk_warnings": [
-    "BOND ROUT: 30Y at 5.2%, 62% of fund managers expect 6%. Further yield spike = flash crash risk across all assets.",
-    "SILVER VULNERABILITY: -5.6% today, India duty hike structural negative. 0 break = accelerated selling.",
-    "XAU STOP BREACHED: Mean-reversion entry at 4506 has 2xATR stop technically breached. Thesis still valid but on thin ice.",
-    "SIGNAL ACCURACY: System at ~50% consensus accuracy \u2014 near coin-flip. Low confidence in any directional signal.",
-    "LAYER 2 NOISE: 20 invocations producing mostly HOLD = wasted compute + risk of false action on one lucky trigger."
+    "Iran ceasefire collapse could spike gold/oil, crush equities",
+    "30Y yield at 19-year high \u2014 continued rise is risk-off for all assets",
+    "XAG seasonal weakness May-June \u2014 patience required",
+    "BTC sentiment signal is pure noise \u2014 do not trade on flips",
+    "5 enabled signals produce zero votes in dominant regime"
   ],
   "research_highlights": [
-    "ConnorsRSI(2): RSI(2)<10 BUY, 72% win rate on BTC (stratbase.ai). Simple, additive to existing RSI(14).",
-    "Variance Ratio regime: VR(k)<1 = MR, >1 = trending. Directly addresses 80% unknown regime problem.",
-    "Absorption Ratio: PCA-based cross-asset regime detector (SSRN 1633027, score 8.55). Already added as module, pending validation.",
-    "Multi-LLM disagreement meta-signal: Compose existing LLM votes. When Ministral/Qwen3 agree on BTC, 68.7% accuracy.",
-    "Gold-Silver ratio ML MR: GSR z-score + ML regime filter improves Sharpe 0.3\u21920.73 (SSRN 5710242)."
+    "Signal correlation clusters: bb+mean_reversion+rsi+momentum agree 100% \u2014 effectively 1 signal casting 4 votes",
+    "econ_calendar and crypto_macro always vote BUY in ranging \u2014 systematic bias",
+    "3h horizon measurably better for metals (XAG 53.1% vs 49.1% 1d, XAU 54.1% vs 50.4% 1d)",
+    "CUSUM detector could catch accuracy degradation 3-7 days earlier",
+    "COT silver at 13-year speculative lows \u2014 contrarian bullish but needs confirmation"
   ]
 }

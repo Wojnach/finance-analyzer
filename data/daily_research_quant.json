@@ -1,151 +1,130 @@
 {
-  "date": "2026-05-19",
-  "generated_at": "2026-05-19T14:30:00.000000+00:00",
+  "date": "2026-05-21",
+  "generated_at": "2026-05-21T20:42:08.014665+00:00",
   "research_topics": [
-    "IC-weighted and PPO-adaptive signal combination",
-    "Regime-adaptive signal selection (trending vs ranging vs stress)",
-    "Walk-forward optimization with double out-of-sample windows",
-    "Ensemble methods for weak financial signals (~50% accuracy)",
-    "LLM multi-agent trading architectures (TradingAgents, TiMi)",
-    "Fractional Kelly position sizing for weak-edge leveraged instruments"
+    "Signal ensemble methods (MWU, EARCP, PPO alpha weighting, IR-based)",
+    "Regime detection (BOCPD, TDA, HMM-network hybrid)",
+    "Metals-specific models (central bank flows, ML for gold/silver, G/S ratio velocity)",
+    "Crypto-specific models (composite on-chain CNN-LSTM, funding rate microstructure)",
+    "LLM agents for trading (TradingAgents debate framework, TradingGPT layered memory)",
+    "Walk-forward validation (double OOS, CPCV, hypothesis-driven WF)"
   ],
   "findings": [
     {
-      "topic": "PPO-adaptive signal weighting (replaces static IC weighting)",
-      "finding": "Springer 2026 paper: PPO reinforcement learning dynamically optimizes weights of 50 LLM-generated alpha signals across 10 stocks. PPO-weighted portfolio achieves higher Sharpe ratios and smaller max drawdowns than equal-weighted, momentum, or buy-and-hold baselines. Key insight: PPO does not always maximize cumulative return but consistently delivers better RISK-ADJUSTED performance. Uses DeepSeek to generate alphas, PPO to weight them in real-time.",
-      "relevance_to_us": "CRITICAL. We have 17 active signals with static accuracy gates. PPO or simpler RL (contextual bandit) could replace our fixed 47% threshold with dynamic weighting that adapts to recent signal performance per-ticker. Simpler first step: exponential-decay IC-weighted voting using rolling 7d accuracy as IC proxy.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "https://link.springer.com/article/10.1007/s41060-026-01072-2"
-    },
-    {
-      "topic": "Fundamental Law of Active Management: IR = IC * sqrt(N)",
-      "finding": "Our system performance = average signal accuracy * sqrt(independent signal count). With 17 signals at ~52% average IC, many are correlated (RSI overlaps mean_reversion, momentum overlaps momentum_factors). Effective N is likely 8-10, not 17. Improving independence matters more than adding more weak signals.",
-      "relevance_to_us": "CRITICAL. This explains why adding more signals hasn't helped -- correlated signals reduce effective breadth. Priority: (1) prune correlated signals or merge them, (2) ensure remaining signals are maximally independent, (3) weight by IC not equal-vote.",
+      "topic": "Signal Combination",
+      "finding": "IR-based signal weighting (FactSet 2026) \u2014 use Information Ratio (IC/IC_vol) as proportional weights, validated over 13 years. Numin paper: utility-weighted MWU updates instead of binary accuracy.",
+      "relevance_to_us": "We have IC infrastructure (ic_computation.py) and MWU (signal_weights.py). Unify into IR-proportional weighting.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://analystprep.com/study-notes/cfa-level-2/state-and-interpret-the-fundamental-law-of-active-portfolio-management-including-its-component-terms-transfer-coefficient-information-coefficient-breadth-and-active-risk-aggressiveness/"
+      "source": "FactSet insight paper + arXiv 2412.03167v1"
     },
     {
-      "topic": "Multi-timeframe regime-adaptive strategy (4-state model)",
-      "finding": "FMZ Quant 2025: Production system classifies market into 4 states using ADX, Bollinger Band width, ATR: (1) Trending: ADX>25, (2) Ranging: ADX<25 + price_range_ratio<0.03, (3) Volatile: BB_width>1.5*avg + ATR>1.2*avg, (4) Quiet: BB_width<0.8*avg. Each regime activates different signal subset. Trending = momentum/trend signals. Ranging = mean_reversion/BB. Volatile = reduce position, widen stops. Quiet = tighten entries.",
-      "relevance_to_us": "HIGH. Our binary trending/ranging is too coarse. The 4-state model would have caught MSTR's 8.8% drop yesterday as 'volatile' regime, not 'ranging'. Immediate implementation: add volatile and quiet states to regime detection, gate momentum signals in ranging, gate mean-reversion in trending.",
+      "topic": "Regime Detection",
+      "finding": "Bayesian Online Changepoint Detection (BOCPD) \u2014 probabilistic regime shift detection, 1-3 bars faster than EMA crossover. Adams-MacKay algorithm is ~100 lines Python.",
+      "relevance_to_us": "Current detect_regime() is rule-based with known lag (BUG-156). BOCPD gives probability of change, not binary.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://medium.com/@FMZQuant/multi-timeframe-adaptive-market-regime-quantitative-trading-strategy-1b16309ddabb"
+      "source": "ACM ICMST 2025 + arXiv 2407.16376"
     },
     {
-      "topic": "RegimeNAS: regime-aware neural architecture search",
-      "finding": "Aug 2025 arXiv: Differentiable architecture search framework for crypto trading. Three specialized neural modules (Volatility Block, Trend Block, Range Block) dynamically activated based on detected regime. Multi-head attention across multiple timeframes for regime identification. Bayesian search space with Lipschitz stability constraints prevents overfitting.",
-      "relevance_to_us": "ASPIRATIONAL. Too complex for immediate implementation but the core idea -- different model architectures per regime -- validates our direction. Simpler version: different signal weight vectors per regime state.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "https://arxiv.org/abs/2508.11338"
-    },
-    {
-      "topic": "Walk-forward with double out-of-sample windows",
-      "finding": "Feb 2026 arXiv: Novel approach parameterizes both training AND testing window lengths in walk-forward optimization. For each training subperiod, optimal parameters identified and evaluated out-of-sample in corresponding test subperiod. Key principle: 'identify robust plateaus, not conquer highest peaks' -- extreme parameter values = overfitting to noise. Also: hypothesis-driven framework (Dec 2025 arXiv) combines interpretable signal generation with strict OOS testing.",
-      "relevance_to_us": "CRITICAL. We have zero formal walk-forward validation. Signal parameters (RSI=14, BB=20,2) are static defaults. Should implement: (1) 30d train / 7d test rolling windows, (2) parameter stability test -- if optimal param shifts >20% between windows, signal is unstable, (3) plateau detection -- prefer parameter ranges where accuracy is stable, not peaked.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://arxiv.org/abs/2602.10785"
-    },
-    {
-      "topic": "Ensemble methods for weak (~50%) financial classifiers",
-      "finding": "Multiple 2025-2026 papers show: (1) LSTM+ARIMA-GARCH+XGBoost ensemble outperforms all components, lowest MAE 0.028, highest F1 0.859. (2) Ensemble RL reduces max drawdown by 4.17% and improves Sharpe by 0.21. (3) Stacking with diverse weak learners (KNN, logistic regression, SVM) + neural meta-learner beats any individual. Key: diversity of base models is more important than individual accuracy.",
-      "relevance_to_us": "HIGH. Our 17 signals at ~50-55% ARE the weak classifiers. The research validates that combining them CAN produce edge -- but only if: (a) they're sufficiently independent (our correlation problem), (b) weighting adapts to recent performance, (c) meta-learner combines them optimally. Current equal-weighted majority voting is the weakest possible combination method.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://arxiv.org/pdf/2502.17518"
-    },
-    {
-      "topic": "TradingAgents: LLM multi-agent trading framework v0.2",
-      "finding": "TradingAgents (Dec 2024, updated Feb 2026): LLM agents in specialized roles -- fundamental analysts, sentiment analysts, technical analysts, bull/bear debaters, risk managers. v0.2 supports Claude 4.x. TiMi (May 2025): separates strategy development from minute-level deployment with semantic analysis + code programming + mathematical reasoning chain. Key: task decomposition into specialized reasoning paths outperforms monolithic LLM prompts.",
-      "relevance_to_us": "MEDIUM. Our Layer 2 uses single Claude invocation with a massive prompt. Could benefit from: (1) separate bull-case vs bear-case reasoning (we already have signal disaggregation), (2) explicit risk-check agent that validates position sizing before execution, (3) separate short-term vs long-term reasoning paths. BUT: added complexity and latency vs our 180s/600s/900s timeout tiers.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "medium",
-      "source": "https://github.com/TauricResearch/TradingAgents"
-    },
-    {
-      "topic": "Fractional Kelly for weak-edge leveraged instruments",
-      "finding": "Consensus across multiple sources: (1) Use 10-25% Kelly for crypto due to estimation error, (2) Half Kelly retains 75% growth rate but halves volatility, (3) Ed Thorp and top quant firms use quarter Kelly, (4) Recalculate every 50 trades or when win rate shifts, (5) For leveraged instruments: Kelly * (1/leverage) to account for amplified variance, (6) NEVER use full Kelly when edge estimate is uncertain.",
-      "relevance_to_us": "CRITICAL for warrant trading. Our 5x leveraged MINI warrants with 10-20% knockout acceptance need: quarter Kelly at most (effective 1/20th Kelly on underlying). With 52% accuracy system: Kelly fraction ~0.04 on underlying, which means ~0.8% of portfolio per warrant trade. Currently we may be oversizing.",
+      "topic": "LLM Trading",
+      "finding": "TradingAgents (UCLA+MIT, ICML 2025) \u2014 7 specialized LLM agents with Bull/Bear debate. Structured debate catches blind spots vs monolithic decisions.",
+      "relevance_to_us": "Our Layer 2 is monolithic Claude invocation. Restructure prompt into debate format without extra API calls.",
       "implementation_difficulty": "easy",
       "expected_impact": "high",
-      "source": "https://quantstrategy.io/blog/applying-the-kelly-criterion-to-trading-maximizing-growth/"
+      "source": "arXiv 2412.20138, github.com/TauricResearch/TradingAgents"
     },
     {
-      "topic": "Volatility targeting for knock-out warrants",
-      "finding": "When volatility doubles, cut position size in half to keep dollar risk constant. ATR-based position sizing: position_size = risk_budget / (ATR * leverage_factor). For knock-out products: leverage explodes as price approaches barrier, so volatility-targeting must account for dynamic leverage, not just static leverage ratio. Adaptive leveraged volatility control (Mar 2026 arXiv) shows single-asset systems can target constant realized vol by adjusting exposure daily.",
-      "relevance_to_us": "HIGH. Our MINI silver warrants have 5x leverage that increases as silver approaches barrier. Current position sizing doesn't account for dynamic leverage near barrier. Implementation: daily recalculate effective leverage from barrier distance, adjust position size to maintain constant dollar-risk.",
+      "topic": "Signal Combination",
+      "finding": "EARCP coherence-aware ensemble \u2014 coherence regularization term scales consensus confidence by inter-signal agreement. 12-of-17 agreement != 3-of-5 squeaker.",
+      "relevance_to_us": "Addresses our MIN_VOTERS=3 problem. Would quantify agreement quality, not just quantity.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "arXiv 2603.14651"
+    },
+    {
+      "topic": "Crypto Models",
+      "finding": "Composite on-chain signals with CNN-LSTM achieved 82-84% directional accuracy for BTC cycle positioning. Individual metrics should be combined through ML, not voted independently.",
+      "relevance_to_us": "Our on_chain_btc signal (60% 1d) treats sub-metrics independently. A meta-model could improve to 70%+.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "Engineering Applications of AI 2025, altcointrading.net"
+    },
+    {
+      "topic": "Metals Models",
+      "finding": "Tree-based classifiers (RF, XGBoost) best for precious metals direction. SVR-RBF for gold, ELM for silver. JPM model: 100 tonnes CB buying = 1.7% gold price increase.",
+      "relevance_to_us": "XAG accuracy at 49.2% \u2014 a LightGBM meta-learner on our 12 metals signals could improve to 60%+.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium-high",
+      "source": "IJISRT 2024-2025, JPMorgan commodity research"
+    },
+    {
+      "topic": "Walk-Forward",
+      "finding": "Double out-of-sample walk-forward (arXiv 2602.10785) \u2014 tests 81 window combinations. Performance highly sensitive to window size. Single WF runs can overfit.",
+      "relevance_to_us": "Could determine if our 49 disabled signals genuinely lack alpha or were evaluated in unfavorable windows.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium-high",
+      "source": "arXiv 2602.10785"
+    },
+    {
+      "topic": "Crypto Models",
+      "finding": "Funding rate regime shifts Granger-cause price shocks. Sustained negative funding predicts short squeezes. Should be change-point signal, not level-based.",
+      "relevance_to_us": "Our funding_rate signal is disabled (30.8% at 1d). Retool as regime-transition detector using CUSUM/z-score.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "https://arxiv.org/pdf/2603.01298"
+      "source": "MDPI Finance 2025"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "IC-weighted signal voting (replace equal-weight majority)",
-      "description": "Replace equal-weight majority voting with rolling 7d accuracy-weighted (IC-proxy) voting. Each signal's vote weight = its recent accuracy for that specific ticker and timeframe. Exponential decay (lambda=0.9) so recent accuracy matters more. This is the single highest-impact change available.",
+      "title": "IR-Based Signal Weighting + Utility MWU",
+      "description": "Replace IC-multiplier bolt-on with proper IR-proportional weights. Modify MWU to use return magnitude instead of binary correct/incorrect.",
       "priority": 1,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
-      ]
-    },
-    {
-      "title": "4-state regime detection (trending/ranging/volatile/quiet)",
-      "description": "Upgrade binary trending/ranging to 4-state using ADX + BB_width + ATR. Gate signal subsets per regime: trending=momentum signals, ranging=mean_reversion, volatile=reduce all confidence by 0.5x, quiet=tighten entry thresholds. This prevents the MSTR 8.8% drop misclassification.",
-      "priority": 1,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/signals/macro_regime.py",
-        "portfolio/regime_detection.py"
-      ]
-    },
-    {
-      "title": "Signal correlation audit and pruning",
-      "description": "Compute 30d pairwise correlation matrix of all 17 active signal outputs per ticker. Merge or prune pairs with >0.7 correlation: likely candidates are RSI/mean_reversion and momentum/momentum_factors. Goal: increase effective breadth N in IR=IC*sqrt(N).",
-      "priority": 2,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "scripts/signal_correlation_audit.py"
-      ]
-    },
-    {
-      "title": "Walk-forward parameter validation framework",
-      "description": "Implement 30d-train/7d-test rolling walk-forward for signal parameters. Flag parameters that shift >20% between windows as unstable. Prefer 'plateau' parameters over 'peak' parameters. Start with RSI period, BB period/stddev, momentum lookbacks.",
-      "priority": 2,
       "effort_days": 3,
       "files_affected": [
+        "portfolio/signal_weights.py",
         "portfolio/signal_engine.py",
-        "scripts/walk_forward_validation.py",
-        "portfolio/signals/rsi_signal.py",
-        "portfolio/signals/bollinger_signal.py"
+        "portfolio/ic_computation.py"
       ]
     },
     {
-      "title": "Quarter-Kelly position sizing for warrant trades",
-      "description": "Implement fractional Kelly (25% Kelly) for warrant position sizing. Account for dynamic leverage: effective_kelly = kelly_fraction / effective_leverage. Recalculate effective leverage from barrier distance daily. Cap max position at 2% portfolio per warrant.",
+      "title": "BOCPD Regime Detection",
+      "description": "Add Bayesian Online Changepoint Detection alongside rule-based detect_regime(). Output probability of regime change for continuous penalty scaling.",
       "priority": 2,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/risk_management.py",
-        "portfolio/position_sizer.py",
-        "data/metals_loop.py"
-      ]
-    },
-    {
-      "title": "Per-ticker signal weight profiles",
-      "description": "Different tickers respond to different signals. Create per-ticker weight vectors based on historical per-ticker accuracy. BTC: weight on-chain + momentum higher. XAG: weight cross-asset + COT higher. MSTR: weight BTC-proxy (once fixed) + momentum higher. ETH: weight crypto_macro + DeFi metrics higher.",
-      "priority": 3,
       "effort_days": 2,
       "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
+        "portfolio/indicators.py",
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Structured Bull/Bear Debate in Layer 2",
+      "description": "Restructure Layer 2 prompt into debate format: Bull analyst, Bear analyst, Risk manager, Final synthesis. Single Claude invocation.",
+      "priority": 3,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/agent_invocation.py",
+        "docs/TRADING_PLAYBOOK.md"
+      ]
+    },
+    {
+      "title": "LightGBM Meta-Learner for Metals",
+      "description": "Train tree-based classifier on 12 metals signal outputs to predict 1d XAG direction. Walk-forward validated.",
+      "priority": 4,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signals/metals_ml_meta.py",
+        "tests/test_metals_ml_meta.py"
+      ]
+    },
+    {
+      "title": "Composite On-Chain BTC Meta-Model",
+      "description": "Replace independent on-chain sub-metric voting with gradient boosting meta-model. Target: 60% -> 70%+ BTC accuracy.",
+      "priority": 5,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signals/on_chain_btc.py",
+        "portfolio/onchain_data.py"
       ]
     }
   ]

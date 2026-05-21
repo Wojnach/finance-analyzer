@@ -1,389 +1,240 @@
 {
-  "date": "2026-05-19",
-  "generated_at": "2026-05-19T20:30:00+00:00",
-  "summary": "17 active signals, 49 disabled. System is in ranging regime. Key finding: several enabled signals have collapsed recently (econ_calendar 33% recent, crypto_macro 22.9% recent, credit_spread_risk 20% recent, ministral 30% recent). The accuracy gate, regime gating, and per-ticker blacklists provide defense-in-depth but the number of degraded enabled signals is high. crypto_evrp (66-73% recent) remains the best disabled signal and should be enabled. BUY accuracy is systematically worse than SELL accuracy across nearly all signals — the system has a SELL edge and a BUY deficit.",
+  "date": "2026-05-21",
+  "generated_at": "2026-05-21T20:36:41.914561+00:00",
+  "overall_consensus_accuracy": {
+    "1d": {
+      "accuracy": 0.486,
+      "samples": 49651,
+      "verdict": "BELOW COIN FLIP - system predictions net-negative"
+    },
+    "3d": {
+      "accuracy": 0.482,
+      "samples": 49001,
+      "verdict": "BELOW COIN FLIP"
+    }
+  },
   "top_signals": [
     {
-      "signal": "crypto_evrp",
-      "ticker": "all (crypto-only)",
-      "horizon": "1d",
-      "accuracy": 0.661,
-      "accuracy_recent": 0.726,
-      "samples": 227,
-      "samples_recent": 157,
-      "enabled": false,
-      "note": "STILL DISABLED despite being the #1 recent performer for 2 consecutive audits. Anti-correlated with the failing macro cluster. 85.7% BUY accuracy (42 sam), 61.6% SELL accuracy (185 sam). Should be P0 enabled."
+      "name": "qwen3",
+      "accuracy_1d": 0.603,
+      "recent_1d": 0.694,
+      "samples": 3896,
+      "status": "ON",
+      "trend": "IMPROVING"
     },
     {
-      "signal": "statistical_jump_regime",
-      "ticker": "all",
-      "horizon": "1d",
-      "accuracy": 0.561,
-      "accuracy_recent": 0.667,
-      "samples": 2764,
-      "samples_recent": 775,
-      "enabled": true,
-      "note": "Consistent star. 58.5% BUY, 53.7% SELL at 1d. Recent 66.7% at 775 samples confirms it is not a small-sample illusion. SELL recent is 77.2% (534 sam) — very strong."
-    },
-    {
-      "signal": "news_event",
-      "ticker": "all",
-      "horizon": "3h_recent",
-      "accuracy": 0.506,
-      "accuracy_recent": 0.700,
-      "samples": 9290,
-      "samples_recent": 1762,
-      "enabled": true,
-      "note": "70.0% at 3h_recent on 1762 samples. SELL-only signal (99.2% SELL direction). 63.6% at 1d_recent (280 sam). Horizon multiplier 1.4x at 3h is well-justified."
-    },
-    {
-      "signal": "rsi",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.523,
-      "accuracy_recent": 0.631,
-      "samples": 33156,
-      "samples_recent": 453,
-      "enabled": true,
-      "note": "All-time 52.3% but recent 63.1%. SELL recent is 80.2% (252 sam). BUY recent only 41.8% (201 sam) — directional gate should catch this. Massive 33K sample base makes all-time reliable."
-    },
-    {
-      "signal": "bb",
-      "ticker": "all",
-      "horizon": "1d",
-      "accuracy": 0.545,
-      "accuracy_recent": 0.560,
-      "samples": 8681,
-      "samples_recent": 389,
-      "enabled": true,
-      "note": "Consistent performer. SELL recent 79.4% (160 sam), BUY recent 39.7% (229 sam). Unclustered (full 1.0x weight) — justified by 54.5% all-time on 8.7K samples."
-    },
-    {
-      "signal": "fear_greed",
-      "ticker": "all",
-      "horizon": "1d",
-      "accuracy": 0.586,
-      "accuracy_recent": 0.0,
+      "name": "fear_greed",
+      "accuracy_1d": 0.586,
+      "recent_1d": 0.536,
       "samples": 10232,
-      "samples_recent": 0,
-      "enabled": true,
-      "note": "ZERO recent samples for 2nd consecutive audit. Strong all-time 58.6% but only fires at extreme F&G levels. BUY-only (100% BUY direction). In ranging regime it is regime-gated (0.3x weight). No actionable data this week."
+      "status": "ON"
     },
     {
-      "signal": "qwen3",
-      "ticker": "all",
-      "horizon": "1d",
-      "accuracy": 0.600,
-      "accuracy_recent": 0.500,
-      "samples": 3833,
-      "samples_recent": 42,
-      "enabled": true,
-      "note": "All-time strong at 60.0%, SELL accuracy 73.6% (2542 sam). Recent degradation to 50% on only 42 samples — too small to be conclusive. BUY all-time only 33.2% (1291 sam) — directional gate should be blocking BUY votes."
+      "name": "crypto_evrp",
+      "accuracy_1d": 0.582,
+      "recent_1d": 0.601,
+      "samples": 330,
+      "status": "ON"
     },
     {
-      "signal": "ministral",
-      "ticker": "BTC-USD (metals-specific)",
-      "horizon": "1h (metals accuracy)",
-      "accuracy": 0.581,
-      "accuracy_recent": 0.300,
-      "samples": 6288,
-      "samples_recent": 40,
-      "enabled": true,
-      "note": "Metals accuracy: BTC 60.9% 1h (1723 sam), ETH 55.9% (2538 sam). But XAG 28.4% 1h (116 sam), XAG 23.1% 3h (78 sam). Per-ticker blacklist correctly blocks on XAG/XAU. Recent 1d only 30% on 40 samples. BUY recent: 6.7% (30 sam) — catastrophic BUY direction."
+      "name": "bb",
+      "accuracy_1d": 0.549,
+      "recent_1d": 0.586,
+      "samples": 8879,
+      "status": "ON",
+      "trend": "IMPROVING"
+    },
+    {
+      "name": "statistical_jump_regime",
+      "accuracy_1d": 0.545,
+      "recent_1d": 0.543,
+      "samples": 3050,
+      "status": "ON"
     }
   ],
-  "worst_signals": [
+  "worst_active_signals": [
     {
-      "signal": "credit_spread_risk",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.500,
-      "accuracy_recent": 0.200,
+      "name": "credit_spread_risk",
+      "accuracy_1d": 0.5,
+      "recent_1d": 0.2,
       "samples": 1809,
-      "samples_recent": 220,
-      "enabled": true,
-      "recommendation": "monitor",
-      "note": "COLLAPSED from 50.0% all-time to 20.0% recent on 220 samples. 100% BUY direction (perma-bull). Per-ticker blacklists cover XAG, XAU, MSTR. In fundamental_cluster with crypto_macro. The accuracy gate (47%) should be catching this at consensus time. Verify gate is working."
+      "action": "DISABLE - 80% wrong recently"
     },
     {
-      "signal": "crypto_macro",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.545,
-      "accuracy_recent": 0.229,
-      "samples": 4288,
-      "samples_recent": 340,
-      "enabled": true,
-      "recommendation": "monitor",
-      "note": "COLLAPSED from 54.5% all-time to 22.9% recent on 340 samples (large enough to be real). 93.8% BUY direction — extreme bias (0.2x penalty applies). Blended accuracy ~32% should be caught by 47% gate. Per-ticker blacklisted on BTC/ETH at 1d."
+      "name": "ministral",
+      "accuracy_1d": 0.58,
+      "recent_1d": 0.308,
+      "samples": 6303,
+      "note": "BUT 62.6% at 3h_recent"
     },
     {
-      "signal": "econ_calendar",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.576,
-      "accuracy_recent": 0.330,
-      "samples": 7688,
-      "samples_recent": 1024,
-      "enabled": true,
-      "recommendation": "monitor",
-      "note": "COLLAPSED from 57.6% all-time to 33.0% recent on 1024 samples — this is NOT noise. BUY recent only 26.3% (798 sam). Per-ticker blacklisted on BTC/ETH/XAG at 1d. Still 59.9% at 3h all-time but 0 recent 3h samples. The 3h accuracy may also be stale."
+      "name": "crypto_macro",
+      "accuracy_1d": 0.546,
+      "recent_1d": 0.34,
+      "samples": 4465,
+      "action": "Investigate - severe drop"
     },
     {
-      "signal": "ministral",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.581,
-      "accuracy_recent": 0.300,
-      "samples": 6288,
-      "samples_recent": 40,
-      "enabled": true,
-      "recommendation": "monitor",
-      "note": "Recent 30% but only 40 samples — borderline statistical significance. BUY recent: 6.7% (30 sam) — directional gate should block BUY. SELL recent: 100% (10 sam) but tiny sample. Per-ticker blacklisted on XAG/XAU. Watch for continued degradation."
+      "name": "econ_calendar",
+      "accuracy_1d": 0.575,
+      "recent_1d": 0.401,
+      "samples": 8108,
+      "action": "Investigate - severe drop"
     },
     {
-      "signal": "btc_proxy",
-      "ticker": "MSTR",
-      "horizon": "1d",
-      "accuracy": 0.494,
-      "accuracy_recent": 0.623,
-      "samples": 89,
-      "samples_recent": 61,
-      "enabled": true,
-      "recommendation": "monitor",
-      "note": "All-time 49.4% is below coin-flip on 89 samples. Recent improved to 62.3% on 61 samples but is regime-gated in ranging (where we are now). BUY all-time only 35.8% (67 sam). Insufficient data to declare dead or alive."
+      "name": "momentum_factors",
+      "accuracy_1d": 0.521,
+      "recent_1d": 0.414,
+      "samples": 20852,
+      "note": "BUT 60.1% at 3h_recent"
     },
     {
-      "signal": "hash_ribbons",
-      "ticker": "BTC-only",
-      "horizon": "1d",
-      "accuracy": 0.185,
-      "accuracy_recent": 0.209,
-      "samples": 130,
-      "samples_recent": 91,
-      "enabled": false,
-      "recommendation": "keep disabled",
-      "note": "Consistently terrible at 18-21%. 100% BUY direction. Already disabled. Never re-enable."
+      "name": "btc_proxy",
+      "accuracy_1d": 0.453,
+      "recent_1d": 0.464,
+      "samples": 117,
+      "action": "Below accuracy gate"
     },
     {
-      "signal": "momentum_factors",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.526,
-      "accuracy_recent": 0.461,
-      "samples": 20530,
-      "samples_recent": 791,
-      "enabled": true,
-      "recommendation": "reduce weight at 1d",
-      "note": "Recent 46.1% on 791 samples is below 47% gate threshold. BUY recent: 22.7% (374 sam) — catastrophic. SELL recent: 67.2% (417 sam) — decent. Per-ticker blacklisted at 1d for all tickers. But 60.1% at 3h_recent (1114 sam) — horizon-specific performance. The 1d horizon weight should be reduced."
-    },
-    {
-      "signal": "mean_reversion",
-      "ticker": "all",
-      "horizon": "1d_recent",
-      "accuracy": 0.525,
-      "accuracy_recent": 0.511,
-      "samples": 26808,
-      "samples_recent": 787,
-      "enabled": true,
-      "recommendation": "monitor",
-      "note": "All-time 52.5% is decent. Recent 51.1% is weaker. BUY recent: 33.0% (433 sam) — failing hard. SELL recent: 73.2% (354 sam) — strong. Same BUY-degradation pattern as everything else."
+      "name": "news_event",
+      "accuracy_1d": 0.505,
+      "recent_1d": 0.53,
+      "samples": 9410,
+      "note": "70.0% at 3h_recent"
     }
   ],
-  "insufficient_data_signals": [
-    {"signal": "cot_positioning", "samples": 10, "accuracy": 0.80, "note": "80% on 10 samples is meaningless. Need 100+ to validate. Recent: 5 samples at 60%."},
-    {"signal": "onchain", "samples": 45, "accuracy": 0.60, "note": "60% on 45 samples. BUY-only. Approaching minimum threshold."},
-    {"signal": "vwap_zscore_mr", "samples": 42, "accuracy": 0.69, "note": "69% on 42 samples is promising but insufficient. Recent 67.6% on 34. Candidate for enabling after 100 samples."},
-    {"signal": "metals_cross_asset", "samples": 518, "accuracy": 0.546, "note": "Approaching useful sample size at 518. 54.6% is above gate. But per-ticker blacklisted on XAG/XAU."},
-    {"signal": "btc_proxy", "samples": 89, "accuracy": 0.494, "note": "89 samples at 49.4% all-time. Improving recently (62.3% on 61 sam) but not enough data."}
-  ],
-  "correlation_clusters": [
+  "disabled_but_strong_recently": [
     {
-      "name": "mean_reversion_cluster (ACTIVE)",
-      "signals": ["rsi", "bb", "mean_reversion", "momentum"],
-      "defined_group": "momentum_cluster in signal_engine.py",
-      "correlation_penalty": 0.15,
-      "effective_weight": "1.0 (leader) + 2*0.15 = 1.30x total",
-      "note": "RSI (63.1% recent), BB (56.0% recent), and mean_reversion (51.1% recent) are in momentum_cluster. All three have the same BUY-fail/SELL-strong asymmetry. Leader selection should prefer BB (unclustered at full 1.0x weight) or RSI. mean_reversion adds no information."
+      "name": "heikin_ashi",
+      "recent_1d": 0.822,
+      "samples": 27710,
+      "note": "+33pp vs all-time"
     },
     {
-      "name": "macro_external_cluster (ACTIVE)",
-      "signals": ["fear_greed", "sentiment", "news_event", "calendar", "econ_calendar", "funding"],
-      "defined_group": "macro_external in signal_engine.py",
-      "correlation_penalty": 0.15,
-      "effective_weight": "1.0 (leader) + 5*0.15 = 1.75x total",
-      "note": "6-member cluster with 0.15x follower penalty. Leader is news_event (70.0% 3h recent) which is correct. econ_calendar and sentiment are regime-gated in ranging. fear_greed has 0 recent samples. funding has 0 recent samples. Effective cluster is just news_event + econ_calendar in practice."
+      "name": "volume_flow",
+      "recent_1d": 0.753,
+      "samples": 66171,
+      "note": "+24.8pp vs all-time"
     },
     {
-      "name": "fundamental_cluster (ACTIVE)",
-      "signals": ["claude_fundamental", "crypto_macro", "credit_spread_risk"],
-      "defined_group": "fundamental_cluster in signal_engine.py",
-      "correlation_penalty": 0.30,
-      "effective_weight": "1.0 (leader) + 2*0.30 = 1.60x total",
-      "note": "PROBLEM CLUSTER. All three are degraded: claude_fundamental (57.9% all-time but disabled), crypto_macro (22.9% recent), credit_spread_risk (20% recent). Both enabled members are below 47% gate. If the accuracy gate is working, this cluster contributes zero votes. Verify."
+      "name": "structure",
+      "recent_1d": 0.652,
+      "samples": 16781,
+      "note": "+16.7pp vs all-time"
     },
     {
-      "name": "trend_mega meta-cluster (MOSTLY DISABLED)",
-      "signals": ["pure_trend (ema, heikin_ashi)", "oscillator_trend (momentum_factors, oscillators)", "structural_flow (volume_flow, macro_regime, structure)"],
-      "meta_cluster_penalty": 0.35,
-      "note": "Most members are disabled. Active: momentum_factors (enabled), ema/heikin_ashi/oscillators/volume_flow/macro_regime/structure (all disabled). In practice only oscillator_trend has an active leader (momentum_factors). The meta-cluster penalty rarely fires because leaders don't agree when most are HOLD."
+      "name": "claude_fundamental",
+      "accuracy_1d": 0.579,
+      "samples": 11581,
+      "note": "Strong with large sample"
     },
     {
-      "name": "anti_correlated: crypto_evrp vs macro cluster",
-      "signals": ["crypto_evrp", "crypto_macro", "credit_spread_risk"],
-      "note": "crypto_evrp is the INVERSE of the failing macro cluster. While crypto_macro votes BUY at 22.9% accuracy, crypto_evrp has 85.7% BUY accuracy and 61.6% SELL accuracy. Enabling crypto_evrp would add genuine information diversity."
+      "name": "drift_regime_gate",
+      "accuracy_1d": 0.577,
+      "samples": 1140
     }
   ],
-  "regime_performance": {
-    "current_regime": "ranging",
-    "regime_duration": "extended (141h+ as of last audit)",
-    "ranging": {
-      "best_signals": [
-        {"signal": "bb", "accuracy_ranging": "69.5% recent", "note": "Overbought/oversold detection thrives"},
-        {"signal": "statistical_jump_regime", "accuracy_ranging": "66.7% recent", "note": "Jump detection works well in range-bound markets"},
-        {"signal": "news_event", "accuracy_ranging": "63.6% recent 1d", "note": "Event-driven signals uncorrelated with regime"},
-        {"signal": "rsi", "accuracy_ranging": "63.1% recent 1d", "note": "But BUY side only 41.8% — SELL dominates"}
+  "correlation_clusters": {
+    "pure_trend": {
+      "members": [
+        "ema",
+        "heikin_ashi"
       ],
-      "worst_signals": [
-        {"signal": "momentum_factors", "accuracy_ranging": "46.1% 1d recent, 22.7% BUY", "note": "Trend signal is noise in ranging. Regime-gated at 3h/4h, per-ticker blacklisted at 1d"},
-        {"signal": "econ_calendar", "accuracy_ranging": "33.0% 1d recent", "note": "Macro timing fails in ranging. Regime-gated"},
-        {"signal": "credit_spread_risk", "accuracy_ranging": "20% recent", "note": "Cross-asset risk signal is broken in current regime"},
-        {"signal": "crypto_macro", "accuracy_ranging": "22.9% recent", "note": "DeFi/staking metrics are noise in ranging crypto"}
+      "note": "Both disabled. Heikin_ashi 82.2% recent!"
+    },
+    "oscillator_trend": {
+      "members": [
+        "momentum_factors",
+        "oscillators"
       ],
-      "note": "14 signals are regime-gated in ranging at _default horizon. Additional 7 gated at 3h/4h. The system correctly suppresses trend-following noise. The surviving voters (bb, rsi, statistical_jump_regime, news_event) are the high-accuracy ones."
+      "note": "momentum_factors collapsing 1d"
     },
-    "trending": {
-      "best_signals_alltime": ["ema (52.4% 3h)", "momentum_factors (53.9% 3h)", "qwen3 (59.4% 3h)"],
-      "worst_signals_alltime": ["mean_reversion (penalized 0.6x)", "bb (penalized 0.7x in trending-up)"],
-      "note": "Not active today. Regime weights correctly boost trend-following and penalize mean-reversion."
+    "structural_flow": {
+      "members": [
+        "volume_flow",
+        "macro_regime",
+        "structure"
+      ],
+      "note": "All disabled. VF 75.3% recent!"
+    },
+    "macro_external": {
+      "members": [
+        "fear_greed",
+        "sentiment",
+        "news_event",
+        "calendar",
+        "econ_calendar",
+        "funding"
+      ],
+      "note": "econ_calendar 40.1% dragging group"
+    },
+    "momentum_cluster": {
+      "members": [
+        "rsi",
+        "bb",
+        "mean_reversion",
+        "momentum"
+      ],
+      "note": "Improving: RSI 61.1%, BB 58.6%"
     }
   },
-  "weight_accuracy_mismatch": [
-    {
-      "signal": "momentum_factors",
-      "horizon": "1d",
-      "weight_multiplier": "1.0 (base, no 1d modifier)",
-      "accuracy_1d_recent": 0.461,
-      "accuracy_3h_recent": 0.601,
-      "recommendation": "Add 0.7x 1d horizon weight to match 3h's 1.2x. Signal has strong horizon divergence.",
-      "note": "Per-ticker blacklisted at 1d for ALL tickers already handles this. The 1.0x base weight should be reduced for the rare case it passes all gates at 1d."
+  "horizon_divergence": {
+    "ministral": {
+      "1d_recent": 0.308,
+      "3h_recent": 0.626
     },
-    {
-      "signal": "credit_spread_risk",
-      "horizon": "1d",
-      "weight_multiplier": "1.1 (1d horizon boost from HORIZON_SIGNAL_WEIGHTS)",
-      "accuracy_1d_recent": 0.200,
-      "recommendation": "REMOVE the 1.1x 1d horizon boost immediately. Signal is at 20% recent and getting a BOOST.",
-      "note": "CRITICAL MISMATCH. The 1d boost was set when accuracy was 56.4%. It has collapsed to 20%. The accuracy gate should catch it (20% << 47%) but the boost makes it worse if any gate relaxation occurs."
+    "momentum_factors": {
+      "1d_recent": 0.414,
+      "3h_recent": 0.601
     },
-    {
-      "signal": "econ_calendar",
-      "horizon": "1d",
-      "weight_multiplier": "1.0 (no 1d modifier, but 0.0 because per-ticker blacklisted)",
-      "accuracy_1d_recent": 0.330,
-      "accuracy_3h": 0.599,
-      "recommendation": "Adequate protection via per-ticker blacklists. No weight change needed.",
-      "note": "Defense-in-depth is working: per-ticker blacklist at 1d for BTC/ETH/XAG, regime-gated in ranging."
+    "news_event": {
+      "1d_recent": 0.53,
+      "3h_recent": 0.7
     },
-    {
-      "signal": "fear_greed",
-      "horizon": "1d",
-      "weight_multiplier": "1.0 base, 0.3x in ranging regime",
-      "accuracy_alltime": 0.586,
-      "accuracy_recent": 0.0,
-      "recommendation": "0.3x ranging penalty is too generous for a signal with zero recent data. Consider HOLD-gating in ranging.",
-      "note": "BUY-only (100% direction). In ranging, BUY-only signals are actively harmful. Already regime-gated at 3h/4h but still active at _default."
+    "rsi": {
+      "1d_recent": 0.611,
+      "3h_recent": 0.472
     },
-    {
-      "signal": "qwen3",
-      "horizon": "1d",
-      "weight_multiplier": "1.0 base, 1.2x at 3h",
-      "accuracy_alltime_buy": 0.332,
-      "accuracy_alltime_sell": 0.736,
-      "recommendation": "BUY direction should be permanently gated (33.2% on 1291 samples). The 40% directional gate should already catch this. Verify.",
-      "note": "SELL is excellent (73.6% on 2542 sam). BUY is catastrophic (33.2% on 1291 sam). Directional rescue should allow SELL while blocking BUY."
+    "mean_reversion": {
+      "1d_recent": 0.542,
+      "3h_recent": 0.455
     }
-  ],
-  "overtrigger_analysis": {
-    "invocations_today": 20,
-    "mostly_hold": true,
-    "analysis": "20 Layer 2 invocations producing mostly HOLD indicates overtriggering. In a ranging regime where most signals are gated or degraded, the trigger threshold should be higher. Each Layer 2 invocation costs 180-900s of Claude CLI time. With 17 active signals but ~8-10 regime-gated in ranging, the effective voter count drops to 7-9. Consensus among 7-9 voters oscillates more easily than among 17, causing frequent trigger crossings that resolve to HOLD after Layer 2 analysis.",
-    "root_cause": "Trigger detection threshold is calibrated for full voter count (17). In ranging regime, effective voter count is ~8, making consensus more volatile. Small voter count + directional asymmetry (SELL > BUY accuracy) = frequent BUY→SELL flips.",
-    "recommendation": "Consider regime-adaptive trigger thresholds: require higher confidence delta to trigger Layer 2 when in ranging regime. E.g., 70% confidence threshold in ranging vs 60% in trending."
-  },
-  "xag_flipflop_analysis": {
-    "observation": "XAG-USD signals flip-flopped BUY->SELL within 2h",
-    "likely_causes": [
-      "XAG has the fewest effective voters after per-ticker blacklists (ministral, credit_spread_risk, metals_cross_asset, smart_money, structure, ema, sentiment all blacklisted = 7 signals blocked)",
-      "Remaining voters: rsi, bb, momentum, mean_reversion, momentum_factors, news_event, econ_calendar, statistical_jump_regime, qwen3, cot_positioning (~10 signals). Of these, momentum_factors is regime-gated in ranging, econ_calendar is per-ticker blacklisted at 1d for XAG",
-      "Effective XAG voters at 1d in ranging: ~6-7. A single flip from rsi or bb (the cluster leaders) flips the entire consensus",
-      "With persistence filter at 1 cycle for metals (relaxed from 2), single-cycle flips pass through immediately"
-    ],
-    "recommendation": "Consider raising metals persistence to 2 cycles. The 2026-05-11 relaxation to 1 cycle was premature — it trades flip-flop noise for responsiveness, but XAG's low voter count amplifies the noise."
-  },
-  "btc_12h_phantom_buy": {
-    "observation": "BTC 12h phantom BUY appears repeatedly, always fades",
-    "analysis": "The 12h horizon has no specific gating in REGIME_GATED_SIGNALS (falls through to _default). In ranging, _default gates 15+ signals including btc_proxy. The surviving 12h voters are the momentum_cluster (rsi, mean_reversion, momentum) + fear_greed + qwen3. All have BUY accuracy < 42% recently. The 'phantom BUY' is likely these mean-reversion signals detecting oversold conditions (which is their job) but the signal is noise in ranging.",
-    "specific_signal_likely": "mean_reversion (BUY accuracy 58.9% all-time but 33.0% recent) or rsi (BUY accuracy 41.8% recent). Both are mean-reversion signals that fire BUY at dips. In ranging, these dips don't follow through.",
-    "recommendation": "Already partially addressed by regime gating. The 12h horizon has no specific override — consider adding 12h to regime-gated in ranging if the phantom persists."
-  },
-  "systemic_buy_accuracy_deficit": {
-    "observation": "Nearly ALL signals have catastrophically worse BUY accuracy than SELL accuracy in recent data",
-    "examples": [
-      "rsi: BUY 41.8% vs SELL 80.2%",
-      "bb: BUY 39.7% vs SELL 79.4%",
-      "momentum: BUY 32.0% vs SELL 73.9%",
-      "mean_reversion: BUY 33.0% vs SELL 73.2%",
-      "momentum_factors: BUY 22.7% vs SELL 67.2%",
-      "qwen3: BUY 16.7% vs SELL 63.3%",
-      "econ_calendar: BUY 26.3% vs SELL 56.6%",
-      "crypto_macro: BUY 17.9% vs SELL 100% (21 sam)"
-    ],
-    "interpretation": "This is a MARKET REGIME signal, not a signal-engine bug. The market has been in a sustained downtrend or topping pattern where dip-buying fails consistently. The directional accuracy gate (40% threshold) should be blocking BUY votes for the worst offenders (momentum_factors BUY 22.7%, qwen3 BUY 16.7%, crypto_macro BUY 17.9%). Verify the directional gate is catching these.",
-    "recommendation": "The system's SELL signals are highly accurate (70-80% for several). The BUY signals are noise. In ranging markets with BUY-deficit, the correct system behavior is to bias toward SELL and HOLD. The directional gate and bias penalty infrastructure handles this automatically, but verify with a manual check."
   },
   "recommendations": [
     {
-      "title": "Enable crypto_evrp (P0)",
       "priority": 1,
-      "description": "crypto_evrp has 66.1% all-time (227 sam), 72.6% recent (157 sam) at 1d. Anti-correlated with the failing crypto_macro/credit_spread cluster. BUY accuracy 85.7% (42 sam), SELL 61.6% (185 sam). This is the single highest-impact change available — it adds a genuinely diverse, accurate signal to the crypto voter pool.",
-      "expected_impact": "+2-3pp crypto consensus accuracy by replacing the failing macro trio's influence with a genuinely predictive signal."
+      "action": "DISABLE credit_spread_risk",
+      "rationale": "20% recent = 80% wrong direction"
     },
     {
-      "title": "Remove credit_spread_risk 1d horizon boost (P0)",
       "priority": 2,
-      "description": "HORIZON_SIGNAL_WEIGHTS['1d']['credit_spread_risk'] = 1.1 was set when the signal had 56.4% accuracy. It is now at 20% recent. The accuracy gate should block it, but the boost creates a contradiction: the system simultaneously boosts and gates the same signal. Remove the 1.1x boost or set it to 0.5x.",
-      "expected_impact": "Minimal direct impact (gate already blocks), but eliminates a logic contradiction and prevents damage if gate relaxation fires."
+      "action": "Investigate crypto_macro collapse",
+      "rationale": "34% recent from 54.6% all-time"
     },
     {
-      "title": "Verify directional gate is blocking catastrophic BUY votes (P0)",
       "priority": 3,
-      "description": "Multiple signals have BUY accuracy below 25% recently: momentum_factors (22.7%), qwen3 (16.7%), crypto_macro (17.9%), econ_calendar (26.3%). The directional gate threshold is 40%. Verify in signal_log that these BUY votes are being converted to HOLD at consensus time.",
-      "expected_impact": "Diagnostic. If gate is working, no change needed. If not, fixing it could add +3-5pp to consensus accuracy."
+      "action": "Enable heikin_ashi",
+      "rationale": "82.2% recent 1d (27K samples)"
     },
     {
-      "title": "Consider raising metals persistence filter to 2 cycles (P1)",
       "priority": 4,
-      "description": "XAG-USD has ~6-7 effective voters after regime gating and per-ticker blacklists. The persistence relaxation to 1 cycle (2026-05-11) allows single-cycle flips to enter consensus. With such a small voter pool, this creates BUY→SELL flip-flops. Raising to 2 cycles for metals would smooth consensus at the cost of 60s latency.",
-      "expected_impact": "Reduce XAG flip-flop frequency by ~50%. May miss 1-in-10 fast reversals but current flip-flop noise is worse."
+      "action": "Enable volume_flow",
+      "rationale": "75.3% recent 1d (66K samples)"
     },
     {
-      "title": "Regime-adaptive trigger thresholds (P2)",
       "priority": 5,
-      "description": "20 mostly-HOLD Layer 2 invocations in ranging regime wastes Claude CLI time. When the system detects ranging regime, raise the trigger confidence threshold from 60% to 70%. This would prevent borderline triggers from invoking Layer 2 when the voter pool is depleted and consensus is unstable.",
-      "expected_impact": "Reduce Layer 2 invocations by 40-60% in ranging regime without missing genuinely strong signals."
+      "action": "Horizon-specific signal enable/disable",
+      "rationale": "Ministral 62.6% at 3h but 30.8% at 1d"
     },
     {
-      "title": "Add 12h regime gating for mean-reversion in ranging (P2)",
       "priority": 6,
-      "description": "The BTC 12h phantom BUY is likely from mean_reversion or rsi detecting false oversold conditions in ranging. These signals have 33-42% BUY accuracy recently. Adding a 12h key to REGIME_GATED_SIGNALS['ranging'] with mean_reversion would suppress the phantom without affecting the 3h horizon where mean_reversion still has value.",
-      "expected_impact": "Eliminate the documented BTC 12h phantom BUY pattern."
+      "action": "Review claude_fundamental for re-enabling",
+      "rationale": "57.9% accuracy, 11.6K samples"
     },
     {
-      "title": "Shadow-track momentum as mean_reversion replacement candidate (P3)",
       "priority": 7,
-      "description": "mean_reversion (52.5% 1d, 51.1% recent) is in momentum_cluster but adds zero information over RSI and BB which are more accurate. If mean_reversion degrades further below 50%, consider disabling it and promoting momentum (53.0% 1d) as the sole momentum_cluster member alongside RSI.",
-      "expected_impact": "Simplification. Removing a redundant voter improves signal-to-noise ratio."
+      "action": "Faster accuracy gate decay",
+      "rationale": "Blended accuracy too slow to catch collapses"
     }
   ]
 }

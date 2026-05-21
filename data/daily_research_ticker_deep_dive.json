@@ -1,183 +1,106 @@
 {
-  "date": "2026-05-19",
-  "generated_at": "2026-05-19T14:30:00.000000+00:00",
+  "date": "2026-05-21",
+  "generated_at": "2026-05-21T20:42:48.787185+00:00",
   "tickers_analyzed": [
-    "ETH-USD",
-    "MSTR",
-    "XAG-USD"
+    "XAG-USD",
+    "ETH-USD"
   ],
   "deep_dives": [
     {
-      "ticker": "ETH-USD",
-      "current_accuracy": "49.5% 1d, 48.6% 3h (4123 samples) -- essentially coin flip",
-      "key_predictive_features": [
-        "BTC price (dominant driver, 0.89 correlation in 2025, BUT decoupling accelerating in 2026)",
-        "DeFi TVL on Ethereum (68% of global DeFi, growth signals expanding usage)",
-        "Gas fees / EIP-1559 burn rate (high activity = deflationary pressure = bullish)",
-        "Staking ratio (~30% of supply staked, reducing circulating supply)",
-        "Exchange reserves (multi-year lows = structural supply pressure)",
-        "DEX volume on Ethereum (record $139.6B Aug 2025 created price-decoupling from BTC)",
-        "ETH ETF inflows/outflows (institutional flow dominates short-term moves)",
-        "Active address growth rate (network adoption metric)",
-        "LSTM trend factor: RSI + gas usage with 20-day window (academic ML model)",
-        "K-Means clustered market state: MACD + active_address_growth + X_sentiment"
-      ],
-      "fundamental_drivers": [
-        "Ethereum ecosystem shift in 2026: L2s capturing more activity but base layer still settlement",
-        "~30% supply staked at 2.8-3.5% APY, creating structural supply lock",
-        "EIP-1559 burn mechanism: net deflationary during high-activity periods",
-        "Spot ETF inflows driving institutional adoption (multi-billion cumulative)",
-        "Competition from Solana/alternative L1s eroding some DeFi share",
-        "Protocol revenue declining as L2s capture fees (bearish for ETH value accrual)"
-      ],
-      "cross_asset_correlations": {
-        "BTC-USD": "0.89 declining toward 0.3-0.5 during DEX volume spikes -- 'Great Decoupling' thesis",
-        "DeFi_TVL": "strong positive (ETH = infrastructure for DeFi growth)",
-        "NASDAQ": "moderate positive 0.4-0.6 (risk-on correlation)",
-        "DXY": "negative -0.4 to -0.6",
-        "10Y_yield": "negative -0.2 to -0.4 (weaker than BTC)",
-        "VIX": "negative -0.2 to -0.3",
-        "SOL-USD": "0.7-0.85 (competing L1, high co-movement)"
-      },
-      "seasonal_patterns": [
-        "January effect: crypto generally higher returns late year into Jan",
-        "H1 outperformance vs USD and BTC historically, H2 underperformance",
-        "December: 80% win rate over last 5 years",
-        "Intraday: three activity phases aligned with Asian/European/US sessions",
-        "Monday nights (23:00-00:00) and Thursday mornings (00:00-01:00) show highest average returns",
-        "No strong day-of-week effect per academic neural network analysis (weak at best)"
-      ],
-      "papers_and_models": [
-        "ACM 2025: ML-driven multi-factor model for Ethereum -- LSTM trend + K-Means market state + autoencoder factor updates",
-        "Springer 2025: Neural network trading strategy for crypto with 400+ features and parametric labeling",
-        "tandfonline 2026: Bitcoin ETFs and structural decoupling -- ETH correlation with BTC dropping",
-        "Wiley 2025: ARIMA + deep learning for ETH price prediction with seasonal decomposition",
-        "Medium 2026: 'Great Decoupling' analysis -- BTC as macro asset, ETH as tech platform"
-      ],
-      "recommended_new_signals": [
-        "ETH staking ratio change signal: increasing stake = supply reduction = bullish",
-        "DeFi TVL velocity signal: rapid TVL growth on ETH = demand increase",
-        "Gas fee burn rate signal: high burn = deflationary = bullish (already have crypto_macro but it's 49.5%)",
-        "ETH-BTC correlation breakdown detector: when correlation drops below 0.5, trade ETH independently",
-        "ETH exchange reserve drawdown signal: declining reserves = accumulation = bullish",
-        "ETH ETF flow signal: net inflows > threshold = institutional buying",
-        "L2 activity spillover: high L2 usage still needs ETH for gas/settlement"
-      ],
-      "implementation_notes": "ETH at 49.5% 1d is our worst crypto performer. Root cause: our signals are BTC-derived and ETH is decoupling. The crypto_macro signal (DeFi TVL, staking, protocol revenue) should be ETH's best signal but it's at 49.5% too. Fix: (1) Add ETH-specific on-chain features (staking ratio, burn rate, exchange reserves) as a dedicated ETH signal, (2) When BTC-ETH correlation drops below 0.5, downweight BTC-correlated signals for ETH, (3) DEX volume spikes as regime-change detector. The academic ML model (LSTM with gas+RSI) is promising but requires training infrastructure we don't have yet."
-    },
-    {
-      "ticker": "MSTR",
-      "current_accuracy": "46.4% 1d, 45.5% 3h (2450 samples) -- actively harmful, worse than random",
-      "key_predictive_features": [
-        "BTC price (dominant, ~0.97 correlation, but leveraged 1.5-5x beta depending on regime)",
-        "mNAV premium/discount (current ~1.16x, range 0.97x to 2.8x -- KEY regime variable)",
-        "BTC ETF inflows/outflows (compete with MSTR for institutional BTC exposure)",
-        "Convertible bond structure ($8.25B convertible + $10.3B preferred ahead of common)",
-        "ATM equity issuance announcements (dilutive, creates sell-the-news pattern)",
-        "Short interest and options skew (put/call ratio 0.91x, avg 160d expiry)",
-        "10Y Treasury yield (negative for leveraged growth plays)",
-        "MSTR options implied vol vs BTC realized vol divergence"
-      ],
-      "fundamental_drivers": [
-        "BTC treasury: ~843K BTC at avg ~$66K cost basis",
-        "Software revenue negligible (~$100M/yr vs $56B BTC holdings)",
-        "Saylor's capital accretion strategy: issue equity at premium, buy BTC, increase BTC/share",
-        "mNAV premium collapsed from 2.8x (late 2024) to ~1.16x -- premium compression cycle",
-        "Capital structure: convertible debt + preferred equity senior to common = amplified downside",
-        "Asymmetric leverage: BTC -36% -> MSTR -44% in Jan-Feb 2026 (1.2x downside beta)",
-        "Halving cycle thesis weakening -- Saylor argues cycle is dead, price driven by capital flows"
-      ],
-      "cross_asset_correlations": {
-        "BTC-USD": "0.97 (dominant, but time-varying beta 1.5-5x)",
-        "10Y_yield": "-0.3 to -0.5 (negative for leveraged plays)",
-        "NASDAQ": "0.4-0.6 (moderate positive, tech/growth correlation)",
-        "VIX": "-0.3 (risk-off hurts)",
-        "DXY": "-0.3 to -0.5 (strong USD hurts both BTC and MSTR)",
-        "BTC_ETF_flows": "negative when ETF inflows compete with MSTR for BTC exposure demand"
-      },
-      "seasonal_patterns": [
-        "BTC halving cycle: historically 12-18 months post-halving peaks (but Saylor says cycle is dead)",
-        "Year-end tax-loss selling creates Jan buyback opportunity",
-        "Monthly options expiry (OPEX) can drive 5-10% swings due to massive options OI ($40B total)",
-        "ATM issuance announcements: sell-the-news pattern, then re-rate higher once market digests",
-        "Convertible bond maturity dates create known volatility windows"
-      ],
-      "papers_and_models": [
-        "VanEck 2026: Deconstructing MSTR premium, leverage, and capital structure analysis",
-        "Transfer entropy analysis: BTC is dominant information source, MSTR is follower",
-        "Rolling OLS beta estimation more accurate than static correlation for MSTR-BTC",
-        "bitcoinquant.co: Real-time MSTR Bitcoin treasury analysis dashboard"
-      ],
-      "recommended_new_signals": [
-        "mNAV premium/discount signal: BUY when mNAV < 1.0 (discount), SELL when mNAV > 2.0 (extreme premium)",
-        "Adaptive rolling 30d beta signal: replace static btc_proxy with time-varying beta",
-        "MSTR options IV vs BTC realized vol divergence: when MSTR IV >> BTC RV, expect mean reversion",
-        "BTC ETF flow competition signal: large ETF inflows may reduce MSTR premium demand",
-        "ATM issuance detector: MSTR equity offering announcements as short-term SELL signal",
-        "Capital structure stress signal: when convertible bond yields spike, common equity at risk"
-      ],
-      "implementation_notes": "MSTR at 46.4% is our WORST ticker and actively losing money. The btc_proxy signal (46.5%) is the primary culprit -- it assumes static BTC correlation but MSTR has asymmetric leveraged beta that expands in stress. IMMEDIATE fixes: (1) Replace btc_proxy with rolling 30d OLS beta that adjusts for regime, (2) Add mNAV premium signal -- this is the single most important MSTR-specific feature and we don't have it, (3) Gate MSTR signals during high-vol regimes (the 4-state regime model would help), (4) Consider reducing MSTR signal count requirement or increasing confidence threshold given persistent underperformance. The Jan-Feb 2026 episode (BTC -36%, MSTR -44%) shows that downstream leverage risk is real."
-    },
-    {
       "ticker": "XAG-USD",
-      "current_accuracy": "49.3% 1d, 53.2% 3h, 56.7% 3d, 58.2% 5d (3051 samples) -- better at longer horizons",
+      "current_accuracy": {
+        "consensus_1d": 0.492,
+        "samples": 3083
+      },
       "key_predictive_features": [
-        "Gold price and gold-silver ratio (mean-reverting, buy ratio>80, sell ratio<60, currently ~50)",
-        "Industrial demand: solar installations, EV production, AI data centers (59% of total demand)",
-        "COT positioning: speculative vs commercial net positions (CFTC weekly)",
-        "Physical silver ETF flows: SLV, PSLV inflows/outflows",
-        "DXY (strong inverse, -0.6 to -0.8)",
-        "Real interest rates / TIPS yield (inverse, -0.5 to -0.7)",
-        "Copper price (0.5-0.7 correlation, co-produced metal, industrial demand proxy)",
-        "Oil price (0.3-0.5, mining cost input and inflation proxy)",
-        "Supply deficit: 5th consecutive year of shortage in 2025, projected 46.3M oz deficit 2026",
-        "COMEX delivery month dynamics (Mar, May, Jul, Sep, Dec)"
+        "Gold/silver ratio velocity (ROC of ratio) \u2014 mean reversion predictor",
+        "COT positioning: speculative net longs vs commercial shorts",
+        "Real yield (TIPS breakeven) \u2014 correlation broke post-2022 but still useful at extremes",
+        "Industrial demand proxies: solar panel installations, copper prices",
+        "Central bank gold buying (proxy for precious metals demand)",
+        "DXY inverse correlation \u2014 stronger predictor than individual technicals",
+        "Copper/gold ratio as economic health proxy"
       ],
       "fundamental_drivers": [
-        "Supply deficit persistent: mine output stagnating, 75% is byproduct of copper/lead/zinc mining",
-        "Industrial demand hit 700M oz in 2025 for first time (solar + AI + EVs)",
-        "Gold-silver ratio compressed from 105 to ~50 -- major mean reversion played out",
-        "Central bank gold buying creating spillover demand into silver",
-        "Green energy transition: silver critical for solar panels, structural multi-year demand growth",
-        "Price rose 147% in 2025, now at ~$114/oz -- potential exhaustion risk but deficit supports floor",
-        "Goldman target $85-100 (stale?), Citi target $110 H2 2026"
+        "Silver supply deficit: mine output declining, industrial demand rising",
+        "Solar panel demand: each GW of solar capacity uses ~20 tonnes of silver",
+        "Electric vehicle battery demand (silver content in connectors)",
+        "Geopolitical safe-haven premium (Iran/Middle East, Ukraine)",
+        "Central bank diversification away from USD reserves"
       ],
       "cross_asset_correlations": {
-        "XAU-USD": "0.85-0.95 (strong, silver is higher beta gold)",
-        "DXY": "-0.6 to -0.8 (strong inverse, primary macro driver)",
-        "TIPS_yield": "-0.5 to -0.7 (real rates inverse)",
-        "copper": "0.5-0.7 (industrial metals co-movement + co-production)",
-        "oil": "0.3-0.5 (inflation proxy + mining cost input)",
-        "VIX": "0.1-0.3 (weak positive, safe haven during stress but also risk-off industrial selloff)",
-        "solar_ETF": "0.3-0.5 (green energy demand proxy)"
+        "gold": "Strongest \u2014 G/S ratio compression thesis active",
+        "copper": "Leading indicator for industrial silver demand",
+        "DXY": "Inverse \u2014 DXY rally suppresses silver",
+        "VIX": "Mixed \u2014 safe haven vs risk-off industrial demand destruction",
+        "oil": "Moderate \u2014 energy costs affect mining supply"
       },
       "seasonal_patterns": [
-        "Mid-December to mid-February: strongest seasonal period (industrial restocking + India wedding)",
-        "January rally: industrial users place new-year orders, creating demand surge",
-        "September-October: historically weakest months",
-        "COMEX delivery months (Mar, May, Jul, Sep, Dec): potential squeeze dynamics",
-        "Day-of-week effect: weak to non-existent per academic studies (LME 1994-2014)",
-        "Slight downward trend mid-Feb to mid-Dec with gains concentrated in Dec-Feb window",
-        "Q4 industrial restocking can create late-year support"
+        "January effect: silver tends to rally in Jan-Feb (jewelry/industrial restocking)",
+        "September-October weakness: seasonal mine supply increase",
+        "Indian wedding season (Oct-Dec) drives gold demand, pulls silver"
       ],
       "papers_and_models": [
-        "ResearchGate: Analysis of seasonality effects in gold, silver, platinum, palladium, copper markets",
-        "QuantifiedStrategies.com: Silver seasonal strategy backtest -- Dec-Feb window outperforms",
-        "ARIMA models best for short-term XAG prediction; ML models poor during high-vol periods",
-        "Gold-silver ratio mean reversion: academically documented, buy >80, sell <60",
-        "Copper price LSTM model (PubMed 2023): WTI + gold + silver as input features for copper prediction -- implies reverse signal path",
-        "Supply-demand structural analysis: 46.3M oz deficit projected 2026"
+        "IJISRT 2024-2025: SVR-RBF best for gold, ELM competitive for silver",
+        "JPMorgan: 100 tonnes CB gold buying = 1.7% gold price increase (silver follows with leverage)",
+        "Tree-based classifiers (RF, XGBoost) best directional accuracy for precious metals ETFs"
       ],
       "recommended_new_signals": [
-        "Gold-silver ratio mean reversion signal: BUY when ratio >80, SELL when ratio <60 (currently ~50 -- neutral)",
-        "Physical silver ETF flow signal: net SLV/PSLV inflows as accumulation indicator",
-        "COMEX delivery month squeeze detector: elevated open interest near delivery = potential squeeze",
-        "Solar/EV production leading indicator: solar installation growth rate as 3-6 month demand predictor",
-        "DXY momentum signal for silver: strong DXY trend = strong silver inverse move",
-        "Supply deficit persistence signal: annual deficit data as structural support level",
-        "Copper-silver divergence signal: if copper rallies but silver lags, expect silver catchup (co-production link)"
+        "Gold/silver ratio ROC (rate of change) \u2014 mean reversion signal",
+        "Central bank flow quarterly update \u2014 medium-term directional bias",
+        "DXY momentum as cross-asset predictor (already have dxy_cross_asset, disabled)",
+        "Copper price momentum as leading indicator",
+        "LightGBM meta-learner on existing 12 metals signal outputs"
       ],
-      "implementation_notes": "XAG 1d accuracy (49.3%) is poor but 3d (56.7%) and 5d (58.2%) are our best numbers across all tickers. This confirms silver is better predicted at longer horizons -- our 1d-focused system is the wrong timeframe for XAG. IMMEDIATE actions: (1) Shift XAG signal horizon to 3d/5d for position decisions, keep 1d only for intraday timing, (2) The gold-silver ratio at ~50 means the big mean-reversion trade has already played out -- don't chase it, (3) Focus cross-asset signals on DXY and copper as leading indicators, (4) Our metals_cross_asset signal (copper/GVZ/SPY/gold-silver ratio) is at 54.6% which is OK but could be improved by weighting DXY higher, (5) Seasonal window: we're in the weak May-Sep period -- reduce silver position sizing until the strong Dec-Feb window. 74 days without a metals trade remains concerning."
+      "implementation_notes": "XAG accuracy at coin-flip level suggests individual signals cancel out. A meta-learner could capture non-linear interactions between signals that simple voting misses."
+    },
+    {
+      "ticker": "ETH-USD",
+      "current_accuracy": {
+        "consensus_1d": 0.498,
+        "samples": 4154
+      },
+      "key_predictive_features": [
+        "BTC lead-lag: BTC moves lead ETH by 1-4 hours (exploitable with hourly data)",
+        "ETH/BTC ratio momentum \u2014 ratio expansion/compression predicts relative performance",
+        "DeFi TVL changes \u2014 proxy for ETH demand",
+        "Gas fee trends \u2014 high fees = high network activity = demand",
+        "Staking yield changes \u2014 yield compression may reduce buy pressure",
+        "Layer 2 activity (Arbitrum, Optimism, Base) \u2014 ETH demand proxy",
+        "Funding rate regime transitions (not levels)"
+      ],
+      "fundamental_drivers": [
+        "Ethereum staking: 26%+ of ETH locked, supply squeeze",
+        "DeFi protocol revenue as ETH demand driver",
+        "Layer 2 adoption reducing gas fees but increasing ETH settlement demand",
+        "Institutional adoption (ETH ETF flows)",
+        "Pectra upgrade and future scaling roadmap"
+      ],
+      "cross_asset_correlations": {
+        "BTC": "Strongest \u2014 0.85+ correlation, BTC leads by hours",
+        "MSTR": "Indirect via BTC correlation",
+        "DXY": "Moderate inverse correlation",
+        "risk_assets": "Trades like high-beta tech stock in macro regimes",
+        "gas_fees": "Internal correlation \u2014 high gas = more ETH burned"
+      },
+      "seasonal_patterns": [
+        "Known noise: ETH Now-TF oscillates rapidly (documented as noise pattern)",
+        "Post-upgrade rallies tend to fade within 2-4 weeks",
+        "Funding rate sustained negative periods predict short squeezes"
+      ],
+      "papers_and_models": [
+        "CNN-LSTM on composite on-chain features: 82-84% for cycle positioning",
+        "MDPI Finance 2025: funding rate regime shifts Granger-cause price shocks",
+        "ETH/BTC ratio as cointegrated pair for statistical arbitrage"
+      ],
+      "recommended_new_signals": [
+        "BTC lead signal: use BTC 1h-4h price changes to predict ETH direction",
+        "DeFi TVL momentum (already in crypto_macro, but collapsed to 34% recently)",
+        "ETH/BTC ratio z-score for mean reversion",
+        "Funding rate regime transition detector (CUSUM-based, not level-based)",
+        "Gas fee velocity as network demand proxy"
+      ],
+      "implementation_notes": "ETH accuracy is near coin-flip because ETH largely follows BTC with noise. A BTC-lead signal exploiting the 1-4h lag could be the single most impactful improvement."
     }
   ]
 }
