@@ -68,6 +68,7 @@ STOCKHOLM_TZ = ZoneInfo("Europe/Stockholm")
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from portfolio.file_utils import last_jsonl_entry as _last_jsonl_entry_impl
 from portfolio.file_utils import load_json as _load_json_impl
 from portfolio.file_utils import load_jsonl as _load_jsonl_impl
 from portfolio.file_utils import load_jsonl_tail as _load_jsonl_tail_impl
@@ -888,34 +889,9 @@ def api_mstr_loop():
     out = {
         "state": _read_json(DATA_DIR / "mstr_loop_state.json") or {},
         "scorecard": _read_json(DATA_DIR / "mstr_loop_scorecard.json") or {},
-        "last_poll": None,
-        "last_trade": None,
+        "last_poll": _last_jsonl_entry_impl(DATA_DIR / "mstr_loop_poll.jsonl"),
+        "last_trade": _last_jsonl_entry_impl(DATA_DIR / "mstr_loop_trades.jsonl"),
     }
-    import json as _json
-    poll_path = DATA_DIR / "mstr_loop_poll.jsonl"
-    if poll_path.exists():
-        try:
-            with open(poll_path, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        try:
-                            out["last_poll"] = _json.loads(line)
-                        except _json.JSONDecodeError:
-                            pass
-        except (OSError, UnicodeDecodeError):
-            pass
-    trades_path = DATA_DIR / "mstr_loop_trades.jsonl"
-    if trades_path.exists():
-        try:
-            with open(trades_path, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        try:
-                            out["last_trade"] = _json.loads(line)
-                        except _json.JSONDecodeError:
-                            pass
-        except (OSError, UnicodeDecodeError):
-            pass
     return jsonify(out)
 
 

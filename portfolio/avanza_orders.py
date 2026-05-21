@@ -364,6 +364,17 @@ def _execute_confirmed_order(order: dict, config: dict) -> None:
                 volume=order["volume"],
             )
 
+        if result is None:
+            order["status"] = "error"
+            order["error"] = "API returned no response"
+            logger.error("Order API returned None: %s", order["id"])
+            send_telegram(
+                f"AVANZA {action} ERROR\n"
+                f"{order['instrument_name']}: API returned no response",
+                config,
+            )
+            return
+
         status = result.get("orderRequestStatus", "UNKNOWN")
         order_id = result.get("orderId", "?")
         msg_text = result.get("message", "")
