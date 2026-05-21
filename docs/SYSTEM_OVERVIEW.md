@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-05-20
-Branch: improve/auto-session-2026-05-20
+Updated: 2026-05-21
+Branch: improve/auto-session-2026-05-21
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 69 signal modules (18 active, 51 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 70 signal modules (18 active, 52 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -23,45 +23,45 @@ Two-layer autonomous trading system with 69 signal modules (18 active, 51 disabl
 | Metals loop | `data/metals_loop.py` | Separate process, warrant trading |
 | Agent | `scripts/win/pf-agent.bat` | Spawns Claude CLI for Layer 2 |
 
-## 3) Module Map (~152 portfolio modules)
+## 3) Module Map (283 portfolio modules)
 
 ### Orchestration (5 modules)
-- `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
-- `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen so watchdog never sees stale start time.
-- `trigger.py` (330 lines): Change detection — consensus flip (with clock-skew guard), price >2%, F&G threshold, sentiment reversal, post-trade, density gate (dampening + cooldown)
-- `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
-- `config_validator.py`: Startup config validation
+- `main.py` (1532 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8), post-cycle housekeeping (15+ tasks), heartbeat keepalive for Layer 2
+- `agent_invocation.py` (1644 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion watchdog (30s daemon), stack overflow auto-disable, drawdown circuit breaker, trade guards gate, multi-agent mode. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen.
+- `trigger.py` (651 lines): 5-section change detection — consensus flip (with clock-skew guard), sustained flip (OR-debounce), price >2%, F&G threshold, sentiment reversal, post-trade. Tier classification (T1/T2/T3), density gate, flip cooldown (30 min), ranging dampening, confidence/ATR floors via claude_budget config.
+- `market_timing.py` (342 lines): DST-aware US/EU market hours, NYSE + Swedish holiday calendars (Easter-based), agent invocation window, GPU signal gating
+- `config_validator.py` (87 lines): Startup config validation
 
-### Signal System (69 modules: 12 core + 57 enhanced, 18 active + 51 disabled)
-- `signal_engine.py` (~4,280 lines): 69-module voting (18 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, ADX dual-regime meta-signal
-- `signal_registry.py` (~300 lines): Plugin-based signal discovery via importlib, lazy loading. All signals registered as "enhanced" via `register_enhanced()`. 5-min import-failure cooldown.
-- `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
-- `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
-- `accuracy_stats.py` (636 lines): Per-signal hit rate tracking, accuracy cache, activation rates
+### Signal System (70 modules: 7 core + 63 enhanced, 18 active + 52 disabled)
+- `signal_engine.py` (4399 lines): 70-module voting (18 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
+- `signal_registry.py` (380 lines): Plugin-based signal discovery via importlib, lazy loading. 63 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
+- `signal_utils.py` (132 lines): Shared helpers — SMA, EMA, RSI, majority_vote
+- `signals/*.py` (64 files, 20,798 lines): Enhanced composite signals, each with 4-8 sub-indicators
+- `accuracy_stats.py` (2070 lines): Per-signal hit rate tracking, accuracy cache, activation rates, thundering-herd lock, degradation detection
 - `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
 ### Data Collection (3 modules)
-- `data_collector.py` (299 lines): Binance spot/FAPI, Alpaca, yfinance; circuit breakers; 7 timeframes
-- `indicators.py` (167 lines): RSI, MACD, EMA, BB, ATR, regime detection (cache per cycle)
-- `shared_state.py` (206 lines): Thread-safe cache (TTL + stale fallback), rate limiters, NewsAPI quota
+- `data_collector.py` (344 lines): Binance spot/FAPI, Alpaca, yfinance; circuit breakers; 7 timeframes; 60s per-frame timeout
+- `indicators.py` (253 lines): RSI, MACD, EMA, BB, ATR, regime detection (cache per cycle)
+- `shared_state.py` (388 lines): Thread-safe cache (TTL + stale fallback + dogpile prevention), rate limiters, NewsAPI quota, LLM batch rotation
 
-### Portfolio & Risk (7 modules)
-- `portfolio_mgr.py` (181 lines): State load/save with rolling backups (C7), per-file locks (C8), atomic read-modify-write, corruption recovery
-- `trade_guards.py` (267 lines): Per-ticker cooldown, consecutive-loss escalation, position rate limit
-- `risk_management.py` (710 lines): Drawdown circuit breaker (-15%), ATR stops, concentration risk, correlation pairs
-- `equity_curve.py` (599 lines): FIFO round-trip matching, Sharpe/Sortino, max drawdown, calmar ratio
-- `monte_carlo.py` (401 lines): GBM with antithetic variates, probability-driven drift
-- `correlation_priors.py`: Single source of truth for asset correlation strengths (BTC↔ETH: 0.75, XAG↔XAU: 0.85)
-- `monte_carlo_risk.py` (504 lines): Student-t copula VaR/CVaR, imports correlation priors
-- `kelly_sizing.py`: Kelly criterion position sizing
+### Portfolio & Risk (8 modules)
+- `portfolio_mgr.py` (180 lines): State load/save with rolling backups (C7), per-file locks (C8), atomic read-modify-write, corruption recovery
+- `trade_guards.py` (406 lines): Per-ticker cooldown, consecutive-loss escalation (0→8x), position rate limit, time-decay
+- `risk_management.py` (988 lines): Drawdown circuit breaker, peak value tracking (streaming JSONL with byte-offset cache), ATR stops, concentration risk, FX fallback chain
+- `equity_curve.py` (600 lines): FIFO round-trip matching, Sharpe/Sortino, max drawdown, calmar ratio
+- `monte_carlo.py` (422 lines): GBM with antithetic variates, probability-driven drift
+- `correlation_priors.py` (31 lines): Single source of truth for asset correlation strengths (BTC↔ETH: 0.75, XAG↔XAU: 0.85)
+- `monte_carlo_risk.py` (492 lines): Student-t copula VaR/CVaR, imports correlation priors
+- `kelly_sizing.py` (389 lines): Kelly criterion position sizing
 
 ### Reporting & Analysis (6 modules)
-- `reporting.py` (962 lines): agent_summary.json (full/compact/tiered), three-tier compaction, thread-safe module failure tracking
-- `journal.py`: Layer 2 journal JSONL streaming
-- `journal_index.py` (400 lines): BM25 relevance ranking, importance scoring
-- `reflection.py` (243 lines): Periodic strategy metrics (win rate, avg PnL)
-- `prophecy.py`: Macro belief system (silver_bull_2026, etc.)
-- `focus_analysis.py`: Mode B probability format for focus instruments
+- `reporting.py` (1330 lines): agent_summary.json (full/compact/tiered), three-tier compaction, thread-safe module failure tracking with escalation
+- `journal.py` (583 lines): Layer 2 journal JSONL streaming, context markdown generation
+- `journal_index.py` (399 lines): BM25 relevance ranking, importance scoring
+- `reflection.py` (241 lines): Periodic strategy metrics (win rate, avg PnL)
+- `prophecy.py` (392 lines): Macro belief system (silver_bull_2026, etc.)
+- `focus_analysis.py` (236 lines): Mode B probability format for focus instruments
 
 ### External Data (11 modules)
 - `fear_greed.py`, `sentiment.py`, `social_sentiment.py`, `onchain_data.py`
@@ -69,23 +69,23 @@ Two-layer autonomous trading system with 69 signal modules (18 active, 51 disabl
 - `ministral_signal.py`, `ministral_trader.py`, `ml_signal.py` (disabled)
 
 ### Notification (5 modules)
-- `telegram_notifications.py` (138 lines): Send with Markdown escaping, 4096 char limit, fallback
+- `telegram_notifications.py` (142 lines): Send with Markdown escaping, 4096 char limit, fallback
 - `telegram_poller.py`: Incoming message polling, command handling
 - `message_store.py`: Transaction/notification logging
 - `message_throttle.py`: Analysis message rate limiting
-- `digest.py` (206 lines): 4-hour periodic digest with invocation stats
+- `digest.py` (271 lines): 4-hour periodic digest with invocation stats
 
 ### Infrastructure (10 modules)
-- `file_utils.py` (~250 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, load_jsonl_tail, last_jsonl_entry
-- `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor, full-delay jitter)
-- `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
-- `health.py` (~340 lines): Heartbeat, error ring buffer, module failure tracking, signal health, dead signal detection
-- `logging_config.py` (48 lines): RotatingFileHandler (10MB, 3 backups)
-- `signal_db.py`: WAL-mode SQLite dual-write with JSONL fallback. `load_entries()` optimized from O(n²) per-snapshot SELECTs to 3 bulk queries + dict reassembly (2026-05-12).
-- `process_lock.py` (101 lines): Cross-platform non-blocking file locks (msvcrt/fcntl)
-- `subprocess_utils.py` (260 lines): Windows Job Object subprocess protection, orphan reaper. WMIC→PowerShell migration (2026-05-12): `kill_orphaned_by_cmdline()` uses Get-CimInstance for Win11 compat.
-- `notification_text.py` (65 lines): Shared text helpers for human-readable notifications
-- `llama_server.py` (309 lines): Unified persistent llama-server manager, cross-process model swap with file lock, query-scoped locking (BUG-165)
+- `file_utils.py` (423 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, load_jsonl_tail, last_jsonl_entry, sidecar locking (msvcrt/fcntl)
+- `http_retry.py` (99 lines): Exponential backoff (3 retries, 1s base, 2x factor, full-delay jitter), secret redaction
+- `circuit_breaker.py` (134 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
+- `health.py` (452 lines): Heartbeat, error ring buffer, module failure tracking, signal health, dead signal detection, outcome staleness
+- `logging_config.py` (47 lines): RotatingFileHandler (10MB, 3 backups)
+- `signal_db.py` (405 lines): WAL-mode SQLite dual-write with JSONL fallback. `load_entries()` optimized from O(n²) per-snapshot SELECTs to 3 bulk queries + dict reassembly (2026-05-12).
+- `process_lock.py` (107 lines): Cross-platform non-blocking file locks (msvcrt/fcntl)
+- `subprocess_utils.py` (337 lines): Windows Job Object subprocess protection, orphan reaper. WMIC→PowerShell migration (2026-05-12): `kill_orphaned_by_cmdline()` uses Get-CimInstance for Win11 compat.
+- `notification_text.py` (64 lines): Shared text helpers for human-readable notifications
+- `llama_server.py` (658 lines): Unified persistent llama-server manager, cross-process model swap with file lock, query-scoped locking (BUG-165)
 
 ## 4) Data Flow
 
@@ -138,9 +138,9 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (69 total: 18 active, 51 disabled)
+### Signal Inventory (70 total: 18 active, 52 disabled)
 - **Active (18)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, Momentum Factors, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, Credit Spread Risk, On-Chain BTC, Statistical Jump Regime, BTC Proxy, Crypto EVRP
-- **Disabled (51)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, plus 29 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, etc.)
+- **Disabled (52)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, plus 30 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, ConnorsRSI, ADX Regime Switch, CUSUM Accuracy Monitor, Sentiment Extremity Gate, etc.)
 
 ## 6) Configuration
 
@@ -176,9 +176,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 
 ## 7) Test Surface
 
-- ~5,994 tests across 242 test files
+- ~7,730+ tests across 430 test files
 - Sequential: ~16 min; Parallel (`-n auto`): ~5.5 min (2.9x speedup on 8 workers)
-- 26 pre-existing failures (integration/strategy, consensus thresholds, forecast config)
+- 24 pre-existing failures (integration/strategy, consensus thresholds, forecast config)
 - Config: `pyproject.toml` → `[tool.pytest.ini_options]`
 - Linter: ruff (line-length=120, target py311)
 - Fixtures: `conftest.py` provides `make_indicators()`, `make_candles()`, `make_ohlcv_df()`, `sample_config`, `config_file`, `tmp_data_dir`
@@ -204,7 +204,7 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 ### Open Issues
 
 - ARCH-17: main.py re-exports 100+ symbols (obscures module boundaries)
-- ARCH-18/BUG-162: metals_loop.py is 7,699-line monolith — highest bug density, hardest to maintain
+- ARCH-18/BUG-162: metals_loop.py is 7,880-line monolith — highest bug density, hardest to maintain
 - ARCH-19: No CI/CD pipeline — all testing is manual
 - ARCH-20: No type checking (mypy)
 - BUG-132: orb_predictor.py fetches 5000+ candles uncached
@@ -218,7 +218,7 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - **B2 (fixed)**: Contract violation dedup wrote critical_errors.jsonl BEFORE dedup marker → duplicate entries on marker write failure. Swapped order.
 - **B3 (fixed)**: Monte Carlo ATR fallback was generic 2.0% for all assets. Now per-asset-class: crypto=3.5%, metals=4.0%, stocks=2.0%.
 - **B4 (fixed)**: Stuck loading key eviction in shared_state.py logged at DEBUG. Elevated to WARNING.
-- ~6,000+ tests across 242 test files
+- Test suite grew to ~7,730+ tests across 430 files by 2026-05-21.
 
 ### Findings from 2026-05-12 Auto Session
 
@@ -249,4 +249,11 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - **B1 (fixed)**: Consensus test flakes — production accuracy cache files leaked into tests. `_null_cached` mock didn't intercept `accuracy_stats.get_or_compute_accuracy()` called directly inside `generate_signal()`. Fixed by redirecting all 4 accuracy cache file paths to session-scoped tmp dirs.
 - **B2 (fixed)**: `http_retry.py` jitter was 10% of delay — marginal for thundering herd. Bumped to full-delay uniform distribution. Also fixed 429 path that replaced jittered wait with raw `retry_after`.
 - **B4 (fixed)**: `shared_state.py` newsapi TTL used hardcoded UTC offsets (07:00-21:00 UTC). During CEST (summer), 08:00 CET = 06:00 UTC, shifting the active window by 1h. Replaced with timezone-aware `Europe/Stockholm` check.
-- Signal count: 67→69 modules, 17→18 active, 49→51 disabled.
+- Signal count: 67→70 modules, 17→18 active, 50→52 disabled.
+
+### Findings from 2026-05-21 Auto Session
+
+- **BUG-A (fixed)**: `avanza_orders.py` — `place_buy_order()`/`place_sell_order()` can return `None` on Playwright errors. Line 367 called `.get()` on the result without None guard. Added explicit check with clear "API returned no response" diagnostic.
+- **BUG-B (fixed)**: `dashboard/app.py` — `/api/mstr_loop` endpoint read JSONL files via raw `open()` line-by-line iteration. Replaced with `last_jsonl_entry()` (4KB tail seek, O(1) instead of O(n)).
+- **DOC-A (fixed)**: SYSTEM_OVERVIEW.md line counts for 15+ modules were wrong by 30-200% (e.g., agent_invocation.py listed 489, actual 1644). Full accuracy pass on all section 3 numbers.
+- Signal count: 70 modules (7 core + 63 enhanced), 18 active, 52 disabled.
