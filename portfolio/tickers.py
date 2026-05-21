@@ -114,6 +114,10 @@ DISABLED_SIGNALS = {
     "amihud_illiquidity_regime",  # pending live validation (added 2026-05-18)
     "absorption_ratio_regime",  # pending live validation (added 2026-05-19)
     "sentiment_extremity_gate",  # pending live validation (added 2026-05-20)
+    "credit_spread_risk",  # 2026-05-21: 23% blended 1d (0.90×20% recent + 0.10×50% alltime).
+                        # 257 sam all-time, recent accuracy collapsed to 20%. Actively
+                        # harming consensus — was accuracy-gated at runtime but formal
+                        # disable saves compute and prevents regime-override edge cases.
     "funding",          # 2026-05-13: 30.8% at 1d (743 sam). BUY-only signal, all wrong.
                         # 0% activation on all tickers in last 50 entries — phantom voter
                         # that escapes accuracy gate because it rarely votes. When it does
@@ -224,6 +228,7 @@ DISABLED_SIGNALS = {
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
 # - credit_spread_risk ENABLED: 66.9% accuracy (257 sam), BUY 80.3%. Directional
 #   gate at 40% will auto-gate SELL (49.1%) while allowing strong BUY votes.
+#   2026-05-21: RE-DISABLED. Recent accuracy collapsed to 20%, blended 23%.
 # - crypto_macro ENABLED: 56.5% accuracy (1273 sam). BUY-biased (93%) so bias
 #   penalty (0.5x) applies. Provides crypto-specific on-chain edge.
 # funding: removed from DISABLED — 74.2% at 3h (535 samples) but 29.9% at 1d.

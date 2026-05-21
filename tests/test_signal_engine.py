@@ -962,13 +962,13 @@ class TestOrderbookFlowDisabled:
         assert "orderbook_flow" in DISABLED_SIGNALS
 
 
-class TestCreditSpreadRiskEnabled:
-    """credit_spread_risk re-enabled 2026-04-11: 66.9% accuracy (257 sam),
-    BUY 80.3%. Directional gate auto-gates weak SELL direction (49.1%)."""
+class TestCreditSpreadRiskDisabled:
+    """credit_spread_risk DISABLED 2026-05-21: 23% blended accuracy
+    (0.90x20% recent + 0.10x50% alltime). Actively harming consensus."""
 
-    def test_credit_spread_risk_not_disabled(self):
+    def test_credit_spread_risk_disabled(self):
         from portfolio.tickers import DISABLED_SIGNALS
-        assert "credit_spread_risk" not in DISABLED_SIGNALS
+        assert "credit_spread_risk" in DISABLED_SIGNALS
 
 
 class TestCryptoMacroEnabled:
