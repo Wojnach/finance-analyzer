@@ -1,5 +1,47 @@
 # Session Progress
 
+## 2026-05-21 Auto-Improve Session (5 commits)
+
+**Context:** Autonomous improvement session. Codebase highly mature after 5 prior
+auto-sessions. Focus: documentation accuracy, minor bugs, test coverage gaps,
+architecture backlog.
+
+**Commits (branch `improve/auto-session-2026-05-21`):**
+
+1. `docs(plan): improvement plan for 2026-05-21 auto-session`
+
+2. `fix(orders,dashboard): None guard + efficient JSONL reads`
+   - avanza_orders.py: explicit None check before `.get()` on place_buy/sell_order result
+     (was raising AttributeError caught by broad except — now gives specific diagnostic)
+   - dashboard/app.py: replaced raw JSONL reads in /api/mstr_loop with `last_jsonl_entry()`
+     tail-seek (consistent with all other JSONL endpoints)
+
+3. `docs(overview): full accuracy pass on line counts and signal stats`
+   - SYSTEM_OVERVIEW.md: fixed 15+ module line counts wrong by 30-200%
+     (main.py 909→1532, agent_invocation.py 489→1644, trigger.py 330→651, etc.)
+   - Signal counts: 69→70 total, 51→52 disabled
+   - Module count: ~152→283, test files: 242→430
+
+4. `test(log_rotation): add 28 unit tests for data file rotation`
+   - NEW: tests/test_log_rotation.py (337 lines)
+   - Covers: _parse_ts, _file_size_mb, rotate_jsonl (8 tests), rotate_text (7 tests),
+     rotate_file dispatcher, rotate_all error handling, stats helpers, gzip roundtrip
+   - log_rotation.py had zero test coverage prior
+
+5. `docs(backlog): add 4 architecture findings from exploration`
+   - ARCH-17: main.py re-exports 100+ symbols (module boundary issue)
+   - ARCH-18: metals_loop.py 7,880-line monolith
+   - ARCH-19: No CI/CD pipeline
+   - ARCH-20: Signal schema validation missing
+
+**Key finding:** Codebase fundamentals are strong — atomic I/O, thread-safe caching,
+robust error recovery. What remains is documentation drift, minor API safety gaps,
+and structural tech debt (monoliths, missing CI).
+
+**Next:** Merge to main, push, restart loops.
+
+---
+
 ## 2026-05-19 After-Hours — Deep Research + Signal Implementation (3 batches)
 
 **Context:** Autonomous after-hours research session. System at ~50% consensus
