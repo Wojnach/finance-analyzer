@@ -1,5 +1,33 @@
 # Session Progress
 
+## 2026-05-21 /fgl Adversarial Review
+
+**Context:** Full adversarial review across 8 subsystems with parallel Claude Code subagents + lead independent pass. Read-only review; no code shipped.
+
+**Baseline SHA:** `604f0ef1` (post-PLAN commit on main).
+
+**Output:** `docs/reviews/2026-05-21/{lead-review, signals-core, orchestration, portfolio-risk, metals-core, avanza-api, signals-modules, data-external, infrastructure, synthesis}.md`.
+
+**Findings totals (so far):**
+- ~360 findings across 7 returned reviews + lead
+- 73+ P0 (fix-before-next-deploy)
+- 188+ P1 (must-fix)
+- 100+ P2/P3
+
+**Top P0 (synthesis.md):**
+- **STOPS ARE BARRIER-BLIND** across every metals code path (metals-core dominant theme) — applies to grid_tiers, fin_snipe_manager, metals_loop, exit_optimizer, iskbets, fin_fish. User's "never within 3% of barrier" rule is structurally unreachable for 5x MINIs.
+- Layer 2 `Edit,Write,Bash` allow-list = exfil/corruption surface.
+- "Incomplete" stub journal entries poison accuracy stats with fake HOLDs.
+- 10 unresolved critical_errors entries TODAY (7 contract_violations) — root cause is SKIP-paths not bridged to loop_contract.
+- 252 vs 365 day annualization mismatch biases every MC stop-prob / VaR / fill-prob for crypto+metals by ~20%.
+- Bear-MINI long-bias in exit/risk calc.
+- FIFO P&L double-counts buy fees.
+- FOMC Jan 2026 dates off-by-one.
+
+**Next session:** convert Tier-1 backlog items into per-finding implementation PRs. Highest priority: barrier-aware stop helper at `place_stop_loss` boundary.
+
+---
+
 ## 2026-05-21 Auto-Improve Session (5 commits)
 
 **Context:** Autonomous improvement session. Codebase highly mature after 5 prior
