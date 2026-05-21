@@ -321,18 +321,20 @@ def write_agent_summary(
     try:
         from portfolio.accuracy_stats import (
             best_worst_signals,
+            blend_accuracy_data,
             consensus_accuracy,
             load_cached_accuracy,
             signal_accuracy,
             write_accuracy_cache,
         )
 
-        # Use cached accuracy to avoid redundant full-log scans
         sig_acc = load_cached_accuracy("1d")
         if not sig_acc:
             sig_acc = signal_accuracy("1d")
             if sig_acc:
                 write_accuracy_cache("1d", sig_acc)
+        sig_acc_recent = load_cached_accuracy("1d_recent")
+        blended = blend_accuracy_data(sig_acc or {}, sig_acc_recent or {})
         cons_acc = consensus_accuracy("1d")
         bw = best_worst_signals("1d", acc=sig_acc)
         from portfolio.tickers import DISABLED_SIGNALS as _DISABLED
@@ -343,7 +345,11 @@ def write_agent_summary(
         if qualified:
             summary["signal_accuracy_1d"] = {
                 "signals": {
-                    k: {"accuracy": round(v["accuracy"], 3), "samples": v["total"]}
+                    k: {
+                        "accuracy": round(v["accuracy"], 3),
+                        "samples": v["total"],
+                        "blended": round(blended[k]["accuracy"], 3) if k in blended else None,
+                    }
                     for k, v in qualified.items()
                 },
                 "consensus": {
