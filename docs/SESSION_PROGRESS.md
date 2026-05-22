@@ -1,5 +1,31 @@
 # Session Progress
 
+## 2026-05-22 Auto-Improvement Session
+
+**Context:** Autonomous improvement session triggered by adversarial review synthesis (300+ findings, 14 P0s).
+Branch `improve/auto-session-2026-05-22`, 6 commits, 14 bug fixes across 5 batches.
+
+**Batches:**
+
+1. **Data Quality** (B1-B4): 252→365 annualization for crypto/metals (7 files), stub journal NO_DECISION, outcome_tracker 4dp precision + per-minute cache, OSError log level.
+2. **Concurrency/Safety** (B5,B7): prune_jsonl sidecar lock, BEAR MINI knockout `pass`→`continue`.
+3. **Trigger Gate** (B8): SUSTAINED_DURATION_S 120→900 to reduce noise-triggered Layer 2.
+4. **Security/Safety** (B9-B11): gpu_gate stale lock fix, fish_instrument_finder barrier filter, dashboard auth fail-open on config read error.
+5. **Stability** (B12-B14): kill-fail respawn guard, topN sort determinism, ADX cache 6-field key.
+
+**Skipped (B6):** api_utils.py config read — false positive (mtime cache + threading lock correct).
+
+**Deferred (need manual review):**
+- P0 #0: Barrier-blind stops (10+ files, real-money paths)
+- P0 #1: Layer 2 Edit/Write/Bash tool allow-list (security design session)
+- P0 #7: Signal core pre/post persistence gate (4400-line file)
+- P0 #11: Dashboard cookie = master token
+- P1: Auth-cooldown success-after-failure, 3d/5d/10d→1d accuracy collapse
+
+**Test results:** 10,160 passing. 50 failures, all pre-existing on main (verified).
+
+---
+
 ## 2026-05-21 After-Hours Research Session
 
 **Context:** Autonomous 8-phase research + implementation session (22:30 CET).

@@ -33,9 +33,28 @@ Based on 5 parallel exploration agents + adversarial review synthesis (300+ find
 |----|---------|-----|-----|
 | B8 | trigger.py:106 | SUSTAINED_DURATION_S=120 at 600s cadence = 1-cycle gate. | Raise to 900s. |
 
-## Skipped (Too Risky)
+### Batch 4: Security / Safety
 
+| ID | File(s) | Bug | Fix |
+|----|---------|-----|-----|
+| B9 | gpu_gate.py:82 | `_pid_alive` returns True when psutil missing → stale GPU locks never reaped (25h outage). | Return False (assume dead). |
+| B10 | fish_instrument_finder.py:169 | No min barrier distance filter → auto-discovery picks closest-to-barrier MINIs. | Filter <5% barrier distance before ranking. |
+| B11 | dashboard/auth.py:76 | Config read failure → {} → dashboard_token=None → all access allowed. | Keep previous cached config on read failure. |
+
+### Batch 5: Stability / Correctness
+
+| ID | File(s) | Bug | Fix |
+|----|---------|-----|-----|
+| B12 | agent_invocation.py:677 | _kill_overrun_agent nulls _agent_proc even when kill fails → duplicate spawn. | Only null on successful kill. |
+| B13 | signal_engine.py:2346 | _topn_accuracy_key 0.5 default → nondeterministic top-N selection. | Add signal name as tiebreak key. |
+| B14 | signal_engine.py:2842 | _adx_cache key (len, first, last) → content collision across tickers. | Expand to 6-field key (len, first, mid, last, high_max, low_min). |
+
+## Skipped / Deferred
+
+- B6: api_utils.py raw config read — false positive (mtime cache + threading lock + must-raise semantics correct).
 - P0 #0: Barrier-blind stops — 10+ files, real-money paths. TODO: MANUAL REVIEW.
 - P0 #1: Layer 2 Edit/Write/Bash tools — security design session needed.
 - P0 #7: Signal core gate pre/post persistence — 4400-line file, high risk.
 - P0 #11: Dashboard cookie = master token — could lock user out.
+- P1: Auth-cooldown success-after-failure — needs window-based check, not single-entry.
+- P1: 3d/5d/10d horizon → 1d accuracy collapse — needs per-horizon accuracy infrastructure.
