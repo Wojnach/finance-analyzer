@@ -24,8 +24,8 @@
   position: sticky;
   top: 0;
   z-index: var(--z-header);
-  background: var(--bg2);
-  border-bottom: 1px solid var(--bdr);
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--header-accent);
   padding: var(--sp-2) var(--sp-3);
   padding-top: calc(var(--sp-2) + env(safe-area-inset-top));
   display: flex;
@@ -42,14 +42,15 @@
 .app-header__title {
   font-size: var(--ty-md);
   font-weight: 700;
-  letter-spacing: -0.3px;
-  color: var(--tx);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--header-tx);
 }
 .app-header__sub {
   font-size: var(--ty-xs);
-  color: var(--txm);
+  color: var(--header-accent);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
 }
 
 .app-header__pnl {
@@ -76,8 +77,9 @@
   display: inline-block;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: 1px;
   background: var(--grn);
+  box-shadow: 0 0 5px var(--grn);
   animation: pulse 2s infinite;
 }
 .refresh-dot.paused { background: var(--yel); animation: none; }
@@ -89,7 +91,7 @@
   background: transparent;
   border: 0;
   border-radius: var(--rad-md);
-  color: var(--txd);
+  color: var(--header-tx);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -98,8 +100,8 @@
   transition: background var(--dur-fast) var(--ease-out),
               color      var(--dur-fast) var(--ease-out);
 }
-.icon-btn:hover { background: var(--hover); color: var(--tx); }
-.icon-btn.active { color: var(--cyn); }
+.icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--header-accent); }
+.icon-btn.active { color: var(--header-accent); }
 
 /* ================================================================
    Main view container
@@ -157,7 +159,9 @@
 }
 .bottom-nav__item:hover { color: var(--txd); }
 .bottom-nav__item.active {
-  color: var(--cyn);
+  color: var(--grn);
+  background: var(--hover);
+  box-shadow: inset 0 2px 0 var(--grn);
 }
 .bottom-nav__item .glyph {
   font-size: 18px;
@@ -195,7 +199,7 @@
     border-bottom: 2px solid transparent;
   }
   .bottom-nav__item.active {
-    border-bottom-color: var(--cyn);
+    border-bottom-color: var(--grn);
   }
   .bottom-nav__item .glyph { font-size: 14px; }
 }
@@ -223,11 +227,11 @@
   border-bottom: 2px solid transparent;
 }
 :root.desktop-mode .bottom-nav__item.active {
-  border-bottom-color: var(--cyn);
+  border-bottom-color: var(--grn);
 }
 :root.desktop-mode .bottom-nav__item .glyph { font-size: 14px; }
 
 /* Toggle button itself sits in the header icons row. Reuse .icon-btn
    from the existing header styling; .active marks the toggle as ON. */
 .desktop-mode-toggle .glyph { font-size: 16px; }
-.desktop-mode-toggle.active { color: var(--cyn); }
+.desktop-mode-toggle.active { color: var(--grn); }

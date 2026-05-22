@@ -34,7 +34,12 @@
   font-size: var(--ty-md);
   font-weight: 700;
   color: var(--tx);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
 }
+/* Bracketed panel header — terminal reskin 2026-05-22 */
+.card__title::before { content: "[ "; color: var(--txm); }
+.card__title::after  { content: " ]"; color: var(--txm); }
 .card__subtitle {
   font-size: var(--ty-xs);
   color: var(--txm);
@@ -62,8 +67,8 @@
   display: block;
   width: 3px;
   height: 13px;
-  background: var(--cyn);
-  border-radius: 2px;
+  background: var(--grn);
+  border-radius: 0;
 }
 
 /* ================================================================
@@ -82,10 +87,12 @@
   border: 1px solid var(--bdr);
   white-space: nowrap;
   cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   transition: background var(--dur-fast) var(--ease-out);
 }
 .chip:hover { background: var(--hover); color: var(--tx); }
-.chip.active { background: var(--cyn); color: #000; border-color: var(--cyn); }
+.chip.active { background: var(--grn); color: #051005; border-color: var(--grn); }
 
 .chip--filter { min-height: 36px; }   /* dense rows OK per Track 6 spec */
 
@@ -106,9 +113,9 @@
 /* Pulse dots for system health */
 .pulse-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
   background: var(--gry);
 }
 .pulse-dot.ok    { background: var(--grn); box-shadow: 0 0 6px rgba(0,255,136,0.6); }
