@@ -73,7 +73,9 @@ def _get_config() -> dict:
     with _CFG_LOCK:
         if _CFG_VALUE is not None and (now - _CFG_AT) < _CFG_TTL:
             return _CFG_VALUE
-        _CFG_VALUE = _read_config_uncached()
+        fresh = _read_config_uncached()
+        if fresh or _CFG_VALUE is None:
+            _CFG_VALUE = fresh
         _CFG_AT = now
         return _CFG_VALUE
 

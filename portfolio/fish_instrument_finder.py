@@ -166,15 +166,19 @@ def find_best_instruments(
                 "is_active": is_active,
             })
 
-    # Rank: prefer low spread, then high barrier distance (safer)
+    _MIN_BARRIER_DIST_PCT = 5.0
+    safe = [
+        c for c in candidates
+        if c["barrier_distance_pct"] is None or c["barrier_distance_pct"] >= _MIN_BARRIER_DIST_PCT
+    ]
+
     def sort_key(c: dict) -> tuple:
         spread = c["spread_pct"]
-        # Barrier distance: higher is safer, use negative for descending sort
         barrier = -(c["barrier_distance_pct"] or 0)
         return (spread, barrier)
 
-    candidates.sort(key=sort_key)
-    return candidates[:max_results]
+    safe.sort(key=sort_key)
+    return safe[:max_results]
 
 
 def print_instruments(ticker: str, direction: str, underlying_price: float = 0) -> None:

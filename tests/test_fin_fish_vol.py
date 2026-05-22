@@ -98,8 +98,8 @@ class TestVolAnnualization:
         signal = _make_signal(atr_pct=2.0)
         vol, _ = _compute_vol_and_drift(signal, [], "LONG")
 
-        # hourly ATR 2% -> volatility_from_atr -> atr_frac * sqrt(252/14)
-        expected = 0.02 * math.sqrt(252 / 14)
+        # hourly ATR 2% -> volatility_from_atr -> atr_frac * sqrt(365/14)
+        expected = 0.02 * math.sqrt(365 / 14)
         assert abs(vol - expected) < 0.01
 
     def test_narrow_daily_ranges_ignored(self):

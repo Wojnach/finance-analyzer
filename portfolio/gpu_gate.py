@@ -78,8 +78,8 @@ def _pid_alive(pid: int) -> bool:
         import psutil
         return psutil.pid_exists(pid)
     except ImportError:
-        logger.warning("psutil not installed — cannot check if PID %d is alive; stale GPU locks may not be reaped", pid)
-        return True
+        logger.warning("psutil not installed — assuming PID %d is dead to prevent stale GPU lock deadlock", pid)
+        return False
 
 
 def _read_lock() -> dict:
