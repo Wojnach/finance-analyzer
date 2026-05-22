@@ -97,7 +97,9 @@ DISABLED_SIGNALS = {
     # Strongest shadow-to-live promotion candidate. Accuracy gate auto-disables
     # if performance degrades below 47%.
     "hash_ribbons",  # pending live validation (added 2026-04-26)
-    "drift_regime_gate",  # pending live validation (added 2026-04-28)
+    # "drift_regime_gate" RE-ENABLED 2026-05-22: 58.4% 1d all-time (1231 sam),
+    # 66.5% 1d_recent (651 sam). Strongest regime filter. Accuracy gate
+    # auto-disables if performance degrades below 47%.
     "vol_ratio_regime",  # pending live validation (added 2026-04-29)
     "residual_pair_reversion",  # pending live validation (added 2026-04-30)
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
