@@ -181,6 +181,11 @@
 /* Desktop — ≥1024 px: bottom nav becomes a top tab strip; remove fixed bottom */
 @media (min-width: 1024px) {
   .app { padding-bottom: 0; }
+  /* Static (non-fixed) nav must render ABOVE the view in flex flow. DOM
+   * order is header->main->nav, so without an order override the static
+   * nav lands at the document bottom and you must scroll past the whole
+   * view to reach the tabs (2026-05-22 fix). */
+  .app-main { order: 1; }
 
   .bottom-nav {
     position: static;
@@ -208,7 +213,7 @@
    toggle promotes the page to the wide layout regardless of viewport
    width. See js/desktop-mode.js. Mobile remains the default. */
 :root.desktop-mode .app-header { padding-inline: var(--sp-5); }
-:root.desktop-mode .app-main   { padding: var(--sp-4) var(--sp-5); }
+:root.desktop-mode .app-main   { padding: var(--sp-4) var(--sp-5); order: 1; }
 :root.desktop-mode .app { padding-bottom: 0; }
 :root.desktop-mode .bottom-nav {
   position: static;
