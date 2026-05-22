@@ -375,6 +375,10 @@ def _register_defaults():
                       "portfolio.signals.sentiment_extremity_gate",
                       "compute_sentiment_extremity_gate_signal",
                       requires_context=True, max_confidence=0.7)
+    register_enhanced("choppiness_regime_gate",
+                      "portfolio.signals.choppiness_regime_gate",
+                      "compute_choppiness_regime_gate_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()

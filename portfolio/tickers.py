@@ -223,6 +223,9 @@ DISABLED_SIGNALS = {
     "adx_regime_switch",  # 2026-05-19: NEW. ADX dual regime meta-signal. Detects
                         # trend/range transitions via ADX + DI spread. All assets.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "choppiness_regime_gate",  # 2026-05-22: NEW. CHOP regime gate. CHOP>61.8=choppy
+                        # (suppress directional), CHOP<38.2=trending. All assets.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
