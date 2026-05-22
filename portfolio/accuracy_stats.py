@@ -860,6 +860,10 @@ def signal_activation_rates(entries=None):
 _BLEND_DEFAULT_MIN_RECENT_SAMPLES = 30
 
 
+_CATASTROPHIC_FLOOR_THRESHOLD = 0.35
+_CATASTROPHIC_FLOOR_MIN_SAMPLES = 15
+
+
 def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
                         normal_weight=0.70, fast_weight=0.90,
                         min_recent_samples=_BLEND_DEFAULT_MIN_RECENT_SAMPLES):
@@ -867,6 +871,10 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
 
     When recent accuracy diverges sharply from all-time (> divergence_threshold),
     fast-track to higher recent weight for faster regime adaptation.
+
+    Catastrophic floor: if recent accuracy < 35% with 15+ samples, force-use
+    recent accuracy regardless of all-time. Catches signals whose predictive
+    power has collapsed before the standard 30-sample threshold kicks in.
 
     Args:
         alltime: Dict of {signal_name: {accuracy, total, correct, pct}}.
@@ -908,15 +916,14 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
         rc_samples = rc.get("total", 0) if rc else 0
         at_samples = at.get("total", 0) if at else 0
 
-        # Blend only when recent has enough samples AND alltime exists;
-        # otherwise fall back to whichever source has data.
-        # Codex round-10 P2 (2026-04-17 follow-up): previously a recent-only
-        # signal with <min_recent_samples samples fell through to rc_acc,
-        # letting an immature signal's raw recent accuracy drive consensus.
-        # Now we require min_recent_samples even for recent-only signals,
-        # falling back to a neutral 0.5 otherwise (matches pre-patch
-        # semantics for signals below the recent-sample floor).
-        if rc_samples >= min_recent_samples and at_samples > 0:
+        # Catastrophic floor: if recent accuracy is catastrophically low with
+        # enough samples, force-use recent accuracy even below the normal
+        # min_recent_samples threshold. A signal at 34.8% with 15+ samples
+        # should not keep voting at 58% all-time accuracy.
+        if (rc_samples >= _CATASTROPHIC_FLOOR_MIN_SAMPLES
+                and rc_acc < _CATASTROPHIC_FLOOR_THRESHOLD):
+            blended = rc_acc
+        elif rc_samples >= min_recent_samples and at_samples > 0:
             divergence = abs(rc_acc - at_acc)
             w = fast_weight if divergence > divergence_threshold else normal_weight
             blended = w * rc_acc + (1 - w) * at_acc

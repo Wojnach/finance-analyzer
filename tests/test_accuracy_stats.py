@@ -619,6 +619,36 @@ class TestEnabledFlagAndSamplesAlias:
         assert result["rsi"]["samples"] == result["rsi"]["total"]
         assert result[any_disabled]["enabled"] is False
 
+    def test_catastrophic_floor_overrides_alltime(self):
+        """When recent accuracy < 35% with 15+ samples, force-use recent."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"ministral": {"accuracy": 0.58, "total": 6303, "correct": 3655}}
+        recent = {"ministral": {"accuracy": 0.25, "total": 20, "correct": 5}}
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        m = result["ministral"]
+        assert m["accuracy"] == 0.25
+
+    def test_catastrophic_floor_not_triggered_above_threshold(self):
+        """Recent accuracy above 35% follows normal blend logic."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"rsi": {"accuracy": 0.52, "total": 33000, "correct": 17160}}
+        recent = {"rsi": {"accuracy": 0.40, "total": 20, "correct": 8}}
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        r = result["rsi"]
+        assert r["accuracy"] == 0.52  # alltime fallback (20 < 30 min_recent)
+
+    def test_catastrophic_floor_requires_min_samples(self):
+        """Below min catastrophic samples (15), alltime still used."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"ml": {"accuracy": 0.42, "total": 1714, "correct": 720}}
+        recent = {"ml": {"accuracy": 0.10, "total": 10, "correct": 1}}
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        m = result["ml"]
+        assert m["accuracy"] == 0.42  # alltime (10 < 15 catastrophic min)
+
     def test_signal_accuracy_by_regime_includes_enabled_and_samples(self):
         from portfolio.accuracy_stats import signal_accuracy_by_regime
         from portfolio.tickers import DISABLED_SIGNALS
