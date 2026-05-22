@@ -575,7 +575,7 @@ def test_wall_clock_cooldown_suppresses_rapid_refire(contract_env, monkeypatch):
     })
     _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
         {"ts": _iso(now - timedelta(minutes=10)),
-         "status": "auth_error", "tier": 1, "exit_code": 0},
+         "status": "success", "tier": 1, "exit_code": 0},
     ])
     p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
     p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
@@ -623,7 +623,7 @@ def test_wall_clock_cooldown_rejects_non_finite_stored_ts(contract_env, monkeypa
     })
     _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
         {"ts": _iso(now - timedelta(minutes=10)),
-         "status": "auth_error", "tier": 1, "exit_code": 0},
+         "status": "success", "tier": 1, "exit_code": 0},
     ])
     p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
     p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
@@ -656,7 +656,7 @@ def test_wall_clock_cooldown_clears_after_window(contract_env, monkeypatch):
     })
     _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
         {"ts": _iso(now - timedelta(minutes=10)),
-         "status": "auth_error", "tier": 1, "exit_code": 0},
+         "status": "success", "tier": 1, "exit_code": 0},
     ])
     p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
     p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")

@@ -241,14 +241,14 @@ def test_violation_includes_last_invocation_context(contract_env):
     inv_ts = trigger_ts + timedelta(seconds=30)
     _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
         {"ts": _iso(inv_ts),
-         "reasons": ["test"], "status": "auth_error",
+         "reasons": ["test"], "status": "success",
          "tier": 3, "exit_code": 1, "duration_s": 0.5},
     ])
 
     violations = loop_contract.check_layer2_journal_activity()
     assert len(violations) == 1
     details = violations[0].details
-    assert details["last_invocation_status"] == "auth_error"
+    assert details["last_invocation_status"] == "success"
     assert details["last_invocation_ts"] == _iso(inv_ts)
     assert details["last_invocation_tier"] == 3
     assert details["last_invocation_exit_code"] == 1

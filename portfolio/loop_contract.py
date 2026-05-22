@@ -367,8 +367,19 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         "skipped_gate",
         "skipped_stack_overflow",
         "skipped_test",
+        "skipped_auth_cooldown",
+    })
+    _KNOWN_FAILURE_STATUSES = frozenset({
+        "incomplete",
+        "auth_error",
     })
     if latest_l2_inv and latest_l2_inv.get("status") in _LEGITIMATE_SKIP_STATUSES:
+        inv_ts = _parse_iso(
+            latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
+        )
+        if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
+            return []
+    if latest_l2_inv and latest_l2_inv.get("status") in _KNOWN_FAILURE_STATUSES:
         inv_ts = _parse_iso(
             latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
         )
