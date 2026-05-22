@@ -1,124 +1,107 @@
 {
-  "ts": "2026-05-21T21:00:08.139910+00:00",
-  "session": "after-hours-research",
-  "date": "2026-05-21",
-  "summary": "After-hours research session completed 8 phases. System consensus accuracy at 48.6% (1d) — below coin flip. Root cause: weak signals diluting strong ones in combination. Disabled credit_spread_risk (23% blended). Added blended accuracy to agent_summary for audit visibility. 9 new signal candidates added to backlog. Monthly seasonality data added to profiles.",
-  "system_state": {
-    "regime": "ranging (96%)",
-    "consensus_1d_accuracy": 0.486,
-    "active_signals": 16,
-    "disabled_signals": 50,
-    "critical_errors": 11,
-    "critical_errors_breakdown": {
-      "accuracy_degradation": 2,
-      "contract_violation": 7,
-      "avanza_account_mismatch": 1,
-      "layer2_auth": 1
-    }
+  "date": "2026-05-22",
+  "generated_at": "2026-05-22T20:59:16.076575+00:00",
+  "session_type": "after-hours-research",
+  "headline": "Ranging markets, all HOLD. Three code improvements shipped: catastrophic accuracy floor, drift_regime_gate re-enabled, contract violation noise suppressed.",
+  "system_status": {
+    "loop_uptime_h": 14.5,
+    "cycles": 87,
+    "errors": 0,
+    "active_signals": 18,
+    "disabled_signals": 48,
+    "layer2_invocations_today": 56,
+    "layer2_success_rate": "30.4%",
+    "journal_entries_today": 29
   },
-  "positions": {
+  "portfolio_snapshot": {
     "patient": {
-      "XAG-USD": "2.556 oz @ $86.43 avg (-13.2%)",
-      "BTC-USD": "0.01225 BTC dust (post 50% exit)",
-      "cash_pct": "~96%"
+      "status": "HOLD",
+      "positions": "BTC 0.0123sh, XAG 2.56oz",
+      "drawdown": "3.4%",
+      "notes": "BTC oversold (RSI 18-28) but 20.4% 3d track record. XAG 82% bullish 3d prob but ranging."
     },
-    "bold": "DORMANT"
-  },
-  "implementation": {
-    "batch_1": {
-      "action": "Disabled credit_spread_risk",
-      "rationale": "23% blended accuracy (0.90x20% recent + 0.10x50% alltime)",
-      "files": [
-        "portfolio/tickers.py",
-        "tests/test_signal_engine.py"
-      ]
-    },
-    "batch_2": {
-      "action": "9 new signal candidates + monthly seasonality",
-      "candidates": [
-        "real_yield_level_velocity (XAG/XAU, 7.5)",
-        "cot_adx_trend_gate (XAG/XAU, 7.25)",
-        "slv_etf_flow_zscore (XAG, 6.7)",
-        "eth_exchange_netflow_zscore (ETH, 7.3)",
-        "eth_btc_ratio_roc_zscore (ETH, 7.85)",
-        "defi_tvl_price_divergence (ETH, 7.4)",
-        "funding_rate_extreme_contrarian (BTC/ETH, 7.25)",
-        "eth_upgrade_calendar (ETH, 7.0)",
-        "monthly_seasonality_confidence (all, 7.2)"
-      ],
-      "files": [
-        "data/signal_research_backlog.jsonl",
-        "data/seasonality_profiles.json"
-      ]
-    },
-    "batch_3": {
-      "action": "Blended accuracy in agent_summary",
-      "rationale": "Makes runtime gate state visible — alltime can show 54% while blended is 23%",
-      "files": [
-        "portfolio/reporting.py"
-      ]
+    "bold": {
+      "status": "DORMANT",
+      "positions": "None",
+      "notes": "No breakout conditions met. Ranging regime."
     }
   },
-  "research_highlights": {
-    "macro": {
-      "fomc": "Hawkish minutes, Kevin Warsh as new chair",
-      "oil": "WTI $99.5, elevated",
-      "gold": "$4,517",
-      "silver": "$76.68 (-13.1% from avg cost)",
-      "key_risk": "Iran deal whipsaw (bogus headline)"
+  "market_context": {
+    "regime": "ranging",
+    "vix": "moderate",
+    "dxy": "99.39 (+0.30%)",
+    "us_markets": "CLOSED Sat-Mon (Memorial Day)",
+    "key_levels": {
+      "BTC": "Support $74-76K, Resistance $78-82.5K",
+      "XAG": "Support $75-78, Resistance $83",
+      "XAU": "Support $4,400-4,460, Resistance $4,580-4,590",
+      "ETH": "Support $2,050-2,080, Resistance $2,200-2,400"
     },
-    "quant": {
-      "top_priority": "IR-based signal weighting (proportional weights by Information Ratio)",
-      "regime": "BOCPD (Bayesian Online Changepoint Detection) for faster regime switching",
-      "debate": "Structured Bull/Bear debate in Layer 2 prompt (TradingAgents, ICML 2025)"
-    },
-    "signal_audit": {
-      "worst_blended": [
-        "credit_spread_risk: 23% (DISABLED)",
-        "ministral: 33% at 1d (BUT 62.6% at 3h — horizon divergence)",
-        "crypto_macro: 36.3%",
-        "econ_calendar: 42.1%",
-        "momentum_factors: 44% at 1d (BUT 60.1% at 3h)"
-      ],
-      "best_recent": [
-        "qwen3: 69.4%",
-        "fear_greed: 58.6%",
-        "rsi: 61.1%",
-        "on_chain_btc: 60.0%"
-      ],
-      "survivorship_bias": "heikin_ashi 82.2% recent — but only votes during 4% non-ranging time"
-    },
-    "ticker_deep_dives": {
-      "XAG": {
-        "top_enhancers": [
-          "G/S ratio ML regime filter (SSRN 5710242, Sharpe 0.3->0.73)",
-          "Real yield level+velocity (not just direction)",
-          "COT with ADX trend-strength gate"
-        ],
-        "seasonality": "Jan/Jul strongest, Jun/Sep weakest"
-      },
-      "ETH": {
-        "gap": "Zero ETH-specific on-chain data (BTC has MVRV/SOPR/NUPL/netflow)",
-        "top_enhancers": [
-          "ETH exchange netflow z-score (10yr low at 19M ETH)",
-          "ETH/BTC ratio ROC z-score (rotation signal)",
-          "DeFi TVL growth divergence vs price"
-        ]
-      }
-    }
+    "weekend_risks": [
+      "Iran/Hormuz headline risk - only crypto/FX live",
+      "Thin weekend liquidity amplifies moves",
+      "BTC weekend moves = MSTR gap risk Tuesday"
+    ]
   },
-  "deferred_to_backlog": [
-    "IR-based signal weighting (3d effort, HIGH impact)",
-    "BOCPD regime detection (2d effort, HIGH impact)",
-    "Structured Bull/Bear debate in Layer 2 (1d effort, HIGH impact)",
-    "LightGBM meta-learner for metals (3d effort, MEDIUM-HIGH)",
-    "Composite on-chain BTC meta-model (3d effort, HIGH)",
-    "Regime gate audit with current data (stale since Apr 2)"
+  "improvements_shipped": [
+    {
+      "title": "drift_regime_gate re-enabled",
+      "impact": "18th active signal. 66.5% recent accuracy (651 sam). Best regime filter available.",
+      "commit": "2827a066"
+    },
+    {
+      "title": "Catastrophic accuracy floor (35%, 15 sam)",
+      "impact": "Catches signals like Ministral (34.8% recent, 23 sam) that escape the standard 30-sample blend gate. Prevents harmful signals from diluting consensus.",
+      "commit": "f703f44c"
+    },
+    {
+      "title": "Contract violation suppression for known failures",
+      "impact": "Reduces critical error noise from incomplete/auth_error invocations (were 19 unresolved). Contract still fires on genuine silent failures.",
+      "commit": "e5bd47c1"
+    }
   ],
-  "next_actions": [
-    "Morning: verify loop picked up credit_spread_risk disable (check agent_summary)",
-    "Morning: check if blended accuracy field appears in new summaries",
-    "This week: implement IR-based signal weighting (top quant recommendation)",
-    "This week: regime gate audit with May data (gates set Apr 2, now stale)"
+  "deferred_improvements": [
+    {
+      "title": "IC-based signal weighting",
+      "priority": 1,
+      "effort_days": 3,
+      "reason": "Needs rolling IC computation infrastructure"
+    },
+    {
+      "title": "mRMR signal redundancy analysis",
+      "priority": 2,
+      "effort_days": 1,
+      "reason": "One-time analysis, safe to run anytime"
+    },
+    {
+      "title": "Volatility-targeted position sizing",
+      "priority": 3,
+      "effort_days": 2,
+      "reason": "Requires risk_management.py refactor"
+    },
+    {
+      "title": "Regime-conditioned signal weights",
+      "priority": 4,
+      "effort_days": 5,
+      "reason": "Needs HMM regime classifier first"
+    },
+    {
+      "title": "Structured bull/bear Layer 2 prompt",
+      "priority": 5,
+      "effort_days": 1,
+      "reason": "Low risk, can ship next session"
+    }
+  ],
+  "accuracy_concerns": [
+    "Per-ticker consensus barely above 50% for all Tier-1 instruments",
+    "12 signals dropped >15pp in accuracy (degradation alerts)",
+    "Funding rate at 30.8% is actively harmful - should be permanently retired",
+    "vwap_zscore_mr at 72.9% (59 sam) is promising but needs more data"
+  ],
+  "next_session_priorities": [
+    "Run mRMR redundancy analysis on signal_log.db (1-day effort, immediate insight)",
+    "Implement bull/bear structured prompt for Layer 2 (1-day, reduces confident-wrong failures)",
+    "Evaluate shadow signals with >100 samples for promotion",
+    "Monitor drift_regime_gate live accuracy after re-enablement"
   ]
 }
