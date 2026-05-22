@@ -386,38 +386,37 @@ def prune_jsonl(path, max_entries=5000):
     Returns the number of entries removed, or 0 if no pruning was needed.
     """
     path = Path(path)
-    lines = []
-    try:
-        f = open(path, encoding="utf-8")
-    except FileNotFoundError:
-        return 0
-    with f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            # Validate JSON to avoid preserving corrupt partial lines
-            try:
-                json.loads(stripped)
-                lines.append(stripped)
-            except json.JSONDecodeError:
-                logger.warning("prune_jsonl: skipping malformed line in %s", path.name)
-    if len(lines) <= max_entries:
-        return 0
-    removed = len(lines) - max_entries
-    keep = lines[-max_entries:]
-    # Atomic rewrite via tempfile
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for line in keep:
-                f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, str(path))
-    except BaseException:
-        with suppress(OSError):
-            os.unlink(tmp)
-        raise
+    with jsonl_sidecar_lock(path):
+        lines = []
+        try:
+            f = open(path, encoding="utf-8")
+        except FileNotFoundError:
+            return 0
+        with f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    json.loads(stripped)
+                    lines.append(stripped)
+                except json.JSONDecodeError:
+                    logger.warning("prune_jsonl: skipping malformed line in %s", path.name)
+        if len(lines) <= max_entries:
+            return 0
+        removed = len(lines) - max_entries
+        keep = lines[-max_entries:]
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for line in keep:
+                    f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, str(path))
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp)
+            raise
     logger.info("Pruned %s: removed %d entries, kept %d", path.name, removed, max_entries)
     return removed

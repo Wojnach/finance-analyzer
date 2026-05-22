@@ -730,9 +730,7 @@ def evaluate_warrants(
             if direction == "LONG" and spot <= barrier:
                 continue  # knocked out
             if direction == "SHORT" and spot >= barrier:
-                # BEAR MINIs get knocked out if underlying goes above barrier
-                # (depends on product, but skip if too close)
-                pass
+                continue  # knocked out
             barrier_distance = abs(spot - barrier) / spot * 100
             if barrier_distance < MIN_BARRIER_DISTANCE_PCT:
                 continue
