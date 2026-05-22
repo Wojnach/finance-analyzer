@@ -36,6 +36,10 @@
   color: var(--tx);
   text-transform: uppercase;
   letter-spacing: 0.8px;
+  /* Long unbroken IDs (e.g. XAG_USD_SENTIMENT_..._SUSTAINED) must wrap
+   * inside the bracketed header instead of overflowing the card. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* Bracketed panel header — terminal reskin 2026-05-22 */
 .card__title::before { content: "[ "; color: var(--txm); }
