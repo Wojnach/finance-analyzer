@@ -674,7 +674,10 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
         tier=_agent_tier or fallback_tier,
     )
 
-    _agent_proc = None
+    if kill_ok:
+        _agent_proc = None
+    else:
+        logger.error("Kill failed for pid=%s — keeping _agent_proc to block respawn", pid)
     return kill_ok
 
 

@@ -2343,11 +2343,11 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # downweighted signals lose Top-N slots to healthier peers during a
     # macro window. Without this, sentiment can keep its slot at full
     # raw accuracy and exclude a peer that would have voted more reliably.
-    def _topn_accuracy_key(s: str) -> float:
+    def _topn_accuracy_key(s: str) -> tuple[float, str]:
         base = float(accuracy_data.get(s, {}).get("accuracy", 0.5))
         if macro_active and s in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
             base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
-        return base
+        return (base, s)
 
     active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
     if max_signals and len(active_votes) > max_signals:
@@ -2839,10 +2839,14 @@ def _compute_adx(df, period=14):
     if df is None or not isinstance(df, pd.DataFrame) or len(df) < period * 2:
         return None
 
+    n = len(df)
     df_id = (
-        len(df),
-        float(df["close"].iloc[0]) if len(df) > 0 else 0.0,
-        float(df["close"].iloc[-1]) if len(df) > 0 else 0.0,
+        n,
+        float(df["close"].iloc[0]) if n > 0 else 0.0,
+        float(df["close"].iloc[n // 2]) if n > 1 else 0.0,
+        float(df["close"].iloc[-1]) if n > 0 else 0.0,
+        float(df["high"].max()) if n > 0 else 0.0,
+        float(df["low"].min()) if n > 0 else 0.0,
     )
     with _adx_lock:
         if df_id in _adx_cache:
