@@ -1508,8 +1508,8 @@ def _check_agent_completion_locked():
                     "status": "incomplete",
                     "tier": _agent_tier,
                     "duration_s": duration_s,
-                    "decisions": {"patient": {"action": "HOLD", "reasoning": "Agent completed without decision (incomplete run)"},
-                                  "bold": {"action": "HOLD", "reasoning": "Agent completed without decision (incomplete run)"}},
+                    "decisions": {"patient": {"action": "NO_DECISION", "reasoning": "Agent completed without decision (incomplete run)"},
+                                  "bold": {"action": "NO_DECISION", "reasoning": "Agent completed without decision (incomplete run)"}},
                     "tickers": {},
                 }
                 atomic_append_jsonl(JOURNAL_FILE, stub_entry)

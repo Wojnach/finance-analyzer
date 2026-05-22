@@ -170,7 +170,7 @@ _TRADING_MINUTES = {
     "stock": 390,      # 6.5h
     "crypto": 1440,    # 24h
 }
-_TRADING_DAYS_PER_YEAR = 252
+_TRADING_DAYS_PER_YEAR = 365
 _MIN_VOLATILITY = 0.05  # 5% annualized floor
 
 
@@ -179,9 +179,8 @@ def _estimate_volatility(market: MarketSnapshot) -> float:
     if market.volatility_annual and market.volatility_annual > _MIN_VOLATILITY:
         return market.volatility_annual
     if market.atr_pct and market.atr_pct > 0:
-        # Convert ATR% (14-period) to annualized vol
         atr_frac = market.atr_pct / 100.0
-        return max(atr_frac * math.sqrt(252.0 / 14), _MIN_VOLATILITY)
+        return max(atr_frac * math.sqrt(float(_TRADING_DAYS_PER_YEAR) / 14), _MIN_VOLATILITY)
     return 0.20  # Default 20% annual vol
 
 

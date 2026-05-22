@@ -86,7 +86,7 @@ def load_json(path, default=None):
     except OSError:
         # BUG-139: PermissionError (file locked by antivirus/another process)
         # and other OS-level errors should degrade gracefully like missing files.
-        logger.debug("load_json: OS error reading %s, returning default", path.name)
+        logger.warning("load_json: OS error reading %s, returning default", path.name)
         return default
     except (json.JSONDecodeError, ValueError):
         # H35: Log corruption so it's observable — silent defaults hide data loss.

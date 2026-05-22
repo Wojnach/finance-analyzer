@@ -31,6 +31,19 @@ DEFAULT_N_PATHS = 10_000   # 5K pairs with antithetic variates
 DEFAULT_HORIZONS = [1, 3]  # days
 MIN_VOLATILITY = 0.05      # 5% annualized floor (prevents degenerate sims)
 
+TRADING_DAYS_CRYPTO = 365
+TRADING_DAYS_METALS = 365
+TRADING_DAYS_STOCKS = 252
+
+
+def trading_days_for_ticker(ticker: str) -> int:
+    from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
+    if ticker in CRYPTO_SYMBOLS:
+        return TRADING_DAYS_CRYPTO
+    if ticker in METALS_SYMBOLS:
+        return TRADING_DAYS_METALS
+    return TRADING_DAYS_STOCKS
+
 # Per-asset-class ATR fallbacks when actual ATR is missing from signals.
 # The generic 2.0% underestimates tail risk for crypto/metals.
 _ATR_DEFAULT_BY_CLASS = {
@@ -44,56 +57,40 @@ _ATR_DEFAULT_BY_CLASS = {
 # Volatility & drift estimation from existing system data
 # ---------------------------------------------------------------------------
 
-def volatility_from_atr(atr_pct: float, period: int = 14) -> float:
+def volatility_from_atr(atr_pct: float, period: int = 14, trading_days: int = 365) -> float:
     """Convert ATR% (14-period) to annualized volatility.
-
-    ATR measures average true range over `period` candles. For hourly candles
-    (our primary timeframe), we annualize: vol = atr_frac * sqrt(trading_periods/period).
-
-    Uses 252 trading days (standard for stocks/crypto).
 
     Args:
         atr_pct: ATR as percentage of price (e.g., 3.5 means 3.5%).
         period: ATR lookback period (default 14).
+        trading_days: Trading days per year (365 for crypto/metals, 252 for stocks).
 
     Returns:
         Annualized volatility as a decimal (e.g., 0.20 = 20%).
     """
     atr_frac = atr_pct / 100.0
-    annual_factor = math.sqrt(252.0 / period)
+    annual_factor = math.sqrt(float(trading_days) / period)
     vol = atr_frac * annual_factor
     return max(vol, MIN_VOLATILITY)
 
 
-def drift_from_probability(p_up: float, volatility: float) -> float:
+def drift_from_probability(p_up: float, volatility: float, trading_days: int = 365) -> float:
     """Convert directional probability P(up) into annualized drift.
 
     Uses the inverse of the GBM CDF relationship:
         P(S_T > S_0) = N((mu - 0.5*sigma^2)*sqrt(T) / (sigma*sqrt(T)))
 
-    For 1-day horizon (T = 1/252):
-        mu = sigma * N_inv(p_up) * sqrt(252) + 0.5 * sigma^2
-
-    This ensures the GBM simulation produces paths where the fraction
-    ending above spot matches the input probability.
-
     Args:
         p_up: Probability of price being higher at horizon (0.0-1.0).
         volatility: Annualized volatility (decimal).
+        trading_days: Trading days per year (365 for crypto/metals, 252 for stocks).
 
     Returns:
         Annualized drift (decimal). Positive = upward bias.
     """
-    # Clamp p_up to avoid infinite drift at extremes
     p_up = max(0.01, min(0.99, p_up))
-
-    # N_inv(p_up) gives the z-score for the desired probability
     z = norm.ppf(p_up)
-
-    # mu = sigma * z * sqrt(252) + 0.5 * sigma^2
-    # This is derived from P(S_T > S_0) = N((mu - 0.5*sigma^2)*sqrt(T) / sigma*sqrt(T))
-    mu = volatility * z * math.sqrt(252.0) + 0.5 * volatility**2
-
+    mu = volatility * z * math.sqrt(float(trading_days)) + 0.5 * volatility**2
     return mu
 
 
@@ -128,13 +125,14 @@ class MonteCarloEngine:
 
     def __init__(self, price: float, volatility: float, drift: float = 0.0,
                  horizon_days: float = 1.0, n_paths: int = DEFAULT_N_PATHS,
-                 seed: int | None = None):
+                 seed: int | None = None, trading_days: int = 365):
         self.price = price
         self.volatility = max(volatility, MIN_VOLATILITY)
         self.drift = drift
         self.horizon_days = horizon_days
         self.n_paths = n_paths
         self.seed = seed
+        self.trading_days = trading_days
         self._terminal_prices = None
 
     def simulate_paths(self) -> np.ndarray:
@@ -151,7 +149,7 @@ class MonteCarloEngine:
         """
         rng = np.random.default_rng(self.seed)
 
-        T = self.horizon_days / 252.0  # Convert to years
+        T = self.horizon_days / float(self.trading_days)
         sigma = self.volatility
         mu = self.drift
 
@@ -298,13 +296,10 @@ def simulate_ticker(ticker: str, agent_summary: dict,
     extra = ticker_data.get("extra", {})
     atr_pct = extra.get("atr_pct") or ticker_data.get("atr_pct") or _atr_default_for_ticker(ticker)
 
-    # Get volatility from ATR
-    vol = volatility_from_atr(atr_pct)
-
-    # Get directional probability for drift
-    # Try to use existing probability computation if available
+    td = trading_days_for_ticker(ticker)
+    vol = volatility_from_atr(atr_pct, trading_days=td)
     p_up = _get_directional_probability(ticker, ticker_data, agent_summary)
-    drift = drift_from_probability(p_up, vol)
+    drift = drift_from_probability(p_up, vol, trading_days=td)
 
     # Compute ATR-based stop level (2x ATR below entry/current)
     stop_price = price * (1 - 2 * atr_pct / 100)
@@ -321,6 +316,7 @@ def simulate_ticker(ticker: str, agent_summary: dict,
             horizon_days=h,
             n_paths=n_paths,
             seed=seed,
+            trading_days=td,
         )
         mc.simulate_paths()
 

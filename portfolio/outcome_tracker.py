@@ -455,7 +455,7 @@ def backfill_outcomes(max_entries=2000):
                 if now_ts < target_ts:
                     continue
 
-                cache_key = (ticker, int(target_ts // 3600))
+                cache_key = (ticker, int(target_ts // 60))
                 if cache_key not in price_cache:
                     try:
                         price_cache[cache_key] = _fetch_historical_price(
@@ -469,7 +469,7 @@ def backfill_outcomes(max_entries=2000):
                     continue
 
                 change_pct = round(
-                    ((hist_price - base_price) / base_price) * 100, 2
+                    ((hist_price - base_price) / base_price) * 100, 4
                 )
 
                 outcome_ts_str = datetime.fromtimestamp(

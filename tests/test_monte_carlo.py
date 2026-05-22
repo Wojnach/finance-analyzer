@@ -176,9 +176,11 @@ class TestProbabilities:
     def test_stop_loss_probability_increases_with_vol(self):
         from portfolio.monte_carlo import MonteCarloEngine
         mc_low = MonteCarloEngine(price=100.0, volatility=0.10, drift=0.0,
-                                  horizon_days=1, n_paths=10000, seed=42)
+                                  horizon_days=1, n_paths=10000, seed=42,
+                                  trading_days=252)
         mc_high = MonteCarloEngine(price=100.0, volatility=0.50, drift=0.0,
-                                   horizon_days=1, n_paths=10000, seed=42)
+                                   horizon_days=1, n_paths=10000, seed=42,
+                                   trading_days=252)
         mc_low.simulate_paths()
         mc_high.simulate_paths()
         p_low = mc_low.probability_below(90.0)   # 10% stop

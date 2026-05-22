@@ -201,6 +201,7 @@ class PortfolioRiskSimulator:
         self.n_paths = n_paths
         self.df = df
         self.seed = seed
+        self._trading_days = 365
 
         self._returns = None  # (n_paths, n_assets) log-returns
         self._pnl = None      # (n_paths,) portfolio P&L in USD
@@ -224,7 +225,7 @@ class PortfolioRiskSimulator:
             return self._returns
 
         rng = np.random.default_rng(self.seed)
-        T = self.horizon_days / 252.0
+        T = self.horizon_days / float(getattr(self, '_trading_days', 365))
 
         # Step 1: Cholesky decomposition
         try:
@@ -422,12 +423,13 @@ def compute_portfolio_var(
 
         extra = ticker_data.get("extra", {})
         atr_pct = extra.get("atr_pct") or ticker_data.get("atr_pct", 2.0)
-        vol = volatility_from_atr(atr_pct)
+        from portfolio.monte_carlo import trading_days_for_ticker
+        td = trading_days_for_ticker(ticker)
+        vol = volatility_from_atr(atr_pct, trading_days=td)
 
-        # Get directional probability for drift
         from portfolio.monte_carlo import _get_directional_probability
         p_up = _get_directional_probability(ticker, ticker_data, agent_summary)
-        drift = drift_from_probability(p_up, vol)
+        drift = drift_from_probability(p_up, vol, trading_days=td)
 
         tickers.append(ticker)
         positions[ticker] = {

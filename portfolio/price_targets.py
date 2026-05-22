@@ -37,7 +37,7 @@ def _is_24h(ticker: str) -> bool:
 def _year_fraction(hours: float, is_24h: bool = True) -> float:
     """Convert hours to year fraction for GBM."""
     if is_24h:
-        return hours / (252.0 * 24.0)
+        return hours / (365.0 * 24.0)
     return hours / (252.0 * 6.5)
 
 
@@ -328,11 +328,13 @@ def compute_targets(ticker: str, side: str, price_usd: float,
     if hours_remaining <= 0 or price_usd <= 0 or atr_pct <= 0:
         return result
 
-    vol = volatility_from_atr(atr_pct)
+    from portfolio.monte_carlo import trading_days_for_ticker
+    td = trading_days_for_ticker(ticker)
+    vol = volatility_from_atr(atr_pct, trading_days=td)
     if side == "buy":
-        drift = drift_from_probability(1.0 - p_up, vol)
+        drift = drift_from_probability(1.0 - p_up, vol, trading_days=td)
     else:
-        drift = drift_from_probability(p_up, vol)
+        drift = drift_from_probability(p_up, vol, trading_days=td)
 
     # Blend Chronos drift when available
     if chronos_drift is not None:
@@ -508,7 +510,7 @@ def compute_all_targets(agent_summary: dict, portfolio_states: dict,
         chronos_conf = fc_data.get("chronos_24h_conf", 0)
         if isinstance(chronos_conf, (int, float)) and chronos_conf > 0.3 \
                 and isinstance(chronos_pct, (int, float)) and chronos_pct != 0:
-            chronos_drift_val = (chronos_pct / 100.0) * math.sqrt(252)
+            chronos_drift_val = (chronos_pct / 100.0) * math.sqrt(365)
 
         # BB squeeze detection
         vol_ind = extra.get("volatility_sig_indicators", {})
