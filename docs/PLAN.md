@@ -1,60 +1,77 @@
-# /fgl Adversarial Review Plan — 2026-05-21
+# PLAN — Full Adversarial Codebase Review (FGL protocol)
 
-## Goal
-Full adversarial review of `finance-analyzer` at `b39f5b3e`. Partition codebase into 8 subsystems, run parallel fresh-context Claude Code review subagents alongside a lead independent pass. Cross-critique. Ship synthesis doc only — no code changes.
+**Date:** 2026-05-22 (Fri)
+**Type:** Read-only adversarial review. Ships ZERO production code — only review docs.
+**Trigger:** `/fgl` — "full adversarial review of finance-analyzer, partition into 8 subsystems."
 
-## Baseline SHA
-`b39f5b3e68b759472fe6f648c8bf1baa1195aa78` (main, 2026-05-21)
+## Objective
 
-## Subsystem Partition
+Adversarially review the entire `finance-analyzer` codebase for bugs, silent-failure
+modes, money-math errors, concurrency races, and contract violations. Produce a
+synthesis document with severity-ranked findings. No code is changed this session —
+findings feed the next implementation session and `docs/IMPROVEMENT_BACKLOG.md`.
 
-| # | Name | Scope | Reviewer Agent |
-|---|------|-------|----------------|
-| 1 | signals-core | `signal_engine.py`, `signal_registry.py`, `signal_weights.py`, `signal_utils.py`, `signal_history.py`, `signal_state_since.py`, `signal_postmortem.py`, `signal_weight_optimizer.py`, `train_signal_weights.py`, `ic_computation.py`, `accuracy_stats.py`, `outcome_tracker.py`, `forecast_accuracy.py`, `meta_learner.py` | pr-review-toolkit:code-reviewer |
-| 2 | orchestration | `main.py`, `agent_invocation.py`, `trigger.py`, `market_timing.py`, `claude_gate.py`, `autonomous.py`, `reporting.py`, `journal.py`, `journal_index.py`, `loop_health.py`, `health.py`, `crypto_scheduler.py`, `circuit_breaker.py` | pr-review-toolkit:code-reviewer |
-| 3 | portfolio-risk | `portfolio_mgr.py`, `portfolio_validator.py`, `trade_guards.py`, `risk_management.py`, `equity_curve.py`, `monte_carlo.py`, `monte_carlo_risk.py`, `exit_optimizer.py`, `price_targets.py`, `warrant_portfolio.py`, `cost_model.py`, `trade_risk_classifier.py` | pr-review-toolkit:code-reviewer |
-| 4 | metals-core | `data/metals_loop.py`, `portfolio/metals_*.py`, `portfolio/fin_snipe*.py`, `portfolio/grid_fisher.py`, `portfolio/silver_precompute.py`, `portfolio/gold_precompute.py`, `portfolio/orb_*.py`, `portfolio/iskbets.py`, `portfolio/fin_fish.py`, `portfolio/fish_*.py`, `portfolio/metals_ladder.py` | pr-review-toolkit:code-reviewer |
-| 5 | avanza-api | `avanza_session.py`, `avanza_orders.py`, `avanza_client.py`, `avanza_account_check.py`, `avanza_control.py`, `avanza_resilient_page.py`, `avanza_tracker.py`, `avanza_order_lock.py` | caveman:cavecrew-reviewer |
-| 6 | signals-modules | `portfolio/signals/*.py` (65 modules) | pr-review-toolkit:code-reviewer |
-| 7 | data-external | `data_collector.py`, `fear_greed.py`, `sentiment.py`, `alpha_vantage.py`, `futures_data.py`, `onchain_data.py`, `fx_rates.py`, `news_keywords.py`, `earnings_calendar.py`, `econ_dates.py`, `funding_rate.py`, `crypto_macro_data.py`, `fomc_dates.py`, `bert_sentiment.py` | pr-review-toolkit:code-reviewer |
-| 8 | infrastructure | `file_utils.py`, `http_retry.py`, `gpu_gate.py`, `shared_state.py`, `message_throttle.py`, `message_store.py`, `api_utils.py`, `logging_config.py`, `feature_normalizer.py`, `telegram_*.py`, `dashboard/app.py`, `data_refresh.py` | pr-review-toolkit:code-reviewer |
+## Subsystem partition (8)
 
-## Workflow
+| # | Subsystem | Scope | Reviewer agent |
+|---|-----------|-------|----------------|
+| 1 | signals-core | vote aggregation, accuracy gating, weighting, IC | pr-review-toolkit:code-reviewer |
+| 2 | orchestration | main loop, Layer 2 subprocess, triggers, escalation | pr-review-toolkit:code-reviewer |
+| 3 | portfolio-risk | portfolio state, sizing, risk mgmt, monte carlo, exits | pr-review-toolkit:code-reviewer |
+| 4 | metals-core | metals/oil/crypto loops, warrants, fishing, grid | pr-review-toolkit:code-reviewer |
+| 5 | avanza-api | broker client, BankID auth, order flow, locks | caveman:cavecrew-reviewer |
+| 6 | signals-modules | 64 signal plugins + LLM signal adapters | caveman:cavecrew-reviewer |
+| 7 | data-external | market data fetchers, sentiment, FX, precompute | caveman:cavecrew-reviewer |
+| 8 | infrastructure | atomic I/O, locks, health, notifications, dashboard | pr-review-toolkit:code-reviewer |
 
-1. Create worktree `worktrees/review-2026-05-21` at `b39f5b3e`. Single shared worktree (read-only review, no per-subsystem branches needed because reviews are docs-only).
-2. Spawn 8 subagents in single message (parallel). Each receives:
-   - The subsystem file list
-   - Severity bands (P0 incident-level, P1 must-fix, P2 should-fix, P3 nit)
-   - Output path: `docs/reviews/2026-05-21/<subsystem>.md`
-   - Constraint: read-only, no code edits
-   - Format: `path:line: <severity>: <problem>. <fix>.`
-3. While subagents run, lead writes independent pass at `docs/reviews/2026-05-21/lead-review.md`.
-4. Collect, dedup, cross-critique. Write `docs/reviews/2026-05-21/synthesis.md` with:
-   - Top 10 P0/P1 findings (severity-ranked, with cross-reviewer consensus)
-   - Unique findings per reviewer
-   - Findings the lead missed
-   - Findings subagents missed but lead caught
-   - Backlog feed (P2/P3 -> `docs/IMPROVEMENT_BACKLOG.md` deltas)
-5. Commit all docs to `main`. Push via `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`.
-6. Clean up worktree.
+## Execution
 
-## What Could Break
+1. **Worktree + empty-baseline branches.** Create one worktree (`Q:/fa-review-wt`).
+   In it: orphan branch `review/empty` (empty tree) + 8 branches `review/sub-<name>`,
+   each = empty baseline + that subsystem's files. `git diff review/empty review/sub-X`
+   then renders the whole subsystem as a reviewable diff for diff-oriented agents.
+2. **Spawn 8 background review subagents**, one per subsystem, each told its branch,
+   file list, and the project-specific failure modes to hunt (atomic I/O, exit-0
+   silent failure, subprocess hangs, money rounding, MINI knockout barriers).
+3. **Independent adversarial pass (this agent)** — while subagents run, read the
+   highest-risk files directly. Fresh-eyes findings, not anchored to subagent output.
+4. **Collect** subagent results.
+5. **Cross-critique** — for each subagent finding: confirm / downgrade / reject with
+   reasoning. For each independent finding: check if a subagent caught it too
+   (corroboration raises confidence). Flag disagreements.
+6. **Synthesis doc** → `docs/reviews/2026-05-22-fgl-adversarial-review.md`:
+   severity-ranked (P0/P1/P2/P3), per-subsystem, with file:line, plus a top-N
+   "fix first" list and a corroboration matrix.
+7. **Commit docs to main**, push via Windows git, remove worktree + branches.
 
-- Subagents may time out or produce empty findings. Mitigation: brief them with concrete file lists + line-budget guidance, run in background, collect what returns.
-- Lead pass may drift toward subagent framing if I read subagent output first. Mitigation: lead pass written before collecting subagent results.
-- Cavecrew-reviewer constrained to tight diffs — used only for avanza-api (smallest scope). Larger scopes use pr-review-toolkit:code-reviewer.
+## What could break / risks
+
+- **None to production.** Output is docs only; no prod code, config, or data files
+  are modified. The worktree is isolated and destroyed at the end.
+- **Risk: reviewer false positives.** Mitigation — the cross-critique pass (step 5)
+  is the guard; every reported finding gets independently judged before synthesis.
+- **Risk: context exhaustion** before synthesis. Mitigation — subagents run in
+  background (parallel), output is severity-tagged one-liners (bounded), synthesis
+  is written incrementally.
 
 ## Premortem
 
-Skipped — this is review-only, no code shipped, no Layer 2 behavior change, no atomic-I/O surface. The "what could break" section covers reviewer-process risks. Rationale documented for the protocol auditor.
+The /fgl protocol mandates an agent-driven premortem for plans that ship code. **This
+plan ships zero production code** — it adds review markdown under `docs/` and creates
+then destroys a throwaway worktree. The premortem's purpose (surface prod-incident
+failure chains: silent loop crash, bad trade, data corruption, accuracy regression,
+auth outage) has no surface area here: no loop code, signal weight, threshold, config,
+or data file is touched. The single residual risk — a stale worktree or `review/*`
+branch left behind — is covered by the explicit cleanup step, verified at the end.
+Formal agent-premortem skipped with that reasoning recorded here; the adversarial
+review itself IS a system-wide premortem of the existing code.
 
-## Execution Order
+## Execution order
 
-1. Commit this plan.
-2. Create worktree.
-3. Spawn 8 subagents (single message, background).
-4. Lead independent review pass (foreground, all 8 subsystems).
-5. Collect subagent results.
-6. Synthesize.
-7. Commit `docs/reviews/2026-05-21/*` + `docs/PLAN.md` to main.
-8. Push, clean up worktree.
+1. PLAN.md commit (this file).
+2. Worktree + 9 branches (1 empty + 8 subsystem).
+3. Spawn 8 background reviewers.
+4. Independent review pass (parallel with 3).
+5. Collect + cross-critique.
+6. Synthesis doc.
+7. Commit docs, push, cleanup.
