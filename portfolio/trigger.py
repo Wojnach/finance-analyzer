@@ -103,7 +103,7 @@ FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 # (≈10 min at 600s cadence, ≈2 min at 60s cadence — both unchanged or better
 # than the old count-only behavior).
 SUSTAINED_CHECKS = 3
-SUSTAINED_DURATION_S = 120
+SUSTAINED_DURATION_S = 900
 
 # Per-ticker flip cooldown (2026-05-08): after a sustained flip fires a Layer 2
 # trigger, suppress further sustained flip triggers for the SAME ticker for
