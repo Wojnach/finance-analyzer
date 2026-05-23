@@ -1,5 +1,23 @@
 # Session Progress
 
+## 2026-05-23 Auto-Improvement Session
+
+**Context:** Autonomous improvement — deep codebase review → 11 bugs in 4 batches.
+Branch `improve/auto-session-2026-05-23`, 5 commits (1 plan + 4 fix batches).
+
+**Batches:**
+
+1. **Signal accuracy** (B1-B3): utility boost bypassing accuracy gate (44%→48.4% rescued noise signals), unanimity using wrong voter counts (post-persistence instead of pre, suppressed metals), ADX KeyError on DataFrames missing high/low columns.
+2. **Agent reliability** (B4-B7): stale specialist reports contaminating multi-agent synthesis, specialist stdin pipe leak (stdin=DEVNULL), stack overflow counter `==` vs `>=` off-by-one, unbounded journal load in Layer 2 (load_jsonl_tail 200 cap).
+3. **Data integrity** (B8-B9): unbounded trigger state growth (flip_cooldowns/sustained_counts never pruned for removed tickers), Binance FAPI futures missing circuit breaker (18 retries per 5-min window during outages).
+4. **Config consolidation** (B10-B11): MARKET_OPEN_HOUR backward compat (already fixed on main), redundant config loads in invoke_agent (2 loads → 1).
+
+**Test results:** 221 modified-file tests pass. 67/10,179 suite failures — all pre-existing on main (verified).
+
+**What's next:** Merge into main, push, restart loops.
+
+---
+
 ## 2026-05-22 Auto-Improvement Session
 
 **Context:** Autonomous improvement session triggered by adversarial review synthesis (300+ findings, 14 P0s).

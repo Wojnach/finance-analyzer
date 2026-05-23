@@ -184,6 +184,12 @@ def _save_state(state):
             logger.info("trigger: pruning %d stale ticker(s) from baseline: %s", len(removed), ", ".join(sorted(removed)))
         pruned = {k: v for k, v in tc.items() if k in current_tickers}
         state["triggered_consensus"] = pruned
+        fc = state.get("flip_cooldowns", {})
+        if fc:
+            state["flip_cooldowns"] = {k: v for k, v in fc.items() if k in current_tickers}
+        sc = state.get("sustained_counts", {})
+        if sc:
+            state["sustained_counts"] = {k: v for k, v in sc.items() if k in current_tickers}
     elif current_tickers is not None and len(current_tickers) == 0:
         logger.warning("trigger: empty ticker set — skipping baseline prune to prevent invocation storm")
     state.pop("_current_tickers", None)  # don't persist internal field

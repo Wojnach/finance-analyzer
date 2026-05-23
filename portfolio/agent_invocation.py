@@ -18,6 +18,7 @@ from portfolio.file_utils import (
     count_jsonl_lines,
     last_jsonl_entry,
     load_jsonl,
+    load_jsonl_tail,
 )
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
@@ -426,7 +427,7 @@ def _build_decision_feedback(ticker, max_entries=5):
     Token budget: ≤15 lines.  Never fails the invocation on error.
     """
     try:
-        entries = load_jsonl(JOURNAL_FILE)
+        entries = load_jsonl_tail(JOURNAL_FILE, max_entries=200)
     except Exception:
         return ""
     if not entries:
@@ -732,15 +733,17 @@ def invoke_agent(reasons, tier=3):
         # all Layer 2 work.
         logger.debug("auth cooldown lookup failed: %s", e)
 
-    # Check if Layer 2 is enabled — allows running data loop without Claude quota
+    # Load config once for all gate checks in this invocation
     try:
         config = _load_config()
-        l2_cfg = config.get("layer2", {})
-        if not l2_cfg.get("enabled", True):
-            logger.info("Layer 2 disabled (config.layer2.enabled=false), skipping")
-            return False
     except Exception as e:
-        logger.warning("Failed to load config for layer2 check: %s", e)
+        logger.warning("Failed to load config: %s", e)
+        config = {}
+
+    l2_cfg = config.get("layer2", {})
+    if not l2_cfg.get("enabled", True):
+        logger.info("Layer 2 disabled (config.layer2.enabled=false), skipping")
+        return False
 
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
     timeout = tier_cfg["timeout"]
@@ -943,11 +946,7 @@ def invoke_agent(reasons, tier=3):
 
     # Multi-agent mode: parallel specialists + synthesis (Coordinator Mode pattern)
     # Enabled via config.layer2.multi_agent = true, only for T2/T3
-    try:
-        config = _load_config()
-        multi_agent = config.get("layer2", {}).get("multi_agent", False)
-    except Exception:
-        multi_agent = False
+    multi_agent = l2_cfg.get("multi_agent", False)
 
     if multi_agent and tier >= 2:
         try:
@@ -1530,7 +1529,7 @@ def _check_agent_completion_locked():
             "Check project root for problematic files or update Claude Code.",
             exit_code, _consecutive_stack_overflows,
         )
-        if _consecutive_stack_overflows == _MAX_STACK_OVERFLOWS:
+        if _consecutive_stack_overflows >= _MAX_STACK_OVERFLOWS:
             logger.error(
                 "Layer 2 auto-disabled after %d consecutive stack overflows",
                 _MAX_STACK_OVERFLOWS,

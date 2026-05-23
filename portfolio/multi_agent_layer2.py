@@ -132,6 +132,8 @@ def launch_specialists(
 
     Returns list of Popen processes. Caller must wait for them.
     """
+    cleanup_reports()
+
     prompts = build_specialist_prompts(ticker, trigger_reasons)
 
     allowed, reason = check_claude_gates(caller="multi_agent_specialist")
@@ -178,6 +180,7 @@ def launch_specialists(
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(BASE_DIR),
+                stdin=subprocess.DEVNULL,
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
                 env=agent_env,
