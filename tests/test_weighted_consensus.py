@@ -869,23 +869,24 @@ class TestDirectionalWeightScaling:
         """Direction-specific weights can flip consensus vs overall accuracy.
 
         Without BUG-182 fix: sig_a BUY weight=0.70, sig_b SELL weight=0.55 → BUY wins.
-        With BUG-182 fix: sig_a BUY weight=0.40 (buy_accuracy), sig_b SELL weight=0.55 → SELL wins.
+        With BUG-182 fix: sig_a BUY weight=0.44 (buy_accuracy), sig_b SELL weight=0.55 → SELL wins.
+        buy_accuracy must be >= directional gate threshold (0.43) to avoid being gated.
         """
         votes = {"sig_a": "BUY", "sig_b": "SELL"}
         acc = {
             "sig_a": {"accuracy": 0.70, "total": 200,
-                      "buy_accuracy": 0.40, "total_buy": 80,
+                      "buy_accuracy": 0.44, "total_buy": 80,
                       "sell_accuracy": 0.85, "total_sell": 120},
             "sig_b": {"accuracy": 0.55, "total": 100,
                       "buy_accuracy": 0.55, "total_buy": 50,
                       "sell_accuracy": 0.55, "total_sell": 50},
         }
         action, conf = _weighted_consensus(votes, acc, "breakout")
-        # sig_a BUY weight = buy_accuracy = 0.40
+        # sig_a BUY weight = buy_accuracy = 0.44
         # sig_b SELL weight = sell_accuracy = 0.55
-        # SELL wins: 0.55 / (0.40 + 0.55) ≈ 0.579
+        # SELL wins: 0.55 / (0.44 + 0.55) ≈ 0.556
         assert action == "SELL"
-        assert conf == pytest.approx(0.55 / 0.95, abs=0.02)
+        assert conf == pytest.approx(0.55 / 0.99, abs=0.02)
 
     def test_directional_zero_accuracy_zeroes_weight(self):
         """A signal with 0% directional accuracy contributes zero weight."""
