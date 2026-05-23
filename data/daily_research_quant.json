@@ -1,130 +1,145 @@
 {
-  "date": "2026-05-21",
-  "generated_at": "2026-05-21T20:42:08.014665+00:00",
+  "date": "2026-05-23",
+  "generated_at": "2026-05-23T14:00:00+02:00",
   "research_topics": [
-    "Signal ensemble methods (MWU, EARCP, PPO alpha weighting, IR-based)",
-    "Regime detection (BOCPD, TDA, HMM-network hybrid)",
-    "Metals-specific models (central bank flows, ML for gold/silver, G/S ratio velocity)",
-    "Crypto-specific models (composite on-chain CNN-LSTM, funding rate microstructure)",
-    "LLM agents for trading (TradingAgents debate framework, TradingGPT layered memory)",
-    "Walk-forward validation (double OOS, CPCV, hypothesis-driven WF)"
+    "Adaptive IC-based signal weighting with PPO reinforcement learning",
+    "Walk-forward optimization with parameterized window lengths",
+    "Regime-adaptive weighted ensemble learning (per-regime signal weights)",
+    "Direction-specific signal gating (BUY-only / SELL-only conditional alpha)",
+    "Hybrid LLM-Transformer price prediction architectures",
+    "Multi-agent bull/bear debate trading systems (TradingAgents v0.2.4)",
+    "QuantBench: standardized AI benchmark for quantitative investment",
+    "Regime-aware stock prediction with autoencoder-gated dual transformers",
+    "Boruta feature selection with CNN-LSTM for crypto prediction",
+    "Conditional asymmetric alpha generation under regime stress"
   ],
   "findings": [
     {
-      "topic": "Signal Combination",
-      "finding": "IR-based signal weighting (FactSet 2026) \u2014 use Information Ratio (IC/IC_vol) as proportional weights, validated over 13 years. Numin paper: utility-weighted MWU updates instead of binary accuracy.",
-      "relevance_to_us": "We have IC infrastructure (ic_computation.py) and MWU (signal_weights.py). Unify into IR-proportional weighting.",
+      "topic": "Adaptive IC-Based Signal Weighting with PPO",
+      "finding": "PPO-based RL dynamically weights alpha signals using rolling IC (Spearman correlation) and IC Ratio (IC mean / IC stddev). New QuantBench benchmark (arxiv 2504.18600) reveals continual learning is critical to address distribution shifts in low signal-to-noise environments. Walk-forward IC with 3/6/12-month rolling steps measures market evolution speed. Our system's equal-weight approach leaves significant edge on the table.",
+      "relevance_to_us": "Direct upgrade path for signal_engine.py _weighted_consensus(). We have ic_computation.py already started. The QuantBench finding about continual learning validates our recency-weighted 70/30 approach but suggests going further: exponential decay with half-life tuned per signal volatility rather than fixed 7-day window.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "FactSet insight paper + arXiv 2412.03167v1"
+      "source": "arxiv 2509.01393, arxiv 2504.18600 (QuantBench)"
     },
     {
-      "topic": "Regime Detection",
-      "finding": "Bayesian Online Changepoint Detection (BOCPD) \u2014 probabilistic regime shift detection, 1-3 bars faster than EMA crossover. Adams-MacKay algorithm is ~100 lines Python.",
-      "relevance_to_us": "Current detect_regime() is rule-based with known lag (BUG-156). BOCPD gives probability of change, not binary.",
+      "topic": "Walk-Forward Optimization with Parameterized Windows",
+      "finding": "Feb 2026 paper (arxiv 2602.10785) demonstrates that walk-forward performance is highly dependent on chosen window sizes — there is no universal optimal window. The authors parameterize training/testing window lengths as hyperparameters and optimize jointly using Robust Sharpe Ratio. A Dec 2025 framework (arxiv 2512.12924) combines hypothesis-driven signal generation with RL and strict OOS testing to prevent overfitting.",
+      "relevance_to_us": "Our Chronos 76%→54% crash was exactly the small-sample illusion these papers address. We should implement walk-forward validation on signal_log.db with parameterized windows per signal. Fast signals (RSI, BB) need shorter windows; slow signals (COT, econ_calendar) need longer ones.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "ACM ICMST 2025 + arXiv 2407.16376"
+      "source": "arxiv 2602.10785, arxiv 2512.12924"
     },
     {
-      "topic": "LLM Trading",
-      "finding": "TradingAgents (UCLA+MIT, ICML 2025) \u2014 7 specialized LLM agents with Bull/Bear debate. Structured debate catches blind spots vs monolithic decisions.",
-      "relevance_to_us": "Our Layer 2 is monolithic Claude invocation. Restructure prompt into debate format without extra API calls.",
+      "topic": "Regime-Adaptive Weighted Ensemble Learning",
+      "finding": "April 2026 paper (arxiv 2604.27207) demonstrates regime-adaptive ensemble where a weight-learning neural network dynamically optimizes inter-model contributions across operating regimes. In financial application (arxiv 2603.04441), parametric regime models produce dramatically lower turnover and smoother weight evolution. Regime inference stability is a first-order determinant of portfolio drawdown. A March 2026 paper (arxiv 2603.19136) achieves 0.59% MAPE with autoencoder-gated dual transformers using regime-adaptive control, outperforming HMM-LSTM at 0.87%.",
+      "relevance_to_us": "Our current regime system uses flat penalty multipliers (0.75x ranging, 0.80x high-vol). The research shows per-regime signal weight sets are dramatically better. RSI/BB/mean_reversion excel in ranging; trend/momentum excel in trending. We could train a simple logistic classifier on [realized_vol, ADX, Hurst_exponent] to select regime-specific weight vectors from a lookup table — no neural net needed for v1.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "arxiv 2604.27207, arxiv 2603.04441, arxiv 2603.19136"
+    },
+    {
+      "topic": "Direction-Specific Signal Gating (BUY-only / SELL-only)",
+      "finding": "Research confirms long signals are generally more accurate than short signals due to equity risk premium, but the asymmetry varies by signal type and asset class. AI-driven frameworks mapping 800+ equities into daily directional signals achieve Sharpe >2.5 by conditionally differentiating high vs low crash probability periods. Conditional alpha generation shows that buy-side and sell-side accuracy should be tracked and gated independently.",
+      "relevance_to_us": "CRITICAL for our system. Qwen3 SELL accuracy is 73.5% but BUY is mediocre. news_event BUY accuracy is 20.5% (anti-signal) but SELL may be fine. We should split accuracy tracking into buy_accuracy and sell_accuracy in accuracy_stats.py and gate each direction independently. A signal could be SELL-only-enabled if sell_accuracy >= 55% but buy_accuracy < 47%. This is a low-effort, high-impact change.",
       "implementation_difficulty": "easy",
       "expected_impact": "high",
-      "source": "arXiv 2412.20138, github.com/TauricResearch/TradingAgents"
+      "source": "arxiv 2509.16707, arxiv 2601.19504"
     },
     {
-      "topic": "Signal Combination",
-      "finding": "EARCP coherence-aware ensemble \u2014 coherence regularization term scales consensus confidence by inter-signal agreement. 12-of-17 agreement != 3-of-5 squeaker.",
-      "relevance_to_us": "Addresses our MIN_VOTERS=3 problem. Would quantify agreement quality, not just quantity.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "arXiv 2603.14651"
-    },
-    {
-      "topic": "Crypto Models",
-      "finding": "Composite on-chain signals with CNN-LSTM achieved 82-84% directional accuracy for BTC cycle positioning. Individual metrics should be combined through ML, not voted independently.",
-      "relevance_to_us": "Our on_chain_btc signal (60% 1d) treats sub-metrics independently. A meta-model could improve to 70%+.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "Engineering Applications of AI 2025, altcointrading.net"
-    },
-    {
-      "topic": "Metals Models",
-      "finding": "Tree-based classifiers (RF, XGBoost) best for precious metals direction. SVR-RBF for gold, ELM for silver. JPM model: 100 tonnes CB buying = 1.7% gold price increase.",
-      "relevance_to_us": "XAG accuracy at 49.2% \u2014 a LightGBM meta-learner on our 12 metals signals could improve to 60%+.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium-high",
-      "source": "IJISRT 2024-2025, JPMorgan commodity research"
-    },
-    {
-      "topic": "Walk-Forward",
-      "finding": "Double out-of-sample walk-forward (arXiv 2602.10785) \u2014 tests 81 window combinations. Performance highly sensitive to window size. Single WF runs can overfit.",
-      "relevance_to_us": "Could determine if our 49 disabled signals genuinely lack alpha or were evaluated in unfavorable windows.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium-high",
-      "source": "arXiv 2602.10785"
-    },
-    {
-      "topic": "Crypto Models",
-      "finding": "Funding rate regime shifts Granger-cause price shocks. Sustained negative funding predicts short squeezes. Should be change-point signal, not level-based.",
-      "relevance_to_us": "Our funding_rate signal is disabled (30.8% at 1d). Retool as regime-transition detector using CUSUM/z-score.",
+      "topic": "Hybrid LLM-Transformer Price Prediction",
+      "finding": "Jan 2026 paper (arxiv 2601.02878) shows hybrid LLM-Transformer reduces RMSE by 5.28% vs vanilla Transformer. LLMs serve as signal generators extracting directional sentiment + confidence scores, fused with structured price features through noise-robust gating. Sentiment-aware approach (arxiv 2508.04975) uses LLMs to generate formulaic alphas from historical features + sentiment. Key insight: LLM as analyst generating structured signals, not as direct price predictor.",
+      "relevance_to_us": "Validates our architecture: Qwen3 and Ministral as signal generators, not direct predictors. But we're missing the noise-robust gating mechanism — when LLM confidence is low, the signal should be automatically suppressed. Our current approach treats all LLM outputs equally. Adding a confidence threshold gate (suppress when LLM self-reported confidence < 60%) would reduce noise from uncertain LLM calls.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "MDPI Finance 2025"
+      "source": "arxiv 2601.02878, arxiv 2508.04975"
+    },
+    {
+      "topic": "Multi-Agent Bull/Bear Debate (TradingAgents v0.2.4)",
+      "finding": "TradingAgents now at 51K+ GitHub stars. BlackRock + Columbia University (Apr 2026) published Three-Layer Multi-Agent Framework: dedicated Bull agents, Bear agents, Risk Supervisor — consistently outperforms single-model LLMs. Framework uses deep_think_llm for Bull/Bear debate agents and quick_think_llm for analyst agents. India-trade-cli (Vibe Trading) shows 7 parallel analyst agents + debate for NSE/BSE. Key: adversarial debate among LLM agents improves reasoning quality.",
+      "relevance_to_us": "Layer 2 is a single Claude invocation. Cheapest win: restructure the prompt to require explicit bull_case, bear_case, and risk_check JSON sections before verdict. Medium-term: spawn two Claude subprocess calls (bull advocate + bear advocate) and a third synthesizer. The BlackRock paper validates this approach at institutional scale.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "medium",
+      "source": "github.com/TauricResearch/TradingAgents, BlackRock+Columbia Apr 2026, github.com/hopit-ai/india-trade-cli"
+    },
+    {
+      "topic": "Boruta Feature Selection for Crypto ML",
+      "finding": "Combining Boruta feature selection with CNN-LSTM achieves 82.44% accuracy for BTC direction prediction. 2026 ACM paper on multimodal BTC forecasting found technical indicators (MA, BB, MACD, short lags) dominated per SHAP analysis, while on-chain and sentiment contributed mainly during shocks/news. Five modalities: market data, on-chain, Fear & Greed, news, Reddit. Key finding: price-related features dominate; blockchain/sentiment features have negligible marginal contribution in normal conditions.",
+      "relevance_to_us": "Our on-chain signal is at 60% (45 samples) — consistent with research showing on-chain contributes mainly during regime shifts. We should weight on-chain higher during high-volatility regimes and lower during calm periods. Also validates keeping Fear & Greed as active (58.6% accuracy, 10K samples — our best-sampled high-accuracy signal).",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "ScienceDirect (Boruta+CNN-LSTM), ACM 2026 (doi:10.1145/3777490.3777508)"
+    },
+    {
+      "topic": "Conditional Asymmetric Alpha Under Regime Stress",
+      "finding": "Regime-aware strategies that conditionally differentiate high vs low crash probability periods achieve asymmetric P&L: retaining gains in normal conditions while mitigating losses during stress. The ComSIA 2026 paper (arxiv 2601.19504) demonstrates a hybrid AI system integrating technical analysis, ML, and sentiment for regime-adaptive equity strategies. Daily allocation with regime inference stability as the primary determinant of drawdown control.",
+      "relevance_to_us": "Our drawdown circuit breaker in risk_management.py is binary (on/off). Research suggests a gradient approach: as regime stress indicators rise, progressively reduce position sizes and increase confidence thresholds for new entries. This would prevent the Bold strategy's -7.09% loss pattern (entered during F&G=5).",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "arxiv 2601.19504 (ComSIA 2026)"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "IR-Based Signal Weighting + Utility MWU",
-      "description": "Replace IC-multiplier bolt-on with proper IR-proportional weights. Modify MWU to use return magnitude instead of binary correct/incorrect.",
+      "title": "Direction-Specific Signal Gating",
+      "description": "Split accuracy tracking into buy_accuracy and sell_accuracy per signal per ticker. Gate each direction independently: if sell_accuracy >= 55% but buy_accuracy < 47%, enable signal for SELL only. Immediate win for Qwen3 (73.5% SELL) and news_event (20.5% BUY = anti-signal). Requires changes to accuracy_stats.py vote counting and signal_engine.py gating logic.",
       "priority": 1,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signal_weights.py",
-        "portfolio/signal_engine.py",
-        "portfolio/ic_computation.py"
-      ]
-    },
-    {
-      "title": "BOCPD Regime Detection",
-      "description": "Add Bayesian Online Changepoint Detection alongside rule-based detect_regime(). Output probability of regime change for continuous penalty scaling.",
-      "priority": 2,
       "effort_days": 2,
       "files_affected": [
-        "portfolio/indicators.py",
-        "portfolio/signal_engine.py"
+        "portfolio/accuracy_stats.py",
+        "portfolio/signal_engine.py",
+        "portfolio/ticker_accuracy.py"
       ]
     },
     {
-      "title": "Structured Bull/Bear Debate in Layer 2",
-      "description": "Restructure Layer 2 prompt into debate format: Bull analyst, Bear analyst, Risk manager, Final synthesis. Single Claude invocation.",
+      "title": "IC-Based Signal Weighting (v1: rolling IC weights)",
+      "description": "Replace equal-weight voting with rolling IC weights. Compute 30-day rolling Spearman IC per signal using signal_log.db outcomes. Weight consensus proportionally. Use exponential decay with per-signal half-life instead of fixed 7-day recency window. ic_computation.py already exists — extend it.",
+      "priority": 2,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/ic_computation.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "title": "Walk-Forward Validation Framework",
+      "description": "Implement parameterized walk-forward validation on signal_log.db. Per-signal window optimization: fast signals (RSI, BB) use 2-week train / 3-day test; slow signals (COT, econ) use 3-month train / 2-week test. Report walk-forward Sharpe and accuracy stability. Prevents Chronos-style small-sample illusions.",
       "priority": 3,
+      "effort_days": 4,
+      "files_affected": [
+        "scripts/walk_forward_validation.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "title": "Regime-Specific Signal Weight Vectors",
+      "description": "Replace flat regime penalties (0.75x/0.80x) with per-regime weight lookup tables. Train simple classifier on [realized_vol_20d, ADX_14, Hurst_exponent] to identify 3 regimes. Precompute optimal signal weights per regime from historical signal_log.db data. No neural net needed for v1.",
+      "priority": 4,
+      "effort_days": 5,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/signals/regime_classifier.py"
+      ]
+    },
+    {
+      "title": "LLM Confidence Gate",
+      "description": "Add confidence threshold gate for Qwen3 and Ministral signals. When LLM self-reported confidence < 60%, suppress the signal to HOLD. Aligns with noise-robust gating mechanism from hybrid LLM-Transformer research. Simple string parsing of existing LLM output.",
+      "priority": 5,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signals/ministral_signal.py",
+        "portfolio/signals/qwen3_signal.py"
+      ]
+    },
+    {
+      "title": "Structured Bull/Bear Layer 2 Prompt",
+      "description": "Restructure Layer 2 prompt to require explicit JSON sections: bull_case (3 reasons), bear_case (3 reasons), risk_assessment, verdict. This is the cheapest approximation of multi-agent debate. Proven by BlackRock+Columbia Apr 2026 research.",
+      "priority": 6,
       "effort_days": 1,
       "files_affected": [
         "portfolio/agent_invocation.py",
         "docs/TRADING_PLAYBOOK.md"
-      ]
-    },
-    {
-      "title": "LightGBM Meta-Learner for Metals",
-      "description": "Train tree-based classifier on 12 metals signal outputs to predict 1d XAG direction. Walk-forward validated.",
-      "priority": 4,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signals/metals_ml_meta.py",
-        "tests/test_metals_ml_meta.py"
-      ]
-    },
-    {
-      "title": "Composite On-Chain BTC Meta-Model",
-      "description": "Replace independent on-chain sub-metric voting with gradient boosting meta-model. Target: 60% -> 70%+ BTC accuracy.",
-      "priority": 5,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signals/on_chain_btc.py",
-        "portfolio/onchain_data.py"
       ]
     }
   ]
