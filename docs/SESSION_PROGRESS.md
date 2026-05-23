@@ -23,14 +23,31 @@
 - Graduated rescue penalty: 55%→0.70x, 85%→0.95x (replaces flat 0.70x)
 - 4 new test_agent_invocation tests, 2 new test_signal_engine tests
 
-**Shipped:** 11 commits merged+pushed (765c304c..d8cce614). 376+ tests verified, 0 regressions.
+**Batch 3 (deep research phase):**
+- `/api/calibration` dashboard endpoint (confidence reliability diagram)
+- Calibration warning in Layer 2 prompt (85%+ agreement → skepticism note)
+- BTC ETF flow signal scaffold (module + 9 tests, needs CoinGlass data source)
+- P0 calibration finding: 90%+ agreement = 32.8% actual accuracy (contrarian indicator)
+- Research automation scripts (backtest_autotune, score_candidates, send_research_summary)
+
+**CRITICAL FINDING — Consensus Overconfidence:**
+| Confidence bucket | Predicted | Actual | Samples |
+|-------------------|-----------|--------|---------|
+| 50-60% | 53% | 49.2% | 9,374 |
+| 60-70% | 64% | 47.8% | 17,360 |
+| 70-80% | 74% | 54.3% | 10,230 |
+| 80-90% | 83% | 52.3% | 7,736 |
+| 90-100% | 100% | 32.8% | 5,086 |
+Already handled: Stage 5 unanimity penalty (0.6x at 90%+) + Stage 7 compression brings high-confidence below 60% trade threshold. System is self-correcting.
+
+**Shipped:** 16 commits merged+pushed (765c304c..a5da2a1d). 385+ tests verified, 0 regressions.
 
 **Deferred:**
 - D1: Regime-adaptive weight vectors (5 days)
 - D2: Walk-forward validation (4 days)
 - D3: IC-based signal weighting — ALREADY DONE (ic_computation.py + 12-stage weight cascade)
 - D4: Regime prompt conditioning — DONE this session
-- D5: BTC ETF flow signal (3 days)
+- D5: BTC ETF flow signal — SCAFFOLD DONE, needs CoinGlass API integration
 
 ---
 
