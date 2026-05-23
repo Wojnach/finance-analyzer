@@ -454,7 +454,11 @@ _ACCURACY_GATE_HIGH_SAMPLE_MIN = 7000
 # 2026-04-10: raised from 0.35 → 0.40 to catch macro_regime BUY (38.9%),
 # fibonacci SELL (35.9%), futures_flow both (36-37%).  Now with per-ticker
 # directional data, this gate also works per-instrument.
-_DIRECTIONAL_GATE_THRESHOLD = 0.40
+# 2026-05-23: raised from 0.40 → 0.43. Signals at 41-42% directional
+# accuracy are still noise (p < 0.05 requires ~56% on 100 samples).
+# Constraint: must stay below (ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX)
+# = 0.47 - 0.02 = 0.45 (assertion at module load).
+_DIRECTIONAL_GATE_THRESHOLD = 0.43
 _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
 # Directional rescue (2026-04-28): when a signal fails the overall accuracy
@@ -2691,6 +2695,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             sell_weight += weight
     if gated_signals:
         logger.debug("Accuracy-gated signals (<%s%%): %s", ACCURACY_GATE_THRESHOLD * 100, gated_signals)
+        dir_gated = [s for s in gated_signals if "_BUY" in s or "_SELL" in s]
+        overall_gated = [s for s in gated_signals if "_BUY" not in s and "_SELL" not in s]
+        if dir_gated:
+            logger.info("Directional gate (<%s%%): %s", _DIRECTIONAL_GATE_THRESHOLD * 100, dir_gated)
     total_weight = buy_weight + sell_weight
     if total_weight == 0:
         return "HOLD", 0.0
