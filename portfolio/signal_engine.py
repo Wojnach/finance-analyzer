@@ -471,6 +471,15 @@ _DIRECTIONAL_RESCUE_THRESHOLD = 0.55
 _DIRECTIONAL_RESCUE_MIN_SAMPLES = 30
 _DIRECTIONAL_RESCUE_WEIGHT_PENALTY = 0.70
 
+# LLM confidence gate: suppress BUY/SELL from local LLM signals (Qwen3,
+# Ministral) when model self-reported confidence is below this threshold.
+# Research (arxiv 2601.02878) shows noise-robust gating on LLM confidence
+# improves ensemble quality. Confidence is on 0-1 scale (prompt asks 0-100,
+# parser normalizes). 0.55 = moderate confidence; below this the model
+# is guessing. Applied AFTER accuracy gating, so only affects votes that
+# already passed accuracy + directional gates.
+_LLM_CONFIDENCE_GATE = 0.55
+
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
 # than this threshold, increase recent weight for faster regime adaptation.
 # Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
@@ -3488,6 +3497,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 extra_info["ministral_gating"] = gating.get("gating", "raw")
                 if orig.get("confidence") is not None:
                     extra_info["ministral_confidence"] = orig["confidence"]
+                    if gated_action != "HOLD" and orig["confidence"] < _LLM_CONFIDENCE_GATE:
+                        extra_info["ministral_confidence_gated"] = True
+                        gated_action = "HOLD"
                 votes["ministral"] = gated_action
 
                 # custom_lora fully disabled — not even stored in extra.
@@ -3537,6 +3549,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 extra_info["qwen3_gating"] = gating.get("gating", "raw")
                 if q3.get("confidence") is not None:
                     extra_info["qwen3_confidence"] = q3["confidence"]
+                    if gated_action != "HOLD" and q3["confidence"] < _LLM_CONFIDENCE_GATE:
+                        extra_info["qwen3_confidence_gated"] = True
+                        gated_action = "HOLD"
                 votes["qwen3"] = gated_action
 
         except ImportError:
