@@ -1,5 +1,31 @@
 # Session Progress
 
+## 2026-05-23 After-Hours Research Session (22:30 CEST)
+
+**Implemented:**
+- Raised directional gate threshold 0.40→0.43 (noise reduction in weak directions)
+- Added LLM confidence gate at 55% for Qwen3/Ministral (suppress uncertain predictions)
+- Added 3 new signal engine tests (directional rescue, LLM gate)
+- 5 new entries in signal_research_backlog.jsonl
+- Research data: daily review, macro, quant, ticker deep dive, signal audit
+- Morning briefing + Telegram sent
+
+**Key findings:**
+- Directional asymmetry is the #1 edge: Qwen3 SELL=73.5%, BUY=33.1% (gated correctly)
+- btc_proxy SELL rescue confirmed working (69.4% on 49 samples)
+- crypto_evrp 92.6% 5d accuracy (229 samples) — exceptional medium-term signal
+- BTC ETF flows = biggest signal gap (9x daily mining supply)
+- Iran ceasefire = weekend binary event for all positions
+
+**Deferred:**
+- D1: Regime-adaptive weight vectors (5 days)
+- D2: Walk-forward validation (4 days)
+- D3: IC-based signal weighting (3 days)
+- D4: Bull/bear Layer 2 prompt (1 day)
+- D5: BTC ETF flow signal (3 days)
+
+---
+
 ## 2026-05-23 FGL Adversarial Review
 
 **Context:** Full /fgl adversarial review of finance-analyzer codebase. 8 subsystem

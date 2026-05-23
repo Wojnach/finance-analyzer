@@ -1,107 +1,81 @@
 {
-  "date": "2026-05-22",
-  "generated_at": "2026-05-22T20:59:16.076575+00:00",
-  "session_type": "after-hours-research",
-  "headline": "Ranging markets, all HOLD. Three code improvements shipped: catastrophic accuracy floor, drift_regime_gate re-enabled, contract violation noise suppressed.",
-  "system_status": {
-    "loop_uptime_h": 14.5,
-    "cycles": 87,
-    "errors": 0,
-    "active_signals": 18,
-    "disabled_signals": 48,
-    "layer2_invocations_today": 56,
-    "layer2_success_rate": "30.4%",
-    "journal_entries_today": 29
-  },
-  "portfolio_snapshot": {
-    "patient": {
-      "status": "HOLD",
-      "positions": "BTC 0.0123sh, XAG 2.56oz",
-      "drawdown": "3.4%",
-      "notes": "BTC oversold (RSI 18-28) but 20.4% 3d track record. XAG 82% bullish 3d prob but ranging."
+  "date": "2026-05-23",
+  "generated_at": "2026-05-23T20:54:30.528372+00:00",
+  "market_outlook": "neutral",
+  "confidence": 0.55,
+  "narrative": "Weekend binary: Iran ceasefire deal = risk-on (oil -$8-12, gold dip, BTC bounce), no deal = haven bid (Brent $114+, gold spike). Memorial Day Mon gives extended exposure to weekend headlines. Thursday May 28 is heavy data day (GDP + PCE + durables). BTC near critical $74K support with thin liquidity. Patient positions (XAG $75.57, BTC dust) appropriately sized.",
+  "key_levels": {
+    "XAG-USD": {
+      "support": 75.0,
+      "resistance": 78.0,
+      "current": 75.97,
+      "note": "Patient HOLD at $75.57, right at $75 support"
     },
-    "bold": {
-      "status": "DORMANT",
-      "positions": "None",
-      "notes": "No breakout conditions met. Ranging regime."
+    "XAU-USD": {
+      "support": 4400,
+      "resistance": 4580,
+      "current": 4519,
+      "note": "Range-bound, 30Y >5% headwind"
+    },
+    "BTC-USD": {
+      "support": 74000,
+      "resistance": 78000,
+      "current": 75933,
+      "note": "Critical $74K support, whale accumulation"
+    },
+    "ETH-USD": {
+      "support": 2050,
+      "resistance": 2200,
+      "current": 2077,
+      "note": "Glamsterdam June catalyst"
+    },
+    "MSTR": {
+      "support": 155,
+      "resistance": 165,
+      "current": 159.89,
+      "note": "Gap risk from BTC weekend move"
     }
   },
-  "market_context": {
-    "regime": "ranging",
-    "vix": "moderate",
-    "dxy": "99.39 (+0.30%)",
-    "us_markets": "CLOSED Sat-Mon (Memorial Day)",
-    "key_levels": {
-      "BTC": "Support $74-76K, Resistance $78-82.5K",
-      "XAG": "Support $75-78, Resistance $83",
-      "XAU": "Support $4,400-4,460, Resistance $4,580-4,590",
-      "ETH": "Support $2,050-2,080, Resistance $2,200-2,400"
-    },
-    "weekend_risks": [
-      "Iran/Hormuz headline risk - only crypto/FX live",
-      "Thin weekend liquidity amplifies moves",
-      "BTC weekend moves = MSTR gap risk Tuesday"
-    ]
-  },
-  "improvements_shipped": [
+  "trade_ideas": [
     {
-      "title": "drift_regime_gate re-enabled",
-      "impact": "18th active signal. 66.5% recent accuracy (651 sam). Best regime filter available.",
-      "commit": "2827a066"
+      "instrument": "XAG-USD",
+      "direction": "HOLD",
+      "rationale": "Position at $75.57, right at $75 support. Thesis intact ($120 target). No action needed unless breaks below $73.",
+      "entry_zone": "N/A (already positioned)",
+      "target": 80.0,
+      "stop": 73.0,
+      "confidence": 0.5
     },
     {
-      "title": "Catastrophic accuracy floor (35%, 15 sam)",
-      "impact": "Catches signals like Ministral (34.8% recent, 23 sam) that escape the standard 30-sample blend gate. Prevents harmful signals from diluting consensus.",
-      "commit": "f703f44c"
-    },
-    {
-      "title": "Contract violation suppression for known failures",
-      "impact": "Reduces critical error noise from incomplete/auth_error invocations (were 19 unresolved). Contract still fires on genuine silent failures.",
-      "commit": "e5bd47c1"
+      "instrument": "BTC-USD",
+      "direction": "HOLD",
+      "rationale": "Dust position. $74K support critical. Whale accumulation massive but ETF outflows and CPI 3.8% headwind. Wait for direction.",
+      "entry_zone": "N/A",
+      "target": 78000,
+      "stop": 73000,
+      "confidence": 0.4
     }
   ],
-  "deferred_improvements": [
-    {
-      "title": "IC-based signal weighting",
-      "priority": 1,
-      "effort_days": 3,
-      "reason": "Needs rolling IC computation infrastructure"
-    },
-    {
-      "title": "mRMR signal redundancy analysis",
-      "priority": 2,
-      "effort_days": 1,
-      "reason": "One-time analysis, safe to run anytime"
-    },
-    {
-      "title": "Volatility-targeted position sizing",
-      "priority": 3,
-      "effort_days": 2,
-      "reason": "Requires risk_management.py refactor"
-    },
-    {
-      "title": "Regime-conditioned signal weights",
-      "priority": 4,
-      "effort_days": 5,
-      "reason": "Needs HMM regime classifier first"
-    },
-    {
-      "title": "Structured bull/bear Layer 2 prompt",
-      "priority": 5,
-      "effort_days": 1,
-      "reason": "Low risk, can ship next session"
-    }
+  "system_improvements_implemented": [
+    "Raised directional gate threshold 0.40->0.43 (catches more noise in weak directions)",
+    "Added LLM confidence gate at 55% for Qwen3 and Ministral (suppresses uncertain predictions)",
+    "Added directional rescue verification tests (btc_proxy SELL rescue confirmed working)",
+    "5 new entries in signal research backlog"
   ],
-  "accuracy_concerns": [
-    "Per-ticker consensus barely above 50% for all Tier-1 instruments",
-    "12 signals dropped >15pp in accuracy (degradation alerts)",
-    "Funding rate at 30.8% is actively harmful - should be permanently retired",
-    "vwap_zscore_mr at 72.9% (59 sam) is promising but needs more data"
+  "risk_warnings": [
+    "Iran ceasefire is THE binary event — position sizing should account for gap risk",
+    "Memorial Day = thin liquidity Monday, markets closed = no hedging",
+    "BTC at $74K support — break below triggers cascading liquidations",
+    "XAG Patient position right at $75 support — watch closely",
+    "30Y yields >5% creating persistent headwind for metals",
+    "Avanza session expired since May 20 — no warrant trading possible until re-auth"
   ],
-  "next_session_priorities": [
-    "Run mRMR redundancy analysis on signal_log.db (1-day effort, immediate insight)",
-    "Implement bull/bear structured prompt for Layer 2 (1-day, reduces confident-wrong failures)",
-    "Evaluate shadow signals with >100 samples for promotion",
-    "Monitor drift_regime_gate live accuracy after re-enablement"
+  "research_highlights": [
+    "Directional accuracy asymmetry is the biggest edge: Qwen3 SELL=73.5%, BUY=33.1%",
+    "System already gates this correctly at 43% threshold",
+    "btc_proxy SELL rescued at 69.4% accuracy despite 44.6% overall (directional rescue works)",
+    "crypto_evrp shows 92.6% 5d accuracy on 229 samples — exceptional medium-term signal",
+    "BTC ETF flows identified as biggest signal gap (9x mining supply absorbed)",
+    "Regime-adaptive weight vectors (per-regime signal weights) is highest-impact future improvement"
   ]
 }
