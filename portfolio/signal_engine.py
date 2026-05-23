@@ -2839,6 +2839,10 @@ def _compute_adx(df, period=14):
     if df is None or not isinstance(df, pd.DataFrame) or len(df) < period * 2:
         return None
 
+    required_cols = {"high", "low", "close"}
+    if not required_cols.issubset(df.columns):
+        return None
+
     n = len(df)
     df_id = (
         n,
@@ -4164,13 +4168,18 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 if samples >= 30 and u_score > 0:
                     boost = min(1.0 + u_score, 1.5)
                     if sig_name in accuracy_data:
-                        # BUG-136: Build a new dict instead of mutating in-place.
-                        # The accuracy_data may be a reference to cached alltime data.
-                        boosted_acc = min(accuracy_data[sig_name]["accuracy"] * boost, 0.95)
-                        accuracy_data[sig_name] = {
-                            **accuracy_data[sig_name],
-                            "accuracy": boosted_acc,
-                        }
+                        raw_acc = accuracy_data[sig_name]["accuracy"]
+                        raw_samples = accuracy_data[sig_name].get("total", 0)
+                        high_sample = raw_samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN
+                        eff_gate = (_ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
+                                    if high_sample
+                                    else ACCURACY_GATE_THRESHOLD)
+                        if raw_samples < ACCURACY_GATE_MIN_SAMPLES or raw_acc >= eff_gate:
+                            boosted_acc = min(raw_acc * boost, 0.95)
+                            accuracy_data[sig_name] = {
+                                **accuracy_data[sig_name],
+                                "accuracy": boosted_acc,
+                            }
         except Exception:
             logger.debug("Utility weighting unavailable", exc_info=True)
 
@@ -4257,8 +4266,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     extra_info["_voters"] = active_voters  # pre-filter (compatibility)
     extra_info["_voters_post_filter"] = post_persistence_voters
     extra_info["_total_applicable"] = total_applicable
-    extra_info["_buy_count"] = buy
-    extra_info["_sell_count"] = sell
+    post_buy = sum(1 for v in consensus_votes.values() if v == "BUY")
+    post_sell = sum(1 for v in consensus_votes.values() if v == "SELL")
+    extra_info["_buy_count"] = post_buy
+    extra_info["_sell_count"] = post_sell
+    extra_info["_pre_persistence_buy"] = buy
+    extra_info["_pre_persistence_sell"] = sell
     extra_info["_core_buy"] = core_buy
     extra_info["_core_sell"] = core_sell
     extra_info["_core_active"] = core_active
