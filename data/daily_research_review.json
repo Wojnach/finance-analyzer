@@ -1,117 +1,64 @@
 {
-  "date": "2026-05-21",
-  "generated_at": "2026-05-21T20:33:08.455033+00:00",
+  "date": "2026-05-23",
+  "generated_at": "2026-05-23T20:31:00+00:00",
+  "system_health": {
+    "status": "healthy",
+    "uptime_hours": 14.5,
+    "cycle_count": 87,
+    "error_count": 0,
+    "all_signals_operational": true,
+    "crypto_evrp_failures": 5,
+    "last_trigger": "XAG-USD flipped BUY->SELL (sustained) at 19:40 UTC"
+  },
   "trades_today": [
     {
-      "ticker": "XAG-USD",
-      "action": "SELL 50%",
-      "price": 74.93,
-      "time": "11:20 UTC",
-      "rationale": "Partial exit at 0.93 conf SELL, remaining 2.556oz at avg 6.43 (-13.1%)"
-    },
-    {
-      "ticker": "BTC-USD",
-      "action": "SELL 50%",
-      "price": 77080,
-      "time": "14:04 UTC",
-      "rationale": "ATR stop SELL, 0.933 conf. Remaining 0.01226 BTC dust"
+      "ts": "2026-05-23T08:43",
+      "trigger": "BTC-USD consensus BUY (58%) - Tier 1 quick check",
+      "patient": "HOLD",
+      "bold": "DORMANT",
+      "reasoning": "BTC weak BUY at $77.4K, no structural breakout. XAG $75.57 safe above ATR stop."
     }
   ],
   "signals_that_were_right": [
-    "All XAU BUY rejections correct \u2014 7+ flips in ranging market, price fell from ,685 to ,508",
-    "XAG partial SELL at 4.93 timed well \u2014 price recovered to 5.05 above ATR stop 4.81",
-    "ETH thesis abandonment validated \u2014 ETH from ,306 to ,119 (-8.2%), no position saved capital",
-    "BTC SELL at 7,080 validated \u2014 price drifted to 6,900 (-0.23%)",
-    "All afternoon HOLDs correct in range-bound regime \u2014 BTC bounced 7K-8K"
+    {"signal": "qwen3", "accuracy_1d": 60.1, "samples": 3939, "note": "Consistent top performer, SELL accuracy 73.5%"},
+    {"signal": "fear_greed", "accuracy_1d": 58.6, "samples": 10232, "note": "Contrarian BUY-only signal performing well"},
+    {"signal": "ministral", "accuracy_1d": 58.0, "samples": 6303, "note": "Strong SELL accuracy 59.4%"},
+    {"signal": "drift_regime_gate", "accuracy_1d": 57.4, "samples": 1304, "note": "Recently enabled, holding up"},
+    {"signal": "econ_calendar", "accuracy_1d": 56.4, "samples": 8437, "note": "SELL accuracy 59.3% strong"},
+    {"signal": "bb", "accuracy_1d": 54.8, "samples": 9021, "note": "SELL accuracy 58.5% stands out"}
   ],
   "signals_that_were_wrong": [
-    "XAG BUY signal (0.8426 conf, 5B/1S) fired right as ATR stop was breached \u2014 contradictory",
-    "BTC 12h BUY phantom appeared again (known noise pattern)",
-    "ETH sentiment flips (3+ today) \u2014 all noise, no persistence"
+    {"signal": "btc_proxy", "accuracy_1d": 44.6, "samples": 139, "note": "Under evaluation, below threshold"},
+    {"signal": "news_event", "accuracy_1d": 50.8, "samples": 9516, "note": "BUY accuracy only 20.5% (73 sam) — anti-signal for BUY"},
+    {"signal": "mean_reversion", "accuracy_1d": 52.6, "samples": 27376, "note": "Large sample, SELL accuracy only 48.5%"},
+    {"signal": "momentum_factors", "accuracy_1d": 52.0, "samples": 21077, "note": "Marginal edge, SELL accuracy 49.7%"}
   ],
-  "accuracy_changes": {
-    "top_active_signals": {
-      "qwen3": {
-        "accuracy": 0.603,
-        "samples": 3896,
-        "status": "strong"
-      },
-      "fear_greed": {
-        "accuracy": 0.586,
-        "samples": 10232,
-        "status": "strong"
-      },
-      "ministral": {
-        "accuracy": 0.58,
-        "samples": 6303,
-        "status": "strong"
-      },
-      "econ_calendar": {
-        "accuracy": 0.575,
-        "samples": 8108,
-        "status": "strong"
-      },
-      "bb": {
-        "accuracy": 0.549,
-        "samples": 8879,
-        "status": "moderate"
-      }
-    },
-    "disabled_but_strong": {
-      "claude_fundamental": {
-        "accuracy": 0.579,
-        "samples": 11581,
-        "note": "SHOULD CONSIDER ENABLING"
-      },
-      "drift_regime_gate": {
-        "accuracy": 0.577,
-        "samples": 1140,
-        "note": "SHOULD CONSIDER ENABLING"
-      },
-      "vwap_zscore_mr": {
-        "accuracy": 0.745,
-        "samples": 55,
-        "note": "Very high but tiny sample"
-      }
-    },
-    "weak_active_signals": {
-      "btc_proxy": {
-        "accuracy": 0.453,
-        "samples": 117,
-        "note": "Below 47% gate threshold"
-      },
-      "news_event": {
-        "accuracy": 0.505,
-        "samples": 9410,
-        "note": "Coin flip with large sample"
-      },
-      "credit_spread_risk": {
-        "accuracy": 0.5,
-        "samples": 1809,
-        "note": "Exactly 50%"
-      }
-    },
-    "per_ticker_consensus_1d": {
-      "BTC-USD": 0.528,
-      "ETH-USD": 0.498,
-      "XAG-USD": 0.492,
-      "XAU-USD": 0.503,
-      "MSTR": 0.469
-    }
+  "disabled_signals_worth_investigating": [
+    {"signal": "claude_fundamental", "accuracy_1d": 57.9, "samples": 11581, "note": "57.9% on 11K+ samples — why disabled?"},
+    {"signal": "calendar", "accuracy_1d": 56.8, "samples": 8867, "note": "56.8% BUY but 29.3% SELL — BUY-only candidate"},
+    {"signal": "vwap_zscore_mr", "accuracy_1d": 72.1, "samples": 61, "note": "72% but 61 samples — need more data"}
+  ],
+  "accuracy_concerns": {
+    "cot_positioning": "80% but only 10 samples — unreliable, should not gate on this",
+    "onchain": "60% but only 45 samples — same concern",
+    "hash_ribbons": "29.7% on 209 samples — worst disabled signal",
+    "chronos_1h_XAG": "14.3% and 1.1% accuracy on silver — effectively random"
   },
   "system_errors": [
-    "7x Layer 2 contract violations: trigger fires but no journal entry \u2014 agent silently failing",
-    "2x accuracy degradation: 12 signals dropped >15pp (May 19)",
-    "1x Avanza session expired (May 21 06:01 UTC)",
-    "1x overdue pickup: cryptotrader_lm LoRA 72h verification"
+    "27 unresolved critical errors (7 days)",
+    "12x accuracy_degradation: 12 signals dropped >15pp",
+    "13x contract_violation: Layer 2 triggers fire but agent times out before journal",
+    "2x avanza_account_mismatch: session expired since May 20"
   ],
   "key_observations": [
-    "Range-bound regime all day \u2014 20 Layer 2 invocations, all correctly identified ranging market",
-    "XAG and ETH consensus approaching coin-flip accuracy (49.2% and 49.8%) \u2014 signals not useful for these tickers",
-    "Claude Fundamental (57.9%, 11.6K samples) is disabled but outperforms many active signals \u2014 investigate enabling",
-    "Drift Regime Gate (57.7%, 1.1K samples) also disabled but strong \u2014 could be valuable regime filter",
-    "Layer 2 silent failures (7/12 critical errors) suggest agent timeout or auth issues on trigger",
-    "Patient strategy: correct to hold XAG 2.556oz, BTC dust; Bold DORMANT all day",
-    "All prophecies intact: Silver 20 (cp_4 pending), BTC 00K (5K next), ETH K (.5K next)"
+    "Only 1 Layer 2 journal entry today despite triggers — timeout rate concerning",
+    "XAG flipped BUY->SELL (sustained) at 19:40 UTC",
+    "BTC $77.4K still range-bound, thesis intact but no breakout momentum",
+    "Qwen3 SELL accuracy (73.5%) is exceptional — best directional signal",
+    "Both LLM signals (Qwen3, Ministral) better at SELL than BUY",
+    "Fear & Greed is BUY-only (0 SELL signals in 10K+ samples)",
+    "news_event BUY accuracy 20.5% — anti-signal for BUY direction",
+    "main_XAG_3h at 62.4% — strongest metals predictor",
+    "No metals trades since March — warrant trading inactive"
   ]
 }

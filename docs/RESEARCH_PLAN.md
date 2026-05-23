@@ -1,70 +1,139 @@
-# After-Hours Research Plan — 2026-05-21
+# After-Hours Research Plan — 2026-05-23
 
-## Context
+## Findings Summary
 
-System: 96% ranging regime, **48.6% overall 1d consensus accuracy** (below coin flip).
-Active instruments: XAG-USD ($76.68, -13.1% from avg), BTC-USD ($77.5K, dust position),
-XAU-USD (no position), ETH-USD (no position), MSTR (no position).
+### Phase 0: Daily Review
+- System healthy: 0 errors, 87 cycles, 14.5h uptime, all 48 signal modules operational
+- Only 1 Layer 2 journal entry today (BTC-USD BUY consensus → HOLD/DORMANT)
+- 27 unresolved critical errors (13 contract violations, 12 accuracy degradation, 2 Avanza session expired)
+- No metals trades since March — warrant trading inactive
+- XAG last trigger: BUY→SELL flip at 19:40 UTC
 
-Macro: Hawkish FOMC minutes (Kevin Warsh as new chair), bogus Iran deal whipsaw,
-oil elevated ($99.5 WTI), gold $4,517, silver recovering from $73 low.
+### Phase 1: Market Research
+- **Weekend binary event**: Iran ceasefire — deal = oil drops $8-12, risk-on, gold dips; no deal = Brent $114+, haven bid
+- **Memorial Day**: US closed Mon May 25 — extended weekend exposure, thin liquidity
+- **Heavy data Thursday May 28**: GDP 2nd estimate + PCE deflator + durable goods + claims
+- **No FOMC/CPI/NFP this week**. Next: FOMC Jun 16-17, NFP Jun 5, CPI Jun 10
+- BTC at $74.3-75.6K near critical $74K support, F&G 29, ETF outflows $1.15B but whale accumulation massive (270K BTC)
 
-Critical errors: 7× Layer 2 silent failures, 2× accuracy degradation, 1× Avanza expired.
+### Phase 2: Quant Research
+- **Direction-specific gating is the #1 finding** — validates existing system architecture
+- Walk-forward parameterized windows (arxiv 2602.10785) — window length is a hyperparameter
+- Regime-adaptive ensemble learning outperforms flat penalty multipliers
+- LLM confidence gate — suppress when self-reported confidence < 60%
+- Bull/Bear structured prompt for Layer 2 (cheapest multi-agent approximation)
+
+### Phase 3: Signal Audit — Key Findings
+1. **Qwen3**: Best signal overall (60.1%), SELL accuracy 73.5% but BUY only 33.1% — directional gate already handling this
+2. **btc_proxy**: 44.6% overall (gated), but SELL accuracy 69.4% on 49 samples — directional rescue should save SELL votes. Need to verify rescue is working.
+3. **claude_fundamental**: Disabled correctly — crashed to 19.8% recent (95% BUY bias from Opus tier)
+4. **calendar**: Disabled correctly — 29.3% recent with structural BUY bias
+5. **crypto_evrp**: 54.5% 1d but 92.6% 5d on 229 samples — exceptional medium-term signal
+6. **Fear & Greed**: 58.6% on 10K+ samples but BUY-only (0 SELL signals ever) — is this intentional?
+7. **cot_positioning**: 80% but only 10 samples — statistically meaningless
+8. **williams_vix_fix**: 85.7% SELL accuracy but only 35 samples — monitor
+9. **Directional asymmetry > 25pp in 12 signals** — system already has directional gate at 40%, working correctly
 
 ## Bugs & Problems Found
 
-1. **credit_spread_risk at 23% blended accuracy** — Blended 0.90×0.20 + 0.10×0.50 = 23%.
-   Should be accuracy-gated at runtime, but formally disabling saves compute and prevents
-   edge cases where regime/per-ticker overrides might restore it.
+### B1: Verify btc_proxy directional rescue is working
+- btc_proxy overall 44.6% → accuracy gate forces HOLD
+- But SELL accuracy 69.4% on 49 samples (≥30 threshold, ≥55% rescue threshold)
+- Directional rescue SHOULD rescue SELL votes at 0.70x weight
+- **Action**: Write a test that verifies directional rescue for btc_proxy SELL
+- **Files**: `tests/test_signal_engine.py`
 
-2. **Five enabled signals with severely degraded recent accuracy**:
-   - credit_spread_risk: 50% all-time → 20% recent (blended 23%)
-   - ministral: 58% all-time → 30.8% recent at 1d (BUT 62.6% at 3h)
-   - crypto_macro: 54.6% all-time → 34% recent (blended 36.3%)
-   - econ_calendar: 57.5% all-time → 40.1% recent (blended 42.1%)
-   - momentum_factors: 52.1% all-time → 41.4% recent at 1d (BUT 60.1% at 3h)
+### B2: Layer 2 timeout rate too high
+- Only 1/N triggers resulted in journal entries today
+- Contract violations show triggers firing but agents timing out
+- **Action**: Investigate timeout settings, possibly increase T1 timeout from 180s
+- **Files**: `portfolio/agent_invocation.py`
+- **Priority**: DEFER — needs careful investigation, not a research-session fix
 
-3. **Regime-gated signals have inflated "recent" accuracy** — heikin_ashi shows 82.2%
-   recent but is regime-gated for ranging (96% of time). Its "recent" accuracy only
-   measures the 4% non-ranging periods — survivorship bias, not genuine improvement.
+### B3: Avanza session expired since May 20
+- 2 critical errors for session expiry
+- **Action**: Note for user — needs manual BankID re-authentication
+- **Priority**: DEFER — requires human interaction
 
-4. **7 Layer 2 contract violations today** — trigger fires, no journal entry. Same
-   pattern as yesterday. Agent timeouts or auth failures.
+## Improvements Prioritized (Impact × Ease)
 
-5. **Overall consensus 48.6% at 1d** — system predictions are net-negative. The
-   combination method is destroying individual signal edge. Top signals (Qwen3 69.4%
-   recent, BB 58.6%, RSI 61.1%) are diluted by many weak/harmful signals.
+### Tier 1: Implement NOW (this session)
 
-## Improvements Prioritized
+#### I1: Raise directional gate threshold from 40% to 43%
+- **Impact**: Medium — catches more poor-direction votes
+- **Effort**: Trivial — single constant change
+- **Risk**: Low — existing tests should catch regressions
+- **Files**: `portfolio/signal_engine.py` (line 457)
+- **Rationale**: 40% is generous. Signals at 41-42% directional accuracy are still noise.
+  The assertion at line 1051 requires relaxed accuracy gate (47%-2%=45%) > directional gate.
+  So max safe value is 44%. Setting to 43% gives 2pp buffer.
 
-### Batch 1: Disable Harmful Signal (tickers.py)
-- **B1.1**: Add `credit_spread_risk` to DISABLED_SIGNALS with documentation
-- Rationale: 23% blended accuracy, actively harming consensus
+#### I2: Add LLM confidence gate for Qwen3 and Ministral
+- **Impact**: Medium — reduces noise from low-confidence LLM calls
+- **Effort**: Easy — parse existing confidence output, gate below 60%
+- **Files**: `portfolio/signals/ministral_signal.py`, `portfolio/signals/qwen3_signal.py`
+- **Rationale**: Research shows LLM signals should be suppressed when self-reported confidence is low.
+  Both models already output confidence scores. Just need to add a threshold check.
 
-### Batch 2: Signal Backlog Updates (data/)
-- **B2.1**: Add 9 new signal candidates from quant research + ticker deep dives to backlog
-- **B2.2**: Update seasonality profiles with latest research
+#### I3: Add directional rescue verification test
+- **Impact**: Low (test, not feature) — ensures btc_proxy SELL rescue works
+- **Effort**: Easy
+- **Files**: `tests/test_signal_engine.py`
 
-### Batch 3: Accuracy Gate Recency Enhancement (accuracy_stats.py, signal_engine.py)
-- **B3.1**: Log blended accuracy per signal in agent_summary for visibility
-  (currently only all-time shown in cache — makes audit misleading)
+#### I4: Log directional gate/rescue decisions for observability
+- **Impact**: Medium — helps diagnose which signals are being gated/rescued
+- **Effort**: Easy — add structured logging to existing gate logic
+- **Files**: `portfolio/signal_engine.py`
 
-## Deferred to IMPROVEMENT_BACKLOG
+### Tier 2: Defer to future sessions
 
-- IR-based signal weighting (effort: 3d, impact: HIGH) — top quant research recommendation
-- BOCPD regime detection (effort: 2d, impact: HIGH) — faster than rule-based
-- Structured Bull/Bear debate in Layer 2 prompt (effort: 1d, impact: HIGH)
-- LightGBM meta-learner for metals (effort: 3d, impact: MEDIUM-HIGH)
-- Composite on-chain BTC meta-model (effort: 3d, impact: HIGH)
-- BTC-lead signal for ETH (effort: 1d, impact: MEDIUM-HIGH)
-- Funding rate regime transition detector (effort: 1d, impact: MEDIUM)
-- Regime gate audit with current data (regime gates set Apr 2, now stale)
+#### D1: Regime-specific weight vectors (replace flat penalty multipliers)
+- **Impact**: High — per-regime signal weights dramatically outperform flat penalties
+- **Effort**: 5 days — needs regime classifier, weight optimization, validation
+- **Files**: `portfolio/signal_engine.py`, `portfolio/signals/regime_classifier.py`
+
+#### D2: Walk-forward validation framework
+- **Impact**: High — prevents small-sample illusions (Chronos crash from 76%→54%)
+- **Effort**: 4 days — parameterized windows, per-signal optimization
+- **Files**: `scripts/walk_forward_validation.py`, `portfolio/accuracy_stats.py`
+
+#### D3: IC-based signal weighting
+- **Impact**: High — replace equal weights with rolling IC weights
+- **Effort**: 3 days — extend existing `ic_computation.py`
+- **Files**: `portfolio/signal_engine.py`, `portfolio/ic_computation.py`
+
+#### D4: Structured Bull/Bear Layer 2 prompt
+- **Impact**: Medium — cheapest multi-agent approximation
+- **Effort**: 1 day — prompt restructuring
+- **Files**: `portfolio/agent_invocation.py`, `docs/TRADING_PLAYBOOK.md`
+
+#### D5: BTC ETF flow signal
+- **Impact**: High for BTC — quant research identifies this as biggest signal gap
+- **Effort**: 3 days — needs data source, signal module, testing
+- **Files**: new `portfolio/signals/btc_etf_flow.py`
 
 ## Execution Order
 
-1. Worktree `research/2026-05-21`
-2. Batch 1 (disable credit_spread_risk) → test → commit
-3. Batch 2 (backlog updates) → commit
-4. Batch 3 (blended accuracy logging) → test → commit
-5. Morning briefing → Telegram
-6. Review → merge → push → clean up
+### Batch 1: Signal engine improvements (I1, I4)
+- Raise directional gate threshold to 43%
+- Add structured logging for gate/rescue decisions
+- Run tests, commit
+
+### Batch 2: LLM confidence gate (I2)
+- Add confidence threshold to Qwen3 and Ministral signals
+- Run tests, commit
+
+### Batch 3: Test coverage (I3)
+- Add directional rescue verification test
+- Run tests, commit
+
+### Batch 4: Merge, verify, ship
+- Full test suite
+- Merge to main, push
+- Update SESSION_PROGRESS.md
+
+## Deferred Items → IMPROVEMENT_BACKLOG.md
+- D1-D5 above
+- BTC ETF flow signal (new module needed)
+- Regime-adaptive ensemble (per-regime weight vectors)
+- Walk-forward validation with parameterized windows

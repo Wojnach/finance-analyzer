@@ -1,240 +1,447 @@
 {
-  "date": "2026-05-21",
-  "generated_at": "2026-05-21T20:36:41.914561+00:00",
-  "overall_consensus_accuracy": {
-    "1d": {
-      "accuracy": 0.486,
-      "samples": 49651,
-      "verdict": "BELOW COIN FLIP - system predictions net-negative"
-    },
-    "3d": {
-      "accuracy": 0.482,
-      "samples": 49001,
-      "verdict": "BELOW COIN FLIP"
-    }
-  },
+  "date": "2026-05-23",
   "top_signals": [
     {
-      "name": "qwen3",
-      "accuracy_1d": 0.603,
-      "recent_1d": 0.694,
-      "samples": 3896,
-      "status": "ON",
-      "trend": "IMPROVING"
+      "signal": "qwen3",
+      "accuracy_1d": 60.1,
+      "samples": 3939,
+      "buy_accuracy": 33.1,
+      "sell_accuracy": 73.5
     },
     {
-      "name": "fear_greed",
-      "accuracy_1d": 0.586,
-      "recent_1d": 0.536,
+      "signal": "fear_greed",
+      "accuracy_1d": 58.6,
       "samples": 10232,
-      "status": "ON"
+      "buy_accuracy": 58.6,
+      "sell_accuracy": 0.0
     },
     {
-      "name": "crypto_evrp",
-      "accuracy_1d": 0.582,
-      "recent_1d": 0.601,
-      "samples": 330,
-      "status": "ON"
-    },
-    {
-      "name": "bb",
-      "accuracy_1d": 0.549,
-      "recent_1d": 0.586,
-      "samples": 8879,
-      "status": "ON",
-      "trend": "IMPROVING"
-    },
-    {
-      "name": "statistical_jump_regime",
-      "accuracy_1d": 0.545,
-      "recent_1d": 0.543,
-      "samples": 3050,
-      "status": "ON"
-    }
-  ],
-  "worst_active_signals": [
-    {
-      "name": "credit_spread_risk",
-      "accuracy_1d": 0.5,
-      "recent_1d": 0.2,
-      "samples": 1809,
-      "action": "DISABLE - 80% wrong recently"
-    },
-    {
-      "name": "ministral",
-      "accuracy_1d": 0.58,
-      "recent_1d": 0.308,
+      "signal": "ministral",
+      "accuracy_1d": 58.0,
       "samples": 6303,
-      "note": "BUT 62.6% at 3h_recent"
+      "buy_accuracy": 51.9,
+      "sell_accuracy": 59.4
     },
     {
-      "name": "crypto_macro",
-      "accuracy_1d": 0.546,
-      "recent_1d": 0.34,
-      "samples": 4465,
-      "action": "Investigate - severe drop"
+      "signal": "drift_regime_gate",
+      "accuracy_1d": 57.4,
+      "samples": 1304,
+      "buy_accuracy": 46.6,
+      "sell_accuracy": 78.3
     },
     {
-      "name": "econ_calendar",
-      "accuracy_1d": 0.575,
-      "recent_1d": 0.401,
-      "samples": 8108,
-      "action": "Investigate - severe drop"
+      "signal": "econ_calendar",
+      "accuracy_1d": 56.4,
+      "samples": 8437,
+      "buy_accuracy": 50.7,
+      "sell_accuracy": 59.3
     },
     {
-      "name": "momentum_factors",
-      "accuracy_1d": 0.521,
-      "recent_1d": 0.414,
-      "samples": 20852,
-      "note": "BUT 60.1% at 3h_recent"
+      "signal": "statistical_jump_regime",
+      "accuracy_1d": 54.9,
+      "samples": 3284,
+      "buy_accuracy": 57.0,
+      "sell_accuracy": 53.0
     },
     {
-      "name": "btc_proxy",
-      "accuracy_1d": 0.453,
-      "recent_1d": 0.464,
-      "samples": 117,
-      "action": "Below accuracy gate"
+      "signal": "bb",
+      "accuracy_1d": 54.8,
+      "samples": 9021,
+      "buy_accuracy": 50.0,
+      "sell_accuracy": 58.5
     },
     {
-      "name": "news_event",
-      "accuracy_1d": 0.505,
-      "recent_1d": 0.53,
-      "samples": 9410,
-      "note": "70.0% at 3h_recent"
+      "signal": "metals_cross_asset",
+      "accuracy_1d": 54.6,
+      "samples": 518,
+      "buy_accuracy": 53.6,
+      "sell_accuracy": 56.2
+    },
+    {
+      "signal": "crypto_evrp",
+      "accuracy_1d": 54.5,
+      "samples": 354,
+      "buy_accuracy": 55.4,
+      "sell_accuracy": 54.3
+    },
+    {
+      "signal": "crypto_macro",
+      "accuracy_1d": 54.1,
+      "samples": 4564,
+      "buy_accuracy": 53.6,
+      "sell_accuracy": 64.5
+    },
+    {
+      "signal": "momentum",
+      "accuracy_1d": 52.9,
+      "samples": 12866,
+      "buy_accuracy": 56.5,
+      "sell_accuracy": 49.4
+    },
+    {
+      "signal": "mean_reversion",
+      "accuracy_1d": 52.6,
+      "samples": 27376,
+      "buy_accuracy": 58.8,
+      "sell_accuracy": 48.4
+    },
+    {
+      "signal": "rsi",
+      "accuracy_1d": 52.3,
+      "samples": 33515,
+      "buy_accuracy": 53.4,
+      "sell_accuracy": 51.4
+    },
+    {
+      "signal": "momentum_factors",
+      "accuracy_1d": 52.0,
+      "samples": 21077,
+      "buy_accuracy": 53.4,
+      "sell_accuracy": 49.7
+    },
+    {
+      "signal": "news_event",
+      "accuracy_1d": 50.8,
+      "samples": 9516,
+      "buy_accuracy": 20.5,
+      "sell_accuracy": 51.0
+    },
+    {
+      "signal": "btc_proxy",
+      "accuracy_1d": 44.6,
+      "samples": 139,
+      "buy_accuracy": 31.1,
+      "sell_accuracy": 69.4
     }
   ],
-  "disabled_but_strong_recently": [
+  "worst_signals": [
     {
-      "name": "heikin_ashi",
-      "recent_1d": 0.822,
-      "samples": 27710,
-      "note": "+33pp vs all-time"
+      "signal": "btc_proxy",
+      "accuracy_1d": 44.6,
+      "samples": 139,
+      "note": "Below 53% with significant samples"
     },
     {
-      "name": "volume_flow",
-      "recent_1d": 0.753,
-      "samples": 66171,
-      "note": "+24.8pp vs all-time"
+      "signal": "news_event",
+      "accuracy_1d": 50.8,
+      "samples": 9516,
+      "note": "Below 53% with significant samples"
     },
     {
-      "name": "structure",
-      "recent_1d": 0.652,
-      "samples": 16781,
-      "note": "+16.7pp vs all-time"
+      "signal": "momentum_factors",
+      "accuracy_1d": 52.0,
+      "samples": 21077,
+      "note": "Below 53% with significant samples"
     },
     {
-      "name": "claude_fundamental",
-      "accuracy_1d": 0.579,
-      "samples": 11581,
-      "note": "Strong with large sample"
+      "signal": "rsi",
+      "accuracy_1d": 52.3,
+      "samples": 33515,
+      "note": "Below 53% with significant samples"
     },
     {
-      "name": "drift_regime_gate",
-      "accuracy_1d": 0.577,
-      "samples": 1140
+      "signal": "mean_reversion",
+      "accuracy_1d": 52.6,
+      "samples": 27376,
+      "note": "Below 53% with significant samples"
+    },
+    {
+      "signal": "momentum",
+      "accuracy_1d": 52.9,
+      "samples": 12866,
+      "note": "Below 53% with significant samples"
     }
   ],
-  "correlation_clusters": {
-    "pure_trend": {
-      "members": [
-        "ema",
-        "heikin_ashi"
-      ],
-      "note": "Both disabled. Heikin_ashi 82.2% recent!"
+  "directional_asymmetry": [
+    {
+      "signal": "fear_greed",
+      "buy_accuracy": 58.6,
+      "buy_samples": 10232,
+      "sell_accuracy": 0.0,
+      "sell_samples": 0,
+      "recommended_mode": "BUY_ONLY",
+      "gap_pp": 58.6
     },
-    "oscillator_trend": {
-      "members": [
-        "momentum_factors",
-        "oscillators"
-      ],
-      "note": "momentum_factors collapsing 1d"
+    {
+      "signal": "williams_vix_fix",
+      "buy_accuracy": 43.1,
+      "buy_samples": 346,
+      "sell_accuracy": 85.7,
+      "sell_samples": 35,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 42.6
     },
-    "structural_flow": {
-      "members": [
-        "volume_flow",
-        "macro_regime",
-        "structure"
-      ],
-      "note": "All disabled. VF 75.3% recent!"
+    {
+      "signal": "qwen3",
+      "buy_accuracy": 33.1,
+      "buy_samples": 1302,
+      "sell_accuracy": 73.5,
+      "sell_samples": 2637,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 40.4
     },
-    "macro_external": {
-      "members": [
-        "fear_greed",
-        "sentiment",
-        "news_event",
-        "calendar",
-        "econ_calendar",
-        "funding"
-      ],
-      "note": "econ_calendar 40.1% dragging group"
+    {
+      "signal": "btc_proxy",
+      "buy_accuracy": 31.1,
+      "buy_samples": 90,
+      "sell_accuracy": 69.4,
+      "sell_samples": 49,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 38.3
     },
-    "momentum_cluster": {
-      "members": [
-        "rsi",
-        "bb",
-        "mean_reversion",
-        "momentum"
-      ],
-      "note": "Improving: RSI 61.1%, BB 58.6%"
+    {
+      "signal": "drift_regime_gate",
+      "buy_accuracy": 46.6,
+      "buy_samples": 861,
+      "sell_accuracy": 78.3,
+      "sell_samples": 443,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 31.8
+    },
+    {
+      "signal": "intraday_seasonality",
+      "buy_accuracy": 19.5,
+      "buy_samples": 200,
+      "sell_accuracy": 50.5,
+      "sell_samples": 390,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 31.0
+    },
+    {
+      "signal": "funding",
+      "buy_accuracy": 30.8,
+      "buy_samples": 743,
+      "sell_accuracy": 0.0,
+      "sell_samples": 0,
+      "recommended_mode": "BUY_ONLY",
+      "gap_pp": 30.8
+    },
+    {
+      "signal": "news_event",
+      "buy_accuracy": 20.5,
+      "buy_samples": 73,
+      "sell_accuracy": 51.0,
+      "sell_samples": 9443,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 30.5
+    },
+    {
+      "signal": "hash_ribbons",
+      "buy_accuracy": 29.7,
+      "buy_samples": 209,
+      "sell_accuracy": 0.0,
+      "sell_samples": 0,
+      "recommended_mode": "BUY_ONLY",
+      "gap_pp": 29.7
+    },
+    {
+      "signal": "calendar",
+      "buy_accuracy": 57.5,
+      "buy_samples": 8645,
+      "sell_accuracy": 29.3,
+      "sell_samples": 222,
+      "recommended_mode": "BUY_ONLY",
+      "gap_pp": 28.2
+    },
+    {
+      "signal": "cubic_trend_persistence",
+      "buy_accuracy": 32.7,
+      "buy_samples": 828,
+      "sell_accuracy": 59.9,
+      "sell_samples": 1007,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 27.2
+    },
+    {
+      "signal": "claude_fundamental",
+      "buy_accuracy": 60.5,
+      "buy_samples": 10503,
+      "sell_accuracy": 33.5,
+      "sell_samples": 1078,
+      "recommended_mode": "BUY_ONLY",
+      "gap_pp": 27.0
+    },
+    {
+      "signal": "vol_ratio_regime",
+      "buy_accuracy": 33.8,
+      "buy_samples": 754,
+      "sell_accuracy": 58.6,
+      "sell_samples": 852,
+      "recommended_mode": "SELL_ONLY",
+      "gap_pp": 24.8
     }
-  },
-  "horizon_divergence": {
-    "ministral": {
-      "1d_recent": 0.308,
-      "3h_recent": 0.626
-    },
-    "momentum_factors": {
-      "1d_recent": 0.414,
-      "3h_recent": 0.601
-    },
-    "news_event": {
-      "1d_recent": 0.53,
-      "3h_recent": 0.7
-    },
-    "rsi": {
-      "1d_recent": 0.611,
-      "3h_recent": 0.472
-    },
-    "mean_reversion": {
-      "1d_recent": 0.542,
-      "3h_recent": 0.455
-    }
+  ],
+  "correlation_clusters": [],
+  "regime_performance": {
+    "1d": [
+      {
+        "signal": "qwen3",
+        "accuracy": 60.1,
+        "samples": 3939
+      },
+      {
+        "signal": "fear_greed",
+        "accuracy": 58.6,
+        "samples": 10232
+      },
+      {
+        "signal": "ministral",
+        "accuracy": 58.0,
+        "samples": 6303
+      },
+      {
+        "signal": "drift_regime_gate",
+        "accuracy": 57.4,
+        "samples": 1304
+      },
+      {
+        "signal": "econ_calendar",
+        "accuracy": 56.4,
+        "samples": 8437
+      }
+    ],
+    "3d": [
+      {
+        "signal": "crypto_evrp",
+        "accuracy": 69.6,
+        "samples": 336
+      },
+      {
+        "signal": "fear_greed",
+        "accuracy": 68.7,
+        "samples": 10324
+      },
+      {
+        "signal": "bb",
+        "accuracy": 60.3,
+        "samples": 8581
+      },
+      {
+        "signal": "econ_calendar",
+        "accuracy": 57.0,
+        "samples": 8124
+      },
+      {
+        "signal": "qwen3",
+        "accuracy": 55.3,
+        "samples": 3924
+      }
+    ],
+    "5d": [
+      {
+        "signal": "crypto_evrp",
+        "accuracy": 92.6,
+        "samples": 229
+      },
+      {
+        "signal": "qwen3",
+        "accuracy": 60.4,
+        "samples": 3896
+      },
+      {
+        "signal": "fear_greed",
+        "accuracy": 58.7,
+        "samples": 10153
+      },
+      {
+        "signal": "metals_cross_asset",
+        "accuracy": 58.1,
+        "samples": 542
+      },
+      {
+        "signal": "crypto_macro",
+        "accuracy": 58.1,
+        "samples": 4351
+      }
+    ],
+    "10d": [
+      {
+        "signal": "crypto_evrp",
+        "accuracy": 79.1,
+        "samples": 67
+      },
+      {
+        "signal": "fear_greed",
+        "accuracy": 69.0,
+        "samples": 9465
+      },
+      {
+        "signal": "crypto_macro",
+        "accuracy": 67.7,
+        "samples": 4031
+      },
+      {
+        "signal": "metals_cross_asset",
+        "accuracy": 66.7,
+        "samples": 544
+      },
+      {
+        "signal": "qwen3",
+        "accuracy": 61.8,
+        "samples": 3848
+      }
+    ]
   },
   "recommendations": [
     {
       "priority": 1,
-      "action": "DISABLE credit_spread_risk",
-      "rationale": "20% recent = 80% wrong direction"
+      "title": "Direction-specific signal gating",
+      "description": "Gate signals to only vote in their strong direction. Qwen3 SELL-only (73.5%), claude_fundamental BUY-only (60.5%, 10K sam), calendar BUY-only (57.5%, 8.6K sam). Single biggest edge improvement available.",
+      "effort": "medium",
+      "files": [
+        "portfolio/signal_engine.py"
+      ],
+      "expected_impact": "high"
     },
     {
       "priority": 2,
-      "action": "Investigate crypto_macro collapse",
-      "rationale": "34% recent from 54.6% all-time"
+      "title": "Enable claude_fundamental in BUY-only mode",
+      "description": "Currently disabled at 57.9% overall. But BUY accuracy is 60.5% on 10,503 samples. Enable with BUY-only gate.",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ],
+      "expected_impact": "medium"
     },
     {
       "priority": 3,
-      "action": "Enable heikin_ashi",
-      "rationale": "82.2% recent 1d (27K samples)"
+      "title": "Disable btc_proxy signal",
+      "description": "44.6% accuracy on 139 samples. Below 47% threshold. Still enabled as under evaluation but should be force-disabled.",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ],
+      "expected_impact": "low"
     },
     {
       "priority": 4,
-      "action": "Enable volume_flow",
-      "rationale": "75.3% recent 1d (66K samples)"
+      "title": "Fix cot_positioning sample size",
+      "description": "80% accuracy on 10 samples is meaningless. Do not trust this signal until 50+ samples accumulated.",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ],
+      "expected_impact": "low"
     },
     {
       "priority": 5,
-      "action": "Horizon-specific signal enable/disable",
-      "rationale": "Ministral 62.6% at 3h but 30.8% at 1d"
+      "title": "Investigate crypto_evrp multi-horizon performance",
+      "description": "54.5% 1d but 92.6% 5d accuracy (229 samples). May be a strong medium-term signal being diluted by 1d noise.",
+      "effort": "medium",
+      "files": [
+        "portfolio/signals/crypto_evrp.py"
+      ],
+      "expected_impact": "medium"
     },
     {
       "priority": 6,
-      "action": "Review claude_fundamental for re-enabling",
-      "rationale": "57.9% accuracy, 11.6K samples"
-    },
-    {
-      "priority": 7,
-      "action": "Faster accuracy gate decay",
-      "rationale": "Blended accuracy too slow to catch collapses"
+      "title": "Williams VIX Fix SELL-only evaluation",
+      "description": "85.7% SELL accuracy but only 35 samples. Currently disabled. Monitor and enable SELL-only when 100+ SELL samples.",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ],
+      "expected_impact": "potentially high"
     }
   ]
 }
