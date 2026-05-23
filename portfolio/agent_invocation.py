@@ -18,6 +18,7 @@ from portfolio.file_utils import (
     count_jsonl_lines,
     last_jsonl_entry,
     load_jsonl,
+    load_jsonl_tail,
 )
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
@@ -426,7 +427,7 @@ def _build_decision_feedback(ticker, max_entries=5):
     Token budget: ≤15 lines.  Never fails the invocation on error.
     """
     try:
-        entries = load_jsonl(JOURNAL_FILE)
+        entries = load_jsonl_tail(JOURNAL_FILE, max_entries=200)
     except Exception:
         return ""
     if not entries:
@@ -1530,7 +1531,7 @@ def _check_agent_completion_locked():
             "Check project root for problematic files or update Claude Code.",
             exit_code, _consecutive_stack_overflows,
         )
-        if _consecutive_stack_overflows == _MAX_STACK_OVERFLOWS:
+        if _consecutive_stack_overflows >= _MAX_STACK_OVERFLOWS:
             logger.error(
                 "Layer 2 auto-disabled after %d consecutive stack overflows",
                 _MAX_STACK_OVERFLOWS,
