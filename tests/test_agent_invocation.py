@@ -2062,6 +2062,39 @@ class TestRegimeContext:
             result = ai._build_regime_context()
         assert result == ""
 
+    def test_calibration_warning_on_high_agreement(self, tmp_path):
+        import json
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "regime": "ranging", "action": "BUY", "weighted_confidence": 0.55,
+                    "extra": {"_buy_count": 14, "_sell_count": 1},
+                },
+            }
+        }
+        sf = tmp_path / "agent_summary.json"
+        sf.write_text(json.dumps(summary))
+        with patch.object(ai, "DATA_DIR", tmp_path):
+            result = ai._build_regime_context()
+        assert "CALIBRATION WARNING" in result
+        assert "BTC-USD" in result
+
+    def test_no_calibration_warning_on_balanced_votes(self, tmp_path):
+        import json
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "regime": "ranging", "action": "HOLD", "weighted_confidence": 0.50,
+                    "extra": {"_buy_count": 7, "_sell_count": 8},
+                },
+            }
+        }
+        sf = tmp_path / "agent_summary.json"
+        sf.write_text(json.dumps(summary))
+        with patch.object(ai, "DATA_DIR", tmp_path):
+            result = ai._build_regime_context()
+        assert "CALIBRATION WARNING" not in result
+
     def test_handles_exception_gracefully(self, tmp_path):
         import json
         sf = tmp_path / "agent_summary.json"

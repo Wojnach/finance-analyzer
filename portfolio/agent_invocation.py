@@ -220,7 +220,22 @@ def _build_regime_context():
             parts.append(f"{ticker}={regime}({action}@{conf:.0%})")
         if not parts:
             return ""
-        return "[REGIME] " + ", ".join(parts)
+        line = "[REGIME] " + ", ".join(parts)
+        # Add calibration warning for any high-agreement tickers
+        high_agree = []
+        for ticker in sorted(signals.keys()):
+            tdata = signals[ticker]
+            if not isinstance(tdata, dict):
+                continue
+            extra = tdata.get("extra", {})
+            buy_c = extra.get("_buy_count", 0) or 0
+            sell_c = extra.get("_sell_count", 0) or 0
+            total = buy_c + sell_c
+            if total > 0 and max(buy_c, sell_c) / total >= 0.85:
+                high_agree.append(ticker)
+        if high_agree:
+            line += f"\n[CALIBRATION WARNING] High signal agreement ({', '.join(high_agree)}) historically predicts ~45% accuracy. Be skeptical."
+        return line
     except Exception:
         return ""
 
