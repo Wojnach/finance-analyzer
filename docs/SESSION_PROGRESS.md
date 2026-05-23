@@ -1,5 +1,60 @@
 # Session Progress
 
+## 2026-05-23 FGL Adversarial Review
+
+**Context:** Full /fgl adversarial review of finance-analyzer codebase. 8 subsystem
+partitions reviewed in parallel by `pr-review-toolkit:code-reviewer` subagents +
+independent self-review pass cross-critiquing each output.
+
+**Subsystems reviewed:** signals-core, orchestration, portfolio-risk, metals-core,
+avanza-api, signals-modules, data-external, infrastructure.
+
+**Findings:** 34 raw P0 from subagents → 22 distinct P0 after cross-critique
++ re-classification. 53 raw P1 → ~40 distinct.
+
+**Top P0 themes (ranked by money/silent-failure blast radius):**
+
+1. `kelly_metals.recommended_metals_size` over-sizes by ~50× — `100/avg_loss_pct`
+   over-scaling factor, 0.95 cap is the only thing keeping bot from all-in.
+2. `fin_snipe_manager` 1% stop violates `feedback_mini_stoploss.md` 3% rule —
+   sibling paths enforce 3% correctly; this one is the outlier.
+3. `grid_fisher.rotate_on_buy_fill` leaves naked position when stop-rearm fails
+   (`new_stop_id = None` overwritten unconditionally).
+4. Multi-agent specialist failure cascades into "success" synthesis — `success_count`
+   computed but not gated, synthesis runs on 0/3 specialists. Re-opens silent
+   auth-outage class.
+5. `signal_engine.py:4205` accuracy_gate config-overrideable below documented 47% floor.
+6. `signal_decay_alert.py` uses relative `"data/..."` paths — same class as the
+   2026-05-02 ic_computation.py fix.
+7. `api_utils.get_binance_config` reads `apiKey` but validator requires `key` —
+   silently returns empty creds.
+8. `connors_rsi2` ticker guard absorbs `context=` into `**kwargs`, computes on
+   non-crypto → pollutes promotion pipeline accuracy.
+9. Promoted shadow signal silently HOLDs forever when status="shadow" + promoted=true.
+10. Drawdown breaker mixes historical vs current FX rates → 8% USD/SEK move alone
+    can trip or hide the 20% gate.
+
+**Structural findings:**
+
+- `signal_engine.py` is 4,416 lines (god file; 4 of the P0s live here).
+- 4 parallel Avanza order paths with diverging guards (typed package missing
+  whitelist, size cap, lock).
+- 11+ bare `except: pass` blocks masking real failures.
+- CLAUDE.md drift: `credit_spread_risk` listed active but disabled since 2026-05-21.
+
+**Worktree:** `Q:\finance-analyzer-fgl-2026-05-23` on `review/fgl-2026-05-23`.
+Cleaned up after merge.
+
+**Commits on main:** `0aa095c1` (review docs), `0f40db58` (merge). Pushed.
+
+**Output:** `docs/fgl-2026-05-23/` — 8 subsystem reports + SYNTHESIS.md + self-review.md.
+
+**What's next:** Open a follow-up `fix/fgl-2026-05-23` worktree to implement P0s
+in batches (kelly_metals + fin_snipe + connors_rsi2 + signal_decay first as they
+are smallest blast radius to verify).
+
+---
+
 ## 2026-05-23 Auto-Improvement Session
 
 **Context:** Autonomous improvement — deep codebase review → 11 bugs in 4 batches.
