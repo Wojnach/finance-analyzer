@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-05-23 (Auto-improvement: 11 bug fixes)
+
+Signal accuracy, agent reliability, data integrity fixes.
+
+**Signal engine (signal_engine.py):**
+- Utility boost no longer bypasses accuracy gate — signals below 47%
+  threshold stay gated even with high utility scores.
+- Unanimity detection uses pre-persistence voter counts instead of
+  post-persistence (was overcorrecting metals due to fewer voters).
+- ADX computation guards against missing high/low columns.
+
+**Agent invocation (agent_invocation.py):**
+- Journal load capped at 200 entries via load_jsonl_tail (was loading
+  entire file, growing unbounded).
+- Stack overflow counter uses >= instead of == (off-by-one at threshold).
+- Config loaded once per invocation instead of twice.
+
+**Multi-agent (multi_agent_layer2.py):**
+- Stale specialist reports cleaned up before launching new specialists.
+- Specialist subprocesses get stdin=DEVNULL (was leaking pipe handle).
+
+**Trigger state (trigger.py):**
+- flip_cooldowns and sustained_counts pruned for removed tickers in
+  _save_state (was growing unbounded with ticker churn).
+
+**Futures data (futures_data.py):**
+- Circuit breaker added (5-failure threshold, 60s recovery) — prevents
+  18 retry calls per 5-min cache window during Binance FAPI outages.
+
 ## 2026-05-15 (LLM shadow enrollment)
 
 Routes every LLM-class model on disk through the shadow → measure →
