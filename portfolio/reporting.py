@@ -363,6 +363,25 @@ def write_agent_summary(
         logger.warning("[reporting] accuracy_stats failed", exc_info=True)
         _module_warnings.append("accuracy_stats")
 
+    # 5d accuracy for medium-term hold decisions (Layer 2 sizing)
+    try:
+        sig_acc_5d = load_cached_accuracy("5d")
+        if not sig_acc_5d:
+            sig_acc_5d = signal_accuracy("5d")
+            if sig_acc_5d:
+                write_accuracy_cache("5d", sig_acc_5d)
+        if sig_acc_5d:
+            from portfolio.tickers import DISABLED_SIGNALS as _DISABLED_5D
+            strong_5d = {
+                k: {"accuracy": round(v["accuracy"], 3), "samples": v["total"]}
+                for k, v in sig_acc_5d.items()
+                if v["total"] >= 30 and v["accuracy"] >= 0.60 and k not in _DISABLED_5D
+            }
+            if strong_5d:
+                summary["signal_accuracy_5d_strong"] = strong_5d
+    except Exception:
+        logger.warning("[reporting] 5d accuracy failed", exc_info=True)
+
     # Per-ticker per-signal accuracy (cross-tabulation for Layer 2)
     try:
         from portfolio.accuracy_stats import accuracy_by_ticker_signal
@@ -990,6 +1009,11 @@ def _write_compact_summary(summary):
     if signal_rel:
         compact["signal_reliability"] = signal_rel
 
+    # Propagate strong 5d signals to compact (Layer 2 medium-term sizing)
+    strong_5d = summary.get("signal_accuracy_5d_strong")
+    if strong_5d:
+        compact["signal_accuracy_5d_strong"] = strong_5d
+
     # Propagate on-chain data to compact (BTC only, small)
     onchain = summary.get("onchain")
     if onchain:
@@ -1327,7 +1351,8 @@ def _write_tier2_summary(summary, triggered_tickers=None):
         t2["signal_density"] = density
 
     # Include macro, accuracy, portfolio, and market health sections from full summary
-    for key in ("macro", "signal_accuracy_1d", "signal_reliability", "onchain",
+    for key in ("macro", "signal_accuracy_1d", "signal_accuracy_5d_strong",
+                "signal_reliability", "onchain",
                 "cross_asset_leads", "avanza_instruments", "portfolio",
                 "market_health", "exposure_recommendation", "earnings_proximity"):
         if key in summary:
