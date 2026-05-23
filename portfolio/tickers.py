@@ -228,6 +228,10 @@ DISABLED_SIGNALS = {
     "choppiness_regime_gate",  # 2026-05-22: NEW. CHOP regime gate. CHOP>61.8=choppy
                         # (suppress directional), CHOP<38.2=trending. All assets.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "autotune_adaptive_cycle",  # 2026-05-23: NEW. Ehlers AutoTune adaptive cycle
+                        # detection via autocorrelation periodogram + bandpass filter.
+                        # Cross-asset, OHLCV-only. Score 8.1/10.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -397,4 +401,5 @@ SIGNAL_NAMES = [
     "amihud_illiquidity_regime",
     "absorption_ratio_regime",
     "sentiment_extremity_gate",
+    "autotune_adaptive_cycle",
 ]

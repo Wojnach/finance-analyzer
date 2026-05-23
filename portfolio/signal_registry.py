@@ -379,6 +379,14 @@ def _register_defaults():
                       "portfolio.signals.choppiness_regime_gate",
                       "compute_choppiness_regime_gate_signal",
                       max_confidence=0.7)
+    # AutoTune Adaptive Cycle — Ehlers autocorrelation periodogram + bandpass
+    # 2026-05-23: TASC May 2026. Detects dominant cycle period via rolling ACF,
+    # tunes adaptive bandpass filter. ROC zero-crossing with correlation gate.
+    # Cross-asset, OHLCV-only. Composite score 8.1/10.
+    register_enhanced("autotune_adaptive_cycle",
+                      "portfolio.signals.autotune_adaptive_cycle",
+                      "compute_autotune_adaptive_cycle_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
