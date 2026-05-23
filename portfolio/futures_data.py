@@ -8,6 +8,7 @@ import logging
 import time
 
 from portfolio.api_utils import BINANCE_FAPI_BASE, BINANCE_FUTURES_DATA
+from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _binance_limiter, _cached
 
@@ -23,11 +24,21 @@ _OI_TTL = 300        # 5 min
 _LS_TTL = 300        # 5 min
 _FUNDING_TTL = 900   # 15 min
 
+_fapi_cb = CircuitBreaker("binance_fapi_futures", failure_threshold=5, recovery_timeout=60)
+
 
 def _fetch_json(url, params=None, timeout=10):
-    """Fetch JSON from Binance FAPI with rate limiting and retry."""
+    """Fetch JSON from Binance FAPI with rate limiting, circuit breaker, and retry."""
+    if not _fapi_cb.allow_request():
+        logger.debug("Binance FAPI circuit breaker OPEN — skipping request")
+        return None
     _binance_limiter.wait()
-    return fetch_json(url, params=params, timeout=timeout, label="binance_fapi")
+    result = fetch_json(url, params=params, timeout=timeout, label="binance_fapi")
+    if result is None:
+        _fapi_cb.record_failure()
+    else:
+        _fapi_cb.record_success()
+    return result
 
 
 def get_open_interest(ticker):
