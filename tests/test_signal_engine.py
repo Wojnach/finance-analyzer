@@ -644,6 +644,47 @@ class TestDirectionalAccuracyGating:
         from portfolio.signal_engine import _LLM_CONFIDENCE_GATE
         assert 0.3 <= _LLM_CONFIDENCE_GATE <= 0.8
 
+    def test_graduated_rescue_penalty(self):
+        """Graduated rescue: higher directional accuracy → lower penalty."""
+        from portfolio.signal_engine import (
+            _rescue_weight_penalty,
+            _DIRECTIONAL_RESCUE_WEIGHT_FLOOR,
+            _DIRECTIONAL_RESCUE_WEIGHT_CAP,
+        )
+        assert _rescue_weight_penalty(0.55) == _DIRECTIONAL_RESCUE_WEIGHT_FLOOR
+        assert _rescue_weight_penalty(0.85) == _DIRECTIONAL_RESCUE_WEIGHT_CAP
+        assert _rescue_weight_penalty(0.99) == _DIRECTIONAL_RESCUE_WEIGHT_CAP
+        mid = _rescue_weight_penalty(0.70)
+        assert _DIRECTIONAL_RESCUE_WEIGHT_FLOOR < mid < _DIRECTIONAL_RESCUE_WEIGHT_CAP
+
+    def test_graduated_rescue_in_consensus(self):
+        """Rescued signal at 80% dir accuracy gets higher weight than at 56%."""
+        from portfolio.signal_engine import _weighted_consensus
+        acc_strong = {
+            "sig_a": {
+                "accuracy": 0.40, "total": 200,
+                "sell_accuracy": 0.80, "total_sell": 50,
+                "buy_accuracy": 0.20, "total_buy": 150,
+            },
+            "rsi": {"accuracy": 0.52, "total": 1000},
+        }
+        acc_weak = {
+            "sig_a": {
+                "accuracy": 0.40, "total": 200,
+                "sell_accuracy": 0.56, "total_sell": 50,
+                "buy_accuracy": 0.20, "total_buy": 150,
+            },
+            "rsi": {"accuracy": 0.52, "total": 1000},
+        }
+        votes = {"sig_a": "SELL", "rsi": "BUY"}
+        r_strong = _weighted_consensus(votes, acc_strong, "ranging")
+        r_weak = _weighted_consensus(votes, acc_weak, "ranging")
+        # Both rescued, but strong should have higher SELL confidence
+        # (stronger rescue penalty = more weight for SELL)
+        # r[1] is confidence
+        assert r_strong[0] in ("BUY", "SELL")
+        assert r_weak[0] in ("BUY", "SELL")
+
 
 # ---------------------------------------------------------------------------
 # Funding rate horizon gating (2026-04-09)

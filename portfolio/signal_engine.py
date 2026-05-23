@@ -469,7 +469,18 @@ _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 # penalty so they contribute less than fully-passing signals.
 _DIRECTIONAL_RESCUE_THRESHOLD = 0.55
 _DIRECTIONAL_RESCUE_MIN_SAMPLES = 30
-_DIRECTIONAL_RESCUE_WEIGHT_PENALTY = 0.70
+_DIRECTIONAL_RESCUE_WEIGHT_FLOOR = 0.70
+_DIRECTIONAL_RESCUE_WEIGHT_CAP = 0.95
+
+
+def _rescue_weight_penalty(dir_acc: float) -> float:
+    """Graduated rescue penalty: 55% dir accuracy → 0.70x, 85%+ → 0.95x."""
+    if dir_acc >= 0.85:
+        return _DIRECTIONAL_RESCUE_WEIGHT_CAP
+    if dir_acc <= _DIRECTIONAL_RESCUE_THRESHOLD:
+        return _DIRECTIONAL_RESCUE_WEIGHT_FLOOR
+    t = (dir_acc - _DIRECTIONAL_RESCUE_THRESHOLD) / (0.85 - _DIRECTIONAL_RESCUE_THRESHOLD)
+    return _DIRECTIONAL_RESCUE_WEIGHT_FLOOR + t * (_DIRECTIONAL_RESCUE_WEIGHT_CAP - _DIRECTIONAL_RESCUE_WEIGHT_FLOOR)
 
 # LLM confidence gate: suppress BUY/SELL from local LLM signals (Qwen3,
 # Ministral) when model self-reported confidence is below this threshold.
@@ -2541,11 +2552,12 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # P1-1 (2026-05-02 adversarial follow-ups): defensive — initialize
         # _rescued at the TOP of every iteration so a future contributor who
         # adds a third branch to the gate-check below cannot leak a stale
-        # True from a prior iteration into line 2123 (`if _rescued: weight
-        # *= _DIRECTIONAL_RESCUE_WEIGHT_PENALTY`). Today both arms of the
+        # True from a prior iteration into the weight multiplication.
+        # Today both arms of the
         # if/else at line 2072 set _rescued, so the bug doesn't manifest in
         # production — but the structural guarantee is now hardcoded.
         _rescued = False
+        _rescue_mult = _DIRECTIONAL_RESCUE_WEIGHT_FLOOR
         if vote == "HOLD":
             continue
         if signal_name in excluded:
@@ -2583,14 +2595,14 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                 rescue_n = stats.get("total_sell", 0)
             if (rescue_n >= _DIRECTIONAL_RESCUE_MIN_SAMPLES
                     and rescue_acc >= _DIRECTIONAL_RESCUE_THRESHOLD):
+                _rescue_mult = _rescue_weight_penalty(rescue_acc)
                 logger.debug(
                     "Directional rescue: %s overall=%.1f%% (gated) but "
                     "%s=%.1f%% (%d sam) — rescued at %.0f%% weight",
                     signal_name, acc * 100, vote,
                     rescue_acc * 100, rescue_n,
-                    _DIRECTIONAL_RESCUE_WEIGHT_PENALTY * 100,
+                    _rescue_mult * 100,
                 )
-                # Fall through to weighting with rescue penalty applied later
                 _rescued = True
             else:
                 gated_signals.append(signal_name)
@@ -2621,10 +2633,8 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             weight = acc
         else:
             weight = 0.5
-        # Apply directional rescue penalty: rescued signals contribute at
-        # reduced weight since their overall accuracy failed the gate.
         if _rescued:
-            weight *= _DIRECTIONAL_RESCUE_WEIGHT_PENALTY
+            weight *= _rescue_mult
         # IC-based weight adjustment: boost signals with high return-magnitude
         # predictive power, penalize phantom performers with zero IC.
         if ic_global:
