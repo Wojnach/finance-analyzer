@@ -17,11 +17,19 @@
 - BTC ETF flows = biggest signal gap (9x daily mining supply)
 - Iran ceasefire = weekend binary event for all positions
 
+**Batch 2 (extended session):**
+- Regime context injection in Layer 2 prompt (`[REGIME]` line with per-ticker regime+consensus)
+- 5d accuracy for strong signals propagated to Layer 2 context (crypto_evrp 92.6%)
+- Graduated rescue penalty: 55%→0.70x, 85%→0.95x (replaces flat 0.70x)
+- 4 new test_agent_invocation tests, 2 new test_signal_engine tests
+
+**Shipped:** 11 commits merged+pushed (765c304c..d8cce614). 376+ tests verified, 0 regressions.
+
 **Deferred:**
 - D1: Regime-adaptive weight vectors (5 days)
 - D2: Walk-forward validation (4 days)
-- D3: IC-based signal weighting (3 days)
-- D4: Bull/bear Layer 2 prompt (1 day)
+- D3: IC-based signal weighting — ALREADY DONE (ic_computation.py + 12-stage weight cascade)
+- D4: Regime prompt conditioning — DONE this session
 - D5: BTC ETF flow signal (3 days)
 
 ---

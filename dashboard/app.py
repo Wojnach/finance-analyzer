@@ -1216,6 +1216,21 @@ def api_accuracy_history():
     return jsonify(entries)
 
 
+@app.route("/api/calibration")
+@require_auth
+def api_calibration():
+    """Confidence calibration: predicted confidence vs actual accuracy by bucket."""
+    horizon = request.args.get("horizon", "1d")
+    since = request.args.get("since")
+    try:
+        from portfolio.accuracy_stats import probability_calibration
+        data = probability_calibration(horizon, since=since)
+        return jsonify({"horizon": horizon, "buckets": data})
+    except Exception:
+        logger.exception("calibration endpoint failed")
+        return jsonify({"error": "calibration failed"}), 500
+
+
 @app.route("/api/local-llm-trends")
 @require_auth
 def api_local_llm_trends():
