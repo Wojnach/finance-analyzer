@@ -194,6 +194,37 @@ TIER_CONFIG = {
 }
 
 
+def _build_regime_context():
+    """Build a compact regime summary from the latest signal report.
+
+    Returns a short string like:
+      "[REGIME] XAU-USD=ranging, BTC-USD=trending-up, XAG-USD=high-vol"
+    or empty string if data is unavailable.
+    """
+    try:
+        from portfolio.file_utils import load_json
+        summary = load_json(DATA_DIR / "agent_summary.json")
+        if not summary:
+            return ""
+        signals = summary.get("signals", {})
+        if not signals:
+            return ""
+        parts = []
+        for ticker in sorted(signals.keys()):
+            tdata = signals[ticker]
+            if not isinstance(tdata, dict):
+                continue
+            regime = tdata.get("regime", "unknown")
+            action = tdata.get("action", "HOLD")
+            conf = tdata.get("weighted_confidence", 0)
+            parts.append(f"{ticker}={regime}({action}@{conf:.0%})")
+        if not parts:
+            return ""
+        return "[REGIME] " + ", ".join(parts)
+    except Exception:
+        return ""
+
+
 def _build_tier_prompt(tier, reasons):
     """Build a tier-specific prompt for the Claude Code agent."""
     reason_str = ", ".join(reasons[:5])
@@ -979,6 +1010,9 @@ def invoke_agent(reasons, tier=3):
     else:
         prompt = _build_tier_prompt(tier, reasons)
 
+    _regime_ctx = _build_regime_context()
+    if _regime_ctx:
+        prompt += "\n\n" + _regime_ctx
     # BUG-214: Append drawdown context so Layer 2 sees current risk levels.
     if _drawdown_context:
         prompt += "\n\n[RISK DATA]" + _drawdown_context

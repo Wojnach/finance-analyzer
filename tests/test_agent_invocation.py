@@ -2024,3 +2024,48 @@ class TestNoPositionSkip:
     def test_extract_triggered_tickers_finds_stock(self):
         out = ai._extract_triggered_tickers(["MSTR flipped HOLD->SELL"])
         assert "MSTR" in out
+
+
+# ---------------------------------------------------------------------------
+# Regime context injection (2026-05-23 research)
+# ---------------------------------------------------------------------------
+
+class TestRegimeContext:
+    """Tests for _build_regime_context()."""
+
+    def test_returns_empty_on_missing_file(self, tmp_path):
+        with patch.object(ai, "DATA_DIR", tmp_path):
+            result = ai._build_regime_context()
+        assert result == ""
+
+    def test_returns_regime_line_with_valid_data(self, tmp_path):
+        import json
+        summary = {
+            "signals": {
+                "BTC-USD": {"regime": "trending-up", "action": "BUY", "weighted_confidence": 0.62},
+                "XAG-USD": {"regime": "ranging", "action": "HOLD", "weighted_confidence": 0.45},
+            }
+        }
+        sf = tmp_path / "agent_summary.json"
+        sf.write_text(json.dumps(summary))
+        with patch.object(ai, "DATA_DIR", tmp_path):
+            result = ai._build_regime_context()
+        assert result.startswith("[REGIME]")
+        assert "BTC-USD=trending-up" in result
+        assert "XAG-USD=ranging" in result
+
+    def test_returns_empty_on_no_signals_key(self, tmp_path):
+        import json
+        sf = tmp_path / "agent_summary.json"
+        sf.write_text(json.dumps({"timestamp": "2026-05-23"}))
+        with patch.object(ai, "DATA_DIR", tmp_path):
+            result = ai._build_regime_context()
+        assert result == ""
+
+    def test_handles_exception_gracefully(self, tmp_path):
+        import json
+        sf = tmp_path / "agent_summary.json"
+        sf.write_text("invalid json{{{")
+        with patch.object(ai, "DATA_DIR", tmp_path):
+            result = ai._build_regime_context()
+        assert result == ""
