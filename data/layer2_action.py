@@ -75,7 +75,8 @@ print("Telegram message saved.")
 
 # Only send to Telegram if a trade was executed
 if category == "trade":
-    config = json.load(open("Q:/finance-analyzer/config.json", encoding="utf-8"))
+    with open(pathlib.Path(__file__).resolve().parent.parent / "config.json", encoding="utf-8") as _cf:
+        config = json.load(_cf)
     resp = requests.post(
         f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
         json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}

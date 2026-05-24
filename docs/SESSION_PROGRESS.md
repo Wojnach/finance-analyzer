@@ -1,5 +1,35 @@
 # Session Progress
 
+## 2026-05-24 Auto-Improvement Session
+
+**Context:** Autonomous improvement targeting FGL 2026-05-23 P0s. Branch `improve/auto-session-2026-05-24`.
+
+**Phase 1 — Exploration:** 6 parallel agents surveyed: signal_engine (4449 lines), orchestration (4 files), metals/grid_fisher, dashboard/infra, bare-except inventory, FGL synthesis. kelly_metals P0-1 verified as FALSE POSITIVE via proportional Kelly math.
+
+**Batch 1 (4 fixes, LOW risk):**
+- FGL-P0-2: fin_snipe MIN_STOP_DISTANCE_PCT 1.0→3.0 (memory rule violation)
+- FGL-P0-6: signal_decay_alert relative data/ paths → Path(__file__)-based
+- FGL-P0-7: api_utils.get_binance_config apiKey→key (config schema mismatch)
+- FGL-P0-8: connors_rsi2 signature (df, ticker="", **kwargs) → (df, context=None)
+
+**Batch 2 (3 fixes, MED risk):**
+- FGL-P0-5: accuracy_gate config override clamped to max(0.47, x)
+- FGL-P0-9: promoted shadow signals skip cycle-modulo throttle
+- FGL-P0-11: trigger price baseline refreshed every cycle
+
+**Batch 3 (3 fixes, MED risk):**
+- FGL-P0-12: Layer 2 kill wedge — force _agent_proc=None on Windows after taskkill
+- FGL-P0-4: specialist quorum gate — skip synthesis when 0/N succeed
+- FGL-P0-3: grid_fisher stop-rearm — preserve old stop_loss_id when new fails
+
+**P1 (bonus):** layer2_exec/action/invoke.py — json.load(open()) → proper with-block
+
+**Tests:** 591 targeted tests pass across affected files. Full suite running.
+
+**Deferred:** 11 P0s (need design sessions or have high blast radius).
+
+---
+
 ## 2026-05-23 After-Hours Research Session (22:30 CEST)
 
 **Implemented:**
