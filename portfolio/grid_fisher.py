@@ -1512,8 +1512,30 @@ class GridFisher:
                               qty=inst.inventory_units,
                               avanza_status=result.get("status"),
                               message=result.get("message"))
-        inst.stop_loss_id = new_stop_id
-        inst.stop_loss_price = stop_price
+        if new_stop_id is not None:
+            inst.stop_loss_id = new_stop_id
+            inst.stop_loss_price = stop_price
+        else:
+            logger.critical(
+                "Stop-rearm FAILED for %s (%s) — keeping old stop_loss_id=%s "
+                "to avoid naked position (FGL P0-3)",
+                inst.ticker, inst.ob_id, inst.stop_loss_id,
+            )
+            try:
+                from portfolio.file_utils import atomic_append_jsonl
+                atomic_append_jsonl(
+                    str(Path(__file__).resolve().parent.parent / "data" / "critical_errors.jsonl"),
+                    {
+                        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                        "level": "critical",
+                        "category": "grid_fisher_naked_position",
+                        "caller": "grid_fisher.rotate_on_buy_fill",
+                        "message": f"Stop rearm failed for {inst.ticker} — position has no broker-side stop",
+                        "context": {"ob_id": inst.ob_id, "old_stop_id": inst.stop_loss_id},
+                    },
+                )
+            except Exception:
+                pass
 
         self._log("rotate", ob_id=inst.ob_id, ticker=inst.ticker,
                   linked_buy_tier=filled_tier,

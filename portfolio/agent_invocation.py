@@ -693,9 +693,18 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
     try:
         _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
     except subprocess.TimeoutExpired:
-        if kill_ok:
-            logger.error("Agent pid=%s did not exit after kill+15s wait", pid)
-        kill_ok = False
+        if kill_ok and platform.system() == "Windows":
+            # FGL P0-12: taskkill returned 0/128 (OS confirmed kill) but
+            # Popen.wait timed out — Popen handle is stale. Force-clear
+            # to prevent permanently wedging Layer 2.
+            logger.error(
+                "Agent pid=%s: taskkill succeeded but wait(15) timed out — "
+                "forcing _agent_proc=None to prevent Layer 2 wedge", pid,
+            )
+        else:
+            if kill_ok:
+                logger.error("Agent pid=%s did not exit after kill+15s wait", pid)
+            kill_ok = False
 
     if _agent_log:
         try:
@@ -1013,9 +1022,29 @@ def invoke_agent(reasons, tier=3):
                 results = wait_for_specialists(procs, timeout=specialist_timeout)
                 success_count = sum(1 for v in results.values() if v)
                 logger.info("Specialists complete: %d/%d succeeded", success_count, len(results))
-                # Even if some fail, proceed with synthesis using available reports
+                if success_count == 0:
+                    logger.critical(
+                        "All %d specialists failed — skipping synthesis (FGL P0-4)",
+                        len(results),
+                    )
+                    _log_trigger(reasons, "specialist_quorum_fail", tier=tier)
+                    try:
+                        from portfolio.file_utils import atomic_append_jsonl
+                        atomic_append_jsonl(
+                            str(BASE_DIR / "data" / "critical_errors.jsonl"),
+                            {
+                                "ts": datetime.now(UTC).isoformat(),
+                                "level": "critical",
+                                "category": "specialist_quorum_fail",
+                                "caller": "agent_invocation.invoke_agent",
+                                "message": f"0/{len(results)} specialists succeeded for {ticker}",
+                                "context": {"ticker": ticker, "results": {k: v for k, v in results.items()}},
+                            },
+                        )
+                    except Exception:
+                        pass
+                    return
                 prompt = build_synthesis_prompt(ticker, reasons)
-                # Fall through to normal agent launch with synthesis prompt
             else:
                 logger.warning("No specialists launched, falling back to single-agent")
                 prompt = _build_tier_prompt(tier, reasons)
