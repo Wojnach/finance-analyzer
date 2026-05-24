@@ -1,73 +1,109 @@
-# Improvement Plan — Auto-Session 2026-05-23
+# Improvement Plan — Auto-Session 2026-05-24
 
-Created: 2026-05-23
-Branch: `improve/auto-session-2026-05-23`
-Prior sessions: 7 auto-sessions (05-04 through 05-22), adversarial reviews (05-21, 05-22).
+Based on 6-agent parallel exploration of codebase + cross-reference against
+FGL adversarial review (2026-05-23, 22 P0s, ~40 P1s).
 
-## Context
+## Methodology
 
-6 exploration/audit agents ran in parallel covering: orchestration (main.py, agent_invocation.py, trigger.py, market_timing.py, health.py, autonomous.py), signal system (signal_engine.py, signal_registry.py, accuracy_stats.py, outcome_tracker.py), data layer (file_utils.py, shared_state.py, http_retry.py, circuit_breaker.py, data_collector.py, portfolio_mgr.py, trade_guards.py, risk_management.py, equity_curve.py, fx_rates.py), dashboard (app.py, auth.py, cf_access.py), metals subsystem (metals_loop.py, grid_fisher.py, avanza_session.py, avanza_orders.py, exit_optimizer.py).
+- FGL 2026-05-23 SYNTHESIS.md identified 22 P0 bugs
+- Prior auto-sessions (5/22, 5/23) fixed 25 bugs across 10 batches
+- This session targets remaining FGL P0s with clear fixes + low blast radius
 
-Baseline: 10,210 passing, 36 pre-existing failures (all pre-existing on main).
+## P0 Classification After Verification
 
-## Bugs & Fixes
+### CONFIRMED P0s (10 fixes this session)
 
-### Batch 1: Signal Accuracy (affects trading decisions directly)
+| # | FGL P0 | File | Issue | Risk |
+|---|--------|------|-------|------|
+| 1 | P0-2 | `portfolio/fin_snipe_manager.py:64` | MIN_STOP_DISTANCE_PCT=1.0, violates 3% rule | LOW |
+| 2 | P0-6 | `portfolio/signal_decay_alert.py:27,148` | Relative `"data/..."` paths — silent failure | LOW |
+| 3 | P0-7 | `portfolio/api_utils.py:60` | `apiKey` vs `key` config mismatch | LOW |
+| 4 | P0-5 | `portfolio/signal_engine.py:~4238` | accuracy_gate config override below 47% floor | LOW |
+| 5 | P0-8 | `portfolio/signals/connors_rsi2.py:103` | `**kwargs` absorbs `context=`, ticker guard bypassed | LOW |
+| 6 | P0-9 | `portfolio/signal_engine.py:~3601-3685` | Promoted shadow signal HOLDs forever | MED |
+| 7 | P0-11 | `portfolio/trigger.py:496-509` | Price baseline stales across quiet periods | MED |
+| 8 | P0-12 | `portfolio/agent_invocation.py:647-682` | `_agent_proc` never cleared after kill+wait wedge | MED |
+| 9 | P0-3 | `portfolio/grid_fisher.py:~1424-1522` | Naked position when stop-rearm fails | MED |
+| 10 | P0-4 | `portfolio/agent_invocation.py:~967-971` | 0/3 specialist failure cascades to "success" | MED |
 
-| ID | File(s) | Bug | Impact | Fix |
-|----|---------|-----|--------|-----|
-| B1 | signal_engine.py:4162-4173 | Utility boost can rescue signals below accuracy gate. A signal at 44% acc with positive avg_return gets boosted to 48.4%, passing the 47% gate. | Noise signals trade. E.g. ministral on XAG-USD (33.8% recent) could be rescued. | Only apply utility boost to signals already passing the raw gate. |
-| B2 | signal_engine.py:3989-3990,3004-3037 | Unanimity penalty (Stage 5) uses pre-persistence voter counts but consensus uses post-persistence. 8 pre-persistence BUYs → 0.6x penalty, but only 2 actually voted → overcorrection. | Systematically suppresses legitimate metals signals. | Compute `_buy_count`/`_sell_count` from `consensus_votes` (post-persistence), not `votes`. |
-| B3 | signal_engine.py:2848 | `_compute_adx` crashes with KeyError on DataFrames without 'high' column. Tests provide DataFrames with only 'close'. | Test failures (3 pre-existing). Production safe because `generate_signal` always has full OHLCV. | Guard `_compute_adx`: return None if required columns missing. |
+### FALSE POSITIVE (1)
 
-### Batch 2: Agent Invocation Safety
+| # | FGL P0 | Verdict | Evidence |
+|---|--------|---------|----------|
+| 1 | P0-1 | **CORRECT** | kelly_metals.py math verified: code gives half-Kelly=0.587, proportional Kelly formula gives 0.587. FGL review used wrong formula. |
 
-| ID | File(s) | Bug | Impact | Fix |
-|----|---------|-----|--------|-----|
-| B4 | multi_agent_layer2.py:97-119 | `cleanup_reports()` defined but never called. Specialist report files persist across invocations — synthesis agent reads stale specialist data from previous runs. | Stale analysis feeds trading decisions. | Call `cleanup_reports()` at start of `launch_specialists`. |
-| B5 | multi_agent_layer2.py:178-184 | Specialist subprocesses don't pass `stdin=subprocess.DEVNULL`. Three specialists share parent stdin handle. | Potential deadlock on interactive sessions. | Add `stdin=subprocess.DEVNULL` to specialist Popen. |
-| B6 | agent_invocation.py:1533 | Stack overflow auto-disable uses `==` instead of `>=`. If counter exceeds threshold, alert never fires but invocations still blocked. | Silent Layer 2 disable with no alert. | Change `==` to `>=`. |
-| B7 | agent_invocation.py:429 | `_build_decision_feedback` loads entire journal unboundedly via `load_jsonl(JOURNAL_FILE)`. | O(N) memory/disk on hot path, growing indefinitely. | Replace with `load_jsonl_tail(JOURNAL_FILE, max_entries=200)`. |
+### DEFERRED (11 — too risky or needs design session)
 
-### Batch 3: Trigger & Data Hygiene
+| # | FGL P0 | Why Deferred |
+|---|--------|--------------|
+| P0-10 | Drawdown FX mixing | Needs design decision: USD-only vs dual-currency breaker |
+| P0-13 | Avanza trading whitelist | Unified guard requires testing all 4 order paths |
+| P0-14 | get_buying_power returns 0 | Breaking return type change |
+| P0-15 | get_positions pension leak | Breaking default change |
+| P0-16 | EOD hardcoded | Needs Avanza API integration for `todayClosingTime` |
+| P0-17 | EOD crash recovery | Needs atexit + signal handler design |
+| P0-18 | yfinance lock | Concurrency refactor across 5+ callers |
+| P0-19 | fx_rates stale | Breaking return type (tuple) |
+| P0-20 | Core-gate pre-persistence | Complex change in 4400-line signal_engine.py |
+| P0-21 | Warrant P&L barrier | Schema change + downstream consumers |
+| P0-22 | Journal linear scan | Already partially addressed (load_jsonl_tail cap) |
 
-| ID | File(s) | Bug | Impact | Fix |
-|----|---------|-----|--------|-----|
-| B8 | trigger.py | `flip_cooldowns` and `sustained_counts` never pruned for removed tickers — unbounded growth in trigger_state.json. | State file grows forever, slow reads. | Add pruning in `_save_state` matching existing `triggered_consensus` pattern. |
-| B9 | futures_data.py | No circuit breaker for Binance FAPI calls. API outage → 18 retry calls per 5-min cache window (6 metrics × 3 retries). | Wastes rate limit budget during outage, delays loop. | Add shared `CircuitBreaker("binance_fapi")` gating all futures API calls. |
+---
 
-### Batch 4: Test Fixes & Correctness
+## Execution Batches
 
-| ID | File(s) | Bug | Impact | Fix |
-|----|---------|-----|--------|-----|
-| B10 | tests/test_signal_engine_circuit_breaker.py | Tests pass DataFrames without 'high'/'low' columns to `apply_confidence_penalties` → KeyError in `_compute_adx`. | 3 pre-existing test failures. | Fix tests to include full OHLCV columns, AND add guard in `_compute_adx`. |
-| B11 | agent_invocation.py:737-741,947-950 | Config loaded multiple times in `invoke_agent` — TOCTOU if config file changes mid-invocation. | Config inconsistency between tier check and multi-agent check. | Load config once at top of `invoke_agent`, pass through. |
+### Batch 1: Trivial fixes (4 files, LOW risk)
 
-## Skipped / Deferred
+**Files:** `fin_snipe_manager.py`, `signal_decay_alert.py`, `api_utils.py`, `connors_rsi2.py`
 
-- **P0 #0 (prior session): Barrier-blind stops** — 10+ files, real-money paths. Still deferred: MANUAL REVIEW needed.
-- **P0 #1 (prior session): Layer 2 Edit/Write/Bash tools** — security design session needed.
-- **Signal engine unanimity pre/post persistence (B2)** — marked for this session but if too risky to change at 4400-line scale, defer with TODO.
-- **exit_optimizer.py trading minutes mismatch** (820 vs canonical 810) — minor impact on MC simulation, defer.
-- **IC data cache mutation outside lock** (signal_engine.py:2127-2131) — GIL-protected on CPython, low risk.
-- **Regime gate REPLACE semantics validation assertion** — design improvement, not a bug.
-- **Dashboard rate limiting on auth** — security enhancement, not a bug.
-- **load_equity_curve full JSONL scan** — performance only, defer to SQLite migration.
+1. **fin_snipe_manager.py:64** — Change `MIN_STOP_DISTANCE_PCT = 1.0` to `3.0`.
+   Also audit keep-existing-stop branch (~line 555-563) for same violation.
 
-## Implementation Order
+2. **signal_decay_alert.py:27,148** — Replace relative `"data/..."` with
+   `Path(__file__).resolve().parent.parent / "data"`. Same pattern as
+   ic_computation.py fix (2026-05-02).
 
-### Batch 1 (B1, B2, B3): signal_engine.py — Signal accuracy fixes
-Files: `portfolio/signal_engine.py`
-Impact: Directly affects trading decisions. B1 lets noise signals through. B2 suppresses metals signals.
+3. **api_utils.py:60** — Change `apiKey` to `key` to match config_validator schema.
 
-### Batch 2 (B4, B5, B6, B7): agent_invocation.py + multi_agent_layer2.py — Invocation safety
-Files: `portfolio/agent_invocation.py`, `portfolio/multi_agent_layer2.py`
-Impact: Stale data in decisions (B4), deadlock risk (B5), silent disable (B6), memory growth (B7).
+4. **connors_rsi2.py:103** — Change signature from `(df, ticker="", **kwargs)`
+   to `(df, context=None, **kwargs)`. Extract ticker from context dict.
 
-### Batch 3 (B8, B9): trigger.py + futures_data.py — Data hygiene
-Files: `portfolio/trigger.py`, `portfolio/futures_data.py`
-Impact: State growth (B8), API waste (B9).
+**Impact:** No downstream callers break. All are leaf changes.
 
-### Batch 4 (B10, B11): Test fixes + config consistency
-Files: `tests/test_signal_engine_circuit_breaker.py`, `portfolio/agent_invocation.py`
-Impact: Fix 3+ pre-existing test failures.
+### Batch 2: Signal engine + trigger (3 files, MED risk)
+
+**Files:** `signal_engine.py`, `trigger.py`
+
+5. **signal_engine.py accuracy_gate clamp** — Add
+   `accuracy_gate = max(ACCURACY_GATE_THRESHOLD, accuracy_gate)` after
+   config read. Prevents sub-47% override.
+
+6. **signal_engine.py promoted shadow fix** — In the throttle block at
+   ~line 3663-3685, if `_promoted_override` is True, skip the
+   `status == "shadow"` force-HOLD.
+
+7. **trigger.py:496-509** — Refresh `state["last"]["prices"]` every cycle
+   (not only when triggered). Keep `last_trigger_time` separate.
+
+### Batch 3: Agent invocation + grid fisher (2 files, MED risk)
+
+**Files:** `agent_invocation.py`, `grid_fisher.py`
+
+8. **agent_invocation.py kill wedge** — After `taskkill` returns 0/128 and
+   `wait(15)` times out, force `_agent_proc = None`. Log critical_errors entry.
+
+9. **grid_fisher.py stop-rearm** — Don't overwrite `inst.stop_loss_id`
+   when `new_stop_id is None`. Set `inst.stop_needs_rearm = True`. Log
+   critical_errors entry.
+
+10. **agent_invocation.py specialist quorum** — After `wait_for_specialists`,
+    if `success_count == 0`, skip synthesis and log `specialist_quorum_fail`.
+
+---
+
+## Additional P1 fixes (if time allows)
+
+- `layer2_exec.py:77`, `layer2_action.py:78`, `layer2_invoke.py:75` —
+  Replace `json.load(open(...))` with `load_json()` from file_utils
+- Top 5-10 most critical bare `except: pass` blocks in production paths
+  (metals_loop.py:928, fish_engine.py:654,686,708)
