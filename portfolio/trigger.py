@@ -493,22 +493,26 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 
     triggered = len(reasons) > 0
 
+    # Always refresh price baseline to prevent stale comparisons after
+    # quiet periods. Without this, a 24h+ quiet period causes normal
+    # intraday moves to fire as false triggers (FGL P0-11).
+    if "last" not in state:
+        state["last"] = {}
+    state["last"]["prices"] = dict(prices_usd)
+
     if triggered:
         state["last_trigger_time"] = time.time()
-        state["last"] = {
+        state["last"].update({
             "signals": {
                 t: {"action": s["action"], "confidence": s["confidence"]}
                 for t, s in signals.items()
             },
-            "prices": dict(prices_usd),
             "fear_greeds": {
                 t: fg if isinstance(fg, dict) else {} for t, fg in fear_greeds.items()
             },
             "sentiments": dict(sentiments),
             "time": time.time(),
-        }
-        # C4/NEW-2: only update last_trigger_date when a real trigger fires, so that
-        # classify_tier() can correctly detect the first real trigger of the day.
+        })
         state["last_trigger_date"] = _today_str()
 
     # Track today_date for other purposes

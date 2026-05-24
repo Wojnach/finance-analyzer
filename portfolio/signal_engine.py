@@ -3701,7 +3701,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     should_run_this_cycle,
                 )
                 _sig_status = get_status(sig_name)
-                if _sig_status == "shadow":
+                if _sig_status == "shadow" and not _promoted_override:
                     if not should_run_this_cycle(sig_name, cycle_count_now()):
                         _throttle_skip = True
             except Exception:
@@ -4235,7 +4235,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                         accuracy_data[sig_name] = bh_data
         except Exception:
             logger.debug("Best-horizon accuracy unavailable", exc_info=True)
-    accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
+    accuracy_gate = max(
+        ACCURACY_GATE_THRESHOLD,
+        float(sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)),
+    )
     max_signals = sig_cfg.get("max_active_signals")
 
     # Signal persistence filter: only let signals that maintained their vote
