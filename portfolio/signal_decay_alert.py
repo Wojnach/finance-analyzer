@@ -12,9 +12,13 @@ erosion between manual audit sessions.
 import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 logger = logging.getLogger("portfolio.signal_decay_alert")
 
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_ACCURACY_CACHE_FILE = _DATA_DIR / "accuracy_cache.json"
+_DECAY_ALERTS_FILE = _DATA_DIR / "signal_decay_alerts.jsonl"
 
 # Minimum absolute accuracy drop (percentage points) to trigger an alert.
 _DECAY_THRESHOLD_PP = 10.0
@@ -24,13 +28,15 @@ _MIN_RECENT_SAMPLES = 50
 _MIN_ALLTIME_SAMPLES = 100
 
 
-def check_signal_decay(accuracy_cache_path="data/accuracy_cache.json"):
+def check_signal_decay(accuracy_cache_path=None):
     """Check for signal accuracy decay and return a list of decay alerts.
 
     Returns:
         list[dict]: Each dict has keys: signal, horizon, alltime_acc, recent_acc,
         drop_pp, recent_samples, severity.
     """
+    if accuracy_cache_path is None:
+        accuracy_cache_path = str(_ACCURACY_CACHE_FILE)
     try:
         from portfolio.file_utils import load_json
         cache = load_json(accuracy_cache_path, default=None)
@@ -145,7 +151,7 @@ def log_decay_alerts(alerts):
     }
     try:
         from portfolio.file_utils import atomic_append_jsonl
-        atomic_append_jsonl("data/signal_decay_alerts.jsonl", entry)
+        atomic_append_jsonl(str(_DECAY_ALERTS_FILE), entry)
     except Exception:
         logger.debug("Could not write signal_decay_alerts.jsonl", exc_info=True)
 

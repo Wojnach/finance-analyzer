@@ -61,7 +61,7 @@ def _make_overbought_df(n=50):
 class TestSignalInterface:
     def test_returns_dict_with_required_keys(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "BTC-USD"})
         assert isinstance(result, dict)
         assert "action" in result
         assert "confidence" in result
@@ -70,7 +70,7 @@ class TestSignalInterface:
 
     def test_has_sub_signals(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "BTC-USD"})
         if "sub_signals" in result:
             subs = result["sub_signals"]
             assert "rsi2_level" in subs
@@ -79,45 +79,45 @@ class TestSignalInterface:
 
     def test_confidence_capped(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "BTC-USD"})
         assert result["confidence"] <= MAX_CONFIDENCE
 
     def test_insufficient_data(self):
         df = _make_df(n=3)
-        result = compute_connors_rsi2_signal(df, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "BTC-USD"})
         assert result["action"] == "HOLD"
         assert result["confidence"] == 0.0
 
     def test_none_dataframe(self):
-        result = compute_connors_rsi2_signal(None, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(None, context={"ticker": "BTC-USD"})
         assert result["action"] == "HOLD"
 
 
 class TestTickerFiltering:
     def test_non_crypto_returns_hold(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="XAU-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "XAU-USD"})
         assert result["action"] == "HOLD"
         assert result.get("feature_unavailable") is True
 
     def test_btc_allowed(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "BTC-USD"})
         assert "feature_unavailable" not in result or not result["feature_unavailable"]
 
     def test_eth_allowed(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="ETH-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "ETH-USD"})
         assert "feature_unavailable" not in result or not result["feature_unavailable"]
 
     def test_mstr_excluded(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="MSTR")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "MSTR"})
         assert result.get("feature_unavailable") is True
 
     def test_xag_excluded(self):
         df = _make_df()
-        result = compute_connors_rsi2_signal(df, ticker="XAG-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "XAG-USD"})
         assert result.get("feature_unavailable") is True
 
 
@@ -172,12 +172,12 @@ class TestSubIndicators:
 class TestDirectionalSignals:
     def test_oversold_produces_buy(self):
         df = _make_oversold_df()
-        result = compute_connors_rsi2_signal(df, ticker="BTC-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "BTC-USD"})
         assert result["action"] == "BUY"
         assert result["confidence"] > 0
 
     def test_overbought_produces_sell(self):
         df = _make_overbought_df()
-        result = compute_connors_rsi2_signal(df, ticker="ETH-USD")
+        result = compute_connors_rsi2_signal(df, context={"ticker": "ETH-USD"})
         assert result["action"] == "SELL"
         assert result["confidence"] > 0

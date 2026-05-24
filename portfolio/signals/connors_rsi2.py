@@ -100,22 +100,23 @@ def _price_vs_sma5(close: pd.Series) -> tuple[float, str]:
     return pct_val, "HOLD"
 
 
-def compute_connors_rsi2_signal(df: pd.DataFrame, ticker: str = "",
+def compute_connors_rsi2_signal(df: pd.DataFrame, context=None,
                                 **kwargs) -> dict:
     """Compute ConnorsRSI(2) signal for crypto assets.
 
     Returns standard signal dict with action, confidence, sub_signals.
     Non-crypto tickers get HOLD with feature_unavailable=True.
     """
-    if ticker and not any(ticker.startswith(t.split("-")[0])
-                          for t in _APPLICABLE_TICKERS):
-        if ticker not in _APPLICABLE_TICKERS:
-            return {
-                "action": "HOLD",
-                "confidence": 0.0,
-                "feature_unavailable": True,
-                "reason": "connors_rsi2 only applies to BTC/ETH",
-            }
+    ticker = (context or {}).get("ticker", "") if isinstance(context, dict) else ""
+    if not ticker or not any(
+        ticker.startswith(t.split("-")[0]) for t in _APPLICABLE_TICKERS
+    ):
+        return {
+            "action": "HOLD",
+            "confidence": 0.0,
+            "feature_unavailable": True,
+            "reason": "connors_rsi2 only applies to BTC/ETH",
+        }
 
     if df is None or len(df) < MIN_ROWS:
         return {

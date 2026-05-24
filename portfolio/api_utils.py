@@ -57,4 +57,4 @@ def get_binance_config():
     """Get Binance API credentials."""
     config = load_config()
     ex = config.get("exchange", {})
-    return ex.get("apiKey", ""), ex.get("secret", "")
+    return ex.get("key", ""), ex.get("secret", "")

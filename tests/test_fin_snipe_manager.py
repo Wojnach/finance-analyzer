@@ -100,7 +100,7 @@ def test_plan_entry_splits_flash_reserve_when_enabled():
 def test_plan_exit_cancels_open_buys_and_posts_sell():
     snap = _snapshot(
         position_volume=12,
-        position_average_price=12.86,
+        position_average_price=12.30,
         open_orders=[
             {"orderId": "buy-1", "side": "BUY", "state": "ACTIVE", "price": 12.54, "volume": 12},
         ],
