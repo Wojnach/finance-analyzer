@@ -387,6 +387,13 @@ def _register_defaults():
                       "portfolio.signals.autotune_adaptive_cycle",
                       "compute_autotune_adaptive_cycle_signal",
                       max_confidence=0.7)
+    # BOCPD Regime Switch — Bayesian Online Changepoint Detection (all assets)
+    # 2026-05-24: Wood, Roberts, Zohren (2021), JFDS. Sharpe improvement ~33%.
+    # Switches trend-following ↔ mean-reversion on detected regime breaks.
+    register_enhanced("bocpd_regime_switch",
+                      "portfolio.signals.bocpd_regime_switch",
+                      "compute_bocpd_regime_switch_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()

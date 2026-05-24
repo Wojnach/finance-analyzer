@@ -232,6 +232,9 @@ DISABLED_SIGNALS = {
                         # detection via autocorrelation periodogram + bandpass filter.
                         # Cross-asset, OHLCV-only. Score 8.1/10.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "bocpd_regime_switch",  # 2026-05-24: NEW. BOCPD regime switch (trend↔MR).
+                        # Bayesian Online Changepoint Detection. Cross-asset. Score 8.25/10.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
