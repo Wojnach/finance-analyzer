@@ -752,6 +752,23 @@ _SHADOW_SAFE_SIGNALS = frozenset({
     "cubic_trend_persistence",
     "vwap_zscore_mr",
     "gold_overnight_bias",
+    # 2026-05-24: Expanded shadow set — OHLCV-only signals added since May 11.
+    # These compute locally with no network calls. Adding to shadow enables
+    # outcome tracking (was zero samples because forced-HOLD votes are skipped
+    # by outcome_tracker).
+    "ttm_squeeze",
+    "tsi_chop_mr",
+    "amihud_illiquidity_regime",
+    "absorption_ratio_regime",
+    "trend_slope_momentum",
+    "sentiment_extremity_gate",
+    "connors_rsi2",
+    "adx_regime_switch",
+    "choppiness_regime_gate",
+    "autotune_adaptive_cycle",
+    "bocpd_regime_switch",
+    "momentum_factors",
+    "btc_proxy",
 })
 
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for

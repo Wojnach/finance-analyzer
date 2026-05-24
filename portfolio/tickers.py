@@ -235,6 +235,13 @@ DISABLED_SIGNALS = {
     "bocpd_regime_switch",  # 2026-05-24: NEW. BOCPD regime switch (trend↔MR).
                         # Bayesian Online Changepoint Detection. Cross-asset. Score 8.25/10.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "momentum_factors",  # 2026-05-24: 30% recent accuracy (783 sam), 51.9% all-time (21187 sam).
+                        # Blended ~37% — below 47% gate. Already force-HOLD'd at runtime.
+                        # Formal disable saves compute. Was leader of oscillator_trend cluster
+                        # but actively destroying consensus with high activation rate.
+    "btc_proxy",        # 2026-05-24: Evaluation complete. 44.6% 1d (139 sam), BUY 31.1%.
+                        # 24.1% at 10d horizon. MSTR→BTC proxy thesis did not validate.
+                        # Below accuracy gate at all horizons. Formal disable.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
