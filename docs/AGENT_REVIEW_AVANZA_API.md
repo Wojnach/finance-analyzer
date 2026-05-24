@@ -1,154 +1,102 @@
-# Adversarial Review: avanza-api (Agent Findings)
+# Agent Review: avanza-api subsystem — FGL 2026-05-24
 
-Reviewer: Code-reviewer subagent (feature-dev:code-reviewer)
-Date: 2026-04-08
+**Files reviewed**:
+- portfolio/avanza_session.py
+- portfolio/avanza_client.py
+- portfolio/avanza_orders.py
+- portfolio/avanza_control.py
+- portfolio/avanza_tracker.py
+- portfolio/avanza_account_check.py
+- portfolio/avanza_order_lock.py
+- portfolio/avanza_resilient_page.py
 
----
-
-## CRITICAL
-
-### CA1. avanza_orders.py: CONFIRM matches OLDEST pending order, not newest [95% confidence]
-**File**: `portfolio/avanza_orders.py:127-131`
-
-Loop iterates `pending` in insertion order (oldest first). When user replies CONFIRM to a
-Telegram notification about NVDA, the loop hits a stale SAAB-B order first and executes
-THAT instead. Comment says "most recent" but code does "oldest."
-
-**Fix**: Iterate in reverse order or sort by timestamp descending.
-
-### CA2. avanza_orders.py: Telegram offset saved before order status — crash loses CONFIRM [85% confidence]
-**File**: `portfolio/avanza_orders.py:118-131`
-
-Telegram offset is advanced (line 199) before order status is persisted (line 139). If
-process crashes between these operations, the CONFIRM message is consumed but the order
-is still `pending_confirmation`. On next cycle, no CONFIRM exists → order sits in limbo
-forever, never confirmed and never expired.
-
-**Fix**: Save order status to disk BEFORE advancing Telegram offset (two-phase commit).
-
-### CA3. avanza_session.py: Playwright context used without lock — race with close [88% confidence]
-**File**: `portfolio/avanza_session.py:116-135`
-
-`_get_playwright_context()` acquires `_pw_lock` only during creation. API calls use the
-returned context without the lock. `close_playwright()` holds the lock while closing the
-browser. Thread A mid-request + Thread B closing browser = exception from closed context
-on the trade path with no retry.
-
-### CA4. avanza_session.py: Trailing stop `priceType` set to PERCENTAGE — ambiguous payload [82% confidence]
-**File**: `portfolio/avanza_session.py:505-529`
-
-For trailing stops (`FOLLOW_DOWNWARDS`), `stopLossOrderEvent.priceType` is set to
-`"PERCENTAGE"` (from `value_type`). The sell price is `0` (market). `priceType=PERCENTAGE`
-with `price=0` could be interpreted as "sell at 0% of something" by Avanza backend.
-
-**Fix**: Force `stopLossOrderEvent.priceType = "MONETARY"` for all stop types.
+**Context**: Playwright BankID auth, ~24h session. ISK account 1625505 ONLY. Pension account 2674244 must NOT leak.
 
 ---
 
-## HIGH
+## Critical Findings
 
-### HA1. avanza_client.py: Dynamic ISK account scan could return pension account [83% confidence]
-**File**: `portfolio/avanza_client.py:223-248`
+### 1. avanza_session.py:676-717: BUG — get_positions() returns pension account positions
 
-`get_account_id()` returns first ISK account found. No exclusion guard for pension account
-2674244. If Avanza returns accounts in different order, all orders land on pension.
-Inconsistent with `DEFAULT_ACCOUNT_ID = "1625505"` hardcoded elsewhere.
+**Severity**: BUG (security/data leak)
 
-**Fix**: Add explicit exclusion: `if acct_id == "2674244": continue`
+**Issue**: get_positions() calls api_get() and appends ALL entries from data.get("withOrderbook", []) without filtering by ALLOWED_ACCOUNT_IDS. The account_id field is set on line 714 but never checked. Callers receive pension account holdings (account 2674244) mixed with trading positions.
 
-### HA2. avanza_client.py: TOTP singleton never reset on expiry — stale auth forever [82% confidence]
-**File**: `portfolio/avanza_client.py:55-98`
+**Impact**: Dashboard, grid_fisher, fin_snipe, and position reconciliation sees pension portfolio. Memory rule feedback_isk_only.md explicitly forbids this.
 
-`_client` cached as module-level singleton. `reset_client()` exists but never called
-automatically. When TOTP session expires, all calls return errors but singleton keeps
-returning stale client. No recovery path unlike Playwright's 401 handling.
-
-### HA3. avanza_orders.py: CONFIRM path uses TOTP auth, not BankID — different auth state [85% confidence]
-**File**: `portfolio/avanza_orders.py:206-222`
-
-Order confirmation imports `place_buy_order`/`place_sell_order` from `avanza_control` →
-`avanza_client` (TOTP). Rest of trading uses `avanza_session` (BankID/Playwright). If
-only BankID was refreshed (normal flow), TOTP may be expired → CONFIRM execution fails
-after user already replied.
-
-### HA4. avanza/types.py: StopLossResult looks for wrong key — stop ID always empty [85% confidence]
-**File**: `portfolio/avanza/types.py:212`
-
-`StopLossResult.from_api` checks `stopLossId`, `stop_id`, `id` — but Avanza returns
-`stoplossOrderId`. Any caller using `portfolio.avanza.trading.place_stop_loss` gets
-`stop_id = ""` → impossible to cancel or track the stop-loss.
-
-**Fix**: Add `"stoplossOrderId"` as first key in lookup chain.
-
-### HA5. avanza_session.py: No session expiry pre-check before trades [82% confidence]
-**File**: `portfolio/avanza_session.py:116-135`
-
-After initial context creation, no expiry re-check. ~24h session expires mid-operation →
-hard exception during live trade. `is_session_expiring_soon()` exists but isn't called
-by `_get_playwright_context`.
+**Fix**: Filter at line 701 — skip append if account.get("id", "") not in ALLOWED_ACCOUNT_IDS.
 
 ---
 
-## MEDIUM
+### 2. avanza_session.py:633-645: RISK — cancel_order() has no account whitelist guard
 
-### MA1. avanza_orders.py: Telegram offset file (.txt) with JSON content — legacy confusion [83% confidence]
-**File**: `portfolio/avanza_orders.py:154-160`
+**Severity**: RISK (cross-account mutation)
 
-`avanza_telegram_offset.txt` stores JSON via `atomic_write_json`. Fallback branch reads
-as plain text → gets `"{"` → `int()` fails → `offset = 0` → replays all updates from
-beginning → could re-fire stale CONFIRM.
+**Issue**: cancel_order(order_id, account_id=None) accepts account_id parameter without verifying it's in ALLOWED_ACCOUNT_IDS. All other trading functions enforce the whitelist. This is the only mutating function without it.
 
-### MA2. avanza/streaming.py: Multi-account channel format unverified [80% confidence]
-**File**: `portfolio/avanza/streaming.py:77-84`
+**Impact**: A caller passing account_id="2674244" would cancel orders on the pension account.
 
-Comma-joined account IDs in CometD channel may not match Avanza's expected format. Wrong
-format: subscription silently succeeds but no messages arrive. Order fill notifications
-would be dropped silently.
-
-### MA3. avanza_session.py: get_buying_power fallback may use pension account total [80% confidence]
-**File**: `portfolio/avanza_session.py:300-322`
-
-Fallback uses `categories[0].totalValue` — could be pension account depending on ordering.
-Would report wrong buying power → potentially oversized orders.
+**Fix**: Add if str(account_id or DEFAULT_ACCOUNT_ID) not in ALLOWED_ACCOUNT_IDS: raise ValueError(...) before line 638.
 
 ---
 
-## LOW
+### 3. avanza_client.py:327-368: RISK — _place_order missing minimum order size guard
 
-### LA1. avanza/auth.py: TOTP singleton has no expiry — dead reference after session timeout [80% confidence]
-**File**: `portfolio/avanza/auth.py:86-114`
+**Severity**: RISK (poor fee efficiency)
 
-Same family as HA2. `reset()` exists but nothing triggers it on expiry. Auth errors
-propagate silently.
+**Issue**: The TOTP path _place_order() skips the 1000 SEK minimum check that avanza_session._place_order() enforces at lines 595-597. Orders totaling 500-999 SEK bypass the guard and incur disproportionate brokerage costs.
+
+**Impact**: Inefficient small orders placed; no hard rejection.
+
+**Fix**: Add order_total = round(volume * price, 2); if order_total < 1000.0: raise ValueError(...) after line 348, matching avanza_session.
 
 ---
 
-## Cross-Critique: Claude Direct vs Avanza-API Agent
+### 4. avanza_session.py:134-153: RISK — _get_playwright_context() has no exception cleanup
 
-### Agent found that Claude missed:
-1. **CA1**: CONFIRM matches oldest order, not newest — **CRITICAL order execution bug** — total miss
-2. **CA2**: Telegram offset/order status race condition — total miss
-3. **CA3**: Playwright context race (I noted H12 browser crash recovery but agent found the
-   concurrent-access race between API calls and close — a different, worse issue)
-4. **CA4**: Trailing stop priceType ambiguity — total miss
-5. **HA2**: TOTP singleton never reset — total miss
-6. **HA3**: CONFIRM uses different auth path (TOTP vs BankID) — total miss
-7. **HA4**: StopLossResult wrong key → empty stop ID — total miss (very impactful)
-8. **MA1**: Telegram offset file format confusion — total miss
-9. **MA2**: Streaming channel format — total miss
+**Severity**: RISK (resource leak on init failure)
 
-### Claude found that agent confirmed/expanded:
-1. **H11**: Session expiry ValueError → agent found broader session lifecycle issues (HA5)
-2. **H12**: Playwright context not recovered → agent found concurrent race (CA3, deeper issue)
-3. **H13**: No account ID validation → agent confirmed as HA1 with more detail
-4. **M8**: api_delete 404-as-success → agent didn't re-raise (different priorities)
+**Issue**: If _pw_browser.new_context() at line 149 throws (corrupted storage state, BankID re-auth required), _pw_instance and _pw_browser are assigned but never torn down. The lock is released, but the half-alive Playwright process remains. Subsequent calls see _pw_context is not None but may operate on a dead/stale context.
 
-### Net assessment:
-The avanza-api agent found **4 CRITICAL + 5 HIGH + 3 MEDIUM + 1 LOW = 13 net-new issues**.
-CA1 (wrong order confirmed) and HA4 (stop ID always empty) are the most impactful — they
-directly affect order execution correctness. The agent's deep reading of avanza_orders.py
-uncovered the CONFIRM flow bugs that are invisible without understanding the Telegram
-polling + order state machine interaction.
+**Impact**: Browser zombie process; context corruption on repeated init failures.
 
-Agent was **dramatically stronger** for this subsystem — the order confirmation bugs are
-among the most dangerous findings in the entire review.
+**Fix**: Wrap lines 147-152 in try/except; on exception, call close_playwright() before re-raising.
+
+---
+
+### 5. avanza_session.py:89: RISK — Session expiry check uses <= instead of <
+
+**Severity**: RISK (off-by-one allows expired token for 1 tick)
+
+**Issue**: Line 89 checks if exp <= now: which treats the expiry instant as already expired. Should be < so a token valid until exactly 2026-05-24T12:00:00Z works until 11:59:59Z. Using <= rejects it 1 second early.
+
+**Impact**: Sessions rejected 1 second before true expiry; inconsistent boundary behavior.
+
+**Fix**: Change line 89 to if exp < now:. Optionally add EXPIRY_BUFFER_MINUTES drift.
+
+---
+
+## Design Notes (Lower Priority)
+
+6. avanza_orders.py:355-365: place_buy/sell_order calls lack account_id parameter — correct by design but fragile for future multi-account features. Consider adding optional account_id field to order dict (set to DEFAULT_ACCOUNT_ID now).
+
+7. avanza_client.py:123-134: find_instrument() overly permissive, returns all instruments. Document that search is global.
+
+8. avanza_control.py:137: place_stop_loss() docstring missing parameter documentation.
+
+---
+
+## Verified Correct
+
+- avanza_session.place_buy/sell_order account whitelist guards
+- avanza_session.place_stop_loss account whitelist guard
+- Stop-loss API uses /_api/trading/stoploss/new (line 801)
+- avanza_client.get_positions (TOTP path) filters by ALLOWED_ACCOUNT_IDS
+- avanza_order_lock cross-process semantics
+- avanza_resilient_page.py browser recovery and RLock usage
+- avanza_account_check.py multi-shape handling
+- CONFIRM token validation and legacy backwards-compat
+
+---
+
+Totals: 1 bug, 4 risks, 3 nits

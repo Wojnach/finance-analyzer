@@ -486,3 +486,6 @@ data/rc-server-3_out.txt
 data/list_python_procs.ps1
 data/read_temps.ps1
 data/start_loops.bat
+
+# Adversarial review worktree (created inside repo, 2026-05-24)
+finance-analyzer-reviews/

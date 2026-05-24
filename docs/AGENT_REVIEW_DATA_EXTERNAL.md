@@ -1,148 +1,231 @@
-# Adversarial Review: data-external (Agent Findings)
+# Adversarial Code Review — data-external subsystem
 
-Reviewer: Code-reviewer subagent (feature-dev:code-reviewer)
-Date: 2026-04-08
-
----
-
-## CRITICAL
-
-### CD1. earnings_calendar.py: Wrong config key — Alpha Vantage earnings path NEVER executes [97% confidence]
-**File**: `portfolio/earnings_calendar.py:42`
-
-`config.get("alpha_vantage_key", "")` reads a top-level key that doesn't exist. Actual
-config uses nested `config["alpha_vantage"]["api_key"]`. Result: `api_key` is always `""`,
-early return fires, Alpha Vantage earnings path is **permanently broken** since day one.
-System falls back to yfinance for earnings dates silently.
-
-**Fix**: `api_key = config.get("alpha_vantage", {}).get("api_key", "")`
-
-### CD2. fear_greed.py: Unguarded `body["data"][0]` crashes on malformed API response [92% confidence]
-**File**: `portfolio/fear_greed.py:99`
-
-No guard on `body["data"][0]`. If alternative.me returns valid JSON with missing/empty `data`
-field, `KeyError` or `IndexError` propagates uncaught. Crashes F&G for ALL 20 tickers in
-the current cycle.
-
-**Fix**: `entries = body.get("data") or []; if not entries: return None`
-
-### CD3. funding_rate.py: Unguarded dict access crashes on Binance error response [90% confidence]
-**File**: `portfolio/funding_rate.py:23`
-
-`float(data["lastFundingRate"])` and `float(data["markPrice"])` with no `.get()` guards.
-Binance error responses (`{"code": -1121, "msg": "Invalid symbol."}`) cause `KeyError`.
-Called per crypto ticker every loop cycle.
+Reviewer: opus 4.7 (1M) /fgl audit, empty-baseline
+Date: 2026-05-24
+Worktree: `Q:\finance-analyzer\finance-analyzer-reviews\2026-05-24` (branch `review/fgl-2026-05-24`)
+Scope: 20 modules (Binance, Alpaca, yfinance, Alpha Vantage, NewsAPI, FRED, BGeometrics, etc.)
 
 ---
 
-## HIGH
+## Top 5 (most impactful, sorted by blast radius × silence)
 
-### HD1. econ_dates.py: April 2026 NFP date is Good Friday — market holiday [88% confidence]
-**File**: `portfolio/econ_dates.py:61`
-
-`NFP_DATES_2026` includes `date(2026, 4, 3)` — Good Friday, US markets closed. BLS releases
-data but markets react on April 6 (Monday). Signal gates trades on wrong day and misses
-the actual reaction date.
-
-### HD2. onchain_data.py: 24h stale on-chain data served at DEBUG level only [85% confidence]
-**File**: `portfolio/onchain_data.py:210`
-
-When BGeometrics token is missing, accepts 24h stale MVRV/SOPR data. During BTC capitulation,
-stale "accumulation" signal misleads. Violates CLAUDE.md rule "Live prices first."
-
-### HD3. forecast_signal.py: Chronos-2 column access may KeyError on float columns [83% confidence]
-**File**: `portfolio/forecast_signal.py:218`
-
-`row["0.5"]` assumes string column names. Chronos-2 with `quantile_levels=[0.1, 0.5, 0.9]`
-may return float-typed columns (`row[0.5]`). Silently disables all forecasts.
-
-### HD4. crypto_macro_data.py: Gold/BTC ratio reads stale summary file [82% confidence]
-**File**: `portfolio/crypto_macro_data.py:210`
-
-Reads from `agent_summary_compact.json` (previous cycle's data) instead of live prices.
-After crash+restart, ratio could be arbitrarily stale. Violates CLAUDE.md rule #3.
-
-### HD5. futures_data.py: Missing `oi_usdt` field breaks interface contract [88% confidence]
-**File**: `portfolio/futures_data.py:36,50`
-
-Docstring promises `{oi, oi_usdt, symbol, time}` but returns only `{oi, symbol, time}`.
-Any consumer using `result["oi_usdt"]` gets KeyError.
+1. **`data/crypto_data.py:223-231`** — `get_onchain_summary()` reads keys (`zone`, `bias`, `summary`) that the underlying `interpret_onchain()` **never emits** (it returns `mvrv_zone` / `sopr_zone` / `nupl_zone` / `netflow_signal`). Result: every on-chain summary returned to the crypto/metals loop is permanently `{"zone": "neutral", "bias": "neutral", "summary": ""}` regardless of real on-chain state. Silent — no exception, no log. CLAUDE.md rule #3 violation (downstream consumers think they're getting on-chain context).
+2. **`data/crypto_data.py:75-82, 184-198`** — `get_fear_greed()` masks empty Binance/alternative-me responses as `value=50, classification=Neutral` (silently fabricated baseline); `compute_mstr_btc_nav()` uses hard-coded MSTR_BTC_HOLDINGS=499,096 and SHARES=229M from "early 2026". As of 2026-05-24 MSTR has continued to accumulate BTC — NAV premium calc is structurally biased low.
+3. **`portfolio/forecast_accuracy.py:282, 297, 303-304`** — `datetime.fromisoformat(ts_str)` produces a naive datetime when `ts` lacks tz info. Then compared to `datetime.now(UTC)` (aware) → raises `TypeError: can't compare offset-naive and offset-aware datetimes`. Backfill silently aborts mid-loop. Same naive/aware mismatch exists in `local_llm_report.py:48-51` (naive `ts < cutoff` comparison).
+4. **`portfolio/forecast_signal.py:97`** — `except (ImportError, Exception)` — `Exception` swallows `ImportError`, but more importantly it swallows **every** exception (OOM, CUDA driver, model file corruption, etc.) and logs them all as "Chronos-2 not available". The fallback to v1 may then crash on the same root cause but with no signal of what actually broke.
+5. **`portfolio/data_collector.py:168-204` (`fetch_vix`)** — Calls `yf.Ticker(...).history()` **without acquiring `_yfinance_lock`**. Every other yfinance entry point in the codebase (`fear_greed.get_stock_fear_greed`, `data_collector._fetch_one_timeframe` market-closed path, `golddigger/data_provider`) acquires the lock. Concurrent VIX fetch with sentiment yfinance call from another worker → known yfinance non-thread-safety segfault / corrupted SSL session.
 
 ---
 
-## MEDIUM
+## Critical (P0/P1)
 
-### MD1. alpha_vantage.py: Daily budget counter resets on process restart [85% confidence]
-**File**: `portfolio/alpha_vantage.py:157-168`
+### P0-1 — `data/crypto_data.py:228-231` | P0 | API contract mismatch — silent
+**Issue**: `interpret_onchain(raw)` returns `{mvrv_zone, sopr_zone, nupl_zone, netflow_signal}` (see `portfolio/onchain_data.py:300-345`). `get_onchain_summary()` reads non-existent keys `zone`, `bias`, `summary` and falls through to default `"neutral"` / `""`. The metals/crypto loop has been receiving permanently-neutral on-chain signal since this code was written.
+**Fix**: Read the actual keys:
+```python
+result = {
+    "mvrv": raw.get("mvrv"),
+    "sopr": raw.get("sopr"),
+    "nupl": raw.get("nupl"),
+    "mvrv_zone": interpretation.get("mvrv_zone"),
+    "sopr_zone": interpretation.get("sopr_zone"),
+    "nupl_zone": interpretation.get("nupl_zone"),
+    "netflow_signal": interpretation.get("netflow_signal"),
+}
+```
 
-`_daily_budget_used` is module-level, not persisted. Each crash+restart resets to 0.
-Three restarts/day → 75 calls attempted against 25/day limit. Could get key blocked.
+### P0-2 — `data/crypto_data.py:73-85` | P0 | Fabricated fallback data
+**Issue**: Lines 75 `r.json().get("data", [{}])[0]` — if API returns `{"data": []}` (maintenance window — see fix in `fear_greed.py:104-108`), this code creates `{}` then defaults to `value=50, classification="Neutral"`. The metals loop then treats "50 Neutral" as a real reading. CLAUDE.md rule #3: live prices first.
+**Fix**: Mirror `portfolio/fear_greed.py:104-108` guards — return `None` on empty.
 
-### MD2. sentiment.py: Primary model subprocess hangs 2min without TimeoutExpired catch [82% confidence]
-**File**: `portfolio/sentiment.py:248-259`
+### P0-3 — `data/crypto_data.py:184-203` | P0 | Hard-coded MSTR holdings staleness
+**Issue**: `MSTR_BTC_HOLDINGS = 499_096` and `MSTR_SHARES_OUTSTANDING = 229_000_000` — comment says "as of early 2026". Today is 2026-05-24. MSTR's NAV premium calc is structurally biased because BTC holdings have moved (MSTR announces purchases monthly). User trades MSTR as leveraged BTC proxy per memory — wrong NAV will steer real decisions.
+**Fix**: Either source these from Avanza/Alpaca/SEC filings on a refresh, or pin them to a `_FETCHED_AT` and warn loudly if >30 days stale.
 
-`_run_model` uses `subprocess.run(timeout=120)` but doesn't catch `TimeoutExpired`.
-120s hang per ticker × 20 tickers = potential 40-min stall.
+### P0-4 — `portfolio/forecast_accuracy.py:282-304` | P0 | Naive/aware datetime comparison crash
+**Issue**:
+```python
+entry_time = datetime.fromisoformat(ts_str)        # ← naive if ts has no tz
+...
+now = datetime.now(UTC)                            # aware
+...
+horizon_time = entry_time + timedelta(hours=hours) # still naive
+if now < horizon_time:                             # ← TypeError on aware vs naive
+```
+Any `forecast_predictions.jsonl` row written without `+00:00` suffix kills the backfill loop on contact. The `sentiment_shadow_backfill.py:211-213` peer correctly handles this with `if entry_time.tzinfo is None: entry_time = entry_time.replace(tzinfo=UTC)`. Apply same.
+**Fix**:
+```python
+entry_time = datetime.fromisoformat(ts_str)
+if entry_time.tzinfo is None:
+    entry_time = entry_time.replace(tzinfo=UTC)
+```
+Same fix needed in `local_llm_report.py:48-51`.
 
-### MD3. data_collector.py: Error entries propagate as valid timeframe data [80% confidence]
-**File**: `portfolio/data_collector.py:312`
+### P0-5 — `portfolio/forecast_signal.py:97` | P0 | Exception swallowing hides real failures
+**Issue**: `except (ImportError, Exception) as e:` — `Exception` matches everything (CUDA OOM, GPU driver crash, model file IO error, NaN in tensor, etc.). All get logged as "Chronos-2 not available" and the code falls through to v1, which then fails for the same root cause silently because there's no targeted recovery. Operators see "Chronos-2 not available" forever without knowing whether it's a missing package (one-time install fix) or a transient CUDA OOM (recoverable).
+**Fix**: Catch only `ImportError`. Let other exceptions propagate so the outer `forecast_chronos()` `except Exception as e: logger.warning("Chronos forecast failed for %s: %s", ...)` reports the real cause once.
 
-Failed fetches return `(label, {"error": str(e)})` instead of `None`. Downstream code
-checking `result.get("indicators")` gets None (ok) but `result["action"]` → KeyError.
+### P0-6 — `portfolio/data_collector.py:168-204` | P0 | yfinance thread-safety violation
+**Issue**: `fetch_vix()` calls `yf.Ticker("^VIX").history(period="5d")` **without holding `_yfinance_lock`** (defined in `shared_state.py:286` precisely for this reason). All other yfinance callers (`fear_greed.get_stock_fear_greed:133`, `data_collector._fetch_one_timeframe:291`, etc.) acquire it. Concurrent calls during a busy cycle (8-worker pool) → yfinance's shared session state corrupts, manifests as random `JSONDecodeError`, empty DataFrame, or SSL retries that occupy the full 60s loop budget.
+**Fix**:
+```python
+from portfolio.shared_state import yfinance_lock as _yfinance_lock
+def fetch_vix():
+    try:
+        import yfinance as yf
+        with _yfinance_lock:
+            vix = yf.Ticker("^VIX")
+            hist = vix.history(period="5d")
+        ...
+```
 
-### MD4. crypto_macro_data.py: Max pain initialized to -1 — correct by accident [80% confidence]
-**File**: `portfolio/crypto_macro_data.py:130-165`
+### P1-7 — `portfolio/earnings_calendar.py:64-65` | P1 | Bypasses fetch_json error handling
+**Issue**: `data = r.json()` directly after `fetch_with_retry` — no `r.raise_for_status()`, no check for AV's `{"Note": "..."}` or `{"Information": "..."}` rate-limit responses. If AV returns 200 with `{"Information": "thank you for using..."}` (the newer daily-limit response — `alpha_vantage.py:150` only checks `"Note"`), `data.get("quarterlyEarnings", [])` returns `[]` cleanly and the function returns None — earnings gate silently disabled for the day. Use `fetch_json` instead (which handles raise_for_status), and add the `"Information"` key check shared with `alpha_vantage._fetch_overview`.
+**Fix**: Replace with `fetch_json(...)`. Then check both `"Note"` AND `"Information"` keys.
 
-`max_pain_value = -1` should be `float('inf')`. Works because `total_pain >= 0` always,
-but fragile and misleading.
+### P1-8 — `portfolio/alpha_vantage.py:150` | P1 | Misses AV's newer rate-limit key
+**Issue**: AV's daily-limit response uses `"Information"` as of late 2024 / 2025. This code only checks `"Note"`. When the 25/day budget is exhausted, AV returns 200 OK with `{"Information": "We have detected..."}` — passes the `"Note"` check, then `_normalize_overview` sees no `"Symbol"` and returns None, marked as failure. Circuit breaker accumulates failures on rate-limit responses (line 274) → spurious cooldown.
+**Fix**:
+```python
+if isinstance(data, dict) and ("Note" in data or "Information" in data):
+    logger.warning("Alpha Vantage rate limit hit: %s",
+                   (data.get("Note") or data.get("Information"))[:100])
+    return None
+```
+
+### P1-9 — `portfolio/social_sentiment.py:32, 65` | P1 | Bypasses http_retry + prints errors
+**Issue**: Raw `requests.get(...)` — no retry, no circuit breaker, no Telegram-token redaction in URLs (not needed here, but pattern-broken). Errors go to `print(f"...")` (stdout), not `logger.warning`. CLAUDE.md rule #2 ("Search before writing — reuse `http_retry`"). When Reddit rate-limits (HTTP 429 with no-Retry-After), this code will hammer them and get banned.
+**Fix**: Migrate to `fetch_json(url, headers=..., timeout=10, label=f"reddit:{sub}")`. Replace `print()` with `logger.warning()`.
+
+### P1-10 — `portfolio/crypto_macro_data.py:381-382` | P1 | Truthiness bug rounds 0 to None
+**Issue**:
+```python
+"sum_7d": round(sum_7d, 1) if sum_7d else None,
+"sum_14d": round(sum_14d, 1) if sum_14d else None,
+```
+`sum_7d` can legitimately be `0.0` (perfectly balanced inflow/outflow) — falsy in Python. The condition skips the round and stores `None`, which downstream readers interpret as "no data" rather than "exactly zero netflow". Either `is not None` or directly compare.
+**Fix**:
+```python
+"sum_7d": round(sum_7d, 1) if sum_7d is not None else None,
+```
+
+### P1-11 — `portfolio/crypto_macro_data.py:202-225` | P1 | CLAUDE.md rule #3 violation (live prices)
+**Issue**: `compute_gold_btc_ratio()` reads `agent_summary_compact.json` for BTC and Gold prices. CLAUDE.md rule #3 ("Live prices first. Never base analysis on cached/precomputed data."). Worse, the cache is intentionally rolled into a 1h `_cached("gold_btc_ratio", RATIO_TTL, ...)` (line 450) on top of an already-stale source — staleness can compound to many hours. Trading signals derived from this ratio can be wildly out of sync with reality.
+**Fix**: Route through `portfolio.price_source.fetch_klines("BTC-USD", "1h", 2)` and `fetch_klines("XAU-USD", "1h", 2)` for live prices; preserve the JSONL ratio history (already correct) but compute the ratio from live data.
+
+### P1-12 — `portfolio/data_collector.py:296-300` | P1 | "insufficient data" error swallows real failures
+**Issue**: When `compute_indicators(df)` returns None, code logs `insufficient data ({rows} rows)`. But `compute_indicators` can return None for **many** reasons besides "not enough bars" — including a malformed dataframe, NaN-saturated column, or specific indicator failure. The label is misleading. Operators reading logs assume "API returned too few bars, harmless"; the actual cause might be a Binance schema change that broke `astype(float)` for one column.
+**Fix**: Either inspect `compute_indicators`' failure mode or change the label to `"compute_indicators returned None ({rows} rows)"` — make the path clearly distinguishable from "API returned 5 bars" vs "API returned 100 bars but they're broken".
+
+### P1-13 — `portfolio/seasonality.py:60` | P1 | `grouped.loc[hour]` returns Series — silent default on multi-row
+**Issue**: When `df.groupby("hour")` produces rows where one hour has only 1 observation, `grouped.loc[hour]` returns a Series. But if `hour` duplicates somehow (shouldn't normally happen), `.loc[hour]` returns a DataFrame and `float(row["mean_return"])` fails with TypeError. The function catches nothing and propagates. Wrap defensively or use `.iloc` after explicit sort.
+**Fix (minor)**: Already low-impact since groupby keys are unique; add a defensive `if isinstance(row, pd.DataFrame): row = row.iloc[0]`.
+
+### P1-14 — `portfolio/fear_greed.py:152-154` | P1 | "Belt-and-suspenders" only works for 2D
+**Issue**: The defensive comment correctly notes that yfinance may return a DataFrame for `h["Close"]`, but the squeeze logic only handles `ndim>1`. If yfinance returns a 1D Series (the normal case), `.iloc[-1]` is fine. But if yfinance returns a scalar (rare degenerate case for `^VIX` with 1 row), `float(close_series.iloc[-1])` raises AttributeError. Add a final `try/except` shield with logger.warning instead of letting the exception propagate to the worker.
+
+### P1-15 — `portfolio/data_collector.py:230-231` | P1 | yfinance empty-DataFrame → ValueError → caught → silent skip
+**Issue**: `yfinance_klines` raises `ValueError("No yfinance data for ...")` on empty result. This is caught by `_fetch_one_timeframe` and stored as `{"error": str(e)}`. The error is logged at DEBUG only (line 298). When MSTR's Alpaca path fails and falls through to yfinance, and yfinance also fails (e.g. invalid ticker, rate-limited), **the operator sees nothing**. CLAUDE.md "system reliability is #1" — silent yfinance failures during US market hours have been a recurring source of multi-hour data gaps.
+**Fix**: Log at WARNING when yfinance is the primary fallback (i.e., when market is closed for a stock ticker).
+
+### P1-16 — `portfolio/alpha_vantage.py:30-32` | P1 | Module-level state not lock-protected on init
+**Issue**: `_cache = {}` and `_daily_budget_used = 0` are module-level. `load_persistent_cache()` (line 36) is called from main.py startup. If multiple worker threads import this module simultaneously (during the rare PF-DataLoop + dashboard race), the `_cache` reference may be replaced inside `load_persistent_cache()` without the `_cache_lock`. Actually checking: line 44 does `with _cache_lock: _cache = data`. The lock IS held — but Python module-level `_cache = data` rebinds the name, which is atomic. Other readers using `with _cache_lock: return _cache.get(ticker)` will see the new dict. **Actually OK.** No bug — marking as verified-safe.
 
 ---
 
-## LOW
+## Important (P2/P3)
 
-### LD1. fx_rates.py: 2h stale threshold too long for live trading [80% confidence]
-**File**: `portfolio/fx_rates.py:44-49`
+### P2-17 — `portfolio/funding_rate.py:44-49` | P2 | Hardcoded thresholds with no documentation source
+**Issue**: Thresholds `> 0.0003` (SELL) and `< -0.0001` (BUY) are asymmetric and not documented (comment says "Normal funding ~0.01% (0.0001)"). Bias makes BUY trigger 3x more easily than SELL. May or may not be intentional. Either document the rationale or symmetrize.
 
-USD/SEK can move 1-3% in 2h during volatility. Portfolio valuations silently wrong.
+### P2-18 — `portfolio/futures_data.py:60-64` | P2 | Bare `data["openInterest"]` after `None` check
+**Issue**: `if data is None: return None` then immediately `float(data["openInterest"])` — if Binance changes the schema or returns `{}` (rare error path), KeyError propagates uncaught into the worker. Mirror the defensive pattern from `funding_rate.py:31-39`.
 
-### LD2. data_collector.py: Alpaca/yfinance feed mismatch with extended hours [80% confidence]
-**File**: `portfolio/data_collector.py:261-269`
+### P2-19 — `portfolio/seasonality_updater.py:53-69` | P2 | Bypasses circuit breaker
+**Issue**: Calls `fetch_json(BINANCE_FAPI_BASE/klines, ...)` directly instead of `binance_fapi_klines()` (which uses circuit breaker). If Binance FAPI is degraded and `binance_fapi_cb` is OPEN, this fetcher still pounds the API. Use `binance_fapi_klines(symbol, "1h", limit)` and convert to DataFrame from there.
 
-yfinance fallback includes pre/post-market candles that Alpaca doesn't. Same ticker
-produces different OHLCV depending on time of day.
+### P2-20 — `portfolio/onchain_data.py:282` | P2 | "stale cache without token" path violates rule #3
+**Issue**: When `_load_config_token()` returns None, the function returns the persistent cache (2x normal TTL — 24h instead of 12h). Operator with a missing/revoked BGeometrics token gets day-old on-chain data silently. Should at minimum log WARNING that we're serving 2x-stale data; better: log ERROR and let the on-chain voter abstain.
+
+### P2-21 — `portfolio/sentiment.py:329-338` | P2 | 120s subprocess timeout in fallback path
+**Issue**: When in-process BERT fails, the legacy subprocess fallback has a 120s timeout. The ticker pool timeout is 500s (per comment elsewhere). A wedged sentiment subprocess can hang the worker for 2 minutes, multiplied across multiple tickers in the same cycle. If GPU lock is held by ministral/qwen3, the subprocess may sit waiting indefinitely. Drop subprocess timeout to 30s; in-process fallback is sufficient.
+
+### P2-22 — `portfolio/sentiment.py:32-42` | P2 | Hardcoded paths break dev environments
+**Issue**: Linux paths are `/home/deck/models/...`. The repo has both WSL and Windows paths elsewhere. New contributors on macOS or generic Linux see import-like failures with no helpful message. Read paths from config (`config.local_models.bert_paths`) with these as fallback.
+
+### P2-23 — `portfolio/fx_rates.py:54` | P2 | Bare `except Exception` swallows specific errors
+**Issue**: `except Exception as e: logger.warning("FX rate fetch failed: %s", e)` then falls to cached/fallback. Hides JSONDecodeError, KeyError on `r.json()["rates"]["SEK"]`, etc. Won't crash the loop but operators see "FX rate fetch failed: 'SEK'" with no context to debug. Log `exc_info=True` so the traceback is captured at WARNING level.
+
+### P2-24 — `portfolio/crypto_macro_data.py:108` | P2 | `now = datetime.date.today()` is system-local
+**Issue**: Uses `date.today()` which is *system-local*. The host is CET; Deribit expiries are UTC. Around midnight CET/UTC switch this can pick the wrong nearest expiry by 1 day, particularly for short-dated weeklies. Use `datetime.now(UTC).date()`.
+
+### P2-25 — `portfolio/forecast_accuracy.py:357-369` | P2 | Linear scan of snapshot file on every backfill row
+**Issue**: `_lookup_price_at_time` iterates entire `price_snapshots_hourly.jsonl` for **every** prediction entry — quadratic cost. For N predictions and M snapshots, O(N×M). Once the file grows past a few thousand rows this becomes the dominant cost of `backfill_forecast_outcomes()`. Build an in-memory index per (ticker, hour bucket) on first call.
+
+### P3-26 — `portfolio/futures_data.py:63` | P3 | Field name typo / partial implementation
+**Issue**: `get_open_interest` returns `{oi, symbol, time}` but the docstring says `{oi, oi_usdt, symbol, time}` — `oi_usdt` is missing in the returned dict. Either rip from docstring or compute from `mark_price` if available.
+
+### P3-27 — `portfolio/sentiment.py:233` | P3 | Truthy check on result list
+**Issue**: `if result:` — empty list is falsy. If NewsAPI returns 200 with `articles=[]` (legitimate, no news), `newsapi_track_call()` is NOT incremented. That's actually a feature per the comment (H9/DC-R3-2). But the comment claims "only count against budget when we actually got data" — silently the rate limit isn't being respected if a ticker consistently returns empty arrays. Subtle quota leak.
+
+### P3-28 — `portfolio/data_collector.py:262` | P3 | Implicit string membership check
+**Issue**: `_ss._current_market_state in ("closed", "weekend", "holiday")` — does not handle case-sensitivity issues. If market_state is set as "Closed" anywhere (a future refactor risk), this silently routes to Alpaca which then fails. Defensive `.lower()` on read.
+
+### P3-29 — `data/crypto_data.py:247-259` | P3 | `is_us_market_hours` ignores holidays
+**Issue**: Returns True for any weekday 09:30-16:00 NY time — including July 4, Thanksgiving, MLK Day, etc. Stock signals get derived from holiday data. Compare with `econ_dates.py` pattern (hard-coded list).
+
+### P3-30 — `portfolio/alpha_vantage.py:266-269` | P3 | Circuit breaker break loop premature
+**Issue**: When `_cb.allow_request()` returns False, the loop breaks immediately — but `_alpha_vantage_limiter.wait()` may have already paid the rate-limit cost for this iteration. Move the CB check above the limiter wait.
+
+### P3-31 — `portfolio/fomc_dates.py` and `portfolio/econ_dates.py` | P3 | Hard-coded calendars expire
+**Issue**: Calendars only cover 2026-2027. By Q4 2027 the system will silently degrade — `next_event()` returns None for queries after 2027-12-08. Add a startup assertion that the calendar covers `now()+lookahead_hours`.
+
+### P3-32 — `portfolio/data_collector.py:323` | P3 | ThreadPoolExecutor not closed on TimeoutError
+**Issue**: `with ThreadPoolExecutor(...)` context manager handles shutdown, but inside the timeout `except` block we call `f.cancel()` on futures — `cancel()` only works on **not-yet-started** futures (running ones are uncancellable in stdlib executors). The pool will block in `__exit__` until those running futures finish (which is the original timeout cause). The `with` may sit beyond `_TF_POOL_TIMEOUT`. Consider `shutdown(wait=False, cancel_futures=True)` on the timeout path.
+
+### P3-33 — `portfolio/fear_greed.py:31` | P3 | "extreme_fear" streak resets on missing data
+**Issue**: `get_sustained_fear_days()` returns 0 if `load_json` raises. If the streak file is missing/corrupt during a brief disk error, the signal engine sees `sustained=0` and contrarian gating disengages — exactly when high contrarian conviction is most valuable. Log at WARNING when this branch fires.
+
+### P3-34 — `portfolio/forecast_signal.py:196` | P3 | Wall-clock timestamp doesn't match price candle timing
+**Issue**: `timestamps = pd.date_range(end=pd.Timestamp.now(tz="UTC"), periods=n, freq="h")` — generates hourly timestamps ending NOW. But `prices` came from Binance klines whose last bar's `close_time` may be 0-59 minutes ago. Chronos-2 receives prices with synthetic timestamps that don't reflect when the data was actually observed. Practical impact small (Chronos doesn't strictly need calendar alignment) but documentation lies.
+
+### P3-35 — `portfolio/local_llm_report.py:48-51` | P3 | Naive datetime same-class as P0-4
+**Issue**: Same naive/aware issue as forecast_accuracy.py but in the report builder. If `entry["ts"]` lacks tz, the `ts < cutoff` comparison raises TypeError. Caught at line 49 but as `(TypeError, ValueError)` — wait, it's `(TypeError, ValueError)`. OK, caught. But silently dropping every row with no-tz timestamp means the report shows zero recent predictions. Add WARNING.
+
+### P3-36 — `portfolio/futures_data.py:88-91` | P3 | `sumOpenInterestValue` missing in returned dict for `get_open_interest`
+**Issue**: `get_open_interest_history` returns `{oi, oi_usdt, timestamp}` with `oi_usdt = sumOpenInterestValue`. But `get_open_interest` (the singular version) doesn't return oi_usdt (see P3-26). Consumers using the singular path get a different schema than the history path. Inconsistent.
 
 ---
 
-## Cross-Critique: Claude Direct vs Data-External Agent
+## Notes on prior P0/P1s (2026-05-19) — verification
 
-### Agent found that Claude missed:
-1. **CD1**: earnings_calendar wrong config key — **completely broken since day one** — total miss
-2. **CD2**: fear_greed unguarded access — missed (I noted API failures generically)
-3. **CD3**: funding_rate unguarded access — missed
-4. **HD1**: NFP date is Good Friday — complete miss (I noted hardcoded dates generically but
-   didn't check specific dates against calendar)
-5. **HD3**: Chronos-2 float column names — complete miss
-6. **HD4**: Gold/BTC ratio reads stale file — complete miss
-7. **HD5**: futures_data missing oi_usdt — complete miss
-8. **MD2**: sentiment subprocess TimeoutExpired — missed
-9. **MD3**: Error entries as valid data — missed
-10. **MD4**: Max pain -1 initialization — missed
+1. **Binance error responses returned as garbage candles (`r.json()` → DataFrame on dict)**: `data_collector.py:88-93` now has `if not data: raise ConnectionError` guard. Dict error responses pass the truthy check, then `pd.DataFrame(data, columns=_BINANCE_KLINE_COLS)` raises ValueError on scalar values → caught and CB-recorded as failure. **Verified fixed (mitigated, not eliminated).**
+2. **yfinance error handling silently returns empty DataFrame**: `yfinance_klines` raises `ValueError` on empty (line 230). Caught at `_fetch_one_timeframe` (line 312) and logged at DEBUG. **Partially fixed** — see P1-15 above; should be WARNING when yfinance is the primary fallback.
+3. **Binance 10m interval doesn't exist — use 5m**: `TIMEFRAMES` and `STOCK_TIMEFRAMES` (data_collector.py:44-62) use `15m`, `1h`, `4h`, `1d`, `3d`, `1w`, `1M` — no `10m`. **Verified fixed.** `_binance_interval` map in `price_source.py:101-106` maps `60m→1h, 90m→1h, 120m→2h` correctly.
 
-### Claude found that agent confirmed/expanded:
-1. **H16/MD1**: Alpha Vantage daily budget — both found (I noted it, agent added restart detail)
-2. **M13**: yfinance stale data — agent confirmed as LD2 (feed mismatch angle)
+---
 
-### Claude found that agent didn't cover:
-1. **H15**: Cache key collision fragility — not covered
-2. **M12**: Circuit breaker oscillation — not covered
-3. **M25**: NewsAPI daily count not persisted — not covered (related to MD1 but different API)
+## Files reviewed (clean — no P0/P1)
 
-### Net assessment:
-The data-external agent found **3 CRITICAL + 5 HIGH + 4 MEDIUM + 2 LOW = 14 net-new issues**.
-The earnings_calendar wrong config key (CD1) is the most impactful discovery — a feature
-that has been silently broken since it was written, with the system never fetching earnings
-dates from Alpha Vantage. The NFP Good Friday issue (HD1) is a concrete data error that
-directly affects trading decisions.
+- `portfolio/fomc_dates.py` — date constants only, no I/O
+- `portfolio/econ_dates.py` — handles tz correctly via UTC anchor at 14:00 (P3-31 calendar staleness only)
+- `portfolio/alert_budget.py` — clean thread-safe token bucket
+- `portfolio/news_keywords.py` — pure functions, no I/O
+- `portfolio/bert_sentiment.py` — well-designed with meta-tensor recovery, per-model locks
+- `portfolio/price_source.py` — clean router with fallback chain
+- `portfolio/sentiment_shadow_backfill.py` — correctly handles naive/aware datetimes (line 212)
 
-Agent was significantly stronger here — specific API response validation bugs require
-line-by-line reading that the broad review didn't do.
+---
+
+## Recommendations (in priority order)
+
+1. **Fix P0-1 immediately** — the on-chain summary bug is silent and downstream signals depend on it. One-line dict-key fix.
+2. **Fix P0-3** — refresh MSTR holdings/shares constants from Avanza/Alpaca or pin with staleness warning.
+3. **Fix P0-4 and P3-35 together** — apply the `tzinfo is None → UTC` guard pattern from `sentiment_shadow_backfill.py:212` everywhere `datetime.fromisoformat` reads JSONL ts.
+4. **Fix P0-6** — add yfinance_lock to `fetch_vix()`. Trivial.
+5. **Fix P0-5** — narrow the `except` in forecast_signal.py to ImportError only.
+6. **Fix P1-7, P1-8** — coordinate the AV "Note"/"Information" key fix across earnings_calendar.py and alpha_vantage.py.
+7. **Migrate `data/crypto_data.py` off raw `requests.get`** to `fetch_json` — three call sites at lines 73, 102, 148.
+8. **P2 follow-ups** — circuit-breaker hygiene in seasonality_updater.py and subprocess timeout reduction in sentiment.py.
+
+External APIs are unreliable — the patterns of `fetch_json` + circuit breaker + rate limiter that the main `data_collector.py` and `alpha_vantage.py` follow are sound. The biggest risk vectors are **silent semantic bugs** (P0-1 wrong dict keys, P0-3 stale constants) that produce plausible-looking-but-wrong outputs, and **silent quota / staleness leaks** (P1-8 missing rate-limit key, P2-20 stale on-chain cache without token). Less common is outright crash — the codebase has matured well around the prior P0s.
