@@ -139,6 +139,7 @@ class InstrumentState:
     # threshold → instrument cooldown for GRID_RAPID_CANCEL_COOLDOWN_S.
     # Reset by a successful fill or by ``roll_session_if_new_day``.
     rapid_cancel_count: int = 0
+    stop_needs_rearm: bool = False
     last_rapid_cancel_ts: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -161,6 +162,7 @@ class InstrumentState:
             "eod_sell_order_id": self.eod_sell_order_id,
             "rapid_cancel_count": self.rapid_cancel_count,
             "last_rapid_cancel_ts": self.last_rapid_cancel_ts,
+            "stop_needs_rearm": self.stop_needs_rearm,
         }
 
     @classmethod
@@ -184,6 +186,7 @@ class InstrumentState:
             eod_sell_order_id=d.get("eod_sell_order_id"),
             rapid_cancel_count=int(d.get("rapid_cancel_count", 0) or 0),
             last_rapid_cancel_ts=d.get("last_rapid_cancel_ts"),
+            stop_needs_rearm=bool(d.get("stop_needs_rearm", False)),
         )
 
     # ---- queries -----------------------------------------------------------
@@ -1515,7 +1518,9 @@ class GridFisher:
         if new_stop_id is not None:
             inst.stop_loss_id = new_stop_id
             inst.stop_loss_price = stop_price
+            inst.stop_needs_rearm = False
         else:
+            inst.stop_needs_rearm = True
             logger.critical(
                 "Stop-rearm FAILED for %s (%s) — keeping old stop_loss_id=%s "
                 "to avoid naked position (FGL P0-3)",
@@ -1640,6 +1645,27 @@ class GridFisher:
                       ticker=inst.ticker, tier=tier)
         for ob, cached, live in reconcile.inventory_drift:
             self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+
+        for inst in self.state.by_instrument.values():
+            if inst.stop_needs_rearm and inst.inventory_units > 0 and inst.stop_loss_price:
+                if not self._probe_only:
+                    sp = inst.stop_loss_price
+                    result = self._safe_session_call(
+                        self.session.place_stop_loss,
+                        inst.ob_id, sp, round(sp * 0.995, 2),
+                        inst.inventory_units, default=None,
+                    )
+                    sid = None
+                    if isinstance(result, dict) and result.get("status") == "SUCCESS":
+                        sid = str(result.get("stoplossOrderId") or "") or None
+                    if sid:
+                        inst.stop_loss_id = sid
+                        inst.stop_needs_rearm = False
+                        self._log("stop_rearm_retry_ok", ob_id=inst.ob_id,
+                                  ticker=inst.ticker, stop_id=sid)
+                    else:
+                        self._log("stop_rearm_retry_fail", ob_id=inst.ob_id,
+                                  ticker=inst.ticker)
 
         # Roll up realised per-instrument P&L into the global counter so
         # ``should_halt_global`` actually sees the running session loss.
