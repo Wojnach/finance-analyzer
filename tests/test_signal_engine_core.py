@@ -1225,7 +1225,7 @@ class TestExpandedCorrelationGroups:
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
         assert "macro_regime" in CORRELATION_GROUPS["structural_flow"]
-        assert "fear_greed" in CORRELATION_GROUPS["macro_external"]
+        assert "fear_greed" not in CORRELATION_GROUPS["macro_external"]
         assert "structure" in CORRELATION_GROUPS["structural_flow"]
 
     def test_volume_flow_in_structural_flow_group(self):

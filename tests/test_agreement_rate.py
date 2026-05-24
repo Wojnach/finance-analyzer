@@ -73,9 +73,9 @@ class TestComputeAgreementRate:
 class TestExpandedMacroExternalGroup:
     """Verify macro_external now includes calendar, econ_calendar, funding."""
 
-    def test_macro_external_has_6_members(self):
+    def test_macro_external_has_5_members(self):
         group = CORRELATION_GROUPS["macro_external"]
-        assert len(group) == 6
+        assert len(group) == 5
 
     def test_macro_external_new_members(self):
         group = CORRELATION_GROUPS["macro_external"]
@@ -85,7 +85,7 @@ class TestExpandedMacroExternalGroup:
 
     def test_macro_external_original_members(self):
         group = CORRELATION_GROUPS["macro_external"]
-        assert "fear_greed" in group
+        assert "fear_greed" not in group
         assert "sentiment" in group
         assert "news_event" in group
 

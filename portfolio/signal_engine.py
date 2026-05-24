@@ -1802,8 +1802,15 @@ _STATIC_CORRELATION_GROUPS = {
     # found calendar↔fear_greed 100% agreement (501 sam), funding↔fear_greed
     # 100% (543 sam), news_event↔econ_calendar 100% (714 sam). These orphaned
     # signals were voting with full weight despite being completely redundant.
+    # 2026-05-24: Split macro_external. fear_greed is a contrarian BUY-only
+    # signal (F&G ≤20 = BUY) that should not be grouped with news/calendar
+    # signals. The 100% agreement measured in April was fear_greed↔calendar
+    # (both BUY biased), but calendar is now disabled. With active members
+    # being fear_greed (BUY-only), news_event (SELL-dominant), econ_calendar
+    # (mixed), grouping them suppresses econ_calendar (0.15x) unfairly.
+    # fear_greed now votes independently at full weight.
     "macro_external": frozenset({
-        "fear_greed", "sentiment", "news_event",
+        "sentiment", "news_event",
         "calendar", "econ_calendar", "funding",
     }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
