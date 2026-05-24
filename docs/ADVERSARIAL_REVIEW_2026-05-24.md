@@ -15,13 +15,13 @@
 | signals-core | pr-review-toolkit:code-reviewer | 2 | 4 | 5 | 3 | 14 |
 | orchestration | pr-review-toolkit:code-reviewer | 5 | 17 | 22 | 3 | 47 |
 | portfolio-risk | pr-review-toolkit:code-reviewer | 8 | 13 | 9 | 4 | 34 |
-| metals-core | pr-review-toolkit:code-reviewer | _running at synthesis time, see deferred section_ | _ | _ | _ | _ |
+| metals-core | pr-review-toolkit:code-reviewer | 2 | 3 | 6 | 2 | 13 |
 | avanza-api | caveman:cavecrew-reviewer | 1 | 4 | 3 | 0 | 8 |
 | signals-modules | pr-review-toolkit:code-reviewer | 0 | 5 | 14 | 3 | 22 |
 | data-external | pr-review-toolkit:code-reviewer | 6 | 10 | 8 | 11 | 35 |
 | infrastructure | caveman:cavecrew-reviewer | 0 | 1 | 3 | 0 | 4 |
 | **main thread cross-cut** | self | 8 | 6 | 3 | 3 | 20 |
-| **TOTAL (excluding metals)** | | **30** | **60** | **67** | **27** | **184** |
+| **TOTAL** | | **32** | **63** | **73** | **29** | **197** |
 
 The lower-count infrastructure subsystem reflects a smaller worktree (caveman agent did not re-write its file, so we transcribed the agent's terse summary; the worktree-resident Apr 8 prior file lists 4 additional P0/P1 candidates we flag for verification under "Carryover").
 
@@ -100,12 +100,16 @@ Picked by: cross-agent corroboration (independently flagged by ≥2 sources), mo
 - **Conviction:** main-thread (IND-P0-7). data-external agent flagged the fix as landed but the code in main repo still shows the unguarded path — discrepancy worth verifying after this review.
 - **Fix:** before `df = pd.DataFrame(...)`: `if isinstance(data, dict) and "code" in data: raise ConnectionError(data.get("msg","binance error"))`.
 
-### T10. Grid Fisher stop-sell-price still 0.5% buffer on 5x certs — STILL NOT FIXED
+### T10. Stop sell-price buffers too tight on 5x certs across 3 modules — STILL NOT FIXED
 
-- **Where:** `portfolio/grid_fisher.py:1496` (`stop_sell_price = round(stop_price * 0.995, 2)`).
-- **Why P0:** A 0.5% buffer on a 5x cert means a 0.5% underlying gap past trigger leaves the limit unfilled. The recent commit `289e5030` fixed `stop_needs_rearm` flag retry but did NOT widen the buffer itself. Confirms 2026-05-19 T3 (one of three sites; fin_snipe sites also still 1%). The `.claude/rules/metals-avanza.md` explicit rule: "5x leverage certificates need -15%+ stops, not -8%."
-- **Conviction:** main-thread (IND-P0-6). Metals-core agent still running at synthesis time — likely to corroborate.
-- **Fix:** widen to ≥3% buffer (`stop_price * 0.97`) for 5x MINIs; also widen `fin_snipe_manager.HARD_STOP_SELL_BUFFER_PCT` from 0.01 to 0.03.
+- **Where:**
+  - `portfolio/grid_fisher.py:1496` (rotate-on-buy-fill path) and `:1655` (stop_needs_rearm retry path) — both use `stop_price * 0.995` (0.5%).
+  - `portfolio/fin_snipe_manager.py:62,537` — `HARD_STOP_SELL_BUFFER_PCT = 0.01` (1%) combined with `HARD_STOP_CERT_PCT = 0.05` (5% cert ≈ 1% underlying for 5x).
+  - `data/metals_loop.py:2469, 4913` — legacy stop ladder `trigger_price * 0.99` (1%) — disabled by default but reachable via toggle.
+- **Why P0:** A 0.5–1% buffer on a 5x cert leaves a small underlying gap-past-trigger unfilled; the position falls naked. `.claude/rules/metals-avanza.md`: "5x leverage certificates need -15%+ stops, not -8%." memory/feedback_mini_stoploss.md: minimum 3% buffer for silver MINIs.
+- **Correction from this review:** the recent commit `be4273d3` changed `MIN_STOP_DISTANCE_PCT` (a different constant, controls when to SKIP placing a new stop) from 1.0 → 3.0. It did NOT widen `HARD_STOP_CERT_PCT` or `HARD_STOP_SELL_BUFFER_PCT`. The fix is still pending.
+- **Conviction:** main-thread (IND-P0-6) + metals-core agent P0 #1 and #2.
+- **Fix:** widen all five sites to ≥3% buffer (`stop_price * 0.97`); raise `HARD_STOP_SELL_BUFFER_PCT = 0.03`; consider raising `HARD_STOP_CERT_PCT = 0.08` (8% cert ≈ 1.6% underlying); centralize via `grid_fisher_config.GRID_STOP_SELL_BUFFER_PCT`.
 
 ---
 
@@ -150,8 +154,15 @@ Several P0s in this review (T6, T7, T9, T10) are pre-existing code no recent dif
 - **P0:** `monte_carlo_risk.py:408` + `exit_optimizer.py:718` — both bypass cached `_resolve_fx_rate` chain (raw `agent_summary.get("fx_rate", 10.85)`); reintroduces the false-circuit-breaker bug class.
 - **P0:** `price_targets.py:391,397,417,419,429,431` — warrant SEK gain formula `(target - price) * units * leverage * fx` overstates by **~27×** on real silver MINI math. EV-ranked targets misranked → recommends the wrong target.
 
-### metals-core (running at synthesis time)
-Deferred. The agent is the largest of the eight (covering `data/metals_loop.py`, all swing traders, grid_fisher, fin_snipe_*, ministral/qwen3 traders, golddigger/, elongir/, mstr_loop/). When it finishes, its findings will be appended below in the "Late additions" section. Expected to corroborate T10 (stop buffer) and likely flag fast-tick / slow-loop module-global races. See independent IND-P0-6 for the partial coverage.
+### metals-core (2 P0, 3 P1, 6 P2, 2 P3) — returned at 17:46, ~30min runtime
+- **P0:** `grid_fisher.py:1496, 1655` — both stop-rearm paths use `stop_price * 0.995` (0.5% buffer). Corroborates T10. The fix needs to land in both the rotate-on-buy-fill path and the tick-retry path.
+- **P0:** `fin_snipe_manager.py:62,537` — `HARD_STOP_SELL_BUFFER_PCT = 0.01` (1%) AND `HARD_STOP_CERT_PCT = 0.05`. Combined = 5% cert stop ≈ 1% underlying for 5x cert, with only 1% sell buffer. **Important correction:** agent verified that the recent batch fix `be4273d3` did NOT change `HARD_STOP_CERT_PCT` — it changed `MIN_STOP_DISTANCE_PCT` (a different constant). T10 in this synthesis previously implied the cert pct was 0.03; it is still 0.05.
+- **P1:** `grid_fisher.py:1885-1891` — EOD `eod_market_flat()` cancels stop then falls through to `bid = inst.avg_entry_price` then to `0`, producing `max(0*0.99, 0.01) = 0.01 SEK` fire-sale limit. Probability low but defense-in-depth violated; abort with critical_errors.jsonl if both quote and avg_entry missing.
+- **P1:** `data/metals_loop.py:2469, 4913` — legacy stop ladder uses `trigger_price * 0.99` (1% buffer). Disabled by default (`STOP_ORDER_ENABLED=False`) but reachable via Telegram/CLI toggle.
+- **P1:** `data/layer2_invoke.py:46, 68` — partial fix from commit `4adeec2d`: the journal/telegram writes use relative paths while sibling `layer2_action.py` and `layer2_exec.py` got the absolute-path treatment. Practical impact bounded today (claude_gate sets cwd) but a manual invocation from anywhere else drops a misplaced `data/` directory.
+- **P2:** `metals_loop.py:1592-1596` — silent fallback from `agent_summary.json` to `agent_summary_compact.json` masks degraded mode.
+
+**Important: agent REFUTED a candidate finding I had primed in the prompt.** I had told the agent to look for "silver fast-tick races slow loop on module globals." The agent verified there is **no race** — `_silver_fast_tick`, `_silver_entry_fast_tick`, `_gold_entry_fast_tick` all run serially in the same thread as the main cycle via `_sleep_for_cycle`. No `threading.Thread` is started anywhere in metals_loop. The 2026-05-19 T10 finding was either wrong or refers to a removed code path. **Remove from regression watch.**
 
 ### avanza-api (1 P0, 4 P1)
 - T6 above.
@@ -246,4 +257,4 @@ Direction schema migration — closes T4:
 
 ---
 
-_Last updated: 2026-05-24 17:40 CET. Metals-core subsystem to be appended once its agent returns._
+_Last updated: 2026-05-24 17:50 CET. All 8 subsystem agents returned. Metals-core (last to finish, ~30min runtime) corrected one priored prompt assumption and added 2 P0 / 3 P1 / 6 P2 / 2 P3 findings._
