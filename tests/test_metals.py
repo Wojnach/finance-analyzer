@@ -261,4 +261,5 @@ class TestMetalsSignalConfig:
         # 2026-05-12: 26 → 23 after disabling volatility_sig, dxy_cross_asset,
         # forecast (all 3 apply to crypto despite dxy being metals-focused).
         # 2026-05-19: 23 → 17 after further May disables.
-        assert extra["_total_applicable"] == 17
+        # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
+        assert extra["_total_applicable"] == 15

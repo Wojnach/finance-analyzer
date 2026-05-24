@@ -297,6 +297,7 @@ class TestSignalEngineQwen3:
         future signal additions don't re-break this test on every audit.
         2026-05-19: bounds lowered to current — crypto >=17, stocks >=10,
         metals >=13.
+        2026-05-24: crypto 17→15 after disabling momentum_factors + btc_proxy.
         """
         from portfolio.signal_engine import _compute_applicable_count
 
@@ -304,9 +305,9 @@ class TestSignalEngineQwen3:
         stock_count = _compute_applicable_count("NVDA")
         metal_count = _compute_applicable_count("XAU-USD")
 
-        assert crypto_count >= 17
+        assert crypto_count >= 15
         assert stock_count >= 10
-        assert metal_count >= 13
+        assert metal_count >= 12
 
     def test_qwen3_not_crypto_only(self):
         """qwen3 should NOT be in _CRYPTO_ONLY_SIGNALS."""

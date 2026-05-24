@@ -353,7 +353,8 @@ class TestStockSignalVoteCounts:
         # tripwire pattern as the stock counterpart.
         # 2026-05-19: 26 → 17 after May-2026 disable wave (matches CLAUDE.md
         # "crypto=16 applicable" ± 1 recent addition).
-        assert extra["_total_applicable"] == 17
+        # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
+        assert extra["_total_applicable"] == 15
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):
