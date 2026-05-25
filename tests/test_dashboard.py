@@ -1895,3 +1895,13 @@ class TestReadJsonlGrowsTailBytes:
 
         result = _read_jsonl(f, limit=100)
         assert len(result) == 5
+
+
+class TestSecurityHeaders:
+    def test_responses_include_security_headers(self, client, tmp_data):
+        (tmp_data / "health_state.json").write_text("{}", encoding="utf-8")
+        resp = client.get("/api/health")
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["X-Frame-Options"] == "DENY"
+        assert "max-age=" in resp.headers["Strict-Transport-Security"]
+        assert "frame-ancestors" in resp.headers["Content-Security-Policy"]
