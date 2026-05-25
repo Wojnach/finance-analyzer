@@ -208,7 +208,9 @@ class TestMetalsSignalConfig:
         # forecast (research session signal audit).
         # 2026-05-19: 17 → 13 after further May disables.
         # 2026-05-25: 13 → 12 after momentum_factors disable (f192f0e2).
-        assert extra["_total_applicable"] == 12
+        # 2026-05-25: 12 → 13 after per-ticker overrides: +williams_vix_fix,
+        # +realized_skewness, -statistical_jump_regime for XAU-USD.
+        assert extra["_total_applicable"] == 13
 
     def test_stocks_total_applicable(self):
         """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""

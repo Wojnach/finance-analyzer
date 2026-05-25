@@ -137,12 +137,14 @@ class TestVoteCountIntegrity:
         forecast (research session signal audit).
         2026-05-19: 17 → 13 after further May disables.
         2026-05-25: 13 → 12 after momentum_factors disable (f192f0e2).
+        2026-05-25: 12 → 13 after per-ticker overrides: +williams_vix_fix,
+        +realized_skewness, -statistical_jump_regime for XAU-USD.
         """
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 12
+        assert extra["_total_applicable"] == 13
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
