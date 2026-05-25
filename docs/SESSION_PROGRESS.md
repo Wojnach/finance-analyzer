@@ -1,5 +1,42 @@
 # Session Progress
 
+## 2026-05-25 After-Hours Research Agent (23:30 CEST)
+
+**Full 8-phase research protocol. 4 commits merged to main, pushed.**
+
+### Research Findings
+- **ROOT CAUSE**: Per-ticker consensus accuracy ≤50% for 4/5 instruments because same signal has vastly different accuracy per ticker (e.g., credit_spread_risk: 57.4% BTC but 17.3% XAG).
+- Walk-forward optimizer outputs exist but are NOT wired into live consensus — highest-ROI single fix.
+- MWU learning rate (eta=0.1) too aggressive for 15 signals/30K samples; optimal ~0.015.
+- IC-weighted ensembles would be strictly superior to accuracy-based voting.
+- drift_regime_gate is star performer: 68.1% recent (626 samples).
+- 3 disabled signals outperform active ones: williams_vix_fix (61.5%), realized_skewness (64.3%), hash_ribbons (60.7%).
+
+### Implementation (shipped)
+- **Per-ticker signal overrides** in signal_engine.py:
+  - RE-ENABLED: williams_vix_fix (XAU 76.5%, XAG 60.9%), realized_skewness (XAU 60.3%), credit_spread_risk (BTC/ETH 57.4%)
+  - DISABLED per-ticker: statistical_jump_regime (XAU 50.2%), cubic_trend_persistence (XAG 41.6%), realized_skewness (XAG 42.9%), crypto_evrp (BTC 40.2%)
+  - WEIGHT BOOSTS: drift_regime_gate 1.4x, williams_vix_fix 1.3x
+  - WEIGHT CUTS: statistical_jump_regime 0.7x, crypto_evrp 0.6x
+- Test fixes: XAU-USD applicable count 12→13
+- CLAUDE.md updated: 80 modules, 16 active, per-ticker override docs
+- Morning briefing written + sent to Telegram
+
+### Market outlook (May 26)
+- ALL HOLD. Memorial Day thin liquidity. Iran deal binary risk.
+- BTC $77.2K testing $80K resistance (best accuracy 52.7%)
+- Gold $4,562 near $4,577 resistance. Silver range-bound.
+- Thursday PCE/GDP data heavy.
+
+### What's next (priority order)
+1. Wire walk-forward weights into live consensus (+2-4% accuracy)
+2. IC-based signal weighting (+3-5% metals/ETH)
+3. Regime-conditional signal selection (+2-3%)
+4. TIPS real yield feature for metals (+2-3% XAU/XAG)
+5. Reduce MWU eta 0.1→0.015
+
+---
+
 ## 2026-05-25 Signal Research Session (22:00 CEST)
 
 **8-phase autonomous research completed. 4 commits merged to main.**
