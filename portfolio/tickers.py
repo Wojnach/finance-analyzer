@@ -242,6 +242,9 @@ DISABLED_SIGNALS = {
     "btc_proxy",        # 2026-05-24: Evaluation complete. 44.6% 1d (139 sam), BUY 31.1%.
                         # 24.1% at 10d horizon. MSTR→BTC proxy thesis did not validate.
                         # Below accuracy gate at all horizons. Formal disable.
+    "cryptotrader_lm",  # LLM shadow signal — managed by shadow_registry rotation.
+    "finance_llama",    # LLM shadow signal — managed by shadow_registry rotation.
+    "meta_trader",      # LLM shadow signal — managed by shadow_registry rotation.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -412,4 +415,12 @@ SIGNAL_NAMES = [
     "absorption_ratio_regime",
     "sentiment_extremity_gate",
     "autotune_adaptive_cycle",
+    "connors_rsi2",
+    "adx_regime_switch",
+    "choppiness_regime_gate",
+    "bocpd_regime_switch",
+    "gold_overnight_bias",
+    "cryptotrader_lm",
+    "finance_llama",
+    "meta_trader",
 ]
