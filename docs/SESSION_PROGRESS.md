@@ -1,5 +1,82 @@
 # Session Progress
 
+## 2026-05-25 Signal Research Session (22:00 CEST)
+
+**8-phase autonomous research completed. 4 commits merged to main.**
+
+### Research (Phases 0-5)
+- Baseline: 15 active signals, 51 disabled, 67 registered. System healthy.
+- Academic search: 28 papers across 6 categories (options, macro surprise, crypto sentiment, physical metals, cross-asset, on-chain).
+- Web research: 12+ signals from industry sources.
+- 8 new candidates appended to backlog (68→76 total).
+- Top candidate: `btc_gold_correlation_regime` (composite 8.05/10).
+
+### Implementation (Phases 6-7)
+- **New signal**: `btc_gold_correlation_regime` — 30-day rolling Pearson correlation between BTC and Gold returns, z-scored against 252-day history. BUY BTC at z<-2.0, SELL at z>1.5. XAU gets inverse.
+- Premortem: 7 failure narratives (lock contention, weekend bias, NaN leaks, registration gap, correlation groups, cache staleness, tripwire counts). All addressed in implementation.
+- Uses `shared_state._cached()` (no lock contention), stale-data guard (>25% zero-return forces HOLD), NaN-safe indicators.
+- 17 new tests pass. Full suite: 10,302 pass, 25 pre-existing fail.
+- Signal starts DISABLED (shadow mode) — accumulates accuracy before enabling.
+- Registered as signal #67 with `requires_context=True, max_confidence=0.7`.
+
+### What's next
+- Shadow accuracy tracking — check in ~7 days for promotion decision.
+- Top unimplemented candidates: `btc_etf_flow_signal` (8.0), `kalshi_macro_bridge` (7.65), `eth_usdt_netflow_directional` (7.45).
+
+---
+
+## 2026-05-25 Auto-Improvement Session
+
+**4-batch autonomous improvement completed. 6 commits merged to main.**
+
+### What was fixed
+1. **BUG-A (HIGH)**: 8 signals missing from SIGNAL_NAMES — outcome_tracker silently dropped their votes, preventing accuracy accumulation. Added 5 shadow signals + 3 LLM rotation signals.
+2. **BUG-C (MEDIUM)**: Dashboard missing security headers. Added X-Frame-Options, X-Content-Type-Options, HSTS, CSP frame-ancestors.
+3. **BUG-B (LOW)**: SYSTEM_HEALTH_CONTRACT referenced 20 instruments (only 5 remain).
+4. **CLEANUP-A**: Removed dead `register_signal()` decorator (never used, 22 lines).
+5. **Tripwire fix**: Metals applicable count 13→12 (missed in f192f0e2).
+6. **Docs**: SYSTEM_OVERVIEW signal counts updated (66 modules, 16 active, 50 disabled).
+
+### Test results
+10,277 passed, 33 failed (all pre-existing), 4 skipped. ~2.5 min parallel.
+
+### What's next
+- Shadow signals now accumulating accuracy. Check in ~7 days whether any reach promotion threshold.
+- 33 pre-existing test failures remain (11 freqtrade integration, rest are config/state/flaky).
+
+---
+
+## 2026-05-24 After-Hours Research Session (21:00 CEST)
+
+**8-phase autonomous research completed. 3 commits merged to main.**
+
+### Phase 0-4: Research & Analysis
+- System healthy: 0 errors, 76 cycles, ~14h uptime
+- Market: range-bound, Memorial Day Monday (thin liquidity), Iran deal binary event (50/50), Thursday PCE deflator
+- BTC MVRV Z-Score 0.41 (mid-cycle), COT silver barely positioned (5,472 contracts), G/S ratio 57
+- Signal audit: momentum_factors catastrophic (30% recent, 783 sam), btc_proxy negative (44.6% 1d, BUY 31.1%)
+- Research deliverables written: daily_research_review.json, daily_research_macro.json, daily_research_quant.json, daily_research_ticker_deep_dive.json, daily_research_signal_audit.json, morning_briefing.json
+
+### Phase 6: Implementation (3 batches)
+**Batch 1** (14573681): Expanded `_SHADOW_SAFE_SIGNALS` from 17→30 signals (adds ttm_squeeze, tsi_chop_mr, amihud_illiquidity_regime, absorption_ratio_regime, trend_slope_momentum, sentiment_extremity_gate, connors_rsi2, adx_regime_switch, choppiness_regime_gate, autotune_adaptive_cycle, bocpd_regime_switch, momentum_factors, btc_proxy). Formally disabled momentum_factors + btc_proxy in tickers.py.
+
+**Batch 2** (7fdde61e): Removed fear_greed from macro_external correlation cluster. fear_greed is contrarian BUY-only; grouping with news_event (SELL-dominant) was suppressing valid votes via 0.15x follower penalty.
+
+**Batch 3** (f192f0e2): Updated 4 test files with new signal count tripwires (crypto 17→15, metals ≥13→≥12, macro_external 6→5 members).
+
+### Phase 7: Ship
+- 277 signal engine tests pass, 10275+ total pass (21 failures all pre-existing)
+- Merged research/daily-2026-05-24 → main (fast-forward), pushed
+- PF-DataLoop + PF-MetalsLoop restarted, worktree cleaned
+
+### Next Session
+- Monitor shadow signals for accuracy data accumulation
+- Check vwap_zscore_mr for promotion (currently 66.2% on 74 samples)
+- Investigate Layer 2 timeout pattern (14 contract violations this week)
+- Thursday: watch PCE deflator impact
+
+---
+
 ## 2026-05-24 Auto-Improvement Session
 
 **Context:** Autonomous improvement targeting FGL 2026-05-23 P0s. Branch `improve/auto-session-2026-05-24`.
@@ -24,9 +101,13 @@
 
 **P1 (bonus):** layer2_exec/action/invoke.py — json.load(open()) → proper with-block
 
-**Tests:** 591 targeted tests pass across affected files. Full suite running.
+**P1 (grid_fisher):** stop_needs_rearm flag — persisted field + tick() retry loop for failed stop placements.
 
-**Deferred:** 11 P0s (need design sessions or have high blast radius).
+**Tests:** 10,218 pass, 418 targeted tests pass (0 regressions). 51 pre-existing/flaky failures.
+
+**Shipped:** 6 commits merged to main, pushed. PF-DataLoop + PF-MetalsLoop restarted. Worktree branch deleted.
+
+**Deferred:** 11 P0s (need design sessions or have high blast radius) — see `docs/IMPROVEMENT_PLAN.md`.
 
 ---
 
