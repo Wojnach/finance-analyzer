@@ -1,77 +1,88 @@
-# PLAN — Full Adversarial Codebase Review (FGL protocol)
+# PLAN — Implement btc_gold_correlation_regime Signal
 
-**Date:** 2026-05-22 (Fri)
-**Type:** Read-only adversarial review. Ships ZERO production code — only review docs.
-**Trigger:** `/fgl` — "full adversarial review of finance-analyzer, partition into 8 subsystems."
+**Date:** 2026-05-25
+**Type:** New signal module (starts disabled/shadow)
+**Branch:** `feat/btc-gold-corr-regime`
 
 ## Objective
 
-Adversarially review the entire `finance-analyzer` codebase for bugs, silent-failure
-modes, money-math errors, concurrency races, and contract violations. Produce a
-synthesis document with severity-ranked findings. No code is changed this session —
-findings feed the next implementation session and `docs/IMPROVEMENT_BACKLOG.md`.
+Implement `btc_gold_correlation_regime` — a cross-asset intermarket signal measuring
+the 30-day rolling Pearson correlation between BTC and Gold daily returns. Extreme
+negative correlation (z < -2.0) historically precedes BTC rallies; high positive
+correlation (z > 1.5) precedes mean-reversion. Composite score 8.05/10.
 
-## Subsystem partition (8)
+## Signal Spec
 
-| # | Subsystem | Scope | Reviewer agent |
-|---|-----------|-------|----------------|
-| 1 | signals-core | vote aggregation, accuracy gating, weighting, IC | pr-review-toolkit:code-reviewer |
-| 2 | orchestration | main loop, Layer 2 subprocess, triggers, escalation | pr-review-toolkit:code-reviewer |
-| 3 | portfolio-risk | portfolio state, sizing, risk mgmt, monte carlo, exits | pr-review-toolkit:code-reviewer |
-| 4 | metals-core | metals/oil/crypto loops, warrants, fishing, grid | pr-review-toolkit:code-reviewer |
-| 5 | avanza-api | broker client, BankID auth, order flow, locks | caveman:cavecrew-reviewer |
-| 6 | signals-modules | 64 signal plugins + LLM signal adapters | caveman:cavecrew-reviewer |
-| 7 | data-external | market data fetchers, sentiment, FX, precompute | caveman:cavecrew-reviewer |
-| 8 | infrastructure | atomic I/O, locks, health, notifications, dashboard | pr-review-toolkit:code-reviewer |
+- **Formula**: `corr_30d = pearson(btc_returns[-30:], gold_returns[-30:])`.
+  `z = (corr_30d - rolling_mean_252d) / rolling_std_252d`.
+  BUY BTC when z < -2.0. SELL when z > 1.5.
+  For XAU-USD: inverse (BUY when z > 1.5, SELL when z < -2.0).
+- **Parameters**: corr_window=30, z_lookback=252, buy_z=-2.0, sell_z=1.5
+- **Data**: OHLCV only — BTC via `binance_klines("BTCUSDT")`, XAU via `binance_fapi_klines("XAUUSDT")`
+- **Target assets**: BTC-USD, XAU-USD (cross-asset)
+- **Category**: intermarket
+- **Max confidence**: 0.7 (external counterpart data)
+- **Starts**: DISABLED (shadow mode)
 
-## Execution
+## Files to Create/Modify
 
-1. **Worktree + empty-baseline branches.** Create one worktree (`Q:/fa-review-wt`).
-   In it: orphan branch `review/empty` (empty tree) + 8 branches `review/sub-<name>`,
-   each = empty baseline + that subsystem's files. `git diff review/empty review/sub-X`
-   then renders the whole subsystem as a reviewable diff for diff-oriented agents.
-2. **Spawn 8 background review subagents**, one per subsystem, each told its branch,
-   file list, and the project-specific failure modes to hunt (atomic I/O, exit-0
-   silent failure, subprocess hangs, money rounding, MINI knockout barriers).
-3. **Independent adversarial pass (this agent)** — while subagents run, read the
-   highest-risk files directly. Fresh-eyes findings, not anchored to subagent output.
-4. **Collect** subagent results.
-5. **Cross-critique** — for each subagent finding: confirm / downgrade / reject with
-   reasoning. For each independent finding: check if a subagent caught it too
-   (corroboration raises confidence). Flag disagreements.
-6. **Synthesis doc** → `docs/reviews/2026-05-22-fgl-adversarial-review.md`:
-   severity-ranked (P0/P1/P2/P3), per-subsystem, with file:line, plus a top-N
-   "fix first" list and a corroboration matrix.
-7. **Commit docs to main**, push via Windows git, remove worktree + branches.
+| # | File | Action |
+|---|------|--------|
+| 1 | `portfolio/signals/btc_gold_correlation_regime.py` | CREATE ~100 lines |
+| 2 | `portfolio/signal_registry.py` | ADD register_enhanced() call |
+| 3 | `portfolio/tickers.py` | ADD to SIGNAL_NAMES + DISABLED_SIGNALS |
+| 4 | `tests/test_signal_btc_gold_correlation_regime.py` | CREATE ~120 lines |
 
-## What could break / risks
+## Implementation Details
 
-- **None to production.** Output is docs only; no prod code, config, or data files
-  are modified. The worktree is isolated and destroyed at the end.
-- **Risk: reviewer false positives.** Mitigation — the cross-critique pass (step 5)
-  is the guard; every reported finding gets independently judged before synthesis.
-- **Risk: context exhaustion** before synthesis. Mitigation — subagents run in
-  background (parallel), output is severity-tagged one-liners (bounded), synthesis
-  is written incrementally.
+### Signal Module (`portfolio/signals/btc_gold_correlation_regime.py`)
 
-## Premortem
+Pattern follows `metals_cross_asset.py` for cross-asset data fetching:
+- Internal fetch of counterpart asset data (BTC fetches XAU, XAU fetches BTC)
+- Thread-safe cache with TTL (4h, matching metals_cross_asset pattern)
+- `_compute_zscore()` helper
+- `compute_btc_gold_correlation_regime_signal(df, context)` main function
+- Returns `{"action": ..., "confidence": ..., "sub_signals": {...}, "indicators": {...}}`
+- HOLD when insufficient data (<252 bars) or fetch failure
 
-The /fgl protocol mandates an agent-driven premortem for plans that ship code. **This
-plan ships zero production code** — it adds review markdown under `docs/` and creates
-then destroys a throwaway worktree. The premortem's purpose (surface prod-incident
-failure chains: silent loop crash, bad trade, data corruption, accuracy regression,
-auth outage) has no surface area here: no loop code, signal weight, threshold, config,
-or data file is touched. The single residual risk — a stale worktree or `review/*`
-branch left behind — is covered by the explicit cleanup step, verified at the end.
-Formal agent-premortem skipped with that reasoning recorded here; the adversarial
-review itself IS a system-wide premortem of the existing code.
+### Registration
 
-## Execution order
+```python
+register_enhanced(
+    "btc_gold_correlation_regime",
+    "portfolio.signals.btc_gold_correlation_regime",
+    "compute_btc_gold_correlation_regime_signal",
+    requires_context=True,
+    max_confidence=0.7,
+)
+```
 
-1. PLAN.md commit (this file).
-2. Worktree + 9 branches (1 empty + 8 subsystem).
-3. Spawn 8 background reviewers.
-4. Independent review pass (parallel with 3).
-5. Collect + cross-critique.
-6. Synthesis doc.
-7. Commit docs, push, cleanup.
+### tickers.py Changes
+
+- Add `"btc_gold_correlation_regime"` to `SIGNAL_NAMES` list
+- Add `"btc_gold_correlation_regime"` to `DISABLED_SIGNALS` set with comment
+
+### Tests
+
+- Valid BUY (z < -2.0), SELL (z > 1.5), HOLD (neutral z)
+- Insufficient data → HOLD
+- Counterpart fetch failure → HOLD
+- XAU inverse logic
+- Confidence capped at 0.7
+- Output schema validation
+
+## Execution Order
+
+1. Commit PLAN.md
+2. Spawn premortem agent
+3. Create worktree `Q:/fa-btc-gold-wt` on branch `feat/btc-gold-corr-regime`
+4. Implement signal module
+5. Register + tickers.py
+6. Tests
+7. Run pytest
+8. Adversarial review subagent
+9. Fix findings
+10. Full test suite
+11. Merge to main, push
+12. Clean up worktree
+13. Update progress tracking files
