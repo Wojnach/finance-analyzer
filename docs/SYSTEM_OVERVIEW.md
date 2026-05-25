@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-05-21
-Branch: improve/auto-session-2026-05-21
+Updated: 2026-05-25
+Branch: improve/auto-session-2026-05-25
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 70 signal modules (18 active, 52 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 66 signal modules (16 active, 63 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -32,9 +32,9 @@ Two-layer autonomous trading system with 70 signal modules (18 active, 52 disabl
 - `market_timing.py` (342 lines): DST-aware US/EU market hours, NYSE + Swedish holiday calendars (Easter-based), agent invocation window, GPU signal gating
 - `config_validator.py` (87 lines): Startup config validation
 
-### Signal System (70 modules: 7 core + 63 enhanced, 18 active + 52 disabled)
-- `signal_engine.py` (4399 lines): 70-module voting (18 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
-- `signal_registry.py` (380 lines): Plugin-based signal discovery via importlib, lazy loading. 63 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
+### Signal System (66 modules: 66 enhanced, 16 active + 50 disabled)
+- `signal_engine.py` (4476 lines): 66-module voting (16 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
+- `signal_registry.py` (399 lines): Plugin-based signal discovery via importlib, lazy loading. 66 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
 - `signal_utils.py` (132 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (64 files, 20,798 lines): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (2070 lines): Per-signal hit rate tracking, accuracy cache, activation rates, thundering-herd lock, degradation detection
@@ -139,8 +139,8 @@ main.loop()
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
 ### Signal Inventory (70 total: 18 active, 52 disabled)
-- **Active (18)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, Momentum Factors, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, Credit Spread Risk, On-Chain BTC, Statistical Jump Regime, BTC Proxy, Crypto EVRP
-- **Disabled (52)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, plus 30 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, ConnorsRSI, ADX Regime Switch, CUSUM Accuracy Monitor, Sentiment Extremity Gate, etc.)
+- **Active (16)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, Credit Spread Risk, On-Chain BTC, Statistical Jump Regime, Crypto EVRP
+- **Disabled (50)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, Momentum Factors (30% recent), BTC Proxy (44.6%), plus 26 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, ConnorsRSI, ADX Regime Switch, BOCPD Regime Switch, Choppiness Regime Gate, Gold Overnight Bias, Sentiment Extremity Gate, etc.)
 
 ## 6) Configuration
 
@@ -257,3 +257,11 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - **BUG-B (fixed)**: `dashboard/app.py` — `/api/mstr_loop` endpoint read JSONL files via raw `open()` line-by-line iteration. Replaced with `last_jsonl_entry()` (4KB tail seek, O(1) instead of O(n)).
 - **DOC-A (fixed)**: SYSTEM_OVERVIEW.md line counts for 15+ modules were wrong by 30-200% (e.g., agent_invocation.py listed 489, actual 1644). Full accuracy pass on all section 3 numbers.
 - Signal count: 70 modules (7 core + 63 enhanced), 18 active, 52 disabled.
+
+### Findings from 2026-05-25 Auto Session
+
+- **BUG-A (fixed)**: `portfolio/tickers.py` — 5 shadow signals (connors_rsi2, adx_regime_switch, choppiness_regime_gate, bocpd_regime_switch, gold_overnight_bias) were in DISABLED_SIGNALS but missing from SIGNAL_NAMES. outcome_tracker silently dropped their votes, preventing accuracy accumulation. Also added 3 LLM rotation signals (cryptotrader_lm, finance_llama, meta_trader) to both lists.
+- **BUG-C (fixed)**: `dashboard/app.py` — Missing security headers (X-Frame-Options, X-Content-Type-Options, HSTS, CSP frame-ancestors). Added to after_request handler.
+- **BUG-B (fixed)**: `docs/SYSTEM_HEALTH_CONTRACT.md` — Referenced 20 instruments (only 5 Tier-1 remain).
+- **CLEANUP-A (fixed)**: `signal_registry.py` — Dead `register_signal()` decorator removed (never used, all 66 modules use `register_enhanced()`).
+- Signal count: 66 modules (66 enhanced), 16 active, 50 disabled.

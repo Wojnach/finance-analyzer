@@ -42,16 +42,16 @@
 
 | Check | Invariant | How to verify |
 |-------|-----------|---------------|
-| **All 20 instruments scanned** | `data/agent_summary.json` contains entries for all 20 tickers | Count keys |
+| **All 5 instruments scanned** | `data/agent_summary.json` contains entries for all 5 Tier-1 tickers | Count keys |
 | **Signal freshness** | Each ticker's signal snapshot < 15 minutes old (crypto/metals) or < 1 hour (stocks, outside market hours) | Check timestamps in summary |
 | **No zero-voter consensus** | No ticker has `applicable_signals = 0` | Check signal counts |
 | **Accuracy gating active** | `data/accuracy_cache.json` exists and was updated within 24h | File mtime |
 
-**Expected tickers** (20):
+**Expected tickers** (5 Tier-1):
 ```
 Crypto:  BTC-USD, ETH-USD
 Metals:  XAU-USD, XAG-USD
-Stocks:  PLTR, NVDA, AMD, GOOGL, AMZN, AAPL, AVGO, META, MU, SOUN, SMCI, TSM, TTWO, VRT, LMT, MSTR
+Stocks:  MSTR
 ```
 
 ---
