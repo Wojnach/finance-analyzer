@@ -117,7 +117,7 @@ Backlog reference: `docs/IMPROVEMENT_BACKLOG.md`.
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-17 active signals (65 modules registered, 49 disabled) across 7 timeframes for 5 Tier-1
+16 active signals (80 modules registered, 64 disabled) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -199,26 +199,31 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (65 Modules · 17 Active · 49 Disabled)
+## Signal System (80 Modules · 16 Active · 64 Disabled)
 
-### Active (17)
-1. RSI(14) — Oversold <30 BUY, overbought >70 SELL (52.2% 1d, 32K sam)
-2. BB(20,2) — Bollinger Band breakout (54.8% 1d, 8K sam)
+### Active (16 globally + per-ticker overrides)
+1. RSI(14) — Oversold <30 BUY, overbought >70 SELL (52.4% 1d, 34K sam)
+2. BB(20,2) — Bollinger Band breakout (54.9% 1d, 9K sam)
 3. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL) (58.6% 1d, 10K sam)
-4. Ministral-8B — Local LLM reasoning via llama-cpp-python (58.2% 1d, 6K sam)
-5. Qwen3-8B — Local LLM reasoning (60.1% 1d, 4K sam, 1.2% activation)
-6. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO (53.0% 1d)
-7. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B (52.6% 1d, 26K sam)
-8. Momentum Factors — Time-Series Mom, ROC-20, 52W High/Low (52.6% 1d, 20K sam)
-9. News Event — Headline velocity, keyword severity, source credibility (50.3% 1d)
-10. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY (60.3% 1d)
-11. Crypto Macro — DeFi TVL, staking yields, protocol revenue (57.1% 1d, crypto only)
-12. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
-13. COT Positioning — CFTC speculative/commercial positioning (100% 1d, 5 sam)
-14. Credit Spread Risk — HY OAS from FRED as cross-asset risk appetite gauge (54.2% 1d)
-15. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (60.0% 1d, BTC-only)
-16. Statistical Jump Regime — Jump detection for regime changes (54.4% 1d, 2K sam)
-17. BTC Proxy — MSTR→BTC proxy signal (46.6% 1d, 58 sam, under evaluation)
+4. Ministral-8B — Local LLM reasoning via llama-cpp-python (58.0% 1d, 6K sam)
+5. Qwen3-8B — Local LLM reasoning (59.7% 1d, 4K sam, 1.2% activation)
+6. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO (52.9% 1d)
+7. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B (52.6% 1d, 28K sam)
+8. News Event — Headline velocity, keyword severity, source credibility (50.6% 1d)
+9. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY (57.2% 1d)
+10. Crypto Macro — DeFi TVL, staking yields, protocol revenue (54.5% 1d, crypto only)
+11. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
+12. COT Positioning — CFTC speculative/commercial positioning (100% 1d, 5 sam)
+13. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (60.0% 1d, BTC-only)
+14. Statistical Jump Regime — Jump detection for regime changes (54.3% 1d, 3K sam)
+15. Crypto EVRP — Crypto equity variance risk premium (55.5% 1d, 366 sam)
+16. Drift Regime Gate — Regime detection via drift analysis (58.1% 1d, 1.5K sam, 68.1% recent)
+
+Per-ticker overrides (disabled globally, active for specific tickers):
+- Williams VIX Fix → XAU (76.5%, 68 sam), XAG (60.9%, 92 sam)
+- Realized Skewness → XAU (60.3%, 572 sam)
+- Credit Spread Risk → BTC (57.4%, 652 sam), ETH (57.4%, 652 sam)
+- ML Classifier → ETH (55.1% 3h, 1206 sam)
 
 ### Disabled (49 — force-HOLD via DISABLED_SIGNALS)
 Core disabled: ML Classifier, MACD, EMA, Volume Confirmation, Funding Rate,
