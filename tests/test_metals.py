@@ -206,9 +206,9 @@ class TestMetalsSignalConfig:
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
         # 2026-05-12: 20 → 17 after disabling volatility_sig, dxy_cross_asset,
         # forecast (research session signal audit).
-        # 2026-05-19: 17 → 13 after further May disables (matches CLAUDE.md
-        # "metals=12 applicable" ± 1 recent addition).
-        assert extra["_total_applicable"] == 13
+        # 2026-05-19: 17 → 13 after further May disables.
+        # 2026-05-25: 13 → 12 after momentum_factors disable (f192f0e2).
+        assert extra["_total_applicable"] == 12
 
     def test_stocks_total_applicable(self):
         """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""
