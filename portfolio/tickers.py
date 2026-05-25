@@ -235,6 +235,9 @@ DISABLED_SIGNALS = {
     "bocpd_regime_switch",  # 2026-05-24: NEW. BOCPD regime switch (trend↔MR).
                         # Bayesian Online Changepoint Detection. Cross-asset. Score 8.25/10.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "btc_gold_correlation_regime",  # 2026-05-25: NEW. BTC-Gold correlation z-score.
+                        # Intermarket cross-asset (BTC+XAU). Score 8.05/10.
+                        # Shadow mode — accumulate accuracy data before enabling.
     "momentum_factors",  # 2026-05-24: 30% recent accuracy (783 sam), 51.9% all-time (21187 sam).
                         # Blended ~37% — below 47% gate. Already force-HOLD'd at runtime.
                         # Formal disable saves compute. Was leader of oscillator_trend cluster
@@ -419,6 +422,7 @@ SIGNAL_NAMES = [
     "adx_regime_switch",
     "choppiness_regime_gate",
     "bocpd_regime_switch",
+    "btc_gold_correlation_regime",
     "gold_overnight_bias",
     "cryptotrader_lm",
     "finance_llama",
