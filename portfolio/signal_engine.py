@@ -699,6 +699,18 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
     # ml on ETH-USD: 55.1% at 3h (1206 samples). Globally disabled at 41.7%
     # because BTC-USD pulls it down to 26.4%. ETH-USD has genuine edge.
     ("ml", "ETH-USD"),
+    # 2026-05-25 after-hours audit: per-ticker accuracy from signal_log.db
+    # williams_vix_fix: globally 51.0% (disabled) but XAU 76.5% (68 sam),
+    # XAG 60.9% (92 sam). Strong metals-specific edge.
+    ("williams_vix_fix", "XAU-USD"),
+    ("williams_vix_fix", "XAG-USD"),
+    # realized_skewness: globally 51.6% (disabled) but XAU 60.3% (572 sam).
+    # Bad for XAG (42.9%) — only re-enable for gold.
+    ("realized_skewness", "XAU-USD"),
+    # credit_spread_risk: globally 50.0% (disabled) but BTC 57.4% (652 sam),
+    # ETH 57.4% (652 sam). Terrible for metals (XAG 17.3%, XAU 35.4%).
+    ("credit_spread_risk", "BTC-USD"),
+    ("credit_spread_risk", "ETH-USD"),
 })
 
 # Shadow-safe signals: disabled signals that are pure math (no network I/O)
@@ -830,18 +842,22 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
                               "futures_flow",  # 32.6% 1d (675 sam)
                               }),
         "BTC-USD": frozenset({"smart_money", "heikin_ashi",
-                              "futures_flow",  # 39.7% 1d (511 sam)
+                              "futures_flow",      # 39.7% 1d (511 sam)
+                              "crypto_evrp",       # 40.2% 7d recent (127 sam), gate to ETH-only — 2026-05-25
                               }),
         "XAG-USD": frozenset({"ministral", "credit_spread_risk",
                               "metals_cross_asset", "smart_money",
-                              "structure",     # 29.9% 1d (723 sam)
-                              "ema",           # 14.7% 1d (34 sam)
-                              "sentiment",     # 33.3% 1d (285 sam), 94% BUY-only
+                              "structure",                 # 29.9% 1d (723 sam)
+                              "ema",                       # 14.7% 1d (34 sam)
+                              "sentiment",                 # 33.3% 1d (285 sam), 94% BUY-only
+                              "cubic_trend_persistence",   # 41.6% 1d (474 sam) — 2026-05-25 audit
+                              "realized_skewness",         # 42.9% 1d (518 sam) — bad for silver, good for gold
                               }),
         "XAU-USD": frozenset({"ministral", "metals_cross_asset",
-                              "structure",           # 30.4% 1d (827 sam)
-                              "credit_spread_risk",  # 35.4% 1d (413 sam), 38.8% 3h — bad everywhere
-                              "macro_regime",        # 34.3% 1d (484 sam)
+                              "structure",                 # 30.4% 1d (827 sam)
+                              "credit_spread_risk",        # 35.4% 1d (413 sam), 38.8% 3h — bad everywhere
+                              "macro_regime",              # 34.3% 1d (484 sam)
+                              "statistical_jump_regime",   # 50.2% 1d (887 sam) — noise for gold, 2026-05-25 audit
                               }),
         # 2026-04-16: trimmed from 7 to 2 (Batch 1). Full history in commit
         # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
@@ -1417,26 +1433,30 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "volume_flow": 0.7,
     },
     "1d": {
-        "bb": 1.3,              # 62.5% at 1d_recent (120 sam) — boosted from 1.2
-        "rsi": 1.1,             # 56.2% at 1d_recent (569 sam) — NEW 2026-04-27
+        "drift_regime_gate": 1.4,   # 68.1% at 1d_recent (626 sam) — STAR performer, 2026-05-25 audit
+        "bb": 1.3,              # 60.5% at 1d_recent (428 sam) — confirmed 2026-05-25
+        "rsi": 1.1,             # 57.5% at 1d_recent (496 sam) — updated 2026-05-25
         "credit_spread_risk": 1.1,  # 56.4% at 1d_recent (140 sam), SELL 77.9% — NEW 2026-04-27
         "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — NEW 2026-04-27
-        "macd": 1.1,            # 54.8% at 1d_recent (93 sam)
-        "mean_reversion": 1.1,  # 51.8% at 1d_recent — reduced from 1.3
-        "news_event": 1.4,      # 70.0% at 1d_recent (340 sam)! — was 0.5 (SELL-focused works now)
+        "macd": 1.1,            # 52.2% at 1d_recent (205 sam) — updated 2026-05-25
+        "mean_reversion": 1.1,  # 56.7% at 1d_recent (727 sam) — updated 2026-05-25
+        "news_event": 1.4,      # 51.5% at 1d_recent (264 sam) — dropped from 70%, reassess
+        "williams_vix_fix": 1.3,    # 61.5% at 1d_recent (205 sam) — re-enabled for metals, 2026-05-25
         "claude_fundamental": 0.5,  # 40.5% at 1d_recent (1178 sam) — NEW 2026-04-27 penalty
-        "sentiment": 0.4,       # 40.1% at 1d_recent (202 sam) — NEW 2026-04-27
+        "sentiment": 0.4,       # 45.9% at 1d_recent (296 sam) — updated 2026-05-25
         "fear_greed": 0.4,      # 25.9% at 1d — still terrible
         "macro_regime": 0.5,    # 36.8% at 1d_recent
         "volatility_sig": 0.5,  # 45.5% at 1d_recent
         "structure": 0.5,       # 33.7% at 1d_recent — tightened from 0.6
         "forecast": 0.5,        # 44.6% at 1d_recent
-        "ema": 0.5,             # 48.6% at 1d_recent — tightened from 0.6
+        "ema": 0.5,             # 46.6% at 1d_recent — updated 2026-05-25
         "trend": 0.5,           # 37.7% at 1d_recent — tightened from 0.6
         "heikin_ashi": 0.6,     # 42.7% at 1d_recent — tightened from 0.7
-        "momentum_factors": 0.5, # 35.4% at 1d_recent — NEW 2026-04-27
+        "momentum_factors": 0.5, # 36.2% at 1d_recent — updated 2026-05-25
         "volume_flow": 0.5,     # 40.0% at 1d_recent — NEW 2026-04-27
-        "crypto_macro": 0.7,    # 46.9% at 1d_recent — NEW 2026-04-27
+        "crypto_macro": 0.7,    # 53.6% at 1d_recent (347 sam) — updated 2026-05-25
+        "statistical_jump_regime": 0.7, # 46.9% at 1d_recent (693 sam) — regressing, 2026-05-25
+        "crypto_evrp": 0.6,     # 40.2% at 1d_recent (127 sam) — regressing, 2026-05-25
     },
 }
 
