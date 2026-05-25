@@ -12,7 +12,6 @@ from portfolio.signal_registry import (
     get_signal_names,
     load_signal_func,
     register_enhanced,
-    register_signal,
 )
 
 
@@ -29,45 +28,6 @@ def _isolate_registries():
     for key in list(_ENHANCED_SIGNALS):
         if key not in enhanced_snapshot:
             del _ENHANCED_SIGNALS[key]
-
-
-class TestRegisterSignal:
-    """Tests for the @register_signal decorator."""
-
-    def test_register_enhanced_via_decorator(self):
-        @register_signal("test_enhanced_dec", signal_type="enhanced")
-        def compute_test(df, **kw):
-            return {"vote": "HOLD"}
-
-        assert "test_enhanced_dec" in _ENHANCED_SIGNALS
-        entry = _ENHANCED_SIGNALS["test_enhanced_dec"]
-        assert entry["name"] == "test_enhanced_dec"
-        assert entry["type"] == "enhanced"
-        assert entry["func"] is compute_test
-
-    def test_register_core_via_decorator_routes_to_enhanced(self):
-        @register_signal("test_core_dec", signal_type="core")
-        def compute_core(df, **kw):
-            return "BUY"
-
-        assert "test_core_dec" in _ENHANCED_SIGNALS
-        entry = _ENHANCED_SIGNALS["test_core_dec"]
-        assert entry["type"] == "core"
-        assert entry["func"] is compute_core
-
-    def test_decorator_returns_original_function(self):
-        @register_signal("test_passthrough", signal_type="enhanced")
-        def my_func():
-            return 42
-
-        assert my_func() == 42
-
-    def test_requires_macro_flag(self):
-        @register_signal("test_macro", signal_type="enhanced", requires_macro=True)
-        def compute_macro(df, **kw):
-            return {"vote": "HOLD"}
-
-        assert _ENHANCED_SIGNALS["test_macro"]["requires_macro"] is True
 
 
 class TestRegisterEnhanced:

@@ -13,28 +13,6 @@ logger = logging.getLogger("portfolio.signal_registry")
 _ENHANCED_SIGNALS: dict[str, dict] = {}
 
 
-def register_signal(name: str, signal_type: str = "enhanced",
-                    module_path: str = None, func_name: str = None,
-                    requires_macro: bool = False):
-    """Register a signal in the global registry.
-
-    Can be used as a decorator on compute functions, or called directly
-    to register signals programmatically.
-    """
-    def decorator(func):
-        entry = {
-            "name": name,
-            "type": signal_type,
-            "module_path": module_path or func.__module__,
-            "func_name": func_name or func.__name__,
-            "requires_macro": requires_macro,
-            "func": func,
-        }
-        _ENHANCED_SIGNALS[name] = entry
-        return func
-    return decorator
-
-
 def register_enhanced(name: str, module_path: str, func_name: str,
                       requires_macro: bool = False,
                       requires_context: bool = False,
