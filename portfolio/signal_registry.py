@@ -372,6 +372,11 @@ def _register_defaults():
                       "portfolio.signals.bocpd_regime_switch",
                       "compute_bocpd_regime_switch_signal",
                       max_confidence=0.7)
+    register_enhanced("btc_gold_correlation_regime",
+                      "portfolio.signals.btc_gold_correlation_regime",
+                      "compute_btc_gold_correlation_regime_signal",
+                      requires_context=True,
+                      max_confidence=0.7)
 
 
 _register_defaults()
