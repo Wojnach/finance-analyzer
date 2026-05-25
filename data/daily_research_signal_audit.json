@@ -1,447 +1,220 @@
 {
-  "date": "2026-05-23",
+  "date": "2026-05-25",
+  "generated_at": "2026-05-25T20:37:33.908176+00:00",
+  "total_signals": 80,
+  "active": 16,
+  "disabled": 64,
   "top_signals": [
     {
-      "signal": "qwen3",
-      "accuracy_1d": 60.1,
-      "samples": 3939,
-      "buy_accuracy": 33.1,
-      "sell_accuracy": 73.5
-    },
-    {
-      "signal": "fear_greed",
-      "accuracy_1d": 58.6,
-      "samples": 10232,
-      "buy_accuracy": 58.6,
-      "sell_accuracy": 0.0
-    },
-    {
-      "signal": "ministral",
-      "accuracy_1d": 58.0,
-      "samples": 6303,
-      "buy_accuracy": 51.9,
-      "sell_accuracy": 59.4
-    },
-    {
       "signal": "drift_regime_gate",
-      "accuracy_1d": 57.4,
-      "samples": 1304,
-      "buy_accuracy": 46.6,
-      "sell_accuracy": 78.3
+      "all_time_1d": "58.1%",
+      "recent_7d": "68.1% (626 sam)",
+      "best_ticker": "ETH-USD 67.2%",
+      "status": "ACTIVE",
+      "verdict": "STAR - consider boosting weight"
     },
     {
-      "signal": "econ_calendar",
-      "accuracy_1d": 56.4,
-      "samples": 8437,
-      "buy_accuracy": 50.7,
-      "sell_accuracy": 59.3
-    },
-    {
-      "signal": "statistical_jump_regime",
-      "accuracy_1d": 54.9,
-      "samples": 3284,
-      "buy_accuracy": 57.0,
-      "sell_accuracy": 53.0
+      "signal": "vwap_zscore_mr",
+      "all_time_1d": "68.4%",
+      "recent_7d": "67.6% (37 sam)",
+      "best_ticker": "XAU-USD 84.2% (19 sam)",
+      "status": "DISABLED",
+      "verdict": "RE-ENABLE - consistently high but low samples"
     },
     {
       "signal": "bb",
-      "accuracy_1d": 54.8,
-      "samples": 9021,
-      "buy_accuracy": 50.0,
-      "sell_accuracy": 58.5
+      "all_time_1d": "54.9%",
+      "recent_7d": "60.5% (428 sam)",
+      "best_ticker": "XAU-USD 62.6%",
+      "status": "ACTIVE",
+      "verdict": "STRONG - performing well across tickers"
     },
     {
-      "signal": "metals_cross_asset",
-      "accuracy_1d": 54.6,
-      "samples": 518,
-      "buy_accuracy": 53.6,
-      "sell_accuracy": 56.2
+      "signal": "williams_vix_fix",
+      "all_time_1d": "51.0%",
+      "recent_7d": "61.5% (205 sam)",
+      "best_ticker": "XAU-USD 76.5% (68 sam)",
+      "status": "DISABLED",
+      "verdict": "RE-ENABLE for metals only"
     },
     {
-      "signal": "crypto_evrp",
-      "accuracy_1d": 54.5,
-      "samples": 354,
-      "buy_accuracy": 55.4,
-      "sell_accuracy": 54.3
-    },
-    {
-      "signal": "crypto_macro",
-      "accuracy_1d": 54.1,
-      "samples": 4564,
-      "buy_accuracy": 53.6,
-      "sell_accuracy": 64.5
-    },
-    {
-      "signal": "momentum",
-      "accuracy_1d": 52.9,
-      "samples": 12866,
-      "buy_accuracy": 56.5,
-      "sell_accuracy": 49.4
-    },
-    {
-      "signal": "mean_reversion",
-      "accuracy_1d": 52.6,
-      "samples": 27376,
-      "buy_accuracy": 58.8,
-      "sell_accuracy": 48.4
+      "signal": "realized_skewness",
+      "all_time_1d": "51.6%",
+      "recent_7d": "64.3% (485 sam)",
+      "best_ticker": "XAU-USD 60.3% (572 sam)",
+      "status": "DISABLED",
+      "verdict": "RE-ENABLE for XAU - strong recent surge"
     },
     {
       "signal": "rsi",
-      "accuracy_1d": 52.3,
-      "samples": 33515,
-      "buy_accuracy": 53.4,
-      "sell_accuracy": 51.4
+      "all_time_1d": "52.4%",
+      "recent_7d": "57.5% (496 sam)",
+      "best_ticker": "XAU-USD 60.5% (1197 sam)",
+      "status": "ACTIVE",
+      "verdict": "SOLID - best edge on metals"
     },
     {
-      "signal": "momentum_factors",
-      "accuracy_1d": 52.0,
-      "samples": 21077,
-      "buy_accuracy": 53.4,
-      "sell_accuracy": 49.7
+      "signal": "qwen3",
+      "all_time_1d": "59.7%",
+      "recent_7d": "53.8% (145 sam)",
+      "best_ticker": "BTC-USD 68.3% (63 sam)",
+      "status": "ACTIVE",
+      "verdict": "GOOD overall, excellent for BTC"
     },
     {
-      "signal": "news_event",
-      "accuracy_1d": 50.8,
-      "samples": 9516,
-      "buy_accuracy": 20.5,
-      "sell_accuracy": 51.0
-    },
-    {
-      "signal": "btc_proxy",
-      "accuracy_1d": 44.6,
-      "samples": 139,
-      "buy_accuracy": 31.1,
-      "sell_accuracy": 69.4
+      "signal": "onchain",
+      "all_time_1d": "60.0%",
+      "recent_7d": "insufficient",
+      "best_ticker": "BTC-USD only (58.3%)",
+      "status": "ACTIVE",
+      "verdict": "GOOD but BTC-only"
     }
   ],
   "worst_signals": [
     {
-      "signal": "btc_proxy",
-      "accuracy_1d": 44.6,
-      "samples": 139,
-      "note": "Below 53% with significant samples"
+      "signal": "crypto_evrp",
+      "all_time_1d": "55.5%",
+      "recent_7d": "40.2% (127 sam)",
+      "status": "ACTIVE",
+      "verdict": "DISABLE globally, but 64.8% on ETH -- per-ticker gate"
+    },
+    {
+      "signal": "statistical_jump_regime",
+      "all_time_1d": "54.3%",
+      "recent_7d": "46.9% (693 sam)",
+      "per_ticker": "BTC 61.3%, XAG 60.3%, XAU 50.2%",
+      "status": "ACTIVE",
+      "verdict": "Per-ticker gate: keep for BTC/XAG, disable for XAU"
     },
     {
       "signal": "news_event",
-      "accuracy_1d": 50.8,
-      "samples": 9516,
-      "note": "Below 53% with significant samples"
+      "all_time_1d": "50.6%",
+      "recent_7d": "51.5% (264 sam)",
+      "status": "ACTIVE",
+      "verdict": "MARGINAL - only 50% edge, high complexity"
     },
     {
-      "signal": "momentum_factors",
-      "accuracy_1d": 52.0,
-      "samples": 21077,
-      "note": "Below 53% with significant samples"
+      "signal": "credit_spread_risk",
+      "all_time_1d": "50.0%",
+      "per_ticker": "BTC/ETH 57.4%, XAG 17.3%, XAU 35.4%",
+      "status": "DISABLED",
+      "verdict": "CORRECT to disable globally. Re-enable for crypto ONLY."
     },
-    {
-      "signal": "rsi",
-      "accuracy_1d": 52.3,
-      "samples": 33515,
-      "note": "Below 53% with significant samples"
-    },
-    {
-      "signal": "mean_reversion",
-      "accuracy_1d": 52.6,
-      "samples": 27376,
-      "note": "Below 53% with significant samples"
-    },
-    {
-      "signal": "momentum",
-      "accuracy_1d": 52.9,
-      "samples": 12866,
-      "note": "Below 53% with significant samples"
-    }
-  ],
-  "directional_asymmetry": [
     {
       "signal": "fear_greed",
-      "buy_accuracy": 58.6,
-      "buy_samples": 10232,
-      "sell_accuracy": 0.0,
-      "sell_samples": 0,
-      "recommended_mode": "BUY_ONLY",
-      "gap_pp": 58.6
-    },
-    {
-      "signal": "williams_vix_fix",
-      "buy_accuracy": 43.1,
-      "buy_samples": 346,
-      "sell_accuracy": 85.7,
-      "sell_samples": 35,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 42.6
-    },
-    {
-      "signal": "qwen3",
-      "buy_accuracy": 33.1,
-      "buy_samples": 1302,
-      "sell_accuracy": 73.5,
-      "sell_samples": 2637,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 40.4
-    },
-    {
-      "signal": "btc_proxy",
-      "buy_accuracy": 31.1,
-      "buy_samples": 90,
-      "sell_accuracy": 69.4,
-      "sell_samples": 49,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 38.3
-    },
-    {
-      "signal": "drift_regime_gate",
-      "buy_accuracy": 46.6,
-      "buy_samples": 861,
-      "sell_accuracy": 78.3,
-      "sell_samples": 443,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 31.8
-    },
-    {
-      "signal": "intraday_seasonality",
-      "buy_accuracy": 19.5,
-      "buy_samples": 200,
-      "sell_accuracy": 50.5,
-      "sell_samples": 390,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 31.0
-    },
-    {
-      "signal": "funding",
-      "buy_accuracy": 30.8,
-      "buy_samples": 743,
-      "sell_accuracy": 0.0,
-      "sell_samples": 0,
-      "recommended_mode": "BUY_ONLY",
-      "gap_pp": 30.8
-    },
-    {
-      "signal": "news_event",
-      "buy_accuracy": 20.5,
-      "buy_samples": 73,
-      "sell_accuracy": 51.0,
-      "sell_samples": 9443,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 30.5
-    },
-    {
-      "signal": "hash_ribbons",
-      "buy_accuracy": 29.7,
-      "buy_samples": 209,
-      "sell_accuracy": 0.0,
-      "sell_samples": 0,
-      "recommended_mode": "BUY_ONLY",
-      "gap_pp": 29.7
-    },
-    {
-      "signal": "calendar",
-      "buy_accuracy": 57.5,
-      "buy_samples": 8645,
-      "sell_accuracy": 29.3,
-      "sell_samples": 222,
-      "recommended_mode": "BUY_ONLY",
-      "gap_pp": 28.2
-    },
-    {
-      "signal": "cubic_trend_persistence",
-      "buy_accuracy": 32.7,
-      "buy_samples": 828,
-      "sell_accuracy": 59.9,
-      "sell_samples": 1007,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 27.2
-    },
-    {
-      "signal": "claude_fundamental",
-      "buy_accuracy": 60.5,
-      "buy_samples": 10503,
-      "sell_accuracy": 33.5,
-      "sell_samples": 1078,
-      "recommended_mode": "BUY_ONLY",
-      "gap_pp": 27.0
-    },
-    {
-      "signal": "vol_ratio_regime",
-      "buy_accuracy": 33.8,
-      "buy_samples": 754,
-      "sell_accuracy": 58.6,
-      "sell_samples": 852,
-      "recommended_mode": "SELL_ONLY",
-      "gap_pp": 24.8
+      "all_time_1d": "58.6%",
+      "status": "ACTIVE",
+      "verdict": "CAUTION - BUY-only signal (never SELL)"
     }
   ],
-  "correlation_clusters": [],
+  "correlation_clusters": [
+    {
+      "name": "momentum_cluster",
+      "signals": [
+        "momentum",
+        "momentum_factors",
+        "ema",
+        "macd",
+        "trend"
+      ],
+      "correlation": "high",
+      "note": "All use price momentum/trend indicators. Redundant information when trending."
+    },
+    {
+      "name": "mean_reversion_cluster",
+      "signals": [
+        "mean_reversion",
+        "rsi",
+        "bb"
+      ],
+      "correlation": "moderate",
+      "note": "RSI and BB overlap with mean_reversion but BB has independent volatility component."
+    },
+    {
+      "name": "llm_cluster",
+      "signals": [
+        "ministral",
+        "qwen3",
+        "claude_fundamental"
+      ],
+      "correlation": "moderate",
+      "note": "All LLMs see similar features. qwen3 has distinct SELL bias (72.7% SELL accuracy)."
+    },
+    {
+      "name": "regime_cluster",
+      "signals": [
+        "drift_regime_gate",
+        "statistical_jump_regime",
+        "vol_ratio_regime",
+        "hurst_regime"
+      ],
+      "correlation": "low-moderate",
+      "note": "Different regime detection methods. drift_regime_gate is star, others mediocre."
+    }
+  ],
   "regime_performance": {
-    "1d": [
-      {
-        "signal": "qwen3",
-        "accuracy": 60.1,
-        "samples": 3939
-      },
-      {
-        "signal": "fear_greed",
-        "accuracy": 58.6,
-        "samples": 10232
-      },
-      {
-        "signal": "ministral",
-        "accuracy": 58.0,
-        "samples": 6303
-      },
-      {
-        "signal": "drift_regime_gate",
-        "accuracy": 57.4,
-        "samples": 1304
-      },
-      {
-        "signal": "econ_calendar",
-        "accuracy": 56.4,
-        "samples": 8437
-      }
-    ],
-    "3d": [
-      {
-        "signal": "crypto_evrp",
-        "accuracy": 69.6,
-        "samples": 336
-      },
-      {
-        "signal": "fear_greed",
-        "accuracy": 68.7,
-        "samples": 10324
-      },
-      {
-        "signal": "bb",
-        "accuracy": 60.3,
-        "samples": 8581
-      },
-      {
-        "signal": "econ_calendar",
-        "accuracy": 57.0,
-        "samples": 8124
-      },
-      {
-        "signal": "qwen3",
-        "accuracy": 55.3,
-        "samples": 3924
-      }
-    ],
-    "5d": [
-      {
-        "signal": "crypto_evrp",
-        "accuracy": 92.6,
-        "samples": 229
-      },
-      {
-        "signal": "qwen3",
-        "accuracy": 60.4,
-        "samples": 3896
-      },
-      {
-        "signal": "fear_greed",
-        "accuracy": 58.7,
-        "samples": 10153
-      },
-      {
-        "signal": "metals_cross_asset",
-        "accuracy": 58.1,
-        "samples": 542
-      },
-      {
-        "signal": "crypto_macro",
-        "accuracy": 58.1,
-        "samples": 4351
-      }
-    ],
-    "10d": [
-      {
-        "signal": "crypto_evrp",
-        "accuracy": 79.1,
-        "samples": 67
-      },
-      {
-        "signal": "fear_greed",
-        "accuracy": 69.0,
-        "samples": 9465
-      },
-      {
-        "signal": "crypto_macro",
-        "accuracy": 67.7,
-        "samples": 4031
-      },
-      {
-        "signal": "metals_cross_asset",
-        "accuracy": 66.7,
-        "samples": 544
-      },
-      {
-        "signal": "qwen3",
-        "accuracy": 61.8,
-        "samples": 3848
-      }
-    ]
+    "current_regime": "ranging",
+    "ranging_penalty": "0.75x confidence",
+    "high_vol_penalty": "0.80x confidence",
+    "observation": "In ranging regime, trend-following signals (ema, macd, momentum) systematically underperform. Mean reversion (rsi, bb, mean_reversion) outperform. Current weights do NOT adjust enough for this."
+  },
+  "critical_finding": {
+    "title": "Per-ticker signal accuracy divergence is the #1 problem",
+    "detail": "Signals like credit_spread_risk (57% BTC vs 17% XAG) and statistical_jump_regime (61% BTC vs 50% XAU) have massive per-ticker accuracy differences. Using them globally destroys metals/ETH consensus. System has NO EDGE on 4/5 instruments.",
+    "root_cause": "No per-ticker signal gating beyond DISABLED_SIGNALS list.",
+    "fix": "Implement per-ticker per-signal accuracy gating: if signal X has <47% accuracy for ticker Y (>=30 samples), force HOLD for that ticker."
   },
   "recommendations": [
     {
       "priority": 1,
-      "title": "Direction-specific signal gating",
-      "description": "Gate signals to only vote in their strong direction. Qwen3 SELL-only (73.5%), claude_fundamental BUY-only (60.5%, 10K sam), calendar BUY-only (57.5%, 8.6K sam). Single biggest edge improvement available.",
+      "title": "Implement per-ticker signal accuracy gating",
+      "description": "Gate signals per-ticker based on per-ticker accuracy from signal_log.db. If signal has <47% accuracy for a specific ticker with >=30 samples, force HOLD for that ticker.",
+      "expected_impact": "HIGH - could improve metals consensus from 49.6% to 55%+",
       "effort": "medium",
       "files": [
-        "portfolio/signal_engine.py"
-      ],
-      "expected_impact": "high"
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
     },
     {
       "priority": 2,
-      "title": "Enable claude_fundamental in BUY-only mode",
-      "description": "Currently disabled at 57.9% overall. But BUY accuracy is 60.5% on 10,503 samples. Enable with BUY-only gate.",
+      "title": "Re-enable williams_vix_fix for metals (XAU, XAG)",
+      "description": "williams_vix_fix has 76.5% accuracy on XAU (68 sam) and 60.9% on XAG (92 sam). Currently disabled globally. Enable per-ticker.",
+      "expected_impact": "MEDIUM - adds high-accuracy voter for metals",
       "effort": "easy",
       "files": [
         "portfolio/signal_engine.py"
-      ],
-      "expected_impact": "medium"
+      ]
     },
     {
       "priority": 3,
-      "title": "Disable btc_proxy signal",
-      "description": "44.6% accuracy on 139 samples. Below 47% threshold. Still enabled as under evaluation but should be force-disabled.",
+      "title": "Disable crypto_evrp or gate it to ETH-only",
+      "description": "crypto_evrp regressed to 40.2% recent. But per-ticker it is 64.8% on ETH. Gate to ETH-only.",
+      "expected_impact": "MEDIUM",
       "effort": "easy",
       "files": [
-        "portfolio/signal_engine.py"
-      ],
-      "expected_impact": "low"
+        "portfolio/tickers.py"
+      ]
     },
     {
       "priority": 4,
-      "title": "Fix cot_positioning sample size",
-      "description": "80% accuracy on 10 samples is meaningless. Do not trust this signal until 50+ samples accumulated.",
+      "title": "Boost drift_regime_gate weight",
+      "description": "drift_regime_gate at 68.1% recent (626 sam) is star performer. No weight boost currently.",
+      "expected_impact": "LOW-MEDIUM",
       "effort": "easy",
       "files": [
         "portfolio/signal_engine.py"
-      ],
-      "expected_impact": "low"
+      ]
     },
     {
       "priority": 5,
-      "title": "Investigate crypto_evrp multi-horizon performance",
-      "description": "54.5% 1d but 92.6% 5d accuracy (229 samples). May be a strong medium-term signal being diluted by 1d noise.",
-      "effort": "medium",
-      "files": [
-        "portfolio/signals/crypto_evrp.py"
-      ],
-      "expected_impact": "medium"
-    },
-    {
-      "priority": 6,
-      "title": "Williams VIX Fix SELL-only evaluation",
-      "description": "85.7% SELL accuracy but only 35 samples. Currently disabled. Monitor and enable SELL-only when 100+ SELL samples.",
+      "title": "Disable statistical_jump_regime for XAU",
+      "description": "statistical_jump_regime at 50.2% for XAU adds noise. Keep for BTC (61.3%) and XAG (60.3%).",
+      "expected_impact": "LOW",
       "effort": "easy",
       "files": [
-        "portfolio/signal_engine.py"
-      ],
-      "expected_impact": "potentially high"
+        "portfolio/tickers.py"
+      ]
     }
   ]
 }

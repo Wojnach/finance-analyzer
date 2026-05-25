@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-05-21T20:41:02.274897+00:00",
-  "total_verdicts": 1500,
-  "total_fin_command": 479,
+  "generated_at": "2026-05-25T20:41:37.245212+00:00",
+  "total_verdicts": 1536,
+  "total_fin_command": 515,
   "total_journal": 1021,
-  "total_logged": 3850,
+  "total_logged": 3931,
   "min_sample_for_lesson": 3,
   "by_source": {
     "fin-silver": {
@@ -36,7 +36,7 @@
     "crypto-scheduler": {
       "accuracy_3d": null,
       "n_evaluable": 0,
-      "n_total": 417,
+      "n_total": 453,
       "avg_confidence": 0,
       "calibration_error": null
     },
@@ -152,12 +152,12 @@
     "BTC-USD": {
       "accuracy_3d": 0.204,
       "n_evaluable": 162,
-      "n_total": 322
+      "n_total": 334
     },
     "ETH-USD": {
       "accuracy_3d": 0.264,
       "n_evaluable": 182,
-      "n_total": 340
+      "n_total": 352
     },
     "GOOGL": {
       "accuracy_3d": 0.545,
@@ -177,7 +177,7 @@
     "MSTR": {
       "accuracy_3d": 0.533,
       "n_evaluable": 30,
-      "n_total": 164
+      "n_total": 176
     },
     "MU": {
       "accuracy_3d": 0.398,

@@ -1,0 +1,112 @@
+"""Write the daily signal audit JSON."""
+import json
+import datetime
+
+audit = {
+    "date": "2026-05-25",
+    "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "total_signals": 80,
+    "active": 16,
+    "disabled": 64,
+    "top_signals": [
+        {"signal": "drift_regime_gate", "all_time_1d": "58.1%", "recent_7d": "68.1% (626 sam)", "best_ticker": "ETH-USD 67.2%", "status": "ACTIVE", "verdict": "STAR - consider boosting weight"},
+        {"signal": "vwap_zscore_mr", "all_time_1d": "68.4%", "recent_7d": "67.6% (37 sam)", "best_ticker": "XAU-USD 84.2% (19 sam)", "status": "DISABLED", "verdict": "RE-ENABLE - consistently high but low samples"},
+        {"signal": "bb", "all_time_1d": "54.9%", "recent_7d": "60.5% (428 sam)", "best_ticker": "XAU-USD 62.6%", "status": "ACTIVE", "verdict": "STRONG - performing well across tickers"},
+        {"signal": "williams_vix_fix", "all_time_1d": "51.0%", "recent_7d": "61.5% (205 sam)", "best_ticker": "XAU-USD 76.5% (68 sam)", "status": "DISABLED", "verdict": "RE-ENABLE for metals only"},
+        {"signal": "realized_skewness", "all_time_1d": "51.6%", "recent_7d": "64.3% (485 sam)", "best_ticker": "XAU-USD 60.3% (572 sam)", "status": "DISABLED", "verdict": "RE-ENABLE for XAU - strong recent surge"},
+        {"signal": "rsi", "all_time_1d": "52.4%", "recent_7d": "57.5% (496 sam)", "best_ticker": "XAU-USD 60.5% (1197 sam)", "status": "ACTIVE", "verdict": "SOLID - best edge on metals"},
+        {"signal": "qwen3", "all_time_1d": "59.7%", "recent_7d": "53.8% (145 sam)", "best_ticker": "BTC-USD 68.3% (63 sam)", "status": "ACTIVE", "verdict": "GOOD overall, excellent for BTC"},
+        {"signal": "onchain", "all_time_1d": "60.0%", "recent_7d": "insufficient", "best_ticker": "BTC-USD only (58.3%)", "status": "ACTIVE", "verdict": "GOOD but BTC-only"},
+    ],
+    "worst_signals": [
+        {"signal": "crypto_evrp", "all_time_1d": "55.5%", "recent_7d": "40.2% (127 sam)", "status": "ACTIVE", "verdict": "DISABLE globally, but 64.8% on ETH -- per-ticker gate"},
+        {"signal": "statistical_jump_regime", "all_time_1d": "54.3%", "recent_7d": "46.9% (693 sam)", "per_ticker": "BTC 61.3%, XAG 60.3%, XAU 50.2%", "status": "ACTIVE", "verdict": "Per-ticker gate: keep for BTC/XAG, disable for XAU"},
+        {"signal": "news_event", "all_time_1d": "50.6%", "recent_7d": "51.5% (264 sam)", "status": "ACTIVE", "verdict": "MARGINAL - only 50% edge, high complexity"},
+        {"signal": "credit_spread_risk", "all_time_1d": "50.0%", "per_ticker": "BTC/ETH 57.4%, XAG 17.3%, XAU 35.4%", "status": "DISABLED", "verdict": "CORRECT to disable globally. Re-enable for crypto ONLY."},
+        {"signal": "fear_greed", "all_time_1d": "58.6%", "status": "ACTIVE", "verdict": "CAUTION - BUY-only signal (never SELL)"},
+    ],
+    "correlation_clusters": [
+        {
+            "name": "momentum_cluster",
+            "signals": ["momentum", "momentum_factors", "ema", "macd", "trend"],
+            "correlation": "high",
+            "note": "All use price momentum/trend indicators. Redundant information when trending.",
+        },
+        {
+            "name": "mean_reversion_cluster",
+            "signals": ["mean_reversion", "rsi", "bb"],
+            "correlation": "moderate",
+            "note": "RSI and BB overlap with mean_reversion but BB has independent volatility component.",
+        },
+        {
+            "name": "llm_cluster",
+            "signals": ["ministral", "qwen3", "claude_fundamental"],
+            "correlation": "moderate",
+            "note": "All LLMs see similar features. qwen3 has distinct SELL bias (72.7% SELL accuracy).",
+        },
+        {
+            "name": "regime_cluster",
+            "signals": ["drift_regime_gate", "statistical_jump_regime", "vol_ratio_regime", "hurst_regime"],
+            "correlation": "low-moderate",
+            "note": "Different regime detection methods. drift_regime_gate is star, others mediocre.",
+        },
+    ],
+    "regime_performance": {
+        "current_regime": "ranging",
+        "ranging_penalty": "0.75x confidence",
+        "high_vol_penalty": "0.80x confidence",
+        "observation": "In ranging regime, trend-following signals (ema, macd, momentum) systematically underperform. Mean reversion (rsi, bb, mean_reversion) outperform. Current weights do NOT adjust enough for this.",
+    },
+    "critical_finding": {
+        "title": "Per-ticker signal accuracy divergence is the #1 problem",
+        "detail": "Signals like credit_spread_risk (57% BTC vs 17% XAG) and statistical_jump_regime (61% BTC vs 50% XAU) have massive per-ticker accuracy differences. Using them globally destroys metals/ETH consensus. System has NO EDGE on 4/5 instruments.",
+        "root_cause": "No per-ticker signal gating beyond DISABLED_SIGNALS list.",
+        "fix": "Implement per-ticker per-signal accuracy gating: if signal X has <47% accuracy for ticker Y (>=30 samples), force HOLD for that ticker.",
+    },
+    "recommendations": [
+        {
+            "priority": 1,
+            "title": "Implement per-ticker signal accuracy gating",
+            "description": "Gate signals per-ticker based on per-ticker accuracy from signal_log.db. If signal has <47% accuracy for a specific ticker with >=30 samples, force HOLD for that ticker.",
+            "expected_impact": "HIGH - could improve metals consensus from 49.6% to 55%+",
+            "effort": "medium",
+            "files": ["portfolio/signal_engine.py", "portfolio/accuracy_stats.py"],
+        },
+        {
+            "priority": 2,
+            "title": "Re-enable williams_vix_fix for metals (XAU, XAG)",
+            "description": "williams_vix_fix has 76.5% accuracy on XAU (68 sam) and 60.9% on XAG (92 sam). Currently disabled globally. Enable per-ticker.",
+            "expected_impact": "MEDIUM - adds high-accuracy voter for metals",
+            "effort": "easy",
+            "files": ["portfolio/signal_engine.py"],
+        },
+        {
+            "priority": 3,
+            "title": "Disable crypto_evrp or gate it to ETH-only",
+            "description": "crypto_evrp regressed to 40.2% recent. But per-ticker it is 64.8% on ETH. Gate to ETH-only.",
+            "expected_impact": "MEDIUM",
+            "effort": "easy",
+            "files": ["portfolio/tickers.py"],
+        },
+        {
+            "priority": 4,
+            "title": "Boost drift_regime_gate weight",
+            "description": "drift_regime_gate at 68.1% recent (626 sam) is star performer. No weight boost currently.",
+            "expected_impact": "LOW-MEDIUM",
+            "effort": "easy",
+            "files": ["portfolio/signal_engine.py"],
+        },
+        {
+            "priority": 5,
+            "title": "Disable statistical_jump_regime for XAU",
+            "description": "statistical_jump_regime at 50.2% for XAU adds noise. Keep for BTC (61.3%) and XAG (60.3%).",
+            "expected_impact": "LOW",
+            "effort": "easy",
+            "files": ["portfolio/tickers.py"],
+        },
+    ],
+}
+
+with open("data/daily_research_signal_audit.json", "w", encoding="utf-8") as f:
+    json.dump(audit, f, indent=2)
+print("Phase 3 signal audit written")

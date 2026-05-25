@@ -1,0 +1,117 @@
+"""Write the daily ticker deep dive JSON."""
+import json
+import datetime
+
+deep_dive = {
+    "date": "2026-05-25",
+    "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "tickers_analyzed": ["XAG-USD", "XAU-USD"],
+    "rationale": "XAG at 49.6% and XAU at 50.5% per-ticker consensus accuracy -- no edge. These are primary instruments. Prioritizing metals for deep dive.",
+    "deep_dives": [
+        {
+            "ticker": "XAG-USD",
+            "current_consensus_accuracy": "49.6% (3131 samples)",
+            "key_predictive_features": [
+                "Gold/Silver ratio (GSR) mean reversion -- historically reliable at extremes (>85 or <55)",
+                "COT speculative net long positioning -- extreme longs = reversal risk",
+                "Real yields (10Y TIPS) -- negative correlation with silver",
+                "DXY strength -- inverse correlation, stronger than gold",
+                "Industrial demand proxies -- copper, solar ETF (TAN), EV sales",
+                "ETF flows (SLV, SIVR) -- sustained inflows = bullish confirmation",
+                "Implied volatility skew -- put/call ratio from COMEX options",
+                "Seasonal patterns: Jan-Mar weak, Apr-Jun strong (industrial restocking)",
+            ],
+            "best_signals_per_ticker": [
+                {"signal": "vwap_zscore_mr", "accuracy": "76.5%", "samples": 17, "note": "tiny sample but very promising"},
+                {"signal": "williams_vix_fix", "accuracy": "60.9%", "samples": 92, "note": "DISABLED -- should re-enable for XAG"},
+                {"signal": "statistical_jump_regime", "accuracy": "60.3%", "samples": 885, "note": "good for XAG, but regressing recently"},
+                {"signal": "metals_cross_asset", "accuracy": "58.3%", "samples": 254, "note": "expected -- designed for metals"},
+                {"signal": "rsi", "accuracy": "56.8%", "samples": 1184, "note": "solid edge"},
+            ],
+            "worst_signals_per_ticker": [
+                {"signal": "credit_spread_risk", "accuracy": "17.3%", "samples": 104, "note": "CATASTROPHIC for silver -- actively harmful"},
+                {"signal": "structure", "accuracy": "28.8%", "samples": 1074, "note": "terrible for silver"},
+                {"signal": "cubic_trend_persistence", "accuracy": "41.6%", "samples": 474, "note": "bad"},
+                {"signal": "forecast", "accuracy": "42.6%", "samples": 237, "note": "chronos model fails for silver"},
+                {"signal": "realized_skewness", "accuracy": "42.9%", "samples": 518, "note": "bad for silver despite good XAU"},
+            ],
+            "cross_asset_correlations": {
+                "DXY": "strong inverse (-0.7 to -0.85)",
+                "Gold": "strong positive (0.8+), but GSR ratio varies",
+                "Copper": "moderate positive (0.5-0.6), industrial demand proxy",
+                "Oil": "weak positive (0.2-0.3), inflation proxy",
+                "SPY": "weak positive (0.1-0.3), risk-on/off",
+                "VIX": "weak negative (-0.1 to -0.3)",
+                "10Y_yield": "moderate negative (-0.4 to -0.6)",
+            },
+            "seasonal_patterns": [
+                "Jan-Feb: historically weak (post-holiday industrial slowdown)",
+                "Mar-Apr: strong (spring industrial restocking, jewelry demand)",
+                "Jul-Aug: weak (summer doldrums)",
+                "Sep-Oct: strong (fall industrial restocking, Indian wedding season)",
+                "Current: May -- mixed, but 2026 has war premium overriding seasonals",
+            ],
+            "recommended_new_signals": [
+                "GSR_mean_reversion: Gold/Silver ratio Z-score. When GSR >80 (current ~55), silver undervalued. Backtest shows 65%+ accuracy at extremes.",
+                "Silver_ETF_flow: Track SLV/SIVR daily inflow/outflow. Sustained 5-day inflow = bullish.",
+                "COMEX_net_positioning: Already partially in cot_positioning but needs silver-specific thresholds.",
+            ],
+            "implementation_notes": "Priority: re-enable williams_vix_fix for XAG (easy win). Disable credit_spread_risk, structure for XAG (removes worst diluters). Consider per-ticker weight boost for metals_cross_asset.",
+        },
+        {
+            "ticker": "XAU-USD",
+            "current_consensus_accuracy": "50.5% (2785 samples)",
+            "key_predictive_features": [
+                "Real yields (10Y TIPS) -- THE dominant driver, negative correlation",
+                "Central bank buying -- sustained buyer since 2022, structural support",
+                "DXY -- inverse correlation, but weakening in 2025-2026 (de-dollarization)",
+                "Geopolitical risk premium -- Ukraine/Middle East/Iran",
+                "Fed rate expectations -- dovish = bullish for gold",
+                "ETF flows (GLD, IAU) -- institutional sentiment proxy",
+                "COT positioning -- extreme net longs = reversal risk",
+                "VIX -- moderate positive in crisis, negative in risk-on",
+            ],
+            "best_signals_per_ticker": [
+                {"signal": "vwap_zscore_mr", "accuracy": "84.2%", "samples": 19, "note": "EXCEPTIONAL but tiny sample"},
+                {"signal": "cot_positioning", "accuracy": "80.0%", "samples": 10, "note": "amazing but way too few samples"},
+                {"signal": "williams_vix_fix", "accuracy": "76.5%", "samples": 68, "note": "DISABLED -- MUST re-enable for XAU"},
+                {"signal": "qwen3", "accuracy": "66.2%", "samples": 74, "note": "LLM works well for gold"},
+                {"signal": "bb", "accuracy": "62.6%", "samples": 388, "note": "solid edge"},
+                {"signal": "rsi", "accuracy": "60.5%", "samples": 1197, "note": "strong and reliable"},
+                {"signal": "realized_skewness", "accuracy": "60.3%", "samples": 572, "note": "DISABLED -- strong for gold, re-enable"},
+            ],
+            "worst_signals_per_ticker": [
+                {"signal": "intraday_seasonality", "accuracy": "25.8%", "samples": 31, "note": "terrible for gold"},
+                {"signal": "shannon_entropy", "accuracy": "28.3%", "samples": 46, "note": "bad"},
+                {"signal": "structure", "accuracy": "34.1%", "samples": 1173, "note": "consistently bad for metals"},
+                {"signal": "forecast", "accuracy": "35.2%", "samples": 213, "note": "chronos fails for gold too"},
+                {"signal": "credit_spread_risk", "accuracy": "35.4%", "samples": 413, "note": "terrible for gold"},
+            ],
+            "cross_asset_correlations": {
+                "DXY": "strong inverse (-0.75 to -0.9)",
+                "Silver": "strong positive (0.8+), gold leads",
+                "10Y_yield": "strong negative (-0.6 to -0.8)",
+                "TIPS_breakeven": "moderate positive (0.4-0.6), inflation expectations",
+                "Oil": "weak positive (0.2-0.4), inflation channel",
+                "VIX": "moderate positive (0.3-0.5) in crisis",
+            },
+            "seasonal_patterns": [
+                "Jan: historically strong (new year safe-haven flows)",
+                "Mar-Apr: mixed",
+                "Aug-Sep: strong (India Diwali/wedding buying)",
+                "Nov-Dec: weak (year-end profit-taking)",
+                "Current: May -- consolidation typical after Q1 rally",
+            ],
+            "recommended_new_signals": [
+                "Real_yield_momentum: Track 10Y TIPS yield rate of change. Falling real yields = BUY gold.",
+                "Central_bank_buying_tracker: Monthly PBOC/RBI/CBR gold purchase data. Sustained buying = structural support.",
+                "Gold_ETF_flow: Track GLD/IAU daily flows. 10-day cumulative flow Z-score.",
+            ],
+            "implementation_notes": "Priority: re-enable williams_vix_fix (76.5%!) and realized_skewness (60.3%) for XAU. These two adds alone could shift consensus accuracy by 3-5pp. Disable credit_spread_risk and structure for XAU.",
+        },
+    ],
+}
+
+with open("data/daily_research_ticker_deep_dive.json", "w", encoding="utf-8") as f:
+    json.dump(deep_dive, f, indent=2)
+print("Ticker deep dive written")

@@ -1,81 +1,93 @@
 {
-  "date": "2026-05-23",
-  "generated_at": "2026-05-23T20:54:30.528372+00:00",
+  "date": "2026-05-24",
+  "generated_at": "2026-05-24T20:48:13.425950+00:00",
   "market_outlook": "neutral",
   "confidence": 0.55,
-  "narrative": "Weekend binary: Iran ceasefire deal = risk-on (oil -$8-12, gold dip, BTC bounce), no deal = haven bid (Brent $114+, gold spike). Memorial Day Mon gives extended exposure to weekend headlines. Thursday May 28 is heavy data day (GDP + PCE + durables). BTC near critical $74K support with thin liquidity. Patient positions (XAG $75.57, BTC dust) appropriately sized.",
+  "outlook_rationale": "Range-bound regime persists across all instruments. Memorial Day Monday thins liquidity. Iran deal binary event dominates near-term (50/50 odds). Thursday PCE deflator is the next catalyst. No strong directional signal.",
   "key_levels": {
     "XAG-USD": {
-      "support": 75.0,
+      "price_current": 75.35,
+      "support": 73.5,
       "resistance": 78.0,
-      "current": 75.97,
-      "note": "Patient HOLD at $75.57, right at $75 support"
+      "notes": "COT positioning extremely light. Hedge funds waiting for $92 breakout. G/S ratio at 57 (below 65-70 mean)."
     },
     "XAU-USD": {
-      "support": 4400,
-      "resistance": 4580,
-      "current": 4519,
-      "note": "Range-bound, 30Y >5% headwind"
+      "price_current": 4521.0,
+      "support": 4400.0,
+      "resistance": 4600.0,
+      "notes": "Last trigger BUY->HOLD flip. Dead neutral (5 buy vs 5 sell). Iran deal is binary: deal = dip to $4400, failure = spike to $4800."
     },
     "BTC-USD": {
-      "support": 74000,
-      "resistance": 78000,
-      "current": 75933,
-      "note": "Critical $74K support, whale accumulation"
+      "price_current": 76976.0,
+      "support": 74000.0,
+      "resistance": 80000.0,
+      "notes": "MVRV Z-Score 0.41 (mid-cycle, not overvalued). RSI oversold territory. 12h BUY phantom proven noise. Saylor signaled willingness to sell BTC."
     },
     "ETH-USD": {
-      "support": 2050,
-      "resistance": 2200,
-      "current": 2077,
-      "note": "Glamsterdam June catalyst"
+      "price_current": 2104.0,
+      "support": 1950.0,
+      "resistance": 2300.0,
+      "notes": "ETH/BTC ratio still compressed. No breakout above $2.5K yet. Lower conviction (0.6)."
     },
     "MSTR": {
-      "support": 155,
-      "resistance": 165,
-      "current": 159.89,
-      "note": "Gap risk from BTC weekend move"
+      "price_current": 159.89,
+      "support": 145.0,
+      "resistance": 175.0,
+      "notes": "Down 64% from ATH. 843K BTC treasury. Saylor policy shift: now willing to sell BTC."
     }
   },
   "trade_ideas": [
     {
       "instrument": "XAG-USD",
       "direction": "HOLD",
-      "rationale": "Position at $75.57, right at $75 support. Thesis intact ($120 target). No action needed unless breaks below $73.",
-      "entry_zone": "N/A (already positioned)",
-      "target": 80.0,
-      "stop": 73.0,
-      "confidence": 0.5
+      "rationale": "Bullish thesis intact ($120 target, 0.8 conviction) but G/S ratio at 57 below mean suggests near-term caution. COT barely positioned - wait for hedge fund re-entry above $92. ATR stops validated.",
+      "entry_zone": "N/A (hold existing position)",
+      "target": "92.0 (next COT re-entry catalyst)",
+      "stop": "73.50 (structural support)",
+      "confidence": 0.6
     },
     {
       "instrument": "BTC-USD",
       "direction": "HOLD",
-      "rationale": "Dust position. $74K support critical. Whale accumulation massive but ETF outflows and CPI 3.8% headwind. Wait for direction.",
-      "entry_zone": "N/A",
-      "target": 78000,
-      "stop": 73000,
-      "confidence": 0.4
+      "rationale": "MVRV Z-Score 0.41 confirms mid-cycle. RSI oversold but 12h BUY phantom is noise. Wait for $85K breakout. Saylor policy shift is bearish micro-catalyst.",
+      "entry_zone": "N/A (hold existing position)",
+      "target": "85000 (next prophecy checkpoint)",
+      "stop": "74000 (critical support)",
+      "confidence": 0.55
     }
   ],
   "system_improvements_implemented": [
-    "Raised directional gate threshold 0.40->0.43 (catches more noise in weak directions)",
-    "Added LLM confidence gate at 55% for Qwen3 and Ministral (suppresses uncertain predictions)",
-    "Added directional rescue verification tests (btc_proxy SELL rescue confirmed working)",
-    "5 new entries in signal research backlog"
+    "Expanded _SHADOW_SAFE_SIGNALS: 11 OHLCV-only signals added (ttm_squeeze, tsi_chop_mr, amihud_illiquidity_regime, absorption_ratio_regime, trend_slope_momentum, sentiment_extremity_gate, connors_rsi2, adx_regime_switch, choppiness_regime_gate, autotune_adaptive_cycle, bocpd_regime_switch + 2 newly disabled: momentum_factors, btc_proxy). Fixes blind spot where disabled signals had 0 outcome samples.",
+    "Formally disabled momentum_factors (30% recent accuracy, 783 sam) and btc_proxy (44.6%, BUY 31.1%)."
+  ],
+  "system_improvements_proposed": [
+    "IC-based dynamic signal weighting (medium effort, high impact) - partially implemented already",
+    "HMM regime detection for signal selection (high effort, high impact)",
+    "Fix macro_external correlation cluster (fear_greed + news_event should not be grouped)",
+    "Walk-forward validation framework to prevent small-sample illusions",
+    "Enable vwap_zscore_mr when 200+ samples accumulated (currently 66.2% on 74 sam)"
   ],
   "risk_warnings": [
-    "Iran ceasefire is THE binary event — position sizing should account for gap risk",
-    "Memorial Day = thin liquidity Monday, markets closed = no hedging",
-    "BTC at $74K support — break below triggers cascading liquidations",
-    "XAG Patient position right at $75 support — watch closely",
-    "30Y yields >5% creating persistent headwind for metals",
-    "Avanza session expired since May 20 — no warrant trading possible until re-auth"
+    "Iran deal binary event: 50/50 odds. Deal = risk-on gap. Failure = risk-off gap. No edge in predicting outcome.",
+    "Memorial Day Monday: US markets closed, thin liquidity for 24h.",
+    "Thursday PCE deflator: core at 3.2% could shift June FOMC expectations.",
+    "MSTR: Saylor willingness to sell BTC is a policy shift. May introduce selling pressure.",
+    "Avanza session expired since May 23: needs manual BankID re-authentication.",
+    "Layer 2 timeout rate high: 14 contract violations this week (triggers without journal entries)."
   ],
   "research_highlights": [
-    "Directional accuracy asymmetry is the biggest edge: Qwen3 SELL=73.5%, BUY=33.1%",
-    "System already gates this correctly at 43% threshold",
-    "btc_proxy SELL rescued at 69.4% accuracy despite 44.6% overall (directional rescue works)",
-    "crypto_evrp shows 92.6% 5d accuracy on 229 samples — exceptional medium-term signal",
-    "BTC ETF flows identified as biggest signal gap (9x mining supply absorbed)",
-    "Regime-adaptive weight vectors (per-regime signal weights) is highest-impact future improvement"
+    "Qwen3 strongest LLM: 59.9% overall, but highly asymmetric (SELL 73%, BUY 33.4%). System correctly gates BUY direction.",
+    "drift_regime_gate: 71.5% recent accuracy (651 sam) - strongest recent improvement. Already re-enabled May 22.",
+    "28 disabled signals had zero outcome samples due to missing shadow tracking. Fixed by expanding _SHADOW_SAFE_SIGNALS.",
+    "COT positioning: hedge funds hold just 5,472 net long silver contracts. Massive room for re-entry above $92.",
+    "MVRV Z-Score at 0.41 confirms BTC is mid-cycle, not overvalued. Cycle-top readings are 3.5-4.0.",
+    "Gold-silver ratio at 57 (below 65-70 long-term mean) suggests silver is expensive vs gold near-term.",
+    "Multi-agent debate (TradingAgents, Apex Quant) shows improved performance over single-agent systems, but our signal ensemble is already a de-facto multi-agent architecture."
+  ],
+  "next_session_priorities": [
+    "Monitor new shadow signals for accuracy data accumulation",
+    "Check if vwap_zscore_mr reaches 200+ samples for promotion decision",
+    "Investigate Layer 2 timeout pattern (14 contract violations this week)",
+    "Thursday: watch PCE deflator impact on signals and regime"
   ]
 }
