@@ -375,12 +375,13 @@ def rotate_jsonl(filename, policy, dry_run=False):
             max_size_bytes = int(max_size_mb_policy * 1024 * 1024)
             estimated_size = sum(len(line.encode("utf-8")) + 1 for line in keep_lines)
             if estimated_size > max_size_bytes:
-                pruned_lines = []
-                while keep_lines and estimated_size > max_size_bytes:
-                    dropped = keep_lines.pop(0)
-                    estimated_size -= len(dropped.encode("utf-8")) + 1
-                    pruned_lines.append(dropped)
-                    size_pruned += 1
+                cut = 0
+                while cut < len(keep_lines) and estimated_size > max_size_bytes:
+                    estimated_size -= len(keep_lines[cut].encode("utf-8")) + 1
+                    cut += 1
+                pruned_lines = keep_lines[:cut]
+                keep_lines = keep_lines[cut:]
+                size_pruned = len(pruned_lines)
                 for dropped_line in pruned_lines:
                     try:
                         entry = json.loads(dropped_line)
