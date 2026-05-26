@@ -91,11 +91,10 @@ DISABLED_SIGNALS = {
     "complexity_gap_regime",  # pending live validation (added 2026-04-22)
     "realized_skewness",  # KILLED 2026-04-29: 33.3% at 1d (90 sam). Below coin flip.
     "mahalanobis_turbulence",  # pending live validation (added 2026-04-24)
-    # "crypto_evrp" RE-ENABLED 2026-05-18: 80.5% 1d_recent (77 sam), 92.4% 3d
-    # (105 sam), 66.7% 1d all-time. Anti-correlated (0% agreement) with the
-    # degraded macro_external cluster (crypto_macro 32.8%, credit_spread 19.3%).
-    # Strongest shadow-to-live promotion candidate. Accuracy gate auto-disables
-    # if performance degrades below 47%.
+    "crypto_evrp",  # 2026-05-26: RE-DISABLED. Was re-enabled 2026-05-18 at claimed
+                    # 80.5% recent — now 43.4% (76 sam). Blended 47.0% right at gate
+                    # boundary → oscillates in/out of accuracy gate. BUY recent 28.6%.
+                    # Small-sample illusion: the 80.5% was 77 samples.
     "hash_ribbons",  # pending live validation (added 2026-04-26)
     # "drift_regime_gate" RE-ENABLED 2026-05-22: 58.4% 1d all-time (1231 sam),
     # 66.5% 1d_recent (651 sam). Strongest regime filter. Accuracy gate

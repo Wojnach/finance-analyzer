@@ -707,10 +707,9 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
     # realized_skewness: globally 51.6% (disabled) but XAU 60.3% (572 sam).
     # Bad for XAG (42.9%) — only re-enable for gold.
     ("realized_skewness", "XAU-USD"),
-    # credit_spread_risk: globally 50.0% (disabled) but BTC 57.4% (652 sam),
-    # ETH 57.4% (652 sam). Terrible for metals (XAG 17.3%, XAU 35.4%).
-    ("credit_spread_risk", "BTC-USD"),
-    ("credit_spread_risk", "ETH-USD"),
+    # credit_spread_risk: REMOVED 2026-05-26. Was 57.4% per-ticker when added,
+    # but signal formally disabled 2026-05-21 at 20% recent blended accuracy.
+    # Override was re-enabling a broken signal for BTC/ETH. See tickers.py:119.
 })
 
 # Shadow-safe signals: disabled signals that are pure math (no network I/O)
