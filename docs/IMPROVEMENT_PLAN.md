@@ -2,12 +2,13 @@
 
 **Branch:** `improve/auto-session-2026-05-26`
 **Created:** 2026-05-26 10:00 CET
+**Status:** COMPLETED
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-A: JSONL rotation ignores `max_size_mb` — golddigger_log at 136MB (HIGH)
+### BUG-A: JSONL rotation ignores `max_size_mb` — golddigger_log at 136MB (HIGH) ✓
 **File:** `portfolio/log_rotation.py:240-367` (rotate_jsonl)
 **Impact:** `golddigger_log.jsonl` is 136MB with 293,780 entries despite a
 50MB policy cap. Age-based archival works (2026-03/04 months archived), but
@@ -16,68 +17,75 @@ the policy dict but never checks it after age pruning. Compare with
 `rotate_text()` which correctly gates on size.
 **Root cause:** High-frequency writers (~10K entries/day) accumulate 30 days
 of data within the age window, far exceeding the size cap.
-**Fix:** After age-based archival, if `keep_lines` still produce a file
-exceeding `max_size_mb`, drop oldest kept entries until under the cap.
+**Fix:** After age-based archival, drop oldest kept entries until under cap.
+Size-pruned entries go to monthly archives (not lost). Result dict includes
+`size_pruned` count.
+**Commit:** `b8e1fe46`
 
-### BUG-B: 9 high-growth JSONL files lack rotation policies (HIGH)
+### BUG-B: 9 high-growth JSONL files lack rotation policies (HIGH) ✓
 **File:** `portfolio/log_rotation.py` ROTATION_POLICIES dict
-**Impact:** These files grow unbounded:
+**Fix:** Added rotation policies for all 9 files with appropriate age/size caps.
+**Commit:** `b8e1fe46`
 
-| File | Size | Est. growth |
-|------|------|-------------|
-| llm_probability_outcomes.jsonl | 23.9 MB | ~5 MB/week |
-| metals_llm_outcomes.jsonl | 14.2 MB | ~3 MB/week |
-| metals_llm_predictions.jsonl | 13.6 MB | ~3 MB/week |
-| mstr_loop_poll.jsonl | 3.4 MB | ~1 MB/week |
-| grid_fisher_decisions.jsonl | 2.8 MB | ~1 MB/week |
-| fin_snipe_manager_log.jsonl | 2.6 MB | ~0.5 MB/week |
-| crypto_value_history.jsonl | 3.0 MB | ~0.5 MB/week |
-| oil_value_history.jsonl | 2.5 MB | ~0.5 MB/week |
-| sentiment_ab_log.jsonl | 2.2 MB | ~0.5 MB/week |
+### BUG-C: `shell=True` subprocess call in subprocess_utils.py (P1) ✓
+**File:** `portfolio/subprocess_utils.py:285-291`
+**Fix:** Converted PowerShell invocation from `shell=True` string to list args.
+**Commit:** `7c651946`
 
-**Fix:** Add rotation policies with appropriate age/size caps per file.
+### BUG-D: Resource leak in silver_monitor.py (P1) ✓
+**File:** `data/silver_monitor.py:796`
+**Fix:** Wrapped raw `open()` in context manager.
+**Commit:** `7c651946`
+
+### BUG-E: BUG-97 test drift — tests pass on stale heuristic (P2) ✓
+**File:** `tests/test_batch2_fixes.py`
+**Fix:** BUG-97 tests updated for 2026-05-17 count-delta heuristic. Added
+`tmp_telegram`/`tmp_journal` fixtures and `_count_before` baselines.
+Fixes 1 pre-existing test failure.
+**Commit:** `7c651946`
+
+### BUG-F: Deprecated `datetime.utcnow()` in escalation_gate (P2) ✓
+**File:** `portfolio/escalation_gate.py:160`
+**Fix:** Replaced with `datetime.now(timezone.utc)`. Eliminates DeprecationWarning.
+**Commit:** `fe54c891`
 
 ---
 
 ## 2. Architecture Improvements
 
-None proposed this session. Known backlog items (ARCH-17 through ARCH-20
-in IMPROVEMENT_BACKLOG.md) are correctly deferred — high-risk refactors
-with no functional impact. This session focuses on concrete reliability fixes.
+### FEAT-A: Auto-discovery of unmanaged log files ✓
+**File:** `portfolio/log_rotation.py`
+**What:** `find_unmanaged_files()` scans `data/` for JSONL/log/txt files >1MB
+without rotation policies. `rotate_all()` calls this every run and prints
+warnings. Prevents future BUG-B scenarios.
+**Breaking:** `rotate_all()` returns `dict {results, unmanaged}` instead of list.
+**Commit:** `10642459`
 
 ---
 
-## 3. Useful Features
+## 3. Documentation Updates ✓
 
-None proposed. Deferred: `/api/log-rotation` dashboard endpoint for
-monitoring disk growth (existing `get_file_stats()` not yet exposed).
-
----
-
-## 4. Refactoring & Cleanup
-
-### REF-A: Test coverage for JSONL size enforcement
-No tests exist for size-based JSONL pruning. Need:
-- Test that `rotate_jsonl` prunes to `max_size_mb` after age archival
-- Test new policy entries rotate correctly
-
-### REF-B: Update SYSTEM_OVERVIEW.md
-Add: rotation policy coverage map, disk growth observations.
+- `docs/SYSTEM_OVERVIEW.md`: Removed log_rotation from untested modules list.
+  Now has 36 tests covering age archival, size pruning, text rotation,
+  unmanaged file detection.
+- **Commit:** `4fbfc640`
 
 ---
 
-## 5. Dependency & Ordering
+## 4. Test Results
 
-### Batch 1: Fix BUG-A + BUG-B (log_rotation.py)
-**Files:** `portfolio/log_rotation.py`
-**Risk:** Low — additive logic after existing age rotation. Existing behavior
-unchanged unless file exceeds size cap after age pruning.
-**Tests first:** Write failing test for size enforcement → implement → pass.
+- **10,309 passed**, 26 failed (all pre-existing), 4 skipped
+- **1 pre-existing failure fixed** (`test_telegram_read_failure_yields_not_sent`)
+- **8 new tests added** (4 size-cap tests + 4 unmanaged-files tests)
+- Runtime: 133s parallel (8 workers)
 
-### Batch 2: Tests for rotation changes
-**Files:** `tests/test_log_rotation.py` (new or extend existing)
-**Risk:** None — test-only changes.
+---
 
-### Batch 3: Documentation
-**Files:** `docs/SYSTEM_OVERVIEW.md`
-**Risk:** None.
+## 5. Commits (chronological)
+
+1. `263b2c27` — docs: improvement plan for 2026-05-26 auto-session
+2. `b8e1fe46` — fix(log-rotation): enforce max_size_mb for JSONL files + add 9 missing policies
+3. `10642459` — feat(log-rotation): auto-discover unmanaged JSONL/log files >1MB
+4. `7c651946` — fix: shell=True removal, resource leak, BUG-97 test drift
+5. `fe54c891` — fix: replace deprecated datetime.utcnow() in escalation_gate
+6. `4fbfc640` — docs: update SYSTEM_OVERVIEW test coverage for log_rotation
