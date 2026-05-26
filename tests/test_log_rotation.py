@@ -350,11 +350,49 @@ class TestRotateAll:
             {"file": "good.jsonl", "status": "nothing_to_archive"},
             RuntimeError("boom"),
         ]):
-            results = lr.rotate_all()
+            output = lr.rotate_all()
+        results = output["results"]
         assert len(results) == 2
         assert results[0]["status"] == "nothing_to_archive"
         assert results[1]["status"] == "error"
         assert "boom" in results[1]["error"]
+
+
+# ---------------------------------------------------------------------------
+# find_unmanaged_files
+# ---------------------------------------------------------------------------
+
+class TestFindUnmanagedFiles:
+    def test_detects_large_unmanaged_jsonl(self, _isolate_dirs, monkeypatch):
+        monkeypatch.setattr(lr, "ROTATION_POLICIES", {})
+        big = _isolate_dirs / "orphan.jsonl"
+        big.write_bytes(b"x" * (2 * 1024 * 1024))
+        result = lr.find_unmanaged_files(min_size_mb=1.0)
+        assert len(result) == 1
+        assert result[0]["file"] == "orphan.jsonl"
+        assert result[0]["size_mb"] >= 1.9
+
+    def test_ignores_small_files(self, _isolate_dirs, monkeypatch):
+        monkeypatch.setattr(lr, "ROTATION_POLICIES", {})
+        small = _isolate_dirs / "tiny.jsonl"
+        small.write_bytes(b"x" * 100)
+        assert lr.find_unmanaged_files(min_size_mb=1.0) == []
+
+    def test_ignores_managed_files(self, _isolate_dirs, monkeypatch):
+        monkeypatch.setattr(lr, "ROTATION_POLICIES", {
+            "managed.jsonl": {"type": "jsonl", "max_age_days": 30, "ts_field": "ts"},
+        })
+        big = _isolate_dirs / "managed.jsonl"
+        big.write_bytes(b"x" * (2 * 1024 * 1024))
+        assert lr.find_unmanaged_files(min_size_mb=1.0) == []
+
+    def test_rotate_all_includes_unmanaged(self, _isolate_dirs, monkeypatch):
+        monkeypatch.setattr(lr, "ROTATION_POLICIES", {})
+        big = _isolate_dirs / "stray.log"
+        big.write_bytes(b"x" * (2 * 1024 * 1024))
+        output = lr.rotate_all()
+        assert "unmanaged" in output
+        assert any(u["file"] == "stray.log" for u in output["unmanaged"])
 
 
 # ---------------------------------------------------------------------------

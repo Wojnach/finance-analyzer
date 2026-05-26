@@ -406,7 +406,8 @@ def _run_post_cycle(config, report=None):
     if should_rotate_logs:
         try:
             from portfolio.log_rotation import rotate_all
-            rotation_results = rotate_all()
+            rotation_output = rotate_all()
+            rotation_results = rotation_output["results"] if isinstance(rotation_output, dict) else rotation_output
             rotated = [r for r in rotation_results if r.get("status") == "rotated"]
             if rotated:
                 logger.info("Log rotation: %d file(s) rotated: %s",

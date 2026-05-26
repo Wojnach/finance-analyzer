@@ -549,10 +549,36 @@ def rotate_file(filename, policy, dry_run=False):
         return rotate_text(filename, policy, dry_run=dry_run)
 
 
+def find_unmanaged_files(min_size_mb=1.0):
+    """Find JSONL/log/txt files in data/ that have no rotation policy.
+
+    Returns list of dicts with file name and size for files exceeding
+    min_size_mb. Useful as a canary to catch new high-growth files
+    before they balloon.
+    """
+    managed = set(ROTATION_POLICIES.keys())
+    unmanaged = []
+    if not DATA_DIR.exists():
+        return unmanaged
+    for ext in ("*.jsonl", "*.log", "*.txt"):
+        for path in DATA_DIR.glob(ext):
+            if path.name in managed:
+                continue
+            size_mb = _file_size_mb(path)
+            if size_mb >= min_size_mb:
+                unmanaged.append({
+                    "file": path.name,
+                    "size_mb": round(size_mb, 2),
+                })
+    unmanaged.sort(key=lambda x: x["size_mb"], reverse=True)
+    return unmanaged
+
+
 def rotate_all(dry_run=False):
     """Rotate all files defined in ROTATION_POLICIES.
 
-    Returns list of result dicts, one per file.
+    Returns dict with 'results' (per-file rotation results) and
+    'unmanaged' (files >1MB without a rotation policy).
     """
     results = []
     for filename, policy in ROTATION_POLICIES.items():
@@ -565,7 +591,12 @@ def rotate_all(dry_run=False):
                 "status": "error",
                 "error": str(e),
             })
-    return results
+
+    unmanaged = find_unmanaged_files(min_size_mb=1.0)
+    for u in unmanaged:
+        print(f"  WARNING: {u['file']} ({u['size_mb']} MB) has no rotation policy")
+
+    return {"results": results, "unmanaged": unmanaged}
 
 
 def get_data_dir_size():
@@ -687,8 +718,11 @@ if __name__ == "__main__":
     mode = "DRY RUN" if dry_run else "LIVE"
     print(f"=== Log Rotation ({mode}) ===\n")
 
-    results = rotate_all(dry_run=dry_run)
-    print_results(results)
+    output = rotate_all(dry_run=dry_run)
+    print_results(output["results"])
+
+    if output["unmanaged"]:
+        print(f"\n  {len(output['unmanaged'])} unmanaged file(s) >1MB found (add rotation policies!)")
 
     total_mb = get_data_dir_size()
     print(f"\nData directory total: {total_mb:.1f} MB")
