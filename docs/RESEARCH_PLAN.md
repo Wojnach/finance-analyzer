@@ -1,55 +1,44 @@
-# After-Hours Research Plan — 2026-05-24
+# After-Hours Research Plan — 2026-05-26
 
-## Findings Summary
+## Bugs & Problems Found
 
-### Phase 0: Daily Review
-- System healthy: 0 errors, 76 cycles, ~14h uptime, all signals green
-- Last trigger: XAU-USD BUY→HOLD flip at 19:03 UTC
-- Market regime: range-bound across all instruments for 3+ days
-- 30 unresolved critical errors (14 contract violations, 10 accuracy degradation, 3 Avanza, 3 misc)
+### P0 (Fixed This Session)
+1. **Stale credit_spread_risk override** — `signal_engine.py:710-713`
+   re-enabled a signal at 20% recent accuracy for BTC/ETH. FIXED: removed override.
+2. **crypto_evrp gate oscillation** — Enabled at claimed 80.5% (77 sam),
+   degraded to 43.4% recent. Blended 47.0% at gate boundary. FIXED: formally disabled.
 
-### Phase 1: Market Research
-- **Monday May 26 = Memorial Day** — US markets closed
-- **Binary event: Iran deal** — 50/50 odds. Deal = risk-on (oil -$10-15, gold dip). Failure = risk-off (Brent $110+, gold $4800+)
-- **Thursday May 28**: GDP + PCE deflator + durable goods + claims (big data day)
-- BTC ~$77K, Gold $4521, Silver $75.35
-- MSTR: Saylor signaled willingness to sell BTC — policy shift
+### P0 (Known, Not Fixed)
+3. **Layer 2 agent timeouts** — 15+ triggers this week with no journal entry.
+   Genuine timeouts, not a race condition. Root cause: agent subprocess produces
+   no useful output within tier timeout. Needs prompt efficiency investigation.
+4. **Avanza session expired** since May 23. Needs manual BankID re-login.
 
-### Phase 2: Quant Research
-- IC-based dynamic signal weighting outperforms equal weights (already partially implemented)
-- HMM regime detection for signal selection (currently flat penalty)
-- Gold-silver ratio at ~57 (below 65-70 mean — silver expensive vs gold near-term)
-- MVRV Z-Score at 0.41 — BTC mid-cycle, not overvalued
-- COT: hedge funds barely positioned in silver (5,472 contracts) — room for re-entry
+### P1 (Monitor)
+5. **crypto_macro degrading** — 46.5% recent (310 sam). Below 47% gate,
+   auto-gated at runtime. If trend continues, formally disable.
+6. **qwen3 recent degradation** — 46.8% recent (124 sam) vs 59.7% all-time.
+   Recent sample count low, may recover. Monitor.
 
-### Phase 3: Signal Audit
-- **DISABLE momentum_factors**: 30% recent accuracy (783 sam) — catastrophic
-- **DISABLE btc_proxy**: 44.6% 1d (139 sam), BUY 31.1% — negative evaluation
-- Top signals: qwen3 (59.9%), drift_regime_gate (59.3%, 71.5% recent), bb (54.8%, 64.5% recent)
-- macro_external cluster misclusters fear_greed (BUY-only) with news_event (SELL-only)
-- 28 disabled signals have 0 outcome samples — not in _SHADOW_SAFE_SIGNALS
+## Improvements Prioritized (from research)
 
-## Implementation Plan
+### Implemented This Session
+1. Remove credit_spread_risk override — DONE
+2. Disable crypto_evrp — DONE
 
-### Batch 1: Shadow tracking expansion + formal disables
-**Files**: portfolio/signal_engine.py, portfolio/tickers.py
+### Defer to Backlog
+3. **Close walk-forward weight loop** — connect trained weights to _weighted_consensus.
+   All infrastructure exists. Est. 2 days. → IMPROVEMENT_BACKLOG.md
+4. **Rolling IC weighting** — replace accuracy-only with EWMA Spearman IC.
+   ic_computation.py needs per-horizon extension. Est. 3 days.
+5. **Fix dynamic correlation groups** — use agreement rate instead of Pearson.
+   Known bug. Est. 2 days.
+6. **Extract gs_ratio_velocity signal** — shadow deploy. Est. 1 day.
+7. **HMM regime detection** — formalize drift_regime_gate. Est. 4 days.
 
-1. Add OHLCV-only disabled signals to `_SHADOW_SAFE_SIGNALS`:
-   - ttm_squeeze, tsi_chop_mr, amihud_illiquidity_regime, absorption_ratio_regime
-   - connors_rsi2, adx_regime_switch, choppiness_regime_gate
-   - autotune_adaptive_cycle, bocpd_regime_switch
-   - trend_slope_momentum, sentiment_extremity_gate
-
-2. Formally disable in tickers.py:
-   - momentum_factors (30% recent, 51.9% all-time — blended ~37%, below gate anyway)
-   - btc_proxy (44.6% 1d, BUY 31.1% — evaluation complete, negative verdict)
-
-### Batch 2: Morning briefing synthesis
-Write data/morning_briefing.json combining all phase findings.
-Send Telegram summary.
-
-### Batch 3: Merge, verify, ship
-- Full test suite
-- Merge to main, push
-- Restart loops
-- Update SESSION_PROGRESS.md
+## Research Deliverables
+- `data/daily_research_review.json` — Phase 0 daily review
+- `data/daily_research_macro.json` — Phase 1 market research
+- `data/daily_research_quant.json` — Phase 2 quant research
+- `data/daily_research_signal_audit.json` — Phase 3 signal audit
+- `data/daily_research_ticker_deep_dive.json` — Per-ticker deep dives (XAG, BTC)
