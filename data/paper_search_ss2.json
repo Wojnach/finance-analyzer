@@ -1,0 +1,379 @@
+{
+  "searches_completed": 7,
+  "search_details": {
+    "semantic_scholar_bitcoin_onchain": "completed",
+    "semantic_scholar_ethereum_defi": "rate_limited_429",
+    "semantic_scholar_funding_rate": "rate_limited_429",
+    "semantic_scholar_vix_term_structure": "completed",
+    "semantic_scholar_yield_curve": "rate_limited_429",
+    "arxiv_crypto_trading": "completed",
+    "arxiv_bitcoin_onchain": "completed",
+    "arxiv_crypto_microstructure": "completed",
+    "arxiv_alpha_factors": "completed",
+    "arxiv_defi_prediction": "completed",
+    "arxiv_funding_rate": "completed",
+    "arxiv_vix_vol_term_structure": "completed"
+  },
+  "total_papers": 22,
+  "papers": [
+    {
+      "title": "Blockchain Metrics and Indicators in Cryptocurrency Trading",
+      "year": 2024,
+      "source": "semantic_scholar+arxiv",
+      "url": "https://arxiv.org/abs/2403.00770",
+      "doi": "10.1016/j.chaos.2023.114305",
+      "citation_count": 17,
+      "abstract_summary": "Constructs new trading indicators from Bitcoin blockchain mining data (hash rate, difficulty, cost per transaction). Hash Ribbon-inspired indicators perform well for locating buy signals with statistical advantage.",
+      "signal_ideas": [
+        "Hash Ribbon indicator: buy when 30d hash rate MA crosses above 60d MA (miners recovering)",
+        "Mining difficulty momentum: rising difficulty = network confidence = bullish",
+        "Cost-per-transaction as network congestion proxy (high cost = high demand = bullish)",
+        "Hash rate z-score for extreme deviation detection"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD"]
+    },
+    {
+      "title": "Temporal Fusion Transformer-Based Trading Strategy for Multi-Crypto Assets Using On-Chain and Technical Indicators",
+      "year": 2025,
+      "source": "semantic_scholar",
+      "url": "https://doi.org/10.3390/systems13060474",
+      "citation_count": 9,
+      "abstract_summary": "TFT framework integrating on-chain metrics (SOPR, TVL, active addresses, exchange net flow, HODL waves) with technical indicators (RSI, MACD) for multi-crypto forecasting and signal-based trading.",
+      "signal_ideas": [
+        "SOPR < 1 = holders selling at loss = capitulation buy signal",
+        "TVL rate of change as DeFi sentiment proxy",
+        "Active addresses momentum: acceleration precedes price moves",
+        "Exchange net flow: negative = coins leaving exchanges = accumulation = bullish",
+        "Realized Cap HODL Waves: shift from short-term to long-term holders = distribution/accumulation phases",
+        "Crypto Fear and Greed Index as contrarian overlay"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "Synergistic Alpha: Forecasting Cryptocurrency Returns by Fusing On-Chain, Sentiment, and Market Data",
+      "year": 2025,
+      "source": "semantic_scholar",
+      "url": "https://doi.org/10.61996/economy.v3i2.103",
+      "citation_count": 0,
+      "abstract_summary": "Hybrid Transformer achieves 61.25% directional accuracy and Sharpe 1.58 on BTC. SHAP shows NVT Signal and social sentiment are top predictors beyond past returns.",
+      "signal_ideas": [
+        "NVT Signal: high NVT = overvalued (sell), low NVT = undervalued (buy)",
+        "FinBERT social media sentiment score as leading indicator",
+        "On-chain + sentiment + market data fusion outperforms single-source"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD"]
+    },
+    {
+      "title": "On- and off-chain demand and supply drivers of Bitcoin price",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2602.08429",
+      "citation_count": null,
+      "abstract_summary": "ARDL model: off-chain demand pressures have significant long-run BTC price impact. On-chain demand matters in both timeframes. Whale trading impact is short-term only.",
+      "signal_ideas": [
+        "Off-chain demand pressure (exchange volume, derivatives OI) as long-run price driver",
+        "On-chain demand pressure (active addresses, transaction count) for both timeframes",
+        "Whale transaction monitoring: significant short-term but weak long-run effect",
+        "Dual on/off-chain demand-supply decomposition for regime identification"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD"]
+    },
+    {
+      "title": "Explainable Patterns in Cryptocurrency Microstructure",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2602.00776",
+      "citation_count": null,
+      "abstract_summary": "Documents stable cross-asset LOB microstructure patterns on Binance Futures perpetuals (BTC, LTC, ETC, ENJ, ROSE). Same engineered order book features show similar predictive importance across assets via SHAP.",
+      "signal_ideas": [
+        "Order flow imbalance (OFI): bid/ask volume change difference predicts short-term returns",
+        "Spread dynamics: widening spread = adverse selection = potential reversal signal",
+        "Portable universal microstructure feature library across crypto assets",
+        "CatBoost with direction-aware GMADL objective for LOB-based prediction",
+        "Flash crash detection via divergent taker vs maker strategy performance"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "The Red Queen's Trap: Limits of Deep Evolution in High-Frequency Trading",
+      "year": 2025,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2512.15732",
+      "citation_count": null,
+      "abstract_summary": "Post-mortem of hybrid DRL/evolutionary HFT system with 70% capital decay. Key finding: model complexity without order-flow information asymmetry increases fragility.",
+      "signal_ideas": [
+        "NEGATIVE RESULT: complexity without order-flow info asymmetry = systemic fragility",
+        "Order-flow data is necessary condition for overcoming microstructure friction",
+        "Training-vs-live APY divergence as overfitting detector"
+      ],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "A Comparative Analysis of Outlier Detection in Bitcoin Limit Order Books",
+      "year": 2025,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2507.14960",
+      "citation_count": null,
+      "abstract_summary": "Benchmark of 13 anomaly detection models on Bitcoin LOB. Empirical Covariance model achieves 6.70% gain vs buy-and-hold.",
+      "signal_ideas": [
+        "LOB anomaly detection as trading signal: outlier bid/ask patterns predict moves",
+        "Empirical Covariance method for detecting manipulative LOB patterns",
+        "Anomaly-triggered entry/exit: trade only when LOB structure is statistically unusual"
+      ],
+      "relevance": "medium",
+      "assets": ["BTC-USD"]
+    },
+    {
+      "title": "Neural Hawkes: Non-Parametric Estimation and Causality Analysis in Cryptocurrency Markets",
+      "year": 2024,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2401.09361",
+      "citation_count": null,
+      "abstract_summary": "Hawkes process estimation for crypto microstructure. Extracts volume influence on BTC trade arrival rate and maps causality among 15 crypto pairs.",
+      "signal_ideas": [
+        "Volume-arrival rate relationship: volume spikes influence future trade intensity",
+        "Cross-crypto causality network: which coins lead/lag in trade activity",
+        "Hawkes process for self-exciting order flow dynamics modeling"
+      ],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "Memory, Roughness, and Information Persistence in Financial Markets",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2605.24285",
+      "citation_count": null,
+      "abstract_summary": "Studies long-memory dynamics in 115 S&P500 stocks. Persistence measures rise during GFC/COVID, correlate with VIX. Cross-sectional persistence aggregates improve volatility forecasts.",
+      "signal_ideas": [
+        "Volatility persistence measure (GPH d-hat): rising d = increasing uncertainty duration",
+        "Cross-sectional persistence aggregates as macro stress indicator (correlates with VIX)",
+        "Persistence-by-stress interaction: forecast gains strongest during elevated vol",
+        "Sectoral persistence divergence as rotation signal"
+      ],
+      "relevance": "high",
+      "assets": ["MSTR", "BTC-USD"]
+    },
+    {
+      "title": "Continuous Timing Signals for Growth-Defensive Style Allocation",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2605.20636",
+      "citation_count": null,
+      "abstract_summary": "Smooth continuous score combining rate relief, SPY drawdown, VIX stress relief, and growth-crowding penalty. Achieves 19.24% CAGR, Sharpe 1.01.",
+      "signal_ideas": [
+        "Rate relief signal: TNX (10Y yield) momentum as growth/defensive timing",
+        "SPY drawdown depth as stress regime indicator",
+        "High-VIX stress relief: mean reversion when VIX elevated",
+        "Growth-crowding penalty: fade growth when too crowded",
+        "Continuous smooth score (softplus + tanh + EWMA) replacing discrete regime labels"
+      ],
+      "relevance": "high",
+      "assets": ["MSTR"]
+    },
+    {
+      "title": "Fundamentals of Perpetual Futures",
+      "year": 2024,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2212.06888",
+      "citation_count": null,
+      "abstract_summary": "No-arbitrage prices for perpetual futures. Crypto deviations from no-arb are larger than traditional markets, comove across currencies, diminish over time. Implied arbitrage yields high Sharpe.",
+      "signal_ideas": [
+        "Perp-spot basis deviation from no-arb bound as mean-reversion signal",
+        "Cross-currency funding rate comovement: simultaneous contango/backwardation = crowded positioning",
+        "Long spot + short perp when basis exceeds no-arb threshold",
+        "Basis convergence speed as regime indicator (faster = more efficient market)"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "Designing funding rates for perpetual futures in cryptocurrency markets",
+      "year": 2025,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2506.08573",
+      "citation_count": null,
+      "abstract_summary": "Mathematical framework for perpetual funding rates using path-dependent BSDEs. Shows how design affects price-target alignment.",
+      "signal_ideas": [
+        "Path-dependent funding rate trajectory predicts future price alignment",
+        "Funding rate deviation from theoretical optimum as mispricing indicator"
+      ],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "BitMEX Funding Correlation with Bitcoin Exchange Rate",
+      "year": 2019,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/1912.03270",
+      "citation_count": null,
+      "abstract_summary": "Proves heteroskedastic nature of funding rates. Establishes Granger causality from funding rates to BTC perpetual swap price. GARCH model for funding prediction.",
+      "signal_ideas": [
+        "Funding rate Granger-causes perp swap price moves",
+        "GARCH-modeled funding rate volatility as positioning extreme indicator",
+        "Extreme positive funding = overleveraged longs = mean reversion opportunity",
+        "Funding rate as predictive tool for gauging market trend"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD"]
+    },
+    {
+      "title": "MadEvolve: Evolutionary Optimization of Trading Systems with LLMs",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2605.23007",
+      "citation_count": null,
+      "abstract_summary": "LLM-driven evolutionary optimization for BTC trading. Evolves feature sets, optimizes strategy components, jointly evolves pipeline with execution.",
+      "signal_ideas": [
+        "LLM-evolved feature sets: automated discovery of optimal indicator combinations",
+        "Joint feature-pipeline + execution co-optimization outperforms sequential design",
+        "P-hacking probability quantification for backtest validation"
+      ],
+      "relevance": "medium",
+      "assets": ["BTC-USD"]
+    },
+    {
+      "title": "When Alpha Disappears: Decision-Time Leakage Benchmark for Financial Backtests",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2605.23959",
+      "citation_count": null,
+      "abstract_summary": "Benchmark diagnosing decision-time leakage. Centered temporal features and same-day-open execution with post-open info cause large inflation. Critical for backtest hygiene.",
+      "signal_ideas": [
+        "METHODOLOGY: centered temporal features are a major source of look-ahead bias",
+        "Same-day-open execution with post-open daily bar info inflates results",
+        "Use t+1-open reference as clean benchmark for any backtest"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD", "MSTR"]
+    },
+    {
+      "title": "Cross-Market Alpha: Testing Short-Term Trading Factors via Double-Selection LASSO",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2601.06499",
+      "citation_count": null,
+      "abstract_summary": "Tests 191 short-term signals on S&P 500. Isolates 17 price-volume and microstructural signals with non-redundant risk premiums using LASSO controlling for 151 fundamental factors.",
+      "signal_ideas": [
+        "17 cross-market transferable price-volume signals with non-redundant alpha",
+        "Double-selection LASSO to isolate signals controlling for fundamentals",
+        "Short-term behavioral signals capture universal dynamics across markets",
+        "Dual-horizon framework: fast behavioral footprints + slow fundamental data"
+      ],
+      "relevance": "high",
+      "assets": ["MSTR"]
+    },
+    {
+      "title": "Hubble: LLM-Driven Agentic Framework for Alpha Factor Discovery",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2604.09601",
+      "citation_count": null,
+      "abstract_summary": "LLM-guided alpha mining with AST sandbox, dual-channel RAG, family-aware selection. Top factors: range, volatility, trend. Out-of-sample: range and volatility factors retain positive IC.",
+      "signal_ideas": [
+        "Range-based alpha factors: (high-low)/close ratios as volatility-regime signals",
+        "Volatility family factors: realized vol ratios across timeframes",
+        "Family-level diversity prevents crowding into volume-only motifs",
+        "Range and volatility factors more robust out-of-sample than trend factors"
+      ],
+      "relevance": "medium",
+      "assets": ["MSTR"]
+    },
+    {
+      "title": "Causal and Predictive Modeling of Short-Horizon Market Risk and Systematic Alpha Generation",
+      "year": 2025,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2510.22348",
+      "citation_count": null,
+      "abstract_summary": "Hybrid ML ensemble predicting 5-day S&P 500 drawdowns using cross-asset features. Achieves Sharpe 2.51, CAPM alpha +0.28, beta 0.51.",
+      "signal_ideas": [
+        "5-day drawdown prediction using cross-asset feature set as risk-off signal",
+        "Cross-asset features: equity vol + fixed income + FX + commodity + VIX term structure",
+        "VIX, credit spreads, yield curve slope as top crash predictors",
+        "Hybrid neural network + tree-based voting ensemble for regime identification"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD", "MSTR"]
+    },
+    {
+      "title": "MemGuard-Alpha: Detecting Memorization-Contaminated Signals in LLM-Based Financial Forecasting",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2603.26797",
+      "citation_count": null,
+      "abstract_summary": "Framework to detect LLM memorization in financial signals. Clean signals yield 14.48 bps/day vs 2.13 bps for tainted (7x). CMMD achieves Sharpe 4.11 vs 2.76 unfiltered.",
+      "signal_ideas": [
+        "Cross-Model Memorization Disagreement: signals where different-cutoff models agree are genuine",
+        "In-sample accuracy rising + out-of-sample falling = memorization red flag",
+        "Clean signal filtering improves Sharpe by 49%"
+      ],
+      "relevance": "medium",
+      "assets": ["MSTR"]
+    },
+    {
+      "title": "Extracting Price Signals from Term Structure of Commodity and Credit Markets",
+      "year": 2024,
+      "source": "semantic_scholar",
+      "url": "https://doi.org/10.52195/pm.v21i1.931",
+      "citation_count": 1,
+      "abstract_summary": "Applies Austrian Business Cycle Theory to commodity and credit term structures. Yield curve inversions and commodity contango/backwardation as leading cycle indicators.",
+      "signal_ideas": [
+        "Commodity term structure slope (contango vs backwardation) as business cycle signal",
+        "Credit term structure inversion timing vs commodity term structure for lead-lag",
+        "Joint commodity + credit term structure divergence as macro regime change detector",
+        "Yield curve inversion depth and duration as recession probability"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "MSTR"]
+    },
+    {
+      "title": "Global Uncertainty and BRICS+ Equity Markets: Spillovers from VIX, Geopolitical Risk, and U.S. Macro-Financial Shocks",
+      "year": 2025,
+      "source": "semantic_scholar",
+      "url": "https://doi.org/10.3390/risks13110217",
+      "citation_count": 1,
+      "abstract_summary": "VAR analysis of VIX, geopolitical risk, inflation expectations, and term spread transmission to emerging markets. VIX is both receiver and transmitter of shocks.",
+      "signal_ideas": [
+        "VIX as bidirectional shock transmitter: spikes propagate to and from emerging markets",
+        "U.S. term spread (T10Y3M) shocks transmit quickly but dissipate in days",
+        "T5YIE (5Y inflation expectations) as quick-impact macro signal",
+        "Geopolitical risk shocks are short-lived on yields and equity"
+      ],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "MSTR"]
+    },
+    {
+      "title": "The Extremity Premium: Sentiment Regimes and Adverse Selection in Cryptocurrency Markets",
+      "year": 2026,
+      "source": "arxiv",
+      "url": "https://arxiv.org/abs/2602.07018",
+      "citation_count": null,
+      "abstract_summary": "Documents that extreme Fear & Greed regimes exhibit significantly higher spreads than neutral periods. Effect replicates on ETH and across 6 of 7 market cycles.",
+      "signal_ideas": [
+        "Extremity premium: extreme fear AND extreme greed both predict wider spreads (higher uncertainty)",
+        "Within-volatility-quintile sentiment extremity as adverse selection signal",
+        "Granger causality from uncertainty to spreads (F=211)",
+        "Replicates across BTC and ETH and 6/7 market cycles"
+      ],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD"]
+    }
+  ],
+  "key_themes": [
+    "On-chain metrics (SOPR, NVT, MVRV, hash rate, exchange net flow) as crypto-specific signals",
+    "Microstructure features (OFI, LOB imbalance, spread dynamics) transferable across crypto assets",
+    "Funding rate and perpetual basis as positioning/sentiment indicators",
+    "Cross-asset feature sets (VIX, credit spreads, yield curve) for drawdown prediction",
+    "LLM-driven alpha discovery and memorization contamination filtering",
+    "Backtest hygiene: decision-time leakage detection, p-hacking quantification",
+    "Volatility persistence and rough-volatility measures as stress regime indicators",
+    "Sentiment extremity premium: extreme F&G regimes predict adverse selection"
+  ],
+  "search_timestamp": "2026-05-26T18:40:00Z"
+}

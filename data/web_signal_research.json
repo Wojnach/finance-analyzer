@@ -1,0 +1,391 @@
+{
+  "searches_completed": 12,
+  "search_date": "2026-05-26",
+  "total_sources": 18,
+  "sources": [
+    {
+      "title": "Gold-Silver Ratio: The 80-50 Rule (gold-standard.org)",
+      "url": "https://gold-standard.org/insights/the-gold-silver-ratio-your-hidden",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Gold-Silver Ratio 80-50 Rule: Buy silver (or swap gold->silver) when GSR >= 80. Buy gold (or swap silver->gold) when GSR <= 50. Convert 10-20% of gold holdings when ratio exceeds 70. Monitor 50-60 range for shift back toward gold. Dollar-cost average rather than timing perfectly.",
+        "Computation: GSR = Price_of_Gold / Price_of_Silver. No technical indicator needed, just spot prices."
+      ],
+      "backtest_results": {
+        "total_return_pct": 3875.82,
+        "max_drawdown_pct": -50.25,
+        "sharpe": 0.6921,
+        "total_trades": 5,
+        "test_period": "2000-2025 (6306 trading days)",
+        "vs_buy_hold": "2.58x better than static gold hold (which returned 1438%)",
+        "notes": "Only 5 trades in 25 years = very low frequency. Buy-and-hold gold had higher Sharpe (0.72) despite lower returns."
+      },
+      "data_requirements": ["Gold spot price (daily)", "Silver spot price (daily)"],
+      "implementation_complexity": "trivial",
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Already have metals_cross_assets.py computing G/S ratio. Could add GSR-based signal with thresholds at 80/50. Very low frequency but strong mean-reversion thesis. Current GSR ~80 = silver accumulation zone."
+    },
+    {
+      "title": "COT Commercial Index Signal (best-trading-platforms.com)",
+      "url": "https://www.best-trading-platforms.com/trading-platform-futures-forex-cfd-stocks-nanotrader/cot-report-signal-profitable-futures-trading",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Dual COT Commercial Index: Compute 6-month and 12-month Commercial Index (min-max normalization of commercial net positions). LONG when BOTH 6m and 12m index > 75. SHORT when BOTH 6m and 12m index < 25.",
+        "COT Index Formula: COT_Index = (currentNet - min(net, N)) / (max(net, N) - min(net, N)) * 100. N = 26 weeks (6m) and 52 weeks (12m).",
+        "Confirmation filters (need 2 of 3): (1) Weekly trend alignment, (2) Commercials buy + OI falls (long) or commercials sell + OI rises (short), (3) Sentiment < 25 (long) or > 75 (short).",
+        "Entry timing: daily chart RSI/momentum divergence + 12-day high/low breakout. Stop: below 3-day low. Signal validity: ~6 weeks."
+      ],
+      "backtest_results": {
+        "anecdotal": "$14K to $300K over 4 years",
+        "validation": "3rd place 2017 World Championship of Futures Trading (real money)",
+        "notes": "No formal Sharpe/win rate provided"
+      },
+      "data_requirements": ["CFTC COT weekly report data", "Futures open interest", "Commercial/speculative net positions", "Daily price + RSI"],
+      "implementation_complexity": "medium",
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD", "BTC-USD"],
+      "actionable_for_system": "Already have COT signal module. Could enhance with dual-timeframe index (6m+12m) and the 75/25 threshold confirmation system. Would improve existing COT signal significantly."
+    },
+    {
+      "title": "VIX Term Structure Regime Signal (volatilitybox.com)",
+      "url": "https://volatilitybox.com/research/vix-contango-backwardation/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "VIX/VIX3M Ratio regime detector: Below 0.95 = contango confirmed. 0.95-1.0 = transition zone (reduce positions 50%). Above 1.0 = backwardation confirmed.",
+        "VIX Futures Basis: Front-month - Spot VIX. >+2.0 = deep contango (risk-on). +0.5 to +2.0 = normal contango. 0 to +0.5 = flat/transition. <0 = backwardation (risk-off). Extremes >+4.0 or <-3.0 = mean-reversion opportunity.",
+        "Additional: VIX9D spike 20%+ above VIX = extreme near-term fear. M1-M2 spread compression toward zero precedes full inversion.",
+        "Re-entry rule: Wait 2-3 days after ratio drops below 1.0, enter at 50% size, scale to full at <0.90."
+      ],
+      "backtest_results": {
+        "contango_monthly_returns": "3-7%",
+        "roll_yield_capture": "85-90% of available roll yield",
+        "vxx_monthly_decay": "4-6%",
+        "notes": "No formal Sharpe/win rate. Contango occurs ~80% of the time."
+      },
+      "data_requirements": ["VIX spot (daily)", "VIX3M (daily)", "VIX9D (daily)", "VIX futures front-month and second-month prices"],
+      "implementation_complexity": "low",
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD", "MSTR"],
+      "actionable_for_system": "Already have VIX Term Structure signal module. Could refine with the 0.95/1.0 ratio thresholds and the VIX9D spike confirmation. Useful as cross-asset risk regime overlay for all instruments."
+    },
+    {
+      "title": "MVRV Z-Score Bitcoin Signal (multiple sources)",
+      "url": "https://axeladlerjr.com/mvrv-z-score-how-to-identify-bitcoin-market-tops-and-bottoms/",
+      "source_type": "blog",
+      "signal_ideas": [
+        "MVRV Z-Score = (Market_Value - Realized_Value) / StdDev(Market_Value). Market Value = price * circulating supply. Realized Value = aggregate cost basis of all coins.",
+        "Thresholds: Z > 6.0 = extreme overvaluation (red zone, distribution risk). Z 3.5-6.0 = elevated risk (yellow zone). Z < 0.5 = accumulation opportunity (green zone). Z < 0 = deep value / capitulation.",
+        "TradingView strategy variant: Long entry at spread Z-Score crossing above 0.382, short entry below -0.382. 252-day lookback for Z-Score calculation.",
+        "BTC spends ~44% of time in green zone. Every major cycle top and bottom since 2013 marked by extreme Z-Score readings.",
+        "Confirm with: NUPL, STH SOPR < 1.0, Exchange Netflow (outflows = accumulation)."
+      ],
+      "backtest_results": {
+        "notes": "No formal backtest metrics. Framework is zone-based rather than mechanical. Historical accuracy for identifying tops/bottoms described as very high but sample size is small (4-5 full cycles)."
+      },
+      "data_requirements": ["Bitcoin market cap (real-time)", "Bitcoin realized cap (on-chain, Glassnode/CryptoQuant)", "Circulating supply", "UTXO-based realized value"],
+      "implementation_complexity": "medium",
+      "relevance": "high",
+      "assets": ["BTC-USD"],
+      "actionable_for_system": "Already have On-Chain BTC signal with MVRV Z-Score. Could refine thresholds based on these zone definitions (0.5/3.5/6.0). Current implementation may not use optimal thresholds."
+    },
+    {
+      "title": "Hash Ribbons Bitcoin Buy Signal (Capriole Investments)",
+      "url": "https://capriole.com/hash-ribbons-bitcoin-bottoms/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Hash Ribbons: 1-month SMA of BTC Hash Rate vs 2-month SMA of BTC Hash Rate.",
+        "Miner capitulation: 1m SMA crosses below 2m SMA. Recovery: 1m SMA crosses back above 2m SMA.",
+        "Enhanced buy signal: After hash rate recovery (1m crosses above 2m), wait for 10-day price SMA to cross above 20-day price SMA. This momentum filter significantly reduces max drawdown.",
+        "Signal sequence: (1) Capitulation detected -> (2) Hash rate recovers -> (3) Price momentum confirms -> BUY.",
+        "SMA periods not critical -- the concept is robust across parameter choices."
+      ],
+      "backtest_results": {
+        "win_rate": 0.89,
+        "avg_return_to_cycle_peak": ">5000%",
+        "avg_max_drawdown": -0.11,
+        "total_signals": 9,
+        "failed_signals": 1,
+        "failed_signal_detail": "January 2015: 42% drawdown",
+        "avg_trade_duration_days": 253
+      },
+      "data_requirements": ["Bitcoin hash rate (daily, from blockchain.com or Glassnode)", "Bitcoin price (daily)"],
+      "implementation_complexity": "low",
+      "relevance": "high",
+      "assets": ["BTC-USD"],
+      "actionable_for_system": "Already have Hash Ribbons signal module (disabled). 89% win rate on 9 signals is compelling but very low frequency. Could activate as a rare high-conviction overlay. Data already available from on-chain sources."
+    },
+    {
+      "title": "MSTR mNAV Premium/Discount Signal (bitcoinquant.co + bankless)",
+      "url": "https://bitcoinquant.co/company/MSTR",
+      "source_type": "industry",
+      "signal_ideas": [
+        "mNAV = Market_Cap / BTC_NAV. Where BTC_NAV = BTC_Holdings * BTC_Price.",
+        "EV-based variant: Enterprise_Value / BTC_NAV (includes debt and preferred stock).",
+        "Signal zones: mNAV > 2.0 = extreme premium (historically preceded corrections). mNAV 1.0-2.0 = normal premium. mNAV < 1.0 = discount (rare, historically strong buy signal). Current: EV mNAV = 1.08, Market Cap mNAV = 0.83.",
+        "Davis Double Play: When mNAV < 1.0, potential for dual return from (1) BTC appreciation + (2) premium normalization.",
+        "mNAV peaked >3.0x in late 2024 during BTC bull run. Compressed to ~1.0 after BTC spot ETFs launched (structural premium evaporated)."
+      ],
+      "backtest_results": null,
+      "data_requirements": ["MSTR market cap or stock price", "MSTR shares outstanding", "MSTR BTC holdings count (from 8-K filings)", "BTC spot price", "MSTR debt outstanding (for EV variant)"],
+      "implementation_complexity": "low",
+      "relevance": "high",
+      "assets": ["MSTR", "BTC-USD"],
+      "actionable_for_system": "Not currently implemented. Simple to compute: just need MSTR price, shares outstanding, BTC holdings (updated quarterly from filings, ~528K BTC as of recent). Could add as MSTR-specific signal. mNAV < 1.0 is a clear buy signal."
+    },
+    {
+      "title": "Precious Metals Intraday Bias Strategy (Benzinga/Unger Academy)",
+      "url": "https://www.benzinga.com/Opinion/25/10/48046945/market-bias-in-precious-metals-futures-trading-system-on-gold-silver-platinum-and-copper",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Gold/Silver intraday bias: Night weakness (2:00 AM to late morning), afternoon rebound, then resumption of weakness next night.",
+        "Gold entry rules: Long at 10:00 AM NY time, short at 2:00 AM NY time. Positions alternate (closing prior position).",
+        "Pattern replicates across Gold, Silver, Platinum, and Copper.",
+        "15-year backtest (2010-2025) segmented into 3-year intervals shows pattern stability.",
+        "Limitation: Average trade size is modest due to short daily exposure."
+      ],
+      "backtest_results": {
+        "test_period": "2010-2025",
+        "notes": "Positive equity curve shown but no specific Sharpe/win rate/drawdown numbers published. Pattern confirmed across all four metals."
+      },
+      "data_requirements": ["Intraday gold/silver prices (hourly or 15-min)", "Time-of-day awareness (NY timezone)"],
+      "implementation_complexity": "low",
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Already have Gold Overnight Bias and Intraday Seasonality signals (both disabled/pending). This validates the concept. Could activate overnight bias with these specific time windows (2AM/10AM NY). Metals loop runs 24/7 so timing is feasible."
+    },
+    {
+      "title": "Copper-Gold Ratio Recession Indicator (gold-standard.org)",
+      "url": "https://gold-standard.org/insights/the-copper-to-gold-ratio-a-powerful",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Copper/Gold Ratio = Copper_Price_per_oz / Gold_Price_per_oz. Rising ratio = economic expansion. Falling ratio = recession risk.",
+        "Historical correlation with 10Y Treasury yields: ~0.85 (weakening in recent years).",
+        "Current ratio (2025): ~0.00077, lowest in 50 years. Extreme risk-off signal.",
+        "Key historical readings: 2008 crisis = 0.00110, 2020 COVID = 0.00084, 1980 stagflation = 0.00086.",
+        "QuantifiedStrategies: Buy signal when Cu/Au ratio < 0.19 for first time in 1 year. Positive results for 1-12 month holding periods.",
+        "Caveat: 2025 distorted by tariff-driven copper flows. False signals common around macro tremors."
+      ],
+      "backtest_results": {
+        "notes": "Positive forward returns after ratio drops below 0.19 threshold (1-12 month horizons). No formal Sharpe/win rate. Primarily a regime indicator, not a trade signal."
+      },
+      "data_requirements": ["Copper price (daily)", "Gold price (daily)", "10Y Treasury yield (for correlation check)"],
+      "implementation_complexity": "trivial",
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD", "BTC-USD"],
+      "actionable_for_system": "Already have Copper/Gold Ratio in metals_cross_assets.py. Currently used as a component of Metals Cross-Asset signal. Could add standalone ratio threshold signal. Extreme current reading (50-year low) suggests structural gold demand."
+    },
+    {
+      "title": "Gold vs Real Yields Inverse Correlation (longtermtrends.com)",
+      "url": "https://www.longtermtrends.com/gold-vs-real-yields/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Gold-Real Yield inverse correlation: r = -0.82 (Erb & Harvey). Gold rises when real yields fall.",
+        "Real Yield = 10Y Treasury Nominal Rate - Expected Inflation (or TIPS yield directly).",
+        "Signal logic: When real yields turn negative, gold becomes attractive (opportunity cost of holding zero-yield gold drops). When real yields rise sharply, gold faces headwind.",
+        "Breakeven inflation momentum: If breakevens rise faster than nominal rates, real yields fall -> gold bullish.",
+        "Caveat: Post-March 2022, gold rose despite rising real yields (safe-haven demand override). Correlation is state-dependent."
+      ],
+      "backtest_results": null,
+      "data_requirements": ["10Y Treasury yield (FRED DGS10)", "10Y TIPS yield (FRED DFII10)", "Breakeven inflation rate (FRED T10YIE)", "Gold price"],
+      "implementation_complexity": "low",
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Already have Gold Real Yield Paradox signal (disabled). Already have Breakeven Inflation Momentum signal (disabled). This confirms both are valid concepts. The -0.82 correlation is strong. Could activate with FRED data (already used for Treasury Risk Rotation)."
+    },
+    {
+      "title": "Cross-Asset Time-Series Momentum I-XTSM (Wiley/academic)",
+      "url": "https://onlinelibrary.wiley.com/doi/10.1111/acfi.70001",
+      "source_type": "blog",
+      "signal_ideas": [
+        "Improved Cross-Asset TSMOM (I-XTSM): Use GSCI industrial metal index as the cross-asset signal instead of bonds.",
+        "Signal: Past 1-month return of cross-asset predicts equity market direction (NOT the traditional 12-month lookback).",
+        "Regime identification: Use cross-asset return sign as regime indicator. When industrial metals had positive 1-month return, equity momentum strategies perform better.",
+        "Standard XTSM: Past bond returns predict equity, past equity returns predict bonds. Relationship exploits lead-lag across asset classes.",
+        "I-XTSM increases profitability substantially and avoids momentum crashes."
+      ],
+      "backtest_results": {
+        "test_period": "1990-2023",
+        "notes": "I-XTSM increases profitability substantially vs standard TSMOM. Avoids momentum collapse. Full paper behind paywall - exact Sharpe/returns not accessible."
+      },
+      "data_requirements": ["GSCI Industrial Metals Index (monthly returns)", "Equity index returns (monthly)", "Bond index returns (monthly)"],
+      "implementation_complexity": "medium",
+      "relevance": "medium",
+      "assets": ["BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Already have Cross-Asset TSMOM signal (disabled). The I-XTSM improvement (use 1-month industrial metals as cross-asset signal instead of 12-month bonds) is actionable. Could fetch GSCI metals index via yfinance and implement 1-month lookback variant."
+    },
+    {
+      "title": "Central Bank Gold Buying as Leading Indicator (World Gold Council)",
+      "url": "https://www.gold.org/goldhub/gold-focus/2026/04/central-bank-gold-statistics-central-banks-stay-course-gold-february",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Central bank net gold purchases: Monthly data from WGC. 2025 average: 26t/month. Feb 2026: 27t (in line with trend).",
+        "Key buyers with consecutive streaks: Czech Republic (36 consecutive months), China (16 months), Uzbekistan (5 months).",
+        "Signal logic: Sustained CB buying (>20t/month, multiple months) = structural floor under gold prices. Sharp drop in CB buying pace = price sensitivity, potential pullback.",
+        "YTD 2026 pace (31t through Feb) trails 2025 equivalent by 38%, suggesting price sensitivity at current elevated levels.",
+        "New entrants (Africa: Uganda, Kenya) starting domestic gold purchasing = broadening demand base."
+      ],
+      "backtest_results": null,
+      "data_requirements": ["WGC monthly central bank gold statistics (free from gold.org)", "Country-level reserve data"],
+      "implementation_complexity": "low",
+      "relevance": "medium",
+      "assets": ["XAU-USD"],
+      "actionable_for_system": "Not currently implemented as a signal. Monthly frequency is very low. Could add as a slow-moving fundamental overlay: scrape WGC monthly data. When CB buying >30t/month for 3+ months, boost gold bullish bias. When CB buying drops below 15t/month, reduce bullish bias."
+    },
+    {
+      "title": "Breakout Momentum with Volume Filter (luxalgo.com)",
+      "url": "https://www.luxalgo.com/blog/top-10-algo-trading-strategies-for-2025/",
+      "source_type": "blog",
+      "signal_ideas": [
+        "Volume surge breakout: Volume must be 10%+ above 50-day MA to confirm breakout.",
+        "Gold ETF backtest: Average 0.86% gain over 20 days without filter, rising to 1.25% with volume filter.",
+        "Multi-timeframe RSI: 5-min RSI agreement with 1-hr RSI achieves 90%+ accuracy in backtests. Use adaptive thresholds (40/80 in strong uptrends instead of standard 30/70).",
+        "Bollinger Bands: Middle Band = 20-period SMA, Outer = +/- 2 sigma (adjustable 1.5-2.5 sigma). Position sizing scales to band width."
+      ],
+      "backtest_results": {
+        "gold_etf_20d_return": 0.0125,
+        "gold_etf_20d_return_no_filter": 0.0086,
+        "rsi_multi_tf_accuracy": ">90%",
+        "notes": "Volume filter improves gold ETF breakout returns by 45%"
+      },
+      "data_requirements": ["OHLCV data (daily or intraday)", "50-day volume MA"],
+      "implementation_complexity": "trivial",
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD", "BTC-USD", "ETH-USD"],
+      "actionable_for_system": "Already have Volume Confirmation signal (disabled) and Volume Flow signal (disabled). The volume surge threshold (10%+ above 50-day MA) is a specific, testable rule. Could use as confirmation filter for existing breakout signals."
+    },
+    {
+      "title": "DXY-Gold Inverse Correlation Divergence Signal",
+      "url": "https://goldsilver.com/industry-news/article/dollar-vs-gold-relationship-why-they-often-move-in-opposite-directions/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Gold-DXY correlation: typically -0.5 to -0.8. 60-day rolling correlation ~-0.45.",
+        "Divergence signal: When gold rises despite DXY strength (or vice versa), it signals strong underlying demand/supply beyond dollar dynamics.",
+        "2025 breakdown: Gold surged to $4,380 despite mixed DXY, driven by CB buying and geopolitical safe-haven.",
+        "Trading rule: If 30-day rolling Gold-DXY correlation turns positive (>0), it signals regime shift - gold is decoupled from dollar and driven by other factors (usually bullish for gold).",
+        "Cancel trade if gold doesn't react within 2-3 candles after dollar move, or if real yields move differently."
+      ],
+      "backtest_results": null,
+      "data_requirements": ["DXY index (daily)", "Gold price (daily)", "Rolling correlation calculation"],
+      "implementation_complexity": "trivial",
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Already have DXY Cross-Asset signal (disabled). The specific divergence idea (positive correlation = regime shift) is interesting. Could add as a binary overlay: when 30-day Gold-DXY correlation > 0 for 5+ days, flag as 'gold decoupled' regime and boost gold bullish signals."
+    },
+    {
+      "title": "Silver Seasonality: December-February and July-August",
+      "url": "https://www.quantifiedstrategies.com/seasonal-trading-strategy-silver/",
+      "source_type": "blog",
+      "signal_ideas": [
+        "Silver seasonality best periods: December to February (industrial demand for new year), July to August.",
+        "Cause: Industrial silver users place orders at beginning of new year driving Dec-Feb demand.",
+        "Silver follows gold's seasonal patterns but with higher beta.",
+        "Calendar-based: Long silver Dec 1 - Feb 28, Long silver Jul 1 - Aug 31. Flat otherwise."
+      ],
+      "backtest_results": null,
+      "data_requirements": ["Silver daily prices", "Calendar dates"],
+      "implementation_complexity": "trivial",
+      "relevance": "medium",
+      "assets": ["XAG-USD"],
+      "actionable_for_system": "Already have Intraday Seasonality signal (disabled) and Calendar signal (disabled). The Dec-Feb / Jul-Aug silver seasonal pattern is well-known. Could activate Calendar signal with these specific monthly windows for silver."
+    },
+    {
+      "title": "VIX Backwardation Directional Signal Analysis (CBOE)",
+      "url": "https://www.cboe.com/insights/posts/inside-volatility-trading-is-vix-backwardation-necessarily-a-sign-of-a-future-down-market/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "VIX backwardation occurs less than 20% of the time since 2010.",
+        "Backwardation periods tend to be shorter than contango periods.",
+        "Major backwardation episodes correlated with: 2008 crisis, 2011 EU debt crisis, Q4 2018 selloff, 2020 pandemic.",
+        "CRITICAL CAVEAT (from CBOE themselves): 'Outside of some of the biggest and most memorable market selloffs the results don't pan out.'",
+        "Best stock performance often follows immediately after biggest selloffs. Using backwardation as a sell signal causes whipsaw."
+      ],
+      "backtest_results": {
+        "notes": "CBOE's own analysis suggests backwardation is NOT a reliable standalone sell signal. Works only for the largest crises. Many false signals."
+      },
+      "data_requirements": ["VIX futures term structure"],
+      "implementation_complexity": "low",
+      "relevance": "low",
+      "assets": ["BTC-USD", "ETH-USD", "MSTR"],
+      "actionable_for_system": "Validates caution in using VIX backwardation as a standalone signal. Better used as a regime overlay (risk-off context) rather than a trade signal. Current VIX Term Structure signal should weight this appropriately."
+    },
+    {
+      "title": "Cross-Asset TSMOM Sharpe Enhancement (microalphas.com)",
+      "url": "https://microalphas.com/cross-asset-signals/",
+      "source_type": "blog",
+      "signal_ideas": [
+        "Time-Series Momentum (TSMOM) across assets: Sharpe ratios 45% higher than single-asset momentum.",
+        "TSMOM performance is 70% above diversified buy-and-hold.",
+        "Lookback periods: 6-12 months for cross-asset momentum signals.",
+        "Machine learning models achieve 80.6% and 83.6% predictive accuracy on cross-asset signals.",
+        "Minimum data requirement: 3-5 years (750-1250 daily observations), ideally 5-8 years for multiple cycles."
+      ],
+      "backtest_results": {
+        "sharpe_improvement": "45% higher than single-asset momentum",
+        "vs_buy_hold": "70% above diversified buy-and-hold",
+        "ml_accuracy": [0.806, 0.836],
+        "notes": "No specific absolute Sharpe ratio provided. Relative improvement metrics only."
+      },
+      "data_requirements": ["Multi-asset daily price data (5-8 years)", "Futures prices across equities, bonds, currencies, commodities"],
+      "implementation_complexity": "high",
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD", "BTC-USD", "ETH-USD", "MSTR"],
+      "actionable_for_system": "Already have Cross-Asset TSMOM signal (disabled). The 45% Sharpe improvement over single-asset momentum is compelling. Could implement with existing multi-asset data. 6-12 month lookback aligns with existing infrastructure."
+    },
+    {
+      "title": "COT Index Thresholds for Gold/Silver (market-bulls.com + barchart)",
+      "url": "https://market-bulls.com/cot-report-gold/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "COT Index Formula: COT_Index = (currentNet - min(net, N)) / (max(net, N) - min(net, N)) * 100.",
+        "Standard lookback periods: N = 26 weeks (6-month), N = 52 weeks (12-month), N = 156 weeks (36-month/3-year).",
+        "Commercial Index thresholds: Above 80 = commercials bullish (contrarian BUY). Below 20 = commercials bearish (contrarian SELL).",
+        "Large Speculator contrarian: Near 90+ = speculators very long (contrarian SELL). Near 10 or below = speculators very short (contrarian BUY).",
+        "MarketBulls provides both 6-month and 36-month COT Index for gold -- dual timeframe confirmation improves reliability."
+      ],
+      "backtest_results": null,
+      "data_requirements": ["CFTC weekly COT data (free from cftc.gov)", "Historical commercial/speculative net positions", "Gold and silver futures specifically"],
+      "implementation_complexity": "low",
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Already have COT Positioning signal. Could enhance with the specific 80/20 threshold on the normalized index and add the dual-timeframe (6m + 36m) confirmation. The normalization formula is exactly what min-max scaling does. Easy to implement."
+    },
+    {
+      "title": "Alpha Architect: Value, Momentum & Carry Across Asset Classes",
+      "url": "https://alphaarchitect.com/momentum-factor-investing/",
+      "source_type": "blog",
+      "signal_ideas": [
+        "Commodity momentum: 12-month lookback, skip most recent month (12-1 momentum). Long top tercile, short bottom tercile.",
+        "Commodity carry: Based on futures roll yield (backwardation = positive carry = long signal).",
+        "Commodity value: Based on mean-reversion of real commodity prices over 5-year horizon.",
+        "Factor crowding in commodities can erode premiums. Monitor factor crowding metrics.",
+        "150+ years of momentum evidence across 40+ countries. Most robust factor across all asset classes."
+      ],
+      "backtest_results": {
+        "notes": "AlphaArchitect site blocked (403). Summary from search results: momentum is most robust factor across asset classes over 150+ years. Specific commodity Sharpe ratios not accessible."
+      },
+      "data_requirements": ["Commodity futures prices (front-month and deferred)", "5-year real price history for value factor", "Roll yield data for carry factor"],
+      "implementation_complexity": "medium",
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "actionable_for_system": "Trend Slope Momentum (disabled) could implement 12-1 momentum. Could add carry factor using futures roll yield data from Binance FAPI (already available). Value factor needs 5-year real price series -- feasible with existing data."
+    }
+  ],
+  "meta": {
+    "blocked_sites": ["quantifiedstrategies.com (bot verification)", "alphaarchitect.com (403)", "priceactionlab.com (403)", "spotedcrypto.com (403)"],
+    "paywalled": ["Wiley (I-XTSM paper)", "Medium (VIX regime detection, Gold-Silver ratio)"],
+    "best_actionable_signals": [
+      "Hash Ribbons (89% win rate, 9 signals, already have module -- just activate)",
+      "MSTR mNAV < 1.0 (clear buy signal, simple to compute, not yet implemented)",
+      "COT dual-timeframe index 80/20 threshold (enhances existing COT signal)",
+      "Gold-Silver Ratio 80-50 rule (3875% return over 25 years, but only 5 trades)",
+      "VIX/VIX3M ratio 0.95/1.0 thresholds (refines existing VIX Term Structure signal)",
+      "Precious metals intraday bias (2AM/10AM NY time windows, validates existing overnight bias concept)"
+    ],
+    "new_signal_candidates_not_yet_in_system": [
+      "MSTR mNAV premium/discount (simple: MSTR_market_cap / (BTC_holdings * BTC_price))",
+      "Central bank gold buying pace (monthly WGC data as slow fundamental overlay)",
+      "Gold-DXY correlation regime shift (positive correlation = decoupled gold = bullish)"
+    ]
+  }
+}

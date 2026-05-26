@@ -1,0 +1,510 @@
+{
+  "searches_completed": 8,
+  "search_date": "2026-05-26",
+  "search_type": "ssrn_and_industry_research",
+  "total_sources": 22,
+  "sources": [
+    {
+      "title": "Cross-Sectional and Time-Series Tests of Return Predictability: Cross-Asset Momentum Approach",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5858542",
+      "source_type": "ssrn",
+      "authors": "Mizuki Kusakabe",
+      "date": "2025-12",
+      "signal_ideas": [
+        "Cross-asset momentum: use past government bond returns to predict future equity returns, and vice versa",
+        "Time-series momentum applied across asset class boundaries rather than within",
+        "Bond-equity momentum spillover as a regime-aware signal"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["government bond returns (10Y)", "equity index returns", "commodity futures returns"],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "XAU-USD", "XAG-USD"],
+      "implementation_notes": "Could adapt to metals-crypto cross-momentum: use gold returns to predict silver direction, or bond momentum to predict metals. Already partially implemented in metals_cross_assets.py but this formalizes the time-series approach."
+    },
+    {
+      "title": "Learning to Rank: Enhancing Momentum Strategies Across Asset Classes",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5255258",
+      "source_type": "ssrn",
+      "authors": "Tom Burdorf",
+      "date": "2025-05",
+      "signal_ideas": [
+        "Learning-to-rank (LTR) algorithms for cross-sectional momentum ranking",
+        "Replace simple momentum sorting with ML-based ranking across bonds, equities, commodities, FX",
+        "LTR significantly enhances momentum in several asset classes vs naive sorting"
+      ],
+      "backtest_results": {
+        "description": "ML-filtered momentum outperforms static sort in bonds and commodities",
+        "sharpe_improvement": "significant in several asset classes"
+      },
+      "data_requirements": ["multi-asset momentum features", "LTR model (LambdaMART or similar)", "cross-sectional returns"],
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD", "BTC-USD"],
+      "implementation_notes": "Could replace our simple momentum signal with an LTR-based cross-asset ranking. Would need sufficient history across all 5 tier-1 instruments. Heavy ML infrastructure requirement."
+    },
+    {
+      "title": "Gold Silver Pair Trading - Mean Reversion Strategy Using Machine Learning",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5710242",
+      "source_type": "ssrn",
+      "authors": "Vineet Kumar Mittal, Richa Mittal",
+      "date": "2025",
+      "signal_ideas": [
+        "Gold-silver spread z-score with ML regime filter (Gradient Boosting, SVM)",
+        "Z-score normalization of gold/silver spread for mean reversion entries",
+        "Regime filter trained on volatility, macro, and sentiment features to distinguish stable vs unstable spread",
+        "ML-filtered entries reduce drawdowns during high-vol regimes (COVID, inflation spikes, commodity rallies)"
+      ],
+      "backtest_results": {
+        "description": "ML-filtered mean reversion outperforms static statistical arbitrage",
+        "improvement": "better entry precision, reduced drawdowns in high-vol regimes",
+        "test_period": "2015-2025",
+        "instruments": "COMEX GC-SI futures, GLD-SLV ETFs"
+      },
+      "data_requirements": ["XAU-USD prices", "XAG-USD prices", "gold/silver ratio history", "VIX or volatility measure", "macro sentiment features"],
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "HIGHLY RELEVANT. We already track gold/silver ratio in metals_cross_assets.py. Could implement: (1) z-score of ratio with entry/exit thresholds, (2) ML regime gate using existing volatility + macro features. The ratio recently compressed to <50 from >100 — extreme regime. Zenodo dataset available for replication."
+    },
+    {
+      "title": "A Reliable Approach to Forecast Prices of Precious and Base Metals",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5098410",
+      "source_type": "ssrn",
+      "authors": "Amit Sinha",
+      "date": "2025-01",
+      "signal_ideas": [
+        "Multi-factor precious metals forecasting model",
+        "Journal of Finance Issues methodology for metals price prediction"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["precious metals prices", "base metals prices", "macro indicators"],
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Could not access full abstract due to SSRN 403. Worth reading the full paper for specific methodology."
+    },
+    {
+      "title": "Forecasting Price Volatility of Non-Ferrous Metals: Econometric vs ML vs AI Models",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5330706",
+      "source_type": "ssrn",
+      "authors": "Rafal Sieradzki, Slawomir Kwiatek",
+      "date": "2025-03",
+      "signal_ideas": [
+        "GARCH achieves best/comparable MSE performance vs LSTM for metal volatility forecasting",
+        "Pretrained Chronos model shows superior accuracy under MAE and QLIKE metrics",
+        "Volatility forecasting ensemble: GARCH + Chronos for metals"
+      ],
+      "backtest_results": {
+        "description": "GARCH matches LSTM on MSE; Chronos outperforms on MAE and QLIKE",
+        "models_tested": ["GARCH", "LSTM", "Chronos (pretrained)"]
+      },
+      "data_requirements": ["LME metals prices", "OHLCV data", "GARCH model implementation", "Chronos-2 (already deployed)"],
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "VALIDATES our Chronos-2 deployment. Paper confirms pretrained Chronos outperforms on MAE/QLIKE for metals volatility. Could add a GARCH ensemble layer alongside Chronos for volatility-adjusted signals. We already have Chronos running but accuracy has regressed — this suggests MAE/QLIKE are better evaluation metrics than directional accuracy."
+    },
+    {
+      "title": "Precious Metals in Financial Markets: A Copula Application",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5764942",
+      "source_type": "ssrn",
+      "authors": "Mattia Macalli",
+      "date": "2025",
+      "signal_ideas": [
+        "Copula-based dependency structure between precious metals",
+        "Tail dependence detection for extreme co-movement events",
+        "Non-linear dependency signals between gold, silver, platinum"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["multi-metals price series", "copula estimation library"],
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Could enhance our dynamic correlation module (currently dead code per memory). Copula approach captures tail dependence that Pearson correlation misses — exactly our known bug."
+    },
+    {
+      "title": "Asynchronous Market Efficiency in Precious Metals Markets: A Local Currency Lens",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5225166",
+      "source_type": "ssrn",
+      "authors": "Hafiz Rana, Fergal O'Connor, Erez Yerushalmi, Jae H. Kim",
+      "date": "2025-04",
+      "signal_ideas": [
+        "Adaptive Market Hypothesis testing in locally-denominated precious metals",
+        "Time-varying efficiency exploitable during inefficient regimes",
+        "Local currency pricing reveals inefficiencies hidden in USD-only analysis"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["precious metals prices in multiple currencies", "USD/SEK rates (already have)", "efficiency test statistics"],
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Interesting for our SEK-denominated warrant trading. If gold/silver show different efficiency regimes in SEK vs USD, we could time entries based on SEK-specific inefficiency windows."
+    },
+    {
+      "title": "Understanding Currency and Precious Metal Interconnectedness During Crises",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5395794",
+      "source_type": "ssrn",
+      "authors": "Nikolaos Kyriazis, Shaen Corbet, Konstantinos Dimitriadis, Imran Yousaf",
+      "date": "2025",
+      "signal_ideas": [
+        "Crisis-regime currency-metals connectedness shifts",
+        "DXY and currency stress as leading indicators for metals moves",
+        "Cross-asset contagion signals during inflationary and geopolitical crises"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["DXY index", "major currency pairs", "precious metals prices", "crisis event dates"],
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Complements our existing DXY cross-asset signal (currently disabled). Could add crisis-regime detection as a gate: when crisis connectedness spikes, amplify metals signals."
+    },
+    {
+      "title": "Bitcoin 2025-2026 Macro Analysis: Policy, Institutional Flows, and Strategic Positioning",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5232018",
+      "source_type": "ssrn",
+      "authors": "Haseeb Chaudhary",
+      "date": "2025",
+      "signal_ideas": [
+        "ETF-driven demand model for Bitcoin price forecasting",
+        "Monte Carlo simulation using regulatory treatment scenarios",
+        "Sovereign adoption probability as a regime signal",
+        "M2 money supply growth correlation with BTC (r=0.78 in 2020-2023)"
+      ],
+      "backtest_results": {
+        "description": "Monte Carlo base case $150K-$250K, tail scenarios >$750K under sovereign adoption",
+        "correlation": "M2 growth vs BTC price r=0.78"
+      },
+      "data_requirements": ["global M2 money supply", "BTC ETF flow data", "regulatory event calendar"],
+      "relevance": "high",
+      "assets": ["BTC-USD"],
+      "implementation_notes": "M2 correlation of 0.78 is actionable. Could implement a Global M2 Growth signal: track M2 from Fed, ECB, BOJ, PBOC and use YoY growth rate as a BTC directional signal. ETF flow data available from multiple sources."
+    },
+    {
+      "title": "Bitcoin Price Dynamics: Macroeconomic Correlations, Halving Cycles, and Institutional Adoption",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5395221",
+      "source_type": "ssrn",
+      "authors": "Soumyajit Sarkar",
+      "date": "2025",
+      "signal_ideas": [
+        "Halving cycle positioning signal (150-day pre/post halving windows)",
+        "Institutional adoption acceleration metric via ETF flow momentum",
+        "Macro correlation regime shifts as entry/exit timing"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["BTC halving dates", "ETF flow data", "macro indicators"],
+      "relevance": "medium",
+      "assets": ["BTC-USD"],
+      "implementation_notes": "Halving cycle signal is partially captured by our existing system. The ETF flow momentum signal is new and actionable."
+    },
+    {
+      "title": "Bitcoin ETFs and Structural Decoupling in the Cryptocurrency Market",
+      "url": "https://www.tandfonline.com/doi/full/10.1080/23322039.2026.2625541",
+      "source_type": "ssrn",
+      "authors": "Various",
+      "date": "2026",
+      "signal_ideas": [
+        "BTC decoupling from altcoins as a regime indicator",
+        "BTC dominance > 60% signals institutional-led (not retail) market",
+        "Altcoin correlation dynamics as a risk-on/risk-off signal"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["BTC dominance", "altcoin correlation matrix", "ETF flow data"],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "ETH-USD"],
+      "implementation_notes": "BTC dominance at 60% now. When BTC dominance peaks and reverses, it historically signals altcoin rotation (bullish ETH). Could add BTC.D momentum as an ETH timing signal."
+    },
+    {
+      "title": "The Extremity Premium: Sentiment Regimes and Adverse Selection in Cryptocurrency Markets",
+      "url": "https://arxiv.org/abs/2602.07018v2",
+      "source_type": "ssrn",
+      "authors": "Murad Farzulla",
+      "date": "2026-02",
+      "signal_ideas": [
+        "Extreme F&G regimes predict excess uncertainty beyond realized vol (p<0.001, Cohen's d=0.21)",
+        "Extremity premium: extreme fear AND extreme greed both widen spreads vs neutral periods",
+        "Granger causality from uncertainty to spreads (F=211)",
+        "Effect replicates on ETH and across 6 of 7 market cycles",
+        "Within-volatility-quintile comparisons show significant premium"
+      ],
+      "backtest_results": {
+        "description": "Significant extremity premium in BTC/ETH across 6/7 cycles",
+        "p_value": "<0.001",
+        "effect_size": "Cohen's d = 0.21",
+        "granger_f_stat": 211,
+        "period": "Feb 2018 - Jan 2026 (N=2896)"
+      },
+      "data_requirements": ["Crypto Fear & Greed Index (already have)", "BTC/ETH daily data", "bid-ask spreads"],
+      "relevance": "high",
+      "assets": ["BTC-USD", "ETH-USD"],
+      "implementation_notes": "HIGHLY RELEVANT. We already use F&G as a contrarian signal. This paper adds nuance: BOTH extreme fear AND extreme greed predict wider spreads/uncertainty. Could enhance our F&G signal with a volatility-regime-aware gate: during extremes, expect higher vol and adjust position sizing. The Granger causality F=211 is extremely strong."
+    },
+    {
+      "title": "Risk Premia in Commodity Markets",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4796343",
+      "source_type": "ssrn",
+      "authors": "Athanasios Sakkas",
+      "date": "2025-07",
+      "signal_ideas": [
+        "News-based uncertainty factors with negative risk premium in commodities",
+        "Commodities as safer-at-bad-times assets — contrarian signal during uncertainty spikes",
+        "Cross-sectional commodity pricing using uncertainty and volatility factors"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["commodity futures returns", "news-based uncertainty indices", "VIX/GVZ", "cross-sectional commodity data"],
+      "relevance": "medium",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Confirms our contrarian approach during fear spikes. Could formalize: when news uncertainty index spikes AND commodities are 'safer at bad times', increase metals allocation."
+    },
+    {
+      "title": "Momentum Factor Investing: Evidence and Evolution (150-Year Study)",
+      "url": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5561720",
+      "source_type": "ssrn",
+      "authors": "van Vliet, Baltussen, Dom, Vidojevic",
+      "date": "2025-08",
+      "signal_ideas": [
+        "150-year momentum factor evidence across global markets",
+        "Momentum robustness across domestic and international markets",
+        "Evolution of momentum premium over time — still statistically significant"
+      ],
+      "backtest_results": {
+        "description": "Robust momentum factor over 150 years of data across global markets",
+        "period": "150+ years"
+      },
+      "data_requirements": ["multi-asset return series"],
+      "relevance": "low",
+      "assets": ["BTC-USD", "XAU-USD", "XAG-USD"],
+      "implementation_notes": "Confirms momentum is robust. Our momentum signal is already active. Low incremental value."
+    },
+    {
+      "title": "CME Group: Relative Value Prospects of Precious Metals in 2026",
+      "url": "https://www.cmegroup.com/insights/economic-research/2026/the-relative-value-prospects-of-precious-metals-in-2026.html",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Gold/Silver Ratio breached 100x (2020-like extreme) then compressed to <60x — mean reversion signal",
+        "Gold-real yield divergence: gold rallied despite elevated real yields — structural regime shift",
+        "Metals ADV up 35% to 988K contracts — volume confirmation signal",
+        "Fiscal posture analysis as metals macro indicator"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["gold/silver ratio", "10Y TIPS real yield", "CME metals volume/ADV", "fiscal deficit data"],
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Three actionable signals: (1) G/S ratio mean reversion when breaching extreme levels (>95 or <55), (2) GYDI-style gold-real-yield divergence composite, (3) CME metals ADV as volume confirmation. Ratio recently at <50 — extreme low, historically mean-reverts to 60-70."
+    },
+    {
+      "title": "CME Group: The Great Inflation Debate — Precious Metals vs Bonds",
+      "url": "https://www.cmegroup.com/insights/economic-research/2026/the-great-inflation-debate-pits-precious-metals-against-bonds.html",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Breakeven inflation rate as a metals/bonds relative signal",
+        "TIPS yield inversion as a gold accumulation trigger",
+        "Precious metals outperformance vs bonds during fiscal deterioration regimes"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["TIPS yields", "breakeven inflation rates", "FRED data (already integrated)", "bond ETF prices"],
+      "relevance": "high",
+      "assets": ["XAU-USD", "XAG-USD"],
+      "implementation_notes": "Aligns with our existing Breakeven Inflation Momentum signal (pending validation). Could promote from disabled to active if combined with the real-yield divergence signal."
+    },
+    {
+      "title": "Gold-Real Yield Divergence Tracker (GYDI)",
+      "url": "https://ahasignals.com/gold-real-yield-divergence-tracker/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "GYDI composite score (0-100): Paradox Spread (40%), Correlation Break (35%), Treasury vs Gold Momentum Split (25%)",
+        "30D gold-yield correlation at +0.18 vs baseline -0.45 = structural regime shift",
+        "Paradox regime detection: both gold and yields rising simultaneously (18% of months since 2020, avg 2.8 months)",
+        "Correlation break magnitude: current 0.63 units vs 0.5-unit threshold for max score",
+        "Four-tier severity: LOW (0-24), ELEVATED (25-49), HIGH (50-74), CRITICAL (75-100); current = 42 ELEVATED"
+      ],
+      "backtest_results": {
+        "paradox_frequency": "18% of months since 2020",
+        "avg_paradox_duration": "2.8 months",
+        "current_score": 42,
+        "current_regime": "PARADOX (gold up + yields up)"
+      },
+      "data_requirements": ["gold spot price", "10Y TIPS real yield", "10Y nominal yield", "30-day rolling correlation"],
+      "relevance": "high",
+      "assets": ["XAU-USD"],
+      "implementation_notes": "HIGHLY ACTIONABLE. Implement GYDI as new signal module: (1) Paradox Spread (gold return * yield change sign alignment, 40% weight), (2) Correlation Break (30D rolling corr vs 3Y baseline of -0.45, 35% weight), (3) Momentum Split (gold return minus bond return proxy, 25% weight). All data from FRED + Binance FAPI. When GYDI > 50, traditional real-yield models unreliable."
+    },
+    {
+      "title": "World Gold Council: Gold Demand Trends Q1 2026",
+      "url": "https://www.gold.org/goldhub/research/gold-demand-trends/gold-demand-trends-q1-2026",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Central bank buying rate: 243.7t Q1 2026 (+3% YoY) — leading indicator",
+        "ETF flow momentum reversal: Q1 2026 ETFs at 62t vs 230t Q1 2025 (-73% YoY) — bearish divergence",
+        "Bar & coin demand surge (+42% YoY to 473.6t) — retail FOMO signal",
+        "Gold demand value at record $193B Q1 (+74% YoY) — euphoria indicator",
+        "Jewelry demand collapse (-23% YoY) — high-price demand destruction"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["WGC quarterly demand data (lagged ~6 weeks)", "ETF flow daily data", "central bank buying monthly data"],
+      "relevance": "high",
+      "assets": ["XAU-USD"],
+      "implementation_notes": "ETF flow reversal (-73% YoY in Q1 2026) is potential bearish divergence despite rising prices. Bar/coin surge (+42%) suggests retail FOMO. Monitor for ETF outflow acceleration as early warning. WGC data quarterly but daily ETF holdings from SPDR GLD available."
+    },
+    {
+      "title": "Silver Institute: 2026 Market Outlook — Sixth Consecutive Deficit",
+      "url": "https://silverinstitute.org/global-silver-investment-to-remain-strong-in-2026-against-the-backdrop-of-a-sixth-consecutive-annual-market-deficit/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Structural deficit: 67 Moz projected 2026 (6th consecutive year)",
+        "Gold/silver ratio below 50 (lowest since 2012) — extreme compression, mean reversion risk",
+        "Physical investment demand +20% to 227 Moz — momentum signal",
+        "Industrial fabrication decline -2% to 650 Moz (4-year low) — demand destruction",
+        "ETP holdings 1.31B oz, silver breached $100 then failed — key resistance"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["Silver Institute annual data", "gold/silver ratio", "silver ETP holdings", "industrial demand data"],
+      "relevance": "high",
+      "assets": ["XAG-USD"],
+      "implementation_notes": "G/S ratio <50 is historically extreme — previous compressions preceded ratio expansion (bearish silver vs gold). Industrial demand declining despite deficit — price destroying demand. $100 failed breakout = major resistance. 6th year deficit is structural bullish but priced in."
+    },
+    {
+      "title": "Sprott: Silver Investment Outlook Mid-Year 2025",
+      "url": "https://sprott.com/insights/silver-investment-outlook-mid-year-2025/",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Cumulative shortfall 2021-2025: ~800 Moz — inventory drawdown signal",
+        "Total ETF/mobile inventory drawn since 2019: 1.1B oz — physical squeeze risk",
+        "Solar PV now 17% of silver demand (up from 5.6% in 2015) — structural demand shift",
+        "Mine supply down 7% since 2016 — supply inelasticity",
+        "G/S ratio at 91x vs historical mean 67x (mid-2025) — silver undervalued",
+        "Silver rallies ~2x gold magnitude during precious metals bull markets"
+      ],
+      "backtest_results": {
+        "historical_pattern": "silver rallies approximately 2x gold during bull markets",
+        "gs_ratio_mean": 67,
+        "gs_ratio_mid2025": 91
+      },
+      "data_requirements": ["gold/silver ratio", "COMEX warehouse stocks", "LBMA vault holdings", "solar PV installation data"],
+      "relevance": "high",
+      "assets": ["XAG-USD"],
+      "implementation_notes": "COMEX registered silver inventory and LBMA vault holdings are leading physical squeeze indicators. When registered-to-eligible ratio drops, physical squeeze risk rises. Solar PV demand trackable via IEA quarterly."
+    },
+    {
+      "title": "Amundi Research: Gold Beyond Records",
+      "url": "https://research-center.amundi.com/article/gold-beyond-records",
+      "source_type": "industry",
+      "signal_ideas": [
+        "Multi-factor gold valuation: inflation + CB balance sheets + bond yields",
+        "Central bank buying deceleration H1 2025: 415t (-21% vs H1 2024) — divergence signal",
+        "Record gold ETF monthly inflows Q3 2025: $26B — euphoria indicator",
+        "Institutional gold allocation ~2% vs current traction — underweighting signal",
+        "Three structural catalysts: geopolitical risk premium, fiscal deterioration, demographic shift",
+        "High gold price volatility may curb CB purchases — GVZ as demand-side signal"
+      ],
+      "backtest_results": {
+        "price_targets": {"2026": "$4,200/oz", "2028": "$5,000/oz"},
+        "cb_buying_h1_2025": "415 tonnes (-21% YoY)"
+      },
+      "data_requirements": ["central bank gold purchases (IMF)", "gold ETF flow data", "GVZ", "inflation expectations"],
+      "relevance": "high",
+      "assets": ["XAU-USD"],
+      "implementation_notes": "CB buying deceleration while prices rise = potential divergence. Track monthly CB net purchases via IMF/WGC. GVZ spike -> CB demand reduction -> price vulnerability. Could combine with GYDI for comprehensive gold regime model."
+    },
+    {
+      "title": "Binance Research: Key Trends in Crypto — June 2025",
+      "url": "https://www.binance.com/en/blog/research/binance-research-on-key-trends-in-crypto--june-2025-5076933169959242543",
+      "source_type": "exchange",
+      "signal_ideas": [
+        "BTC spot ETF inflows as momentum signal",
+        "ETH Pectra upgrade catalyst (+43.9% in May 2025)",
+        "DeFi TVL jump +21.4% MoM as crypto risk-on indicator",
+        "BTC ATH at $111,970 — breakout confirmation",
+        "Hyperliquid OI at ATH ($10.1B) as retail FOMO indicator",
+        "US-China tariff dynamics as crypto volatility driver"
+      ],
+      "backtest_results": null,
+      "data_requirements": ["BTC/ETH ETF flow data", "DeFi TVL (DefiLlama)", "futures open interest", "macro event calendar"],
+      "relevance": "medium",
+      "assets": ["BTC-USD", "ETH-USD"],
+      "implementation_notes": "DeFi TVL MoM change partially captured by Crypto Macro signal. ETF flow momentum is new. Futures OI at ATH is contrarian warning."
+    }
+  ],
+  "synthesis": {
+    "highest_priority_new_signals": [
+      {
+        "name": "Gold-Real Yield Divergence Index (GYDI)",
+        "priority": 1,
+        "description": "Composite index measuring breakdown of gold-real yield inverse correlation. Three sub-components: Paradox Spread (40%), Correlation Break (35%), Momentum Split (25%). Four-tier severity 0-100.",
+        "data_available": true,
+        "estimated_implementation_effort": "medium",
+        "expected_assets": ["XAU-USD"],
+        "rationale": "Structural regime shift confirmed by CME, S&P Global, Amundi, AhaSignals. 30D correlation at +0.18 vs -0.45 baseline. When GYDI > 50, traditional models break. Our Gold Real Yield Paradox signal (pending validation) partially addresses this but GYDI composite is more robust."
+      },
+      {
+        "name": "Gold-Silver Ratio Mean Reversion with ML Regime Gate",
+        "priority": 2,
+        "description": "Z-score of gold/silver ratio with Gradient Boosting regime filter. Enter mean reversion trades only when regime is 'stable'. SSRN paper confirms outperformance 2015-2025.",
+        "data_available": true,
+        "estimated_implementation_effort": "medium",
+        "expected_assets": ["XAU-USD", "XAG-USD"],
+        "rationale": "G/S ratio compressed from >100 to <50 — most extreme range in decades. Mean reversion statistically robust per SSRN. ML regime gate reduces drawdowns. Already track ratio in metals_cross_assets.py."
+      },
+      {
+        "name": "Global M2 Money Supply Growth Signal",
+        "priority": 3,
+        "description": "Aggregate M2 from Fed+ECB+BOJ+PBOC. YoY growth rate as BTC directional signal. Correlation r=0.78 confirmed by SSRN for 2020-2023.",
+        "data_available": true,
+        "estimated_implementation_effort": "low",
+        "expected_assets": ["BTC-USD"],
+        "rationale": "Strong correlation (0.78) with BTC. Data from FRED (Fed M2) and central bank APIs. Low cost — monthly fetch + YoY calculation + threshold."
+      },
+      {
+        "name": "ETF Flow Momentum Signal",
+        "priority": 4,
+        "description": "Daily gold ETF (GLD holdings) and BTC ETF net flows. 5-day and 20-day flow momentum as directional signals.",
+        "data_available": true,
+        "estimated_implementation_effort": "low",
+        "expected_assets": ["XAU-USD", "BTC-USD"],
+        "rationale": "ETF flows are dominant marginal buyer for gold and BTC. 2024-2025 reversal coincided with gold breakout. Q1 2026 shows -73% YoY for gold ETFs — potential early warning."
+      },
+      {
+        "name": "Silver Physical Inventory Squeeze Monitor",
+        "priority": 5,
+        "description": "COMEX registered silver inventory, LBMA vault holdings, registered-to-eligible ratio. Alert on threshold breaches.",
+        "data_available": true,
+        "estimated_implementation_effort": "medium",
+        "expected_assets": ["XAG-USD"],
+        "rationale": "1.1B oz drawn from inventory since 2019. 6th consecutive deficit. Physical squeeze risk elevated. COMEX data available daily."
+      },
+      {
+        "name": "F&G Extremity Premium Gate",
+        "priority": 6,
+        "description": "Enhance existing F&G signal: both extreme fear AND extreme greed predict excess uncertainty. Adjust position sizing during extremes. Based on N=2896 day study with p<0.001.",
+        "data_available": true,
+        "estimated_implementation_effort": "low",
+        "expected_assets": ["BTC-USD", "ETH-USD"],
+        "rationale": "SSRN paper (Farzulla 2026) shows extremity premium with strong statistical significance across BTC and ETH. Granger causality F=211. Replicates across 6/7 cycles. We already have F&G — enhancement is straightforward."
+      }
+    ],
+    "existing_signals_to_validate_or_promote": [
+      {
+        "signal": "Gold Real Yield Paradox (pending)",
+        "action": "Promote to active — multiple sources confirm structural regime shift",
+        "evidence": "CME, S&P Global, Amundi, AhaSignals all confirm gold-real yield decoupling is structural"
+      },
+      {
+        "signal": "Breakeven Inflation Momentum (pending)",
+        "action": "Promote to active — CME confirms inflation debate is key metals driver",
+        "evidence": "CME Great Inflation Debate paper pits metals vs bonds explicitly"
+      },
+      {
+        "signal": "Chronos-2 forecasts",
+        "action": "Switch evaluation metric from directional accuracy to MAE/QLIKE",
+        "evidence": "Sieradzki & Kwiatek 2025 shows Chronos outperforms on MAE/QLIKE vs GARCH/LSTM for metals"
+      },
+      {
+        "signal": "Copper/Gold Ratio (pending)",
+        "action": "Review — CME confirms cross-metals relative value is key 2026 theme",
+        "evidence": "CME Relative Value Prospects paper"
+      }
+    ],
+    "key_market_regime_observations": [
+      "Gold-real yield inverse correlation BROKEN since 2022 — structural shift from CB buying + de-dollarization",
+      "Gold/Silver ratio compressed from >100 to <50 in 12 months — most extreme move in decades",
+      "BTC structurally decoupling from altcoins due to ETF-driven institutional demand (BTC.D 60%+)",
+      "Silver industrial demand declining at high prices despite structural deficit — demand destruction risk",
+      "Central bank gold buying decelerating (-21% H1 2025 YoY) while prices rise — divergence warning",
+      "Silver breached $100 then failed back below $80 — $100 is major resistance",
+      "Gold ETF flows reversed -73% YoY in Q1 2026 despite price gains — potential bearish divergence",
+      "Extreme F&G regimes (both fear AND greed) predict excess uncertainty with p<0.001 in crypto"
+    ]
+  }
+}

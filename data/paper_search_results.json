@@ -1,0 +1,667 @@
+[
+  {
+    "title": "All That Glisters Is Not Gold: A Benchmark for Reference-Free Counterfactual Financial Misinformation Detection",
+    "abstract": "We introduce RFC Bench, a benchmark for evaluating large language models on financial misinformation under realistic news. RFC Bench operates at the paragraph level and captures the contextual complexity of financial news where meaning emerges from dispersed cues. The benchmark defines two complementary tasks: reference free misinformation detection and comparison based diagnosis using paired original perturbed inputs. Experiments reveal a consistent pattern: performance is substantially stronger when comparative context is available, while reference free settings expose significant weaknesses, including unstable predictions and elevated invalid outputs. These results indicate that current models struggle to maintain coherent belief states without external grounding. By highlighting this g",
+    "url": "http://arxiv.org/abs/2601.04160v3",
+    "published": "2026-01-07",
+    "year": 2026,
+    "authors": "Yuechen Jiang, Zhiwei Liu, Yupeng Cao",
+    "categories": [
+      "cs.CL",
+      "cs.CE",
+      "q-fin.CP"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Forecast-to-Fill: Benchmark-Neutral Alpha and Billion-Dollar Capacity in Gold Futures (2015-2025)",
+    "abstract": "We test whether simple, interpretable state variables-trend and momentum-can generate durable out-of-sample alpha in one of the world's most liquid assets, gold. Using a rolling 10-year training and 6-month testing walk-forward from 2015 to 2025 (2,793 trading days), we convert a smoothed trend-momentum regime signal into volatility-targeted, friction-aware positions through fractional, impact-adjusted Kelly sizing and ATR-based exits. Out of sample, the strategy delivers a Sharpe ratio of 2.88 and a maximum drawdown of 0.52 percent, net of 0.7 basis-point linear cost and a square-root impact term (gamma = 0.02). A regression on spot-gold returns yields a 43 percent annualized return (CAGR approximately 43 percent) and a 37 percent alpha (Sharpe = 2.88, IR = 2.09) at a 15 percent volatilit",
+    "url": "http://arxiv.org/abs/2511.08571v1",
+    "published": "2025-11-11",
+    "year": 2025,
+    "authors": "Mainak Singha, Jose Aguilera-Toste, Vinayak Lahiri",
+    "categories": [
+      "q-fin.TR",
+      "q-fin.CP",
+      "q-fin.PM",
+      "q-fin.RM",
+      "q-fin.ST"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Bootstrapping Liquidity in BTC-Denominated Prediction Markets",
+    "abstract": "Prediction markets have gained adoption as on-chain mechanisms for aggregating information, with platforms such as Polymarket demonstrating demand for stablecoin-denominated markets. However, denominating in non-interest-bearing stablecoins introduces inefficiencies: participants face opportunity costs relative to the fiat risk-free rate, and Bitcoin holders in particular lose exposure to BTC appreciation when converting into stablecoins. This paper explores the case for prediction markets denominated in Bitcoin, treating BTC as a deflationary settlement asset analogous to gold under the classical gold standard. We analyse three methods of supplying liquidity to a newly created BTC-denominated prediction market: cross-market making against existing stablecoin venues, automated market makin",
+    "url": "http://arxiv.org/abs/2509.11990v1",
+    "published": "2025-09-15",
+    "year": 2025,
+    "authors": "Fedor Shabashev",
+    "categories": [
+      "q-fin.TR"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Complexity of Financial Time Series: Multifractal and Multiscale Entropy Analyses",
+    "abstract": "We employed Multifractal Detrended Fluctuation Analysis (MF-DFA) and Refined Composite Multiscale Sample Entropy (RCMSE) to investigate the complexity of Bitcoin, GBP/USD, gold, and natural gas price log-return time series. This study provides a comparative analysis of these markets and offers insights into their predictability and associated risks. Each tool presents a unique method to quantify time series complexity. The RCMSE and MF-DFA methods demonstrate a higher complexity for the Bitcoin time series than others. It is discussed that the increased complexity of Bitcoin may be attributable to the presence of higher nonlinear correlations within its log-return time series.",
+    "url": "http://arxiv.org/abs/2507.23414v1",
+    "published": "2025-07-31",
+    "year": 2025,
+    "authors": "Oday Masoudi, Farhad Shahbazi, Mohammad Sharifi",
+    "categories": [
+      "q-fin.ST",
+      "physics.data-an"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Advanced Applications of Generative AI in Actuarial Science: Case Studies Beyond ChatGPT",
+    "abstract": "This article explores the potential of generative AI (GenAI) to support actuarial practice through four implemented case studies. It situates these case studies within the broader evolution of artificial intelligence in actuarial science, from early neural networks and machine learning to modern transformer-based GenAI systems. The first case study illustrates how large language models (LLMs) can improve claim cost prediction by extracting informative features from unstructured text for use in the underlying supervised learning task. The second case study demonstrates the automation of market comparisons using Retrieval-Augmented Generation to identify, extract, and structure relevant information from insurers' annual reports. The third case study highlights the capabilities of fine-tuned ",
+    "url": "http://arxiv.org/abs/2506.18942v2",
+    "published": "2025-06-22",
+    "year": 2025,
+    "authors": "Simon Hatzesberger, Iris Nonneman",
+    "categories": [
+      "cs.CY",
+      "q-fin.RM"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Predicting Stock Market Crash with Bayesian Generalised Pareto Regression",
+    "abstract": "This paper develops a Bayesian Generalised Pareto Regression (GPR) model to forecast extreme losses in Indian equity markets, with a focus on the Nifty 50 index. Extreme negative returns, though rare, can cause significant financial disruption, and accurate modelling of such events is essential for effective risk management. Traditional Generalised Pareto Distribution (GPD) models often ignore market conditions; in contrast, our framework links the scale parameter to covariates using a log-linear function, allowing tail risk to respond dynamically to market volatility. We examine four prior choices for Bayesian regularisation of regression coefficients: Cauchy, Lasso (Laplace), Ridge (Gaussian), and Zellner's g-prior. Simulation results suggest that the Cauchy prior delivers the best trade",
+    "url": "http://arxiv.org/abs/2506.17549v1",
+    "published": "2025-06-21",
+    "year": 2025,
+    "authors": "Sourish Das",
+    "categories": [
+      "q-fin.ST",
+      "stat.AP",
+      "stat.ML"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Cross-Modal Temporal Fusion for Financial Market Forecasting",
+    "abstract": "Accurate forecasting in financial markets requires integrating diverse data sources, from historical prices to macroeconomic indicators and financial news. However, existing models often fail to align these modalities effectively, limiting their practical use. In this paper, we introduce a transformer-based deep learning framework, Cross-Modal Temporal Fusion (CMTF), that fuses structured and unstructured financial data for improved market prediction. The model incorporates a tensor interpretation module for feature selection and an auto-training pipeline for efficient hyperparameter tuning. Experimental results using FTSE 100 stock data demonstrate that CMTF achieves superior performance in price direction classification compared to classical and deep learning baselines. These findings su",
+    "url": "http://arxiv.org/abs/2504.13522v2",
+    "published": "2025-04-18",
+    "year": 2025,
+    "authors": "Yunhua Pei, John Cartlidge, Anandadeep Mandal",
+    "categories": [
+      "cs.LG",
+      "cs.NE",
+      "q-fin.CP"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Can ChatGPT Overcome Behavioral Biases in the Financial Sector? Classify-and-Rethink: Multi-Step Zero-Shot Reasoning in the Gold Investment",
+    "abstract": "Large Language Models (LLMs) have achieved remarkable success recently, displaying exceptional capabilities in creating understandable and organized text. These LLMs have been utilized in diverse fields, such as clinical research, where domain-specific models like Med-Palm have achieved human-level performance. Recently, researchers have employed advanced prompt engineering to enhance the general reasoning ability of LLMs. Despite the remarkable success of zero-shot Chain-of-Thoughts (CoT) in solving general reasoning tasks, the potential of these methods still remains paid limited attention in the financial reasoning task.To address this issue, we explore multiple prompt strategies and incorporated semantic news information to improve LLMs' performance on financial reasoning tasks.To the ",
+    "url": "http://arxiv.org/abs/2411.13599v2",
+    "published": "2024-11-19",
+    "year": 2024,
+    "authors": "Shuoling Liu, Gaoguo Jia, Yuhang Jiang",
+    "categories": [
+      "q-fin.ST",
+      "cs.AI"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Achilles, Neural Network to Predict the Gold Vs US Dollar Integration with Trading Bot for Automatic Trading",
+    "abstract": "Predicting the stock market is a big challenge for the machine learning world. It is known how difficult it is to have accurate and consistent predictions with ML models. Some architectures are able to capture the movement of stocks but almost never are able to be launched to the production world. We present Achilles, with a classical architecture of LSTM(Long Short Term Memory) neural network this model is able to predict the Gold vs USD commodity. With the predictions minute-per-minute of this model we implemented a trading bot to run during 23 days of testing excluding weekends. At the end of the testing period we generated $1623.52 in profit with the methodology used. The results of our method demonstrate Machine Learning can successfully be implemented to predict the Gold vs USD commo",
+    "url": "http://arxiv.org/abs/2410.21291v3",
+    "published": "2024-10-13",
+    "year": 2024,
+    "authors": "Angel Varela",
+    "categories": [
+      "q-fin.ST",
+      "cs.LG"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Effect of Leaders Voice on Financial Market: An Empirical Deep Learning Expedition on NASDAQ, NSE, and Beyond",
+    "abstract": "Financial market like the price of stock, share, gold, oil, mutual funds are affected by the news and posts on social media. In this work deep learning based models are proposed to predict the trend of financial market based on NLP analysis of the twitter handles of leaders of different fields. There are many models available to predict financial market based on only the historical data of the financial component but combining historical data with news and posts of the social media like Twitter is the main objective of the present work. Substantial improvement is shown in the result. The main features of the present work are: a) proposing completely generalized algorithm which is able to generate models for any twitter handle and any financial component, b) predicting the time window for a",
+    "url": "http://arxiv.org/abs/2403.12161v1",
+    "published": "2024-03-18",
+    "year": 2024,
+    "authors": "Arijit Das, Tanmoy Nandi, Prasanta Saha",
+    "categories": [
+      "cs.CE",
+      "cs.CY",
+      "q-fin.GN"
+    ],
+    "search": "arxiv_metals"
+  },
+  {
+    "title": "Synthetic American Option Pricing via Jump-HMM-Driven Heston Implied Volatility",
+    "abstract": "Generating realistic synthetic option prices requires implied volatility as an input, yet implied volatility is itself derived from observed option prices, creating a circular dependency that limits synthetic data for machine-learning and risk-analysis applications. We break this circularity with a pipeline in which implied volatility emerges as an output of a structural model of equity returns. A Jump Hidden Markov Model produces multi-asset price paths with realistic stylized facts and cross-asset tail dependence; a modified Heston variance process, whose mean-reversion target depends on regime state, days to expiration, moneyness, and a market-mood indicator, converts those paths into implied-volatility paths; and a recombining binomial lattice prices American options from the resulting",
+    "url": "http://arxiv.org/abs/2605.13998v1",
+    "published": "2026-05-13",
+    "year": 2026,
+    "authors": "Julia Sun, Zheyu Jin, Jiawei Zhang",
+    "categories": [
+      "q-fin.CP",
+      "cs.LG"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "From Index to Equity: Pre-Training Transformers for Stock Return Prediction",
+    "abstract": "This research aims to leverage machine learning to improve stock price prediction and support informed investment decisions related to buying, selling, and holding assets. Specifically, this work investigates transformer-based models for stock prediction and examines the impact of pre-training strategies on forecasting performance. A transformer model was first pre-trained on the Toronto Stock Exchange Index (TSX) to predict intra-day return direction and subsequently fine-tuned on individual TSX stocks. The model was further adapted for return-value regression tasks. Performance was benchmarked against Long Short-Term Memory (LSTM) and XGBoost models. Pre-training on the market index improved the binary cross-entropy loss for individual stock prediction from 0.69 to 0.64. The fine-tuned t",
+    "url": "http://arxiv.org/abs/2605.23962v1",
+    "published": "2026-05-12",
+    "year": 2026,
+    "authors": "Marie Soehl Coolsaet, Roberto Gallardo, Zhen Gao",
+    "categories": [
+      "q-fin.ST",
+      "cs.LG"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "SBCA: Cross-Modal BERT-driven Actor-Critic for Multi-Asset Portfolio Optimization",
+    "abstract": "Portfolio optimization is constrained by linear assumptions and insufficient integration of multi-modal information in traditional models. This paper proposes a cross-modal BERT-driven Actor-Critic framework SBCA for multi-asset portfolio optimization to address the deficiencies of existing deep reinforcement learning DRL methods in fusing price data and financial text sentiment, as well as lacking practical trading constraints. The framework adopts a cross-modal gated fusion mechanism to adaptively integrate price time-series features and text semantic features, embeds downside risk and turnover penalty constraints into the reward function, and constructs a complete empirical system for validation. Experiments on 11-year U.S. stock multi-asset datasets show that SBCA outperforms equal wei",
+    "url": "http://arxiv.org/abs/2605.01384v1",
+    "published": "2026-05-02",
+    "year": 2026,
+    "authors": "Jinfeng Pan, Jiahao Chen",
+    "categories": [
+      "q-fin.CP"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "Semi-Static Variance-Optimal Hedging of Covariance Risk in Multi-Asset Derivatives",
+    "abstract": "We develop a semi-static framework for the variance-optimal hedging of multi-asset derivatives exposed to correlation and covariance risk. The approach combines continuous-time dynamic trading in the underlying assets with a static portfolio of auxiliary contingent claims. Using a multivariate Galtchouk--Kunita--Watanabe decomposition, we show that the resulting global mean-variance problem decouples naturally into an inner continuous-time projection onto the space spanned by the underlying assets and an outer finite-dimensional quadratic optimization over the static hedging instruments. To systematically select suitable auxiliary claims, we leverage multidimensional functional spanning theory, establishing that otherwise unhedgeable cross-gamma exposures can be structurally mitigated thro",
+    "url": "http://arxiv.org/abs/2603.25320v1",
+    "published": "2026-03-26",
+    "year": 2026,
+    "authors": "Konstantinos Chatziandreou, Sven Karbach",
+    "categories": [
+      "q-fin.MF",
+      "q-fin.RM"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "Mislearning of Factor Risk Premia under Structural Breaks: A Misspecified Bayesian Learning Framework",
+    "abstract": "While asset-pricing models increasingly recognize that factor risk premia are subject to structural change, existing literature typically assumes that investors correctly account for such instability. This paper studies how investors instead learn under a misspecified model that underestimates structural breaks. We propose a minimal Bayesian framework in which this misspecification generates persistent prediction errors and pricing distortions, and we introduce an empirically tractable measure of mislearning intensity $(Δ_t)$ based on predictive likelihood ratios.  The empirical results yield three main findings. First, in benchmark factor systems, elevated mislearning does not forecast a deterministic short-run collapse in performance; instead, it is associated with stronger long-horizon ",
+    "url": "http://arxiv.org/abs/2603.21672v3",
+    "published": "2026-03-23",
+    "year": 2026,
+    "authors": "Yimeng Qiu",
+    "categories": [
+      "q-fin.PM",
+      "q-fin.ST",
+      "q-fin.TR",
+      "stat.OT"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "Short-horizon Duesenberry Equilibrium",
+    "abstract": "We develop a continuous-time general equilibrium framework for economies with a heterogeneous population -- modeled as a continuum -- that repeatedly optimizes over short horizons under relative-income (Duesenberry-type) criteria. The cross-section evolves through a Brownian flow on a type space, transporting an effective impatience field that captures time variation in preferences induced by demographic changes, aging, and broader social shifts.  We establish three main results. First, we prove an optimal consumption--investment theorem for infinite heterogeneous populations in this Brownian-flow setting. Second, we define a \\emph{short-horizon Duesenberry equilibrium} -- a sequential-trading (Radner-type) equilibrium in which agents repeatedly solve vanishing-horizon problems under a rel",
+    "url": "http://arxiv.org/abs/2603.16108v2",
+    "published": "2026-03-17",
+    "year": 2026,
+    "authors": "Jaime Alberto Londoño",
+    "categories": [
+      "q-fin.MF",
+      "math.PR"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "Risk-Based Auto-Deleveraging",
+    "abstract": "Auto-deleveraging (ADL) mechanisms are a critical yet understudied component of risk management on cryptocurrency futures exchanges. When available margin and other loss-absorbing resources are insufficient to cover losses following large price moves, exchanges reduce positions and socialize losses among solvent participants via rule-based ADL protocols.  We formulate ADL as an optimization problem that minimizes the exchange's risk of loss arising from future equity shortfalls. In a single-asset, isolated-margin setting, we show that under a risk-neutral expected loss objective the unique optimal policy minimizes the maximum leverage among participants. The resulting design has a transparent structure: positions are reduced first for the most highly levered accounts, and leverage is progr",
+    "url": "http://arxiv.org/abs/2603.15963v1",
+    "published": "2026-03-16",
+    "year": 2026,
+    "authors": "Steven Campbell, Natascha Hey, Ciamac C. Moallemi",
+    "categories": [
+      "q-fin.RM",
+      "q-fin.MF",
+      "q-fin.TR"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "Spectral Portfolio Theory: From SGD Weight Matrices to Wealth Dynamics",
+    "abstract": "We develop spectral portfolio theory by establishing a direct identification: neural network weight matrices trained on stochastic processes are portfolio allocation matrices, and their spectral structure encodes factor decompositions and wealth concentration patterns. The three forces governing stochastic gradient descent (SGD) - gradient signal, dimensional regularisation, and eigenvalue repulsion - translate directly into portfolio dynamics: smart money, survival constraint, and endogenous diversification. The spectral properties of SGD weight matrices transition from Marchenko-Pastur statistics (additive regime, short horizon) to inverse-Wishart via the free log-normal (multiplicative regime, long horizon), mirroring the transition from daily returns to long-run wealth compounding. We ",
+    "url": "http://arxiv.org/abs/2603.09006v2",
+    "published": "2026-03-09",
+    "year": 2026,
+    "authors": "Anders G Frøseth",
+    "categories": [
+      "q-fin.PM",
+      "physics.soc-ph"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "TradeFM: A Generative Foundation Model for Trade-flow and Market Microstructure",
+    "abstract": "Foundation models have transformed domains from language to genomics by learning general-purpose representations from large-scale, heterogeneous data. We introduce TradeFM, a 524M-parameter generative Transformer that brings this paradigm to market microstructure, learning directly from billions of trade events across >9K equities. To enable cross-asset generalization, we develop scale-invariant features and a universal tokenization scheme that map the heterogeneous, multi-modal event stream of order flow into a unified discrete sequence -- eliminating asset-specific calibration. Integrated with a deterministic market simulator, TradeFM-generated rollouts reproduce key stylized facts of financial returns, including heavy tails, volatility clustering, and absence of return autocorrelation. ",
+    "url": "http://arxiv.org/abs/2602.23784v1",
+    "published": "2026-02-27",
+    "year": 2026,
+    "authors": "Maxime Kawawa-Beaudan, Srijan Sood, Kassiani Papasotiriou",
+    "categories": [
+      "cs.LG",
+      "cs.AI",
+      "q-fin.CP",
+      "q-fin.TR"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "An Infinite-Dimensional Insider Trading Game",
+    "abstract": "We generalize the seminal framework of Kyle (1985) to a many-asset setting, bridging the gap between informed-trading theory and modern trading practices. Specifically, we formulate an infinite-dimensional Bayesian trading game in which the informed trader's private information may concern arbitrary aspects of the cross-sectional payoff structure across a continuum of traded assets. In this general setting, we obtain a parsimonious equilibrium characterized by a single scalar fixed point, which yields closed-form characterizations of equilibrium trading strategy, price impact within and across markets, and the information efficiency of equilibrium prices.",
+    "url": "http://arxiv.org/abs/2602.21125v3",
+    "published": "2026-02-24",
+    "year": 2026,
+    "authors": "Christian Keller, Michael C. Tseng",
+    "categories": [
+      "q-fin.MF",
+      "econ.TH",
+      "q-fin.GN",
+      "q-fin.TR"
+    ],
+    "search": "arxiv_momentum"
+  },
+  {
+    "title": "StakeBench: Evaluating Language Understanding Grounded in Market Commitment",
+    "abstract": "Existing financial NLP benchmarks often rely on labels supplied by outside observers, measuring how language is perceived rather than what speakers have committed to in the market. We introduce StakeBench, an evaluation framework for language understanding grounded in market commitment. StakeBench links 560,876 comments from 2,261 resolved markets to verified position, action, and market-odds records across Polymarket and Manifold. Supervision is derived from observable market behavior. Position sides, post-comment trading actions, and market-odds trajectories replace human annotation. Four diagnostic tasks test whether models detect market commitment, identify the revealed side, anticipate future action, and perform collective odds projection. Three commitment-aware metrics measure alignm",
+    "url": "http://arxiv.org/abs/2605.26074v1",
+    "published": "2026-05-25",
+    "year": 2026,
+    "authors": "Yunhua Pei, Jingyu Hu, Yiwei Shi",
+    "categories": [
+      "cs.CL",
+      "cs.AI",
+      "q-fin.GN"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Default Contagion, Matrix Approximation, and Control in Sparse Financial Networks",
+    "abstract": "We study systemic default contagion in sparse financial networks and develop a framework for deciding when aggregate exposure matrices are reliable and when node-level network information changes tail risk and control design. The first contribution is a multi-population McKean-Vlasov foundation for distance-to-default dynamics with common noise, bounded state-dependent killing, loss feedback, sparse weighted exposures, and regulatory intervention, including quantitative convergence, propagation of chaos, stability in contagion matrices, controlled well-posedness, a two-population HJB characterization, and a steep-killing bridge to absorbing-boundary contagion. The second contribution is a set of computable matrix-approximation diagnostics: finite-grid bounds driven by row-exposure dispersi",
+    "url": "http://arxiv.org/abs/2605.24833v1",
+    "published": "2026-05-24",
+    "year": 2026,
+    "authors": "Aoxin Zhang, Yingzhe Wang",
+    "categories": [
+      "math.OC",
+      "q-fin.RM"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Incremental SVD for Large-Scale Dynamic Matrices: Accuracy, Subspace Stability, Refresh Strategies, and Financial Factor-Based Risk Models",
+    "abstract": "Return panels, covariances, and large feature matrices evolve one observation or one entry at a time, yet downstream models require an up-to-date low-rank factorization $A_t \\approx U_t Σ_t V_t^\\top$ on every tick -- a regime where full SVD is prohibitive and existing alternatives sacrifice either singular vectors, singular values, or long-horizon stability. We present a practical, metric-driven study of Brand-style incremental SVD, built around a unified engine that handles row appends, column appends, rank-1 entry updates, and metrics tracking within a single framework, with two core contributions. For rank-1 entry updates, we derive an explicit projection-based rule $U'Σ'(V')^\\top = P_U(\\widehat{A} + δ\\,e_ie_j^\\top)P_V$ that keeps rank fixed while discarding only the out-of-subspace rem",
+    "url": "http://arxiv.org/abs/2605.24514v1",
+    "published": "2026-05-23",
+    "year": 2026,
+    "authors": "Stilyan Staykov",
+    "categories": [
+      "math.NA",
+      "q-fin.RM"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Memory, Roughness, and Information Persistence in Financial Markets: A Structural Approach to Volatility Forecasting",
+    "abstract": "This paper studies the joint role of long-memory dynamics,rough-volatility behavior, and persistence-based forecasting features in equity volatility modeling. We combine semiparametric long-memory estimation, rough-volatility diagnostics, and structured forecasting regressions to examine whether persistence measures contain economically meaningful forecasting information beyond conventional volatility predictors. Using a panel of 115 S&P500 constituents from November 2001 through April 2026, we document that volatility proxies exhibit substantial long-memory behavior and locally rough dynamics. The cross-sectional mean Geweke-Porter-Hudak estimate of the memory parameter is $\\hat{d} = 0.226$, while the corresponding local-Whittle estimate is $\\hat{d} = 0.440$, with statistical significance",
+    "url": "http://arxiv.org/abs/2605.24285v1",
+    "published": "2026-05-22",
+    "year": 2026,
+    "authors": "Akash Deep, Nicholas Appiah, Svetlozar T. Rachev",
+    "categories": [
+      "q-fin.ST",
+      "stat.ML"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "An optimal transport foundation for a class of dynamically consistent risk measures",
+    "abstract": "We study a class of dynamically consistent risk measures that robustify a time-homogeneous Markovian reference model by allowing for distributional uncertainty in its transition laws. We start from one-step convex risk evaluations in which ambiguity is captured by penalized worst-case expectations over alternative transition laws. Imposing time consistency then yields a convex monotone semigroup on bounded continuous payoff functions, and this semigroup represents the associated dynamic risk measure. The semigroup is uniquely characterized by its risk generator. Under a lower bound on the family of penalties in terms of suitable optimal transport costs relative to the reference laws, we identify the generator on smooth test functions. For optimal transport bounds with linear small-time sca",
+    "url": "http://arxiv.org/abs/2605.21759v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Sven Fuhrmann, Michael Kupper, Max Nendel",
+    "categories": [
+      "q-fin.MF",
+      "math.OC",
+      "math.PR"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "What Does Deep Hedging Actually Learn? Delta Corrections, Regime Fragility, and Symbolic Distillation",
+    "abstract": "This paper studies empirical deep hedging for S&P 500 index options under a local downside-shortfall reward. It moves beyond performance comparison by asking what the learned hedge does, when it fails, and whether it can be made auditable. TD3 agents are compared with a daily-updated Black-Scholes delta hedge on the same option episodes. In walk-forward tests from 2015 to 2023, the agents usually learn a systematic delta haircut relative to Black-Scholes. The correction is explained by spot-implied-volatility co-movement and often improves accumulated reward and terminal downside variance, but it is regime-fragile: 2022 exposes losses in adverse daily states, while 2023 shows that underhedging can raise ordinary variance when option P&L is spot-dominated and the volatility channel is unusu",
+    "url": "http://arxiv.org/abs/2605.21696v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Kirill Zernikov",
+    "categories": [
+      "q-fin.RM",
+      "q-fin.CP",
+      "q-fin.PR"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Volatility Surface Reconstruction using Deep Learning under No-Arbitrage Constraints",
+    "abstract": "We study the reconstruction of implied volatility surfaces from sparse and noisy option quotes using deep learning models under no-arbitrage constraints. We compare multiple neural architectures, including multilayer perceptrons, convolutional networks, U-Nets, variational autoencoders, and Transformer-based models against classical SVI parameterizations on option market data. Results show that Transformer and U-Net architectures achieve strong reconstruction accuracy, particularly under sparse observation regimes, while soft arbitrage penalties significantly reduce arbitrage violations with moderate impact on reconstruction error. We further analyze the trade-off between accuracy and arbitrage consistency across architectures and regularization strengths.",
+    "url": "http://arxiv.org/abs/2605.24031v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Pablo Rodriguez Manzi",
+    "categories": [
+      "q-fin.CP",
+      "cs.LG"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Wartime Controls, Political Connections, and the Pricing of Zaibatsu Rents in Japan, 1930-1943",
+    "abstract": "This paper examines how wartime economic controls shaped stock-price formation in Japan from 1930 to 1943. We develop a four-portfolio asset-pricing model in which zaibatsu affiliation affects expected payoffs and the translation of valuations into economic scale through lower financing wedges. We then construct daily capitalization-weighted indices and four benchmark portfolios based on a two-by-two sort by zaibatsu affiliation and military orientation. Using a CAPM-AR(p)-SV event-study framework that allows for serial correlation and stochastic volatility, we show that the model rationalizes capitalization concentration, segmented abnormal returns, delayed cumulative adjustment, regime-risk insulation of zaibatsu portfolios, and zaibatsu-concentrated responses to embedded-rent or group-c",
+    "url": "http://arxiv.org/abs/2605.21009v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Keiichi Morimoto, Akihiko Noda, Takenobu Yuki",
+    "categories": [
+      "econ.GN",
+      "q-fin.PR",
+      "q-fin.ST"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Continuous Timing Signals for Growth-Defensive Style Allocation: Factor Attribution, Risk Matching, and Out-of-Sample Evidence",
+    "abstract": "This paper studies conditional allocation between a growth/technology ETF basket, denoted by $G$, and a defensive income/value-oriented ETF basket, denoted by $D$. The objective is not to discover a new standalone alpha factor, but to examine whether known style exposures can be dynamically allocated using macro-market timing signals. Fama-French five-factor plus momentum attribution shows that the relative portfolio $G-D$ is a recognizable style portfolio: its market beta is 0.273, its HML beta is -0.552, its momentum beta is 0.117, and its annualized alpha is 1.95\\% with a Newey-West t-statistic of only 0.81. The empirical object is therefore interpreted as a growth-versus-defensive style allocation problem rather than a new return anomaly.  The allocation framework replaces discrete reg",
+    "url": "http://arxiv.org/abs/2605.20636v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Zheli Xiong",
+    "categories": [
+      "q-fin.PM"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "Do Better Volatility Forecasts Lead to Better Portfolios? Evidence from Graph Neural Networks",
+    "abstract": "This paper tests whether graph neural networks improve realized volatility forecasts and whether those forecasts improve portfolio performance. Using weekly realized volatility for 465 S&P 500 equities from 2015-2025, Heterogeneous Autoregressive and Long Short-Term Memory baselines are compared against GraphSAGE models built on rolling correlation, sector, and Granger-causal graphs, with and without macro regime features. The empirical finding is that the model with the lowest forecast MSE, the model with the highest cross-sectional ranking accuracy, and the model with the highest portfolio Sharpe ratio are three different models. Forecast accuracy, ranking quality, and portfolio performance are related but not interchangeable objectives. Graph volatility models add value only when the po",
+    "url": "http://arxiv.org/abs/2605.19278v2",
+    "published": "2026-05-19",
+    "year": 2026,
+    "authors": "Rylan Wade",
+    "categories": [
+      "q-fin.PM",
+      "cs.LG"
+    ],
+    "search": "arxiv_regime"
+  },
+  {
+    "title": "A Motif-Based Framework for Decomposing Risk Spillovers",
+    "abstract": "Connectedness measures quantify aggregate risk spillovers but obscure the local interaction patterns that generate systemic risk. We develop a motif-based framework that first extracts multiscale backbones from quantile connectedness networks and then identifies directed triadic motifs whose frequencies exceed randomization baselines. To distinguish how assets' sectoral identities shape local spillover structures, we introduce colored motifs under sector partitions of increasing granularity. Using orbit positions that capture each node's structural role within directed triadic motifs, we construct portfolio strategies that exploit an asset's place in the spillover architecture. Applying the framework to 39 commodity and equity futures across lower, median, and upper conditional quantiles, ",
+    "url": "http://arxiv.org/abs/2604.25406v1",
+    "published": "2026-04-28",
+    "year": 2026,
+    "authors": "Ying-Hui Shao, Yan-Hong Yang, Yun Zhang",
+    "categories": [
+      "q-fin.RM"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "The Anatomy of a Decentralized Prediction Market: Microstructure Evidence from the Polymarket Order Book",
+    "abstract": "We study the microstructure of Polymarket, the largest on-chain prediction market, using a continuous tick-level archive of the public order-book feed (30 billion events over 52 days) joined to the authoritative on-chain trade record. On a pre-registered stratified panel of 600 markets we report eight stylized facts: a longshot spread premium; a depth profile closer to uniform than to top-of-book; a null block-clock alignment effect; broad maker-wallet diversity with a concentrated tail; category-conditional effective-spread differences; a sub-50 ms median archive-ingestion delay with a multi-second tail; a self-counterparty wash share with median 1% and a 22% upper tail (well below Cong et al. 2023's 25-70% for unregulated crypto venues -- a sanity bound, not an apples-to-apples reference",
+    "url": "http://arxiv.org/abs/2604.24366v2",
+    "published": "2026-04-27",
+    "year": 2026,
+    "authors": "Philipp D. Dubach",
+    "categories": [
+      "q-fin.TR",
+      "cs.GT",
+      "q-fin.GN"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Hedging market risk and uncertainty via a robust portfolio approach",
+    "abstract": "Shorting for hedging exposes to risk when the market dynamics is uncertain. Managing uncertainty and risk exposure is key in portfolio management practice. This paper develops a robust framework for dynamic minimum-variance hedging that explicitly accounts for forecast uncertainty in volatility estimation to achieve empirical stability and reduced turnover, further improving other standard performance metrics. The approach combines high-frequency realized variance and covariance measures, autoregressive models for multi-step volatility forecasting, and a box-uncertainty robust optimization scheme. We derive a closed-form solution for the robust hedge ratio, which adjusts the standard minimum-variance hedge by incorporating variance forecast uncertainty. Using a diversified sample of equity",
+    "url": "http://arxiv.org/abs/2604.02126v1",
+    "published": "2026-04-02",
+    "year": 2026,
+    "authors": "Adele Ravagnani, Mattia Chiappari, Andrea Flori",
+    "categories": [
+      "q-fin.RM"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Rough volatility dynamics in commodity markets",
+    "abstract": "In this paper, we develop a general rough volatility model for commodities that provides an automatic calibration of the initial term structure of the futures prices and an appropriate treatment of the Samuelson effect. After the theoretical analysis of this general model, we focus on the rBergomi and rHeston models and their calibration to market data of vanilla futures options on WTI Crude Oil. Finally, numerical results illustrate the performance of the proposed rough volatility models for commodities pricing.",
+    "url": "http://arxiv.org/abs/2603.26514v1",
+    "published": "2026-03-27",
+    "year": 2026,
+    "authors": "Roberto Daluiso, Héctor Folgar-Cameán, Andrea Pallavicini",
+    "categories": [
+      "q-fin.PR",
+      "q-fin.CP"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Beyond Polarity: Multi-Dimensional LLM Sentiment Signals for WTI Crude Oil Futures Return Prediction",
+    "abstract": "Forecasting crude oil prices remains challenging because market-relevant information is embedded in large volumes of unstructured news and is not fully captured by traditional polarity-based sentiment measures. This paper examines whether multi-dimensional sentiment signals extracted by large language models improve the prediction of weekly WTI crude oil futures returns. Using energy-sector news articles from 2020 to 2025, we construct five sentiment dimensions covering relevance, polarity, intensity, uncertainty, and forwardness based on GPT-4o, Llama 3.2-3b, and two benchmark models, FinBERT and AlphaVantage. We aggregate article-level signals to the weekly level and evaluate their predictive performance in a classification framework. The best results are achieved by combining GPT-4o and",
+    "url": "http://arxiv.org/abs/2603.11408v2",
+    "published": "2026-03-12",
+    "year": 2026,
+    "authors": "Dehao Dai, Ding Ma, Dou Liu",
+    "categories": [
+      "q-fin.ST",
+      "cs.CL"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Range-Based Volatility Estimators for Monitoring Market Stress: Evidence from Local Food Price Data",
+    "abstract": "Range-based volatility estimators are widely used in financial econometrics to quantify risk and market stress, yet their application to local commodity markets remains limited. This paper shows how open-high--low-close (OHLC) volatility estimators can be adapted to monitor localized market distress across diverse development contexts, including conflict-affected settings, climate-exposed regions, remote and thinly traded markets, and import- and logistics-constrained urban hubs. Using monthly food price data from the World Bank's Real-Time Prices dataset, several volatility measures -- including the Parkinson, Garman-Klass, Rogers-Satchell, and Yang-Zhang estimators -- are constructed and evaluated against independently documented disruption timelines. Across settings, elevated volatility",
+    "url": "http://arxiv.org/abs/2603.02898v1",
+    "published": "2026-03-03",
+    "year": 2026,
+    "authors": "Bo Pieter Johannes Andrée",
+    "categories": [
+      "q-fin.ST",
+      "econ.EM",
+      "stat.AP"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Deep Learning for Financial Time Series: A Large-Scale Benchmark of Risk-Adjusted Performance",
+    "abstract": "We present a large scale benchmark of modern deep learning architectures for a financial time series prediction and position sizing task, with a primary focus on Sharpe ratio optimization. Evaluating linear models, recurrent networks, transformer based architectures, state space models, and recent sequence representation approaches, we assess out of sample performance on a daily futures dataset spanning commodities, equity indices, bonds, and FX spanning 2010 to 2025. Our evaluation goes beyond average returns and includes statistical significance, downside and tail risk measures, breakeven transaction cost analysis, robustness to random seed selection, and computational efficiency. We find that models explicitly designed to learn rich temporal representations consistently outperform linea",
+    "url": "http://arxiv.org/abs/2603.01820v1",
+    "published": "2026-03-02",
+    "year": 2026,
+    "authors": "Adir Saly-Kaufmann, Kieran Wood, Jan Peter-Calliess",
+    "categories": [
+      "q-fin.TR",
+      "cs.LG"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Pricing and hedging for liquidity provision in Constant Function Market Making",
+    "abstract": "This paper develops a robust mathematical framework for Constant Function Market Makers (CFMMs) by transitioning from traditional token reserve analyses to a coordinate system defined by price and intrinsic liquidity. We establish a canonical parametrization of the bonding curve that ensures dimensional consistency across diverse trading functions, such as those employed by Uniswap and Balancer, and demonstrate that asset reserves and value functions exhibit a linear dependence on this intrinsic liquidity. This linear structure facilitates a streamlined approach to arbitrage-free pricing, delta hedging, and systematic risk management. By leveraging the Carr-Madan spanning formula, we characterize Impermanent Loss (IL) as a weighted strip of vanilla options, thereby defining a fine-grained ",
+    "url": "http://arxiv.org/abs/2603.01344v1",
+    "published": "2026-03-02",
+    "year": 2026,
+    "authors": "Jimmy Risk, Shen-Ning Tung, Tai-Ho Wang",
+    "categories": [
+      "q-fin.MF"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "One Rising Ship Sinks Other Ships: Cross-Chain Negative Spillovers in Crypto Markets",
+    "abstract": "We document the first systematic evidence of negative spillover effects in crypto asset returns across blockchains. Using on-chain data from Ethereum, Solana, Binance Smart Chain, Arbitrum, and Avalanche (2022-2025), we show that surges on one chain often coincide with declines on others, in contrast to the positive co-movements typical of equity markets. These spillovers intensify during attention shocks, proxied by chain activity and extreme return events, and persist after controlling for global equity returns, interest rates, and Bitcoin. Nonlinear factor models reveal that attention-driven capital reallocation, rather than common information, underlies these dynamics. Our findings introduce a new form of cross-market linkage, attention-induced substitution, that shapes risk transmissi",
+    "url": "http://arxiv.org/abs/2602.23762v1",
+    "published": "2026-02-27",
+    "year": 2026,
+    "authors": "Mengzhong Ma, Te Bao, Yonggang Wen",
+    "categories": [
+      "q-fin.PR"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "The Extremity Premium: Sentiment Regimes and Adverse Selection in Cryptocurrency Markets",
+    "abstract": "Using the Crypto Fear & Greed Index and Bitcoin daily data, we document that sentiment extremity predicts excess uncertainty beyond realized volatility. Extreme fear and extreme greed regimes exhibit significantly higher spreads than neutral periods -- a phenomenon we term the \"extremity premium.\" Extended validation on the full Fear & Greed history (February 2018--January 2026, N = 2,896) confirms the finding: within-volatility-quintile comparisons show a significant premium (p < 0.001, Cohen's d = 0.21), Granger causality from uncertainty to spreads is strong (F = 211), and placebo tests reject the null (p < 0.0001). The effect replicates on Ethereum and across 6 of 7 market cycles. However, the premium is sensitive to functional form: comprehensive regression controls absorb regime effe",
+    "url": "http://arxiv.org/abs/2602.07018v2",
+    "published": "2026-02-01",
+    "year": 2026,
+    "authors": "Murad Farzulla",
+    "categories": [
+      "q-fin.ST",
+      "q-fin.CP"
+    ],
+    "search": "arxiv_iv_crypto"
+  },
+  {
+    "title": "Predicting Stock Price Direction on Earnings Announcement Days using Multi-modal Deep Learning",
+    "abstract": "Predicting stock price movements during Earnings Announcements (EAs) is a significant challenge due to market noise and high-impact price discontinuities. In this study, we evaluate whether pre-announcement news sentiment, firm fundamentals, and recent market dynamics jointly predict the directional price movement of equities on EA days. We construct a multi-modal feature space combining 15 fundamental metrics, 3 price-based technical indicators and sentiment scores derived from financial news articles processed using FinBERT. We compare a Long Short-Term Memory (LSTM) network and a Transformer-based architecture against a logistic regression baseline, and further assess all models with and without sentiment features to quantify their incremental value. Our results indicate that while the ",
+    "url": "http://arxiv.org/abs/2605.25894v1",
+    "published": "2026-05-25",
+    "year": 2026,
+    "authors": "Manuel Noseda, Nathan Soldati, Marco Paina",
+    "categories": [
+      "cs.LG",
+      "q-fin.ST"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "One Currency, Two Forward Prices: The Onshore-Offshore Renminbi Puzzle",
+    "abstract": "Partially convertible economies face a market-design problem: trade integration, cross-border investment, and domestic balance-sheet exposure increase the demand for currency hedging before full financial integration is complete. China adopted a distinctive architecture for this problem by fostering a deliverable offshore Renminbi market (CNH) alongside the segmented onshore market (CNY), rather than relying only on non-deliverable forwards. This creates two venues for closely related claims on the same currency. Spot prices are tightly linked, yet CNY and CNH forwards display a persistent and economically large discrepancy. We study that discrepancy in a joint equilibrium model for spot and forward trading with transaction costs and segmented supply. In the benchmark case with common cons",
+    "url": "http://arxiv.org/abs/2605.25392v1",
+    "published": "2026-05-25",
+    "year": 2026,
+    "authors": "Samuel Drapeau, Peng Luo, Xuan Tao",
+    "categories": [
+      "q-fin.MF"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Incremental SVD for Large-Scale Dynamic Matrices: Accuracy, Subspace Stability, Refresh Strategies, and Financial Factor-Based Risk Models",
+    "abstract": "Return panels, covariances, and large feature matrices evolve one observation or one entry at a time, yet downstream models require an up-to-date low-rank factorization $A_t \\approx U_t Σ_t V_t^\\top$ on every tick -- a regime where full SVD is prohibitive and existing alternatives sacrifice either singular vectors, singular values, or long-horizon stability. We present a practical, metric-driven study of Brand-style incremental SVD, built around a unified engine that handles row appends, column appends, rank-1 entry updates, and metrics tracking within a single framework, with two core contributions. For rank-1 entry updates, we derive an explicit projection-based rule $U'Σ'(V')^\\top = P_U(\\widehat{A} + δ\\,e_ie_j^\\top)P_V$ that keeps rank fixed while discarding only the out-of-subspace rem",
+    "url": "http://arxiv.org/abs/2605.24514v1",
+    "published": "2026-05-23",
+    "year": 2026,
+    "authors": "Stilyan Staykov",
+    "categories": [
+      "math.NA",
+      "q-fin.RM"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Market Regime Council for Dynamic Credit Assignment in Multi-Agent LLM Decision Systems",
+    "abstract": "Multi-agent LLM decision systems for portfolio management still lack a principled way to assign credit across specialist agents, remain vulnerable to cold-start dominance under regime shifts, and offer limited transparency into how final allocations are formed. We propose Market Regime Council (MRC), a cooperative multi-agent decision system that computes exact Shapley credits across all single, pairwise, and Grand-coalition outputs for online agent weighting. Instantiated with N=3 specialist agents, at each trading period, MRC recomputes coalition-based Shapley weights from exponentially weighted performance histories, uses a Bayesian adaptive mixture to stabilize early periods, applies regime-dependent multipliers to adjust agent authority, and records each rebalance through a five-layer",
+    "url": "http://arxiv.org/abs/2605.24490v1",
+    "published": "2026-05-23",
+    "year": 2026,
+    "authors": "Yunhua Pei, Zerui Ge, Jin Zheng",
+    "categories": [
+      "cs.AI",
+      "cs.LG",
+      "q-fin.PM"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "What Does Deep Hedging Actually Learn? Delta Corrections, Regime Fragility, and Symbolic Distillation",
+    "abstract": "This paper studies empirical deep hedging for S&P 500 index options under a local downside-shortfall reward. It moves beyond performance comparison by asking what the learned hedge does, when it fails, and whether it can be made auditable. TD3 agents are compared with a daily-updated Black-Scholes delta hedge on the same option episodes. In walk-forward tests from 2015 to 2023, the agents usually learn a systematic delta haircut relative to Black-Scholes. The correction is explained by spot-implied-volatility co-movement and often improves accumulated reward and terminal downside variance, but it is regime-fragile: 2022 exposes losses in adverse daily states, while 2023 shows that underhedging can raise ordinary variance when option P&L is spot-dominated and the volatility channel is unusu",
+    "url": "http://arxiv.org/abs/2605.21696v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Kirill Zernikov",
+    "categories": [
+      "q-fin.RM",
+      "q-fin.CP",
+      "q-fin.PR"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Volatility Surface Reconstruction using Deep Learning under No-Arbitrage Constraints",
+    "abstract": "We study the reconstruction of implied volatility surfaces from sparse and noisy option quotes using deep learning models under no-arbitrage constraints. We compare multiple neural architectures, including multilayer perceptrons, convolutional networks, U-Nets, variational autoencoders, and Transformer-based models against classical SVI parameterizations on option market data. Results show that Transformer and U-Net architectures achieve strong reconstruction accuracy, particularly under sparse observation regimes, while soft arbitrage penalties significantly reduce arbitrage violations with moderate impact on reconstruction error. We further analyze the trade-off between accuracy and arbitrage consistency across architectures and regularization strengths.",
+    "url": "http://arxiv.org/abs/2605.24031v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Pablo Rodriguez Manzi",
+    "categories": [
+      "q-fin.CP",
+      "cs.LG"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Portfolio Preference Elicitation in Institutional Crossing Markets",
+    "abstract": "Institutional crossing platforms face a hidden-information problem: investors value trades as portfolios, but liquidity discovery is typically organized around individual securities. We model portfolio crossing as limited-communication preference elicitation over signed portfolio trades. The platform first uses price-directed demand queries to search the portfolio space and then verifies selected packages through value queries; an incumbent verification query records the demand-discovered allocation before further exploration. Final allocations are chosen from elicited reports, so the learning model guides queries but does not determine welfare. The analysis shows why search and verification are complementary. Demand queries locate high-value regions of a nonseparable portfolio space, but ",
+    "url": "http://arxiv.org/abs/2605.21409v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Yoontae Hwang",
+    "categories": [
+      "q-fin.PM",
+      "q-fin.CP"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Continuous Timing Signals for Growth-Defensive Style Allocation: Factor Attribution, Risk Matching, and Out-of-Sample Evidence",
+    "abstract": "This paper studies conditional allocation between a growth/technology ETF basket, denoted by $G$, and a defensive income/value-oriented ETF basket, denoted by $D$. The objective is not to discover a new standalone alpha factor, but to examine whether known style exposures can be dynamically allocated using macro-market timing signals. Fama-French five-factor plus momentum attribution shows that the relative portfolio $G-D$ is a recognizable style portfolio: its market beta is 0.273, its HML beta is -0.552, its momentum beta is 0.117, and its annualized alpha is 1.95\\% with a Newey-West t-statistic of only 0.81. The empirical object is therefore interpreted as a growth-versus-defensive style allocation problem rather than a new return anomaly.  The allocation framework replaces discrete reg",
+    "url": "http://arxiv.org/abs/2605.20636v1",
+    "published": "2026-05-20",
+    "year": 2026,
+    "authors": "Zheli Xiong",
+    "categories": [
+      "q-fin.PM"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Robust Volatility Index Calculation with OTM Option-implied Probability",
+    "abstract": "In financial markets, accurately measuring the risk of future fluctuations in asset prices is of paramount importance. Studies such as Carr and Madan have shown that the expected value of the quadratic variation of log prices can be expressed as an integral of European option prices over a continuum of strikes. This has led to the widespread estimation of model-free volatility (implied variance). However, this theoretical calculation assumes that options are continuously traded across all strike prices, which creates a fundamental gap with real-world market environments where options are only traded at discrete strikes. How to appropriately address this gap and robustly estimate volatility is a crucial issue for both practitioners and academics, and is the primary objective of this paper. ",
+    "url": "http://arxiv.org/abs/2605.17446v1",
+    "published": "2026-05-17",
+    "year": 2026,
+    "authors": "Masaaki Fukasawa, Shunta Murayama",
+    "categories": [
+      "q-fin.MF"
+    ],
+    "search": "arxiv_macro"
+  },
+  {
+    "title": "Deep Reinforcement Learning Framework for Diversified Portfolio Management Across Global Equity Markets",
+    "abstract": "This study develops and evaluates a deep reinforcement learning framework for dynamic portfolio allocation across global equity markets. The Soft Actor-Critic algorithm is used to learn continuous portfolio weights within a Markov Decision Process, incorporating transaction costs, turnover penalties, and diversification constraints into the reward function. Five model configurations are compared, varying in reward formulation, policy structure (flat versus hierarchical Dirichlet), portfolio constraints, and temporal encoder (LSTM versus Transformer), and evaluated via walk-forward optimization across sixteen out-of-sample folds spanning 2003-2026 on the Nasdaq-100, Nikkei 225, and Euro Stoxx 50. Results show that RL strategies achieve competitive risk-adjusted performance primarily in the ",
+    "url": "http://arxiv.org/abs/2605.17307v1",
+    "published": "2026-05-17",
+    "year": 2026,
+    "authors": "Kamil Kashif, Robert Ślepaczuk",
+    "categories": [
+      "q-fin.PM",
+      "cs.AI",
+      "cs.LG",
+      "cs.NE",
+      "q-fin.TR"
+    ],
+    "search": "arxiv_macro"
+  }
+]
