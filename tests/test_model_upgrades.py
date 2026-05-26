@@ -305,7 +305,7 @@ class TestSignalEngineQwen3:
         stock_count = _compute_applicable_count("NVDA")
         metal_count = _compute_applicable_count("XAU-USD")
 
-        assert crypto_count >= 15
+        assert crypto_count >= 13
         assert stock_count >= 10
         assert metal_count >= 12
 
