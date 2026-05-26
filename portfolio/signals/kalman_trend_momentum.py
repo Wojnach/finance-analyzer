@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import majority_vote, safe_float
+from portfolio.signal_utils import majority_vote
 
 MIN_ROWS = 60
 VELOCITY_Z_BUY = 1.0
@@ -135,7 +135,7 @@ def _sub_trend_regime(velocity: np.ndarray) -> tuple[str, float, dict]:
 def _sub_price_divergence(close: np.ndarray, filtered: np.ndarray,
                           velocity: np.ndarray) -> tuple[str, float, dict]:
     """Sub-3: Trend-aware divergence (dip/rip detector within trend)."""
-    if len(close) < 2 or close[-1] == 0:
+    if len(close) < 2 or abs(close[-1]) < 1e-10:
         return "HOLD", 0.0, {"divergence_pct": np.nan}
 
     div_pct = (close[-1] - filtered[-1]) / close[-1]
