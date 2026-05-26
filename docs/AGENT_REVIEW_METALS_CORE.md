@@ -1,169 +1,102 @@
 # Adversarial Code Review — Metals Core Subsystem
-**Date:** 2026-05-24
-**Branch:** `review/fgl-2026-05-24`
+**Date:** 2026-05-26
 **Reviewer:** Claude Opus 4.7 (1M context, adversarial mode)
-**Scope:** `data/metals_loop.py`, `data/fish_engine.py`, `data/crypto_loop.py`, `data/oil_loop.py`, `portfolio/grid_fisher*.py`, `portfolio/fin_snipe*.py`, `portfolio/golddigger/`, `portfolio/elongir/`, `portfolio/mstr_loop/`, `portfolio/oil_grid_signal.py`, `portfolio/iskbets.py`, `portfolio/bigbet.py`, `portfolio/analyze.py`, `portfolio/orb_predictor.py`, `portfolio/ministral_signal.py`, `portfolio/qwen3_signal.py`, `portfolio/metals_orderbook.py`, `portfolio/microstructure*.py`
+**Scope:** `data/metals_loop.py`, `data/metals_swing_trader.py`, `data/metals_swing_config.py`, `data/metals_execution_engine.py`, `data/metals_warrant_refresh.py`, `data/metals_history_fetch.py`, `data/metals_signal_tracker.py`, `data/metals_accuracy_review.py`, `data/metals_risk.py`, `data/metals_avanza_helpers.py`, `data/metals_llm.py`, `data/metals_shared.py`, `portfolio/metals_orderbook.py`, `portfolio/metals_cross_assets.py`, `portfolio/metals_ladder.py`, `portfolio/metals_precompute.py`, `data/silver_monitor.py`, `portfolio/silver_precompute.py`
 
-This subsystem handles **real money flow** via Avanza warrants on 5x silver, gold, and oil certificates. Knockout barriers exist. Stop-loss math is life-or-death.
+## TOP 3 (money-loss potential)
 
----
+1. **Silver fast-tick is BLIND to swing-managed positions** — `_has_active_silver()` only reads legacy `POSITIONS` (data/metals_positions_state.json). All threshold and 3-min velocity alerts (−3% / −5% / −7% / −10% / −12.5%) silently no-op when silver is held by the swing trader (data/metals_swing_state.json), which is the canonical post-April-2026 entry path. A 10% silver crash during US open on a swing-managed MINI L SILVER position produces ZERO Telegram alerts and ZERO accelerated Claude analysis.
 
-## TOP 5 (sorted by money-loss potential)
+2. **`data/metals_swing_trader.py:2760` legacy 1% sell buffer on the swing trader's stop-loss** — `sell_price = round(trigger_price * 0.99, 2)`. Same 1% wick-bypass class of bug flagged in the May-24 review for grid_fisher and fin_snipe_manager (those were widened to 3%). The swing trader is now THE primary metals entry path and places this stop on every BUY. On a 5x XAG cert with 30% SL anchor, a US-open volatility spike past the trigger can fire the stop without filling the sell — naked position drops 5-10% further before the next cycle re-arms.
 
-1. **`portfolio/grid_fisher.py:1655` | P0 | naked-position window**
-   Stop-rearm retry uses `round(sp * 0.995, 2)` — a 0.5 % sell-price buffer below trigger. The original rotate-on-buy-fill path (`grid_fisher.py:1496`) does the same. On a 5x leveraged cert, a 0.5 % gap is roughly 1/7 of a normal 15-min ATR-band; a 2 % gap-down on the underlying = 10 % cert drop = trigger fires but the sell limit at `trigger*0.995` is already 9.5 % above the prevailing bid, will not fill, and the position falls another 5–10 % before manual intervention. Memory `feedback_mini_stoploss.md` mandates ≥3 % buffer. Fix: widen to `round(sp * 0.97, 2)` (3 %), matching the in-tree `STOP_ORDER_SPREAD_PCT` (1 % per level × 3 levels = 3 %) used by metals_loop's legacy stop ladder.
-
-2. **`portfolio/fin_snipe_manager.py:62, 537` | P0 | wick bypasses stop sell**
-   `HARD_STOP_SELL_BUFFER_PCT = 0.01` ⇒ stop sell limit sits **1 % below** the trigger. On 5x XAG / XAU certs, a single 0.2 % underlying spike past the trigger is enough to wick *through* the sell limit before any fill, leaving the position naked while Avanza shows "stop triggered, order resting unfilled". The same defect that bit the operator pre-2026-05-19. Companion `HARD_STOP_CERT_PCT = 0.05` (5 % below avg entry) is itself tight — only 1 % underlying for a 5x cert. Combined, the stop is too close to entry AND has too small a fill buffer. Fix in two steps:
-   - `HARD_STOP_SELL_BUFFER_PCT = 0.03` (3 % below trigger)
-   - Consider widening `HARD_STOP_CERT_PCT` to `0.08` (8 %, ≈ 1.6 % underlying — outside normal 15-min noise on silver). The prompt's claim that this was "now 0.03 per recent commit" is **false** — see commit `be4273d3` which changed `MIN_STOP_DISTANCE_PCT` (a different constant) from 1.0 → 3.0.
-
-3. **`portfolio/grid_fisher.py:1885-1891` | P1 | EOD fire-sale fallback**
-   `eod_market_flat()` first cancels the protective stop (line 1879), then fetches a quote. If `get_quote` returns a non-None dict with no `"buy"` key (a documented Avanza shape on illiquid hours), `bid` collapses to `0`, then falls through to `inst.avg_entry_price` (line 1890). If `avg_entry_price` is also unset (legacy state-file path, no test coverage), `aggressive = round(max(0 * 0.99, 0.01), 2) = 0.01` SEK — a 0.01 SEK sell on a 5+ SEK cert is a fire-sale and Avanza will fill it from the first bid down to 0.01. Stop already cancelled = naked while the limit hangs at 0.01. The probability of `avg_entry_price = 0` with `inventory_units > 0` is low (record_fill always sets it), but defence-in-depth says don't ship a code path that can sell at 0.01. Fix: abort EOD sweep with `critical_errors.jsonl` entry if `bid <= 0` and `avg_entry_price <= 0`; rearm a fresh stop instead.
-
-4. **`data/metals_loop.py:2469, 4913` | P1 | legacy stop ladder sell buffer 1 %**
-   Both `_rebuild_stop_orders_for` and `place_stop_loss_orders` compute `sell_price = round(trigger_price * 0.99, 2)` — same 1 % buffer issue as fin_snipe_manager. Mitigated by `STOP_ORDER_ENABLED = False` default + `HARDWARE_TRAILING_ENABLED = True`, but if an operator flips the toggle in an emergency (and it has a CLI/Telegram path), the same wick-bypass failure mode lights up. Fix: align with the corrected `HARD_STOP_SELL_BUFFER_PCT`.
-
-5. **`data/layer2_invoke.py:46, 68` | P1 | partial fix from `4adeec2d`**
-   Commit `4adeec2d` added absolute paths for `config.json` reads in the three `data/layer2_*.py` scripts, but `layer2_invoke.py` still has two relative-path *writes* — `data/layer2_journal.jsonl` (line 46) and `data/telegram_messages.jsonl` (line 68). `layer2_action.py` and `layer2_exec.py` were fully patched to use `BASE = pathlib.Path("Q:/finance-analyzer/data")`; layer2_invoke.py needs the same. Practical impact is bounded because `claude_gate.invoke_claude` sets `cwd=BASE_DIR`, so the writes currently land in the right place — but a manual `python data/layer2_invoke.py` from anywhere else drops a `data/` folder under that CWD and never updates the canonical journal. Fix: apply the same `BASE = pathlib.Path("Q:/finance-analyzer/data")` pattern.
+3. **Fast-tick gets ZERO ticks on cycle overrun** — `_sleep_for_cycle` (data/metals_loop.py:1051) returns immediately with an "overran by Xs" log when main cycle work exceeds 60s. Ministral+Chronos+Qwen3 inference chains routinely take 30-90s during LLM-heavy cycles (memory `gpu_loop_reliability.md` warns this). During an overrun the 10s silver fast-tick fires 0 times that cycle, blowing through threshold alerts and the 3-min velocity window. There is no catch-up mechanism on the next cycle either.
 
 ---
 
-## Critical (severity ≥ 90)
+## Critical (P0)
 
-### `portfolio/grid_fisher.py:1496, 1655` | P0 | stop sell buffer too tight on 5x certs
-**Path/lines:**
-- `portfolio/grid_fisher.py:1496` (rotate_on_buy_fill)
-- `portfolio/grid_fisher.py:1655` (stop_needs_rearm retry in tick)
+data/metals_loop.py:1088: P0: `_has_active_silver()` only checks legacy POSITIONS dict; swing-trader silver positions (data/metals_swing_state.json) get NO 10s fast-tick monitoring (threshold alerts, velocity alerts, opportunistic XAG orderbook snapshot at 10s). Fix: also probe self.swing_trader.state["positions"] for any pos with underlying=="XAG-USD" and active flag/units>0.
 
-```python
-# 1496
-stop_sell_price = round(stop_price * 0.995, 2)
-# 1655
-inst.ob_id, sp, round(sp * 0.995, 2),
-```
-**Cat:** stop-loss math / naked position risk on 5x leveraged certs.
-**Why:** `0.995` = 0.5 % buffer. A normal 1-min volatility band on silver during US open is 0.3–0.6 % underlying = 1.5–3 % on a 5x cert. The stop trigger fires, the sell limit at `trigger * 0.995` is already inside that volatility band but at a stale price; if the price has gapped 1 %+ in the cert during the 100 ms between trigger and broker order receipt, the limit never fills. Position falls further naked. Memory `feedback_mini_stoploss.md` is explicit: minimum 3 % distance for silver MINIs. This is the same class of bug as the FGL-P0-2 fix (commit `be4273d3`) that widened `MIN_STOP_DISTANCE_PCT` 1.0 → 3.0 in fin_snipe_manager — but the grid_fisher pair was never widened.
-**Fix:** `round(stop_price * 0.97, 2)` (3 % buffer). Sym-link constant via `grid_fisher_config.GRID_STOP_SELL_BUFFER_PCT = 0.03` so both call sites read the same value. Add a unit test that asserts the gap stays above a configurable floor.
+data/metals_loop.py:1051: P0: `_sleep_for_cycle` overrun branch returns immediately with no fast-tick sub-loop — when LLM inference pushes main cycle past 60s the silver fast-tick fires 0 times for that cycle. Velocity deque (18 readings × 10s = 3 min) is also corrupted because successive overruns gap the price history without resetting. Fix: when overrun detected, still run at least one tick before returning; or detect gaps in the velocity window and force `_silver_fast_prices.clear()`.
 
-### `portfolio/fin_snipe_manager.py:62, 537` | P0 | 1 % stop buffer + 5 % cert trigger combo
-See top-5 #2 above. **Cat:** stop-loss math on 5x MINI certs. **Fix:** widen `HARD_STOP_SELL_BUFFER_PCT` to 0.03, consider widening `HARD_STOP_CERT_PCT` to 0.08. Add regression test asserting `(trigger - sell) / trigger >= 0.025` for any computed stop plan, and `(avg - trigger) / avg >= 0.05` after both knobs are set.
+data/metals_swing_trader.py:2760: P0: `sell_price = round(trigger_price * 0.99, 2)` — only 1% buffer below stop trigger on the swing trader's hardware stop. On a 5x XAG cert this is ~0.2% underlying — a single US-open wick prints past trigger without filling the sell. Memory `feedback_mini_stoploss.md` mandates 3%+ on 5x products. Fix: `round(trigger_price * 0.97, 2)` matching the prior batch widening for grid_fisher and fin_snipe_manager. [REPEAT — same pattern as May-24 metals_loop:2469/4913 ladder finding, but here it's on the active swing path, not the legacy gated ladder.]
+
+data/metals_llm.py:443: P0: Ministral-8B prompt for XAG/XAU metals decisions begins `"You are an expert cryptocurrency trader"`. The model is being asked to score metals using a crypto persona — biases drift, sentiment framing, and asset-class reasoning are wrong. This explains some of the Ministral accuracy regression noted in MEMORY.md. Fix: replace with `"You are an expert metals trader specialising in silver and gold futures"`.
 
 ---
 
-## Important (severity 80–89)
+## Important (P1)
 
-### `portfolio/grid_fisher.py:1885-1891` | P1 | EOD path can fire-sale at 0.01 SEK
-See top-5 #3 above. **Cat:** order placement / fail-open. **Fix:** abort EOD sweep when both quote and avg_entry are missing; emit `critical_errors.jsonl` entry; rearm a fresh stop and retry next tick. Currently the path silently produces a 0.01 SEK sell on the failure branch.
+data/metals_warrant_refresh.py:316,322: P1: catalog stale-cache fallback never alerts beyond DEBUG. If refresh fails completely and the cache is stale (TTL=6h), `load_catalog_or_fetch` returns the stale dict with a WARNING log only — no Telegram, no critical_errors.jsonl. The current on-disk catalog is already 5+ days old (`refreshed_ts: 2026-05-21` per git status). A weekly cert rebase between then and now means `barrier` / `barrier_dist_pct` could place a trade into a near-knockout zone. Fix: gate trading entirely when catalog staleness > 24h, or write critical_errors.jsonl entry. [REPEAT — flagged in May-24 review's "Notes" section, not actioned.]
 
-### `data/metals_loop.py:2469, 4913` | P1 | legacy stop ladder 1 % buffer
-See top-5 #4 above. **Cat:** stop-loss math. **Fix:** parameterize buffer; unify with the fin_snipe_manager constant; cover both code paths in tests.
+data/metals_swing_trader.py:2796: P1: hardcoded `close_cet = 21.0 + 55/60` (21:55) in `_check_exits`. DST gap weeks (~Mar 8-29, Oct 25-Nov 1 when EU/US DST offsets misalign) push the real Avanza commodity close to 21:00 CET. With `EOD_EXIT_MINUTES_BEFORE = 0` user-override, positions are held 55 min past actual market close, bleeding into off-hours liquidity. Same hardcode at metals_swing_trader.py:2448 (entry gate) and data/metals_loop.py:1574 (`is_market_hours`). Fix: ship the `get_session_close_cet()` lookup that metals_swing_config.py:319-321 already TODOs.
 
-### `data/layer2_invoke.py:46, 68` | P1 | relative-path writes after partial fix
-See top-5 #5 above. **Cat:** atomic-I/O / CWD-sensitivity. **Fix:** absolute paths via `pathlib.Path(__file__).resolve().parent.parent / "data" / …`.
+data/metals_signal_tracker.py:643,644: P1: `best_key = max(report.keys(), key=lambda k: report[k]["accuracy"])` — no minimum-sample gate. The "best" / "worst" signals exposed via `get_accuracy_for_context()` (consumed by Claude) can be a single-sample 100% signal beating a 1000-sample 60% signal. This is the exact small-sample inflation pattern that produced the "XAG 82% from 34 samples" illusion (memory). Fix: filter `report` to entries with `total >= 30` before max/min selection.
 
-### `data/metals_loop.py:1592-1596` | P2 | signal-summary fallback shape masks stale data
-```python
-path = "data/agent_summary.json"
-if not os.path.exists(path):
-    path = "data/agent_summary_compact.json"
-```
-**Cat:** silent fail / stale signal use. If the full summary stops being written (Layer 1 crash), the loop silently swallows the compact file. The compact file has fewer tickers / fewer timeframes, but `read_signal_data()` returns the dict either way without flagging the downgrade. Gate Z stale detection further down only checks `signal_age_sec`, not which file produced it. An operator looking at "fresh signal" log lines won't know they got the degraded variant. **Fix:** add a `data_source` field to the returned dict, surface it in the structured status print line near loop heartbeat.
+data/metals_loop.py:1485-1503: P1: silver velocity alert (3-min flush) deduplicates by `vel_key = f"vel_{int((time.time() - 2) // 300)}"` — a 5-min coarse bucket. After a single rapid drop alerts and the price keeps falling another 1% in the next 4 minutes (entirely possible during US open), no second alert fires until the next 5-min epoch. Also: if the fast-tick missed ticks during a cycle overrun, the velocity computation uses a non-contiguous window (oldest is 10-20 minutes old) and may report misleading % moves. Fix: time-tag each tick in the deque (price, ts) and only compute velocity when oldest ts is within window.
 
-### `portfolio/grid_fisher.py:1885-1888` | P2 | quote with empty dict returns 0 bid
-```python
-quote = self._safe_session_call(self.session.get_quote, inst.ob_id, default=None)
-if quote is None:
-    bid = inst.avg_entry_price
-else:
-    bid = float((quote or {}).get("buy") or 0)
-if bid <= 0:
-    bid = inst.avg_entry_price
-aggressive = round(max(bid * 0.99, 0.01), 2)
-```
-**Cat:** stale-data fallback at EOD. When Avanza returns an empty dict (no "buy" field on a halted instrument), bid becomes 0 then falls back to avg_entry_price. The EOD sell then prices at *avg_entry × 0.99*, leaving 49–100 % of any unrealised gains on the table — and if the cert had moved up significantly (a barrier-crossing rally on the BEAR side), the limit sits so far below market it'll fill instantly to anyone willing to take it. **Fix:** use the most-recent `live_volume` or `last_seen_price` from the reconcile data instead of stale entry.
+data/metals_swing_trader.py:2487,2509,2547: P1: `live_leverage = data.get("leverage") or w.get("leverage")` can be None on a stale Avanza response where keyIndicators.leverage is missing; line 2509 then crashes on `abs(None - TARGET_LEVERAGE)`. Catalog refresh populates leverage, but legacy `WARRANT_CATALOG` entries in metals_swing_config.py have it set, and the fallback path uses `w.get("leverage")` which is OK there — but a partial fetch from `fetch_price` returning leverage=None and overriding the catalog value brings the crash live. Fix: `live_leverage = data.get("leverage") or w.get("leverage") or 0`; explicit `if not live_leverage: continue` guard.
 
-### `portfolio/fin_snipe_manager.py:1500-1502` | P2 | `place_stop_loss_no_page` ID extraction is fragile
-```python
-placed_id = (
-    str((result.get("result") or {}).get("stop_id") or "")
-    or str((((result.get("result") or {}).get("parsed") or {}).get("stoplossOrderId")) or "")
-)
-```
-**Cat:** stop-loss tracking. The double-fallback means if Avanza ever changes their response shape (or returns under a third key), the ID is silently lost. Line 1499 just logs a warning ("untracked"), then the next cycle the reconcile path treats the position as if no stop existed and places ANOTHER one. Stops stack up at Avanza until inventory * stops > position size, then the place call returns `short.sell.not.allowed`. **Fix:** raise a `_notify_critical` if both fallbacks return empty so an operator sees it within 30 min instead of via the side effect of stacked stops.
+data/silver_monitor.py:1-9: P1: file is marked DEPRECATED in the docstring but is 800+ lines, has its own singleton lock, and is still actively maintained (last edit 2026-05-26 — same day as this review). Two competing silver monitors exist: the merged metals_loop fast-tick (10s) and this standalone (10s + 5-min Claude). If both run (and the singleton lock at data/silver_monitor.singleton.lock isn't paired against metals_loop's lock), they double-tick the Binance FAPI from the same host — risk of rate-limit hits AND duplicate Telegram alerts on threshold breaches. Fix: actually delete this file or harden the deprecation to refuse-to-run with sys.exit when the metals_loop is detected (e.g. via metals_loop singleton lock probe).
 
-### `portfolio/oil_grid_signal.py:35` | P2 | relative `SIGNAL_FILE` path
-```python
-SIGNAL_FILE = "data/oil_grid_signal.json"
-```
-**Cat:** CWD-sensitive write. Same anti-pattern as elsewhere. Currently safe because metals_loop sets `os.chdir(BASE_DIR)` at startup, but if anyone imports this from a different entry point (`python -m portfolio.oil_grid_signal` from some other CWD), it'll write to `<cwd>/data/oil_grid_signal.json` and the metals_loop will keep reading the old empty/stale value at the canonical path. **Fix:** `SIGNAL_FILE = str(Path(__file__).resolve().parent.parent / "data" / "oil_grid_signal.json")`.
+data/metals_swing_trader.py:1862: P1: `direction = "SHORT" if sig.get("action") == "SELL" else "LONG"` — but the assignment is conditioned on `SHORT_ENABLED=False` at metals_swing_config.py:161. With SHORT disabled, a SELL action arriving here is fall-through into `_select_warrant(underlying, "SHORT")` if (and only if) `_evaluate_entry` already returned True for direction="SHORT" — which it doesn't because `_evaluate_entry` returns `(False, "SHORT disabled")` at line 2214. Net: dead branch. The bug-shaped concern: when SHORT_ENABLED is flipped to True in an emergency, `_select_warrant` returns a BEAR cert and `_execute_buy` is called with `direction="SHORT"` — but `_execute_buy` ONLY records direction in the position dict; the Avanza order is BUY (line 2625 hardcodes "BUY"). The BEAR cert IS bought (correct for SHORT exposure), but the swing trader's per-leverage TP/SL math at line 2650-2651 uses positive `live_lev` — TP/SL signed correctly only because `_check_exits` flips the und_change_pct for SHORT (line 2868). However, the warrant-side `WARRANT_TAKE_PROFIT`/`WARRANT_TRAILING` block at line 3011 has `if direction == "LONG"` — SHORT BEAR-cert positions get NO warrant-side TP. This was the entire reason for adding WARRANT_TAKE_PROFIT (MM-side spikes), so SHORT positions lose that protection silently. The TODO comment at 2999 acknowledges this — un-actioned. Fix: port the block for SHORT with sign-inverted peak tracking before flipping SHORT_ENABLED.
 
-### `data/fish_engine.py:120, 998-1000` | P2 | relative trade-log path + DEBUG silent failure
-```python
-TRADE_LOG = "data/fish_trades.jsonl"
-...
-try:
-    atomic_append_jsonl(self._trade_log_path, entry)
-except Exception:
-    logger.debug("Failed to log trade to %s", ...)
-```
-**Cat:** silent failure on the strategy that lost 12 257 SEK on 2026-04-15. Even though FISH_ENGINE_ENABLED=False today, if it's ever re-enabled per the documented revival checklist, a logging failure inside a hot trade-execute path will be `DEBUG`-level invisible. **Fix:** when re-enabling fish_engine, escalate the except to `WARNING` and route to `critical_errors.jsonl` with `category="fish_engine_log_drop"`.
+data/metals_llm.py:386-388: P1: `_query_chronos_server_inner` returns None on empty/timeout response and calls `_stop_chronos_server()`. The Chronos server is then restarted on the very next query — but if the underlying issue is VRAM exhaustion or GPU hang, restart hits the same wall and silently returns None. The persistent server holds 673MB; combined with Ministral (4.5GB) and Qwen3 (4GB) on a 10GB GPU, contention is plausible. The `_log` is INFO-level; no critical_errors.jsonl entry. Caller treats None as "fall back to subprocess" — but that subprocess loads Chronos on CUDA AGAIN. Fix: log critical when restart sequence repeats N times within 10 min.
 
-### `portfolio/grid_fisher.py:1655` stop_loss_price | P3 | stop_loss_price stale across reset
-Stop retry uses `inst.stop_loss_price` which is the price set at original `rotate_on_buy_fill`. If the underlying has moved substantially since the initial buy fill, the retry places the stop at the *original* level — could be very near current bid or already past it. Probably wanted is "use original stop_loss_price unless bid moved significantly away, then re-anchor to current peak − stop_pct%". **Cat:** trailing-stop hygiene. **Fix:** at retry, also check `bid >= stop_loss_price * (1 + GRID_STOP_PCT/100 + safety)` and re-anchor if not.
+data/metals_avanza_helpers.py:283: P1: `today_str = datetime.datetime.now().strftime("%Y-%m-%d")` uses naive local time. On a Windows-CET host this matches Avanza's expected day, but on a non-CET host (e.g. cloud-hosted UTC failover), `validUntil = today_str` may be "yesterday" from Avanza's POV, making the order immediately expired. Same risk at line 358 for stop-loss `valid_until`. Fix: use `datetime.datetime.now(ZoneInfo("Europe/Stockholm")).strftime("%Y-%m-%d")`.
 
 ---
 
-## Notes (severity < 80, flagged for awareness)
+## Important (P2)
 
-### data/metals_warrant_catalog.json staleness
-The cache file's `refreshed_ts` is **3 days old** (2026-05-21). TTL is 6h per `metals_warrant_refresh.py`. Code path: if refresh fails, falls back to stale catalog with WARNING. Acceptable today (barriers only change weekly), but if Avanza ever rebases a cert weekly, a 3-day-old `barrier` and `barrier_dist_pct` value could drive a buy decision past the new barrier. Suggest tightening behaviour: refuse to place on stale catalog when staleness > 24h, or force a Playwright probe to refresh.
+data/metals_swing_trader.py:2110: P2: `units = int(alloc / ask_price)` floors fractional units. For a SEK 750 ask price on a 5x cert with alloc=3000, units=4 → total_cost=3000 — clean. But with alloc=1000 (MIN_TRADE_SEK floor) and ask=720, units=1 → 720 SEK actual spend, BELOW the 1000 SEK courtage threshold. `place_order` then logs a WARNING and proceeds — courtage on a 720 SEK trade eats ~1.5% round-trip alone. Fix: gate `if total_cost < MIN_TRADE_SEK * 0.95: continue` AFTER the int() truncation.
 
-### data/metals_loop.py "race" between 10s fast-tick and 60s cycle — NOT actually a race
-The prompt cites lines 1407-1503 (silver fast-tick) racing the main cycle on module globals. I checked `_sleep_for_cycle` (lines 1023-1080): the fast-tick is invoked **serially inside the main cycle's sleep window** in the same thread. No `threading.Thread` use anywhere in metals_loop. There is no true race — but module-global mutation by `_silver_fast_tick` is still a code-smell because:
-- A future addition of a worker thread would silently corrupt state.
-- The shared `_silver_alerted_levels` set grows unbounded until session reset (also called from main, single-threaded today).
+data/metals_loop.py:1492: P2: silver velocity dedup key `vel_{int((time.time() - 2) // 300)}` adds a 2-second offset comment-explained as "stable for the full window, avoiding a double-fire when time.time() rolls over the 5-min epoch". But the offset doesn't actually fix double-fire — it just shifts the boundary 2s earlier. If a velocity alert fires at t=298 with key vel_0 (since (298-2)//300 = 0), the next alert at t=302 has key vel_1 (since (302-2)//300 = 1) — both fire within 4 seconds. Fix: use a monotonic last_vel_alert_ts with explicit cooldown (e.g. 300s).
 
-If multithreading is ever added, the buffer + alert set need a lock. For now: documentation comment, no code change.
+data/metals_risk.py:286-293: P2: `simulate_warrant_risk` is called with `direction_prob` derived from LLM consensus direction "up"/"down". For a BEAR cert (SHORT position via inverse warrant), `direction == "up"` for the UNDERLYING means the BEAR cert price goes DOWN — but `simulate_warrant_risk` treats `direction_prob > 0.5` as bullish for the WARRANT (entry_price_warrant rises). Risk metrics are inverted for SHORT positions, biasing VaR/stop-hit-probability low when the underlying outlook is unfavorable for the position. Fix: detect SHORT positions (key contains 'bear' or pos has direction="SHORT") and invert `direction_prob = 1.0 - direction_prob` before calling.
 
-### portfolio/microstructure_state.py | thread-safety is correct
-The state buffers ARE protected by `_buffer_lock`. `get_microstructure_state` appends to history once per cycle via `persist_state`. The orderbook_flow signal reads via `load_persisted_state` (file-based, no shared memory). Clean. False-alarm noted in earlier review.
+data/metals_accuracy_review.py:18-21: P2: hardcoded `POSITIONS = {"gold": {"entry": 972.4}, "silver79": {"entry": 65.13}, "silver301": {"entry": 20.70}}` — these are entries from MONTHS ago. The "per-position PNL" output and HOLD/SELL accuracy buckets are anchored to phantom entries, not the current state. Anyone running `data/metals_accuracy_review.py` to validate the system gets a misleading report. Fix: read entries from data/metals_positions_state.json AND data/metals_swing_state.json at runtime.
 
-### portfolio/golddigger/runner.py:201 | 2 % stop sell buffer
-`sell_price = round(stop_price * 0.98, 2)` — 2 % buffer below trigger. Better than 1 % but still tight on a 20x gold cert (cfg suggests `leverage = 20.0`). Suggest 3 %. Lower severity because GoldDigger has a software-side `check_stop_loss` (line 145) that fires a market-equivalent sell *before* the hardware stop fills — the hardware stop is just defence-in-depth for a process crash.
+data/metals_accuracy_review.py:14: P2: `os.chdir(r"Q:/finance-analyzer")` at module load (also data/metals_history_fetch.py:17). Side-effect on import; if any other module imports these helpers (the relative `data/` paths suggest they might), the CWD silently changes. Fix: replace with explicit absolute paths via `Path(__file__).resolve().parents[1]`.
 
-### data/metals_loop.py:413, 424, 1592 | relative paths under `os.chdir(BASE_DIR)`
-The chdir at line 209 protects all the relative paths. Acceptable today but fragile against a future refactor that imports metals_loop modules into another loop with a different chdir.
+data/metals_loop.py:7204-7210: P2: silver fast-tick activation gated on `_has_active_silver()` AND `_silver_underlying_ref is None`. If the loop restarts and reads a swing-managed silver position via `detect_holdings`, `POSITIONS` may not contain it (swing positions live in metals_swing_state.json, not the legacy POSITIONS dict). The activation message never logs. Compounds the P0 above. Fix: make `_has_active_silver()` swing-aware.
 
-### portfolio/ministral_signal.py + qwen3_signal.py | subprocess fallback timeout = 240s
-240s timeout on a Layer 1 cycle (60s cadence) means a single LLM subprocess can stall the loop's ticker pool. Mitigated by `_invoke_lock` serialisation, but worth noting: if Plex is transcoding AND the llama-server died AND the cold-start fallback hangs for 240s, the entire metals signal pipeline misses 4 cycles. Memory `gpu_loop_reliability.md` says GPU models MUST complete every loop cycle — this falls short. Lower severity because Plex coordination + abstention sentinel already prevents the worst case.
+data/metals_swing_trader.py:2625: P2: BUY order uses `ask_price` as the limit price. If by the time the order reaches Avanza the ask has moved up, the order rests unfilled and the swing trader has already subtracted `total_cost` from `cash_sek` (line 2673). `fill_verified=False` plus `_verify_recent_fills` rollback path covers this AFTER timeout, but during the gap (FILL_VERIFY_MAX_AGE_S) the trader believes cash is committed. Sizing for any concurrent ticker's BUY in the same cycle is wrong. Fix: subtract cash only inside the `if success and fill_verified:` path of `_verify_recent_fills`; or use an "open_orders_committed_sek" sidecar that's reconciled per cycle.
 
-### portfolio/grid_fisher.py:1419-1422 | `_order_delay_s = 0.6` between placements
-6 placements / 10 instruments × tier x 1 cycle could stack up. `GRID_MAX_ORDERS_PER_MIN=10` rate-limit absorbs it. Just be aware: a full-restart that places 6 ladders (3 instruments × 2 tiers) costs 3.6 s of sleep inside one cycle. That overruns the 60 s budget combined with the grid tick's reconcile (1-2 s) plus all other work. Sub-P3.
+data/metals_swing_config.py:323-329: P2: `EOD_EXIT_MINUTES_BEFORE = 0` user-override means positions are held all the way to (and past) 21:55 CET. After 22:00 CET, `minutes_to_close = (21.917 - 22.5) * 60 = -35` — EOD_EXIT fires. But after midnight CET, `_cet_hour() ≈ 0` returns `minutes_to_close = +1315` (positive) — EOD doesn't fire. Between 22:00 and 23:59 CET the system attempts an EOD sell, but Avanza is CLOSED — the sell order rests unfilled into the next session, then sells at next morning's opening fix. Fix: include weekday/closed-session check in EOD_EXIT (skip if outside market hours since order won't fill).
 
-### data/chronos_server.py:18 | hardcoded `Q:/finance-analyzer`
-Acceptable for single-user single-host setup but flagged for future cross-machine portability.
+portfolio/metals_cross_assets.py:139-145: P2: `get_gold_silver_ratio` uses GC=F and SI=F (US futures, closed 22:00 CET Fri to 23:00 CET Sun). On weekends and after-hours, the ratio is stale by up to 65 hours, but the function returns it without a freshness flag. Downstream metals signal weighting treats this as live. Fix: tag `as_of_ts` from `df.index[-1]` and let callers reject stale data.
+
+data/metals_avanza_helpers.py:401: P2: `place_stop_loss` success check is `body.get("status") == "SUCCESS"` — but `place_order` uses `body.get("orderRequestStatus") == "SUCCESS"`. Inconsistent — if Avanza changes the stop-loss response shape (it has changed twice in 2026 per the file's own comments at line 121-128), the helper silently reports success=False and the position becomes naked while the caller logs "stop placed" (line 2783 in swing trader writes the stop_id but never checks for empty string).
+
+data/metals_loop.py:1086-1088: P2: `_has_active_silver` iterates `POSITIONS.items()` checking `"silver" in key.lower()`. Case-sensitive subset string match — if a key is `XAG_TRACKER` or `BEAR_SILVER_X5_AVA_12`, "silver" is in the second but not the first. Inconsistent detection. Fix: also check `pos.get("underlying") == "XAG-USD"`.
+
+data/metals_warrant_refresh.py:281: P2: `"parity": probe.get("parity") or 10` — fallback to 10 when Avanza doesn't return parity. For warrants with parity 1 (single-unit certs like BEAR cert config entry), this would overstate price-per-underlying-unit by 10x and break any cross-check math. Per-warrant parity must be authoritative. Fix: skip the candidate when parity is missing rather than defaulting.
+
+data/metals_swing_trader.py:3011-3041: P2: warrant-side TAKE_PROFIT/TRAILING block guarded by `if direction == "LONG"`. SHORT BEAR-cert positions get NO market-maker-spike TP protection. The 2026-04-20 incident this block was added for (warrant peaked +5.9% while underlying only +1.26%) can happen symmetrically on BEAR certs when underlying crashes. Fix: port with sign-inverted peak tracking when SHORT is enabled (TODO comment at 2999 is unactioned).
+
+portfolio/metals_orderbook.py:35: P2: `_fetch_fapi_json` calls `_binance_limiter.wait()` from `portfolio.shared_state`. The metals_loop fast-tick (10s cadence) and main cycle (60s) both call this through different paths — under contention the limiter may serialize fast-tick calls behind a hung main-cycle request, adding 5-10s latency to silver alerts. Fix: dedicated `_metals_orderbook_limiter` or bypass rate-limiting for the fast-tick orderbook snapshot since it's only XAG-USD at 10s.
+
+data/metals_loop.py:1407-1503: P3 / [REPEAT — explicit not-a-race documented in May-24 review]: silver fast-tick mutates `_silver_session_low/high`, `_silver_consecutive_down`, `_silver_prev_price`, `_silver_fast_prices` deque, `_silver_alerted_levels` set without locks. Single-threaded today (May-24 review verified). Add a doc comment that future threading additions require lock. Not actionable as a bug today.
+
+data/metals_swing_trader.py:2697: P3: BUY Telegram references DEPRECATED `TAKE_PROFIT_WARRANT_PCT` and `STOP_LOSS_WARRANT_PCT` globals (5%, 30%) — for non-5x positions these print wrong numbers (a 10x cert is 10%/60% per-position pct, Telegram shows 5%/30%). Cosmetic; doesn't affect trading. Fix: format from `tp_warrant_pct`/`sl_warrant_pct` already stored on the position dict.
 
 ---
 
-## Verification of prior P0s from the prompt
+## Verification against May-24 review
 
-| Prompt claim | Verified state | Comment |
-|---|---|---|
-| grid_fisher.py:1493 stop sell-price floor stop_price*0.995 = 0.5% (too tight) | **STILL PRESENT** at lines 1496 + 1655 | This review's top-5 #1 |
-| fin_snipe_manager.py:537 HARD_STOP_CERT_PCT = 0.05 (now 0.03 per recent commit) | **STILL 0.05** | Prompt is incorrect — commit `be4273d3` only changed `MIN_STOP_DISTANCE_PCT` 1.0 → 3.0 |
-| fin_snipe_manager HARD_STOP_SELL_BUFFER_PCT = 0.01 (1% below trigger, wicks bypass) | **STILL 0.01** | This review's top-5 #2 |
-| metals_loop.py:1407-1503 silver fast-tick races slow loop on module globals | **NO RACE** | Single-threaded; fast-tick runs serially inside main-cycle sleep. Future code-hazard only |
-| Layer 2 kill wedge (fixed batch 3) | Confirmed fixed in commit `81e0c78e` | Not re-reviewed here |
-| grid_fisher stop-rearm (fixed batch 3 + P1 commit) | Mostly fixed in `81e0c78e` + `289e5030` | Retry path still uses 0.995 buffer (top-5 #1) and stale `stop_loss_price` (P3 above) |
+| Item | State |
+|---|---|
+| metals_loop.py legacy stop ladder 1% sell buffer (lines 2469, 4913) | NOT RE-CHECKED in current scope (outside top-3-priority paths) but presumed still present per May-24 finding |
+| silver fast-tick "race" with main loop | [REPEAT] Confirmed not a race (single-threaded). But P0 here: fast-tick gets 0 ticks on overrun, which May-24 didn't catch |
+| Catalog staleness (>24h) | [REPEAT] still degrades silently; on-disk catalog is currently 5+ days old |
 
 ---
 
 ## Recommended remediation order
 
-1. **Today, before next metals trade**: top-5 items #1 + #2. Both are one-line constant changes plus regression tests.
-2. **This week**: top-5 #3 (EOD fire-sale guard), #4 (metals_loop legacy ladder), #5 (layer2_invoke paths).
-3. **Next sprint**: P2 items above, especially `place_stop_loss_no_page` ID extraction (silent stop-stacking) and the catalog staleness gate.
-4. **Doc-only**: add a comment block in `_silver_fast_tick` reminding future contributors that the function is single-threaded today and that adding any worker thread requires a lock on the module globals.
+1. **Today** — top-3 #1 (silver fast-tick swing-blindness, metals_loop.py:1088), #2 (swing trader 1% stop buffer, line 2760), #4 (Ministral metals prompt at metals_llm.py:443).
+2. **This week** — fast-tick overrun handling (`_sleep_for_cycle`); accuracy-tracker min-sample gate (P1); catalog staleness gate (>24h refuse-trade).
+3. **Next sprint** — DST-aware close lookup (P1); SHORT warrant-side TP block (P2); kill or harden silver_monitor.py.
 
 End of review.
