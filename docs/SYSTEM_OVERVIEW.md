@@ -183,7 +183,8 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - Linter: ruff (line-length=120, target py311)
 - Fixtures: `conftest.py` provides `make_indicators()`, `make_candles()`, `make_ohlcv_df()`, `sample_config`, `config_file`, `tmp_data_dir`
 - 76 tests use `tmp_path` isolation for parallel-safe file I/O
-- 7 untested utility modules: telegram_poller, data_refresh, backup, log_rotation, social_sentiment, stats, regime_alerts
+- 6 untested utility modules: telegram_poller, data_refresh, backup, social_sentiment, stats, regime_alerts
+- log_rotation: 36 tests (age archival, size pruning, text rotation, unmanaged file detection)
 
 ## 8) Key Design Patterns
 
