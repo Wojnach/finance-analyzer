@@ -1,34 +1,47 @@
-# Agent Review — Infrastructure (2026-05-26)
+# Adversarial Review: infrastructure (Agent Findings)
 
-Reviewer: caveman:cavecrew-reviewer
-Tools: Read, Grep, Bash (no Write — summary returned inline; main thread saved to file)
+Reviewer: caveman-ultra
+Date: 2026-05-26
+Style: caveman one-liner
 
-## Findings
+---
 
-**P0**
+## Critical Findings
 
-dashboard/auth.py:175: P0: Bearer token path returns without `_refresh_cookie()`. Cookie expires after 1 year regardless of activity. Call `_refresh_cookie(make_response(f(*args, **kwargs)), expected)` before return to match cookie / query-param paths.
+dashboard/auth.py:175: Bearer token auth returns without calling `_refresh_cookie()`. Cookie expires after 1 year regardless of active use. Call `_refresh_cookie(make_response(f(*args, **kwargs)), expected)` before return to match cookie/query paths.
 
-portfolio/health.py:165: P0: `datetime.fromisoformat(hb)` returns naive datetime. `datetime.now(UTC) - last` (aware − naive) crashes with `TypeError`. Fix: `fromisoformat(hb).replace(tzinfo=UTC)` or assume UTC.
+portfolio/health.py:165: `datetime.fromisoformat(hb)` returns naive datetime (no tzinfo). Line 165 does `datetime.now(UTC) - last` (aware - naive) → TypeError crashes dashboard /api/health. Fix: `fromisoformat(hb).replace(tzinfo=UTC)` or assume UTC.
 
-**P1**
+---
 
-portfolio/http_retry.py:55: P1: Jitter added AFTER `retry_after` cap. `wait += random.uniform(0, wait)` doubles wait on Telegram 429s — "retry_after=10" becomes 10–20 s instead of 10 s. Bound jitter (`min(wait, 60)`) or add before cap.
+## P1 Findings (Race, Resource Leak, Loop Throughput)
 
-portfolio/shared_state.py:88-89: P1: `_loading_keys.add(key)` and `_loading_timestamps[key]` set OUTSIDE try block (line 91). BaseException between 88–90 leaves orphaned key for 120 s. Wrap in try/finally.
+portfolio/http_retry.py:55: Jitter added AFTER `retry_after` cap. Line 55 does `wait += random.uniform(0, wait)`, doubling wait on Telegram 429s. Telegram says "retry_after=10" → wait becomes 10-20s instead of 10s. Bound jitter or add before cap: `wait = min(60, backoff) + jitter`.
 
-**P2**
+portfolio/shared_state.py:88–89: `_loading_keys.add(key)` at line 88, `_loading_timestamps[key] = time.time()` at line 89, both OUTSIDE the try block (line 91). BaseException between 88–90 leaves orphaned key for 120s (no eviction). Wrap in try/finally or move try earlier.
 
-portfolio/health.py:40: P2: `error_count` unbounded — incremented per error cycle, can overflow 2 B over 1 year. Combined with separate `errors[-19:]` list, field can drift. Cap at 10 000.
+---
 
-portfolio/log_rotation.py:455: P2: Temp file with `filepath.with_suffix(".tmp")` does NOT resolve symlinks like `atomic_write_json` (uses `_resolve_write_path`). If target is a symlink, tmp lands on wrong volume, `os.replace` fails. Use `tempfile.mkstemp(dir=str(path.parent))`.
+## P2 Findings (Edge Case, Perf)
 
-portfolio/claude_gate.py:343: P2: `_count_today_invocations()` calls `load_jsonl(INVOCATIONS_LOG)` — full-file scan on every Layer 2 invocation (lines 487, 554). File grows unbounded (no rotation policy). ~5400 calls/month = 200 ms by month 3. Use tail read + count.
+portfolio/health.py:40: `error_count` unbounded, no saturation cap. Incremented every cycle with error. Over 1 year can overflow 2B. Combined with separate `errors[-19:]` list, field can drift. Cap at 10,000 or use `deque(maxlen=100)`.
 
-## Top 3
+portfolio/log_rotation.py:455: Temp file created with `filepath.with_suffix(".tmp")` does NOT resolve symlinks like `atomic_write_json` does (line 59 `_resolve_write_path`). If config.json symlink, tmp lands on wrong volume → os.replace fails. Use `tempfile.mkstemp(dir=str(path.parent))` like file_utils.
 
-1. **dashboard/auth.py:175** — Bearer auth path skips cookie refresh. Real-world impact: CLI scripts hold a working token, never refresh, then silently lose access after a year. Trivial fix.
-2. **portfolio/health.py:165** — Naive datetime subtraction is a guaranteed `/api/health` crash the moment any heartbeat lands without `+00:00` suffix (pre-Python-3.11 ISO write paths). Single-line fix; immediate ship.
-3. **portfolio/http_retry.py:55** — Telegram's documented `retry_after` is honored at 2× by the jitter — under sustained rate-limit the system hits 30–60 s gaps when the API only asked for 15. Slows the loop visibly and pointlessly.
+portfolio/claude_gate.py:343: `_count_today_invocations()` calls `load_jsonl(INVOCATIONS_LOG)` — full-file scan. Called on lines 487, 554. File grows unbounded (no rotation policy). ~5400 invocations/month → 200ms scan by month 3. Use tail read + binary search or append-only count file.
 
-## totals: 7 findings (2 P0, 2 P1, 3 P2)
+---
+
+## Prior Review Status (2026-05-24)
+
+✅ [RESOLVED] portfolio/journal.py:580 — write_context() uses atomic_write_text
+❓ [SAFE] portfolio/gpu_gate.py:217–219 — fd leak claim: except block closes fd on error, actually safe
+⏳ [REPEAT] portfolio/claude_gate.py:343 — See P2 findings above
+
+---
+
+## Summary
+
+2 P0 findings (security + crash), 2 P1 findings (race + jitter), 3 P2 findings (saturation + perf + symlink).
+All tier-1 infrastructure files audited. atomic_write_json family is correct (fsync + replace). Rotation and logging are safe. Main issues: bearer auth missing refresh, health datetime crash, jitter math, thread-unsafe cache bake, unbounded counters, symlink mismatch, full-file scan on invocation count.
+
