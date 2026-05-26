@@ -248,6 +248,9 @@ DISABLED_SIGNALS = {
     "cryptotrader_lm",  # LLM shadow signal — managed by shadow_registry rotation.
     "finance_llama",    # LLM shadow signal — managed by shadow_registry rotation.
     "meta_trader",      # LLM shadow signal — managed by shadow_registry rotation.
+    "kalman_trend_momentum",  # 2026-05-26: NEW. Kalman filter [price, velocity] state-space.
+                        # Source: Singha et al (2025), arxiv:2511.08571, Sharpe 2.88 gold.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -427,4 +430,5 @@ SIGNAL_NAMES = [
     "cryptotrader_lm",
     "finance_llama",
     "meta_trader",
+    "kalman_trend_momentum",
 ]

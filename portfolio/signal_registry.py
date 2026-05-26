@@ -377,6 +377,10 @@ def _register_defaults():
                       "compute_btc_gold_correlation_regime_signal",
                       requires_context=True,
                       max_confidence=0.7)
+    register_enhanced("kalman_trend_momentum",
+                      "portfolio.signals.kalman_trend_momentum",
+                      "compute_kalman_trend_momentum_signal",
+                      max_confidence=0.7)
 
 
 _register_defaults()
