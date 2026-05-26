@@ -64,6 +64,9 @@ close them.
 | 21 | P0 | `data/metals_loop.py:1088` | Silver fast-tick `_has_active_silver()` only reads legacy `POSITIONS`, not swing trader state — all -3% to -12.5% alerts silently no-op for swing-managed silver | METALS-CORE (NEW) |
 | 22 | P0 | `data/metals_swing_trader.py:2760` | Stop-sell buffer 1% (`sell_price = trigger * 0.99`) — same wick-bypass class fixed in grid_fisher/fin_snipe (widened to 3%); swing trader is primary entry path, never widened | METALS-CORE (NEW) |
 | 23 | P0 | `data/metals_loop.py:1051` | `_sleep_for_cycle` returns immediately on overrun — fast-tick produces 0 silver ticks on LLM-heavy cycles, corrupts velocity deque | METALS-CORE (NEW) |
+| 24 | P1 | `portfolio/signals/cross_asset_tsmom.py:148-171` | Bond/equity momentum returns same direction across tickers — polarity reversed for ~3 of 5 (TLT up = BUY metals but should be SELL crypto) | SIGNALS-MODULES (NEW) |
+| 25 | P1 | `portfolio/signals/treasury_risk_rotation.py:182-185` | Inverts `action` for safe-haven tickers but leaves `sub_signals` unchanged — journal shows "subs BUY, action=SELL" mismatch | SIGNALS-MODULES (NEW) |
+| 26 | P1 | `portfolio/signals/econ_calendar.py:44` | `.replace(tzinfo=UTC)` reinterprets wall-clock without converting tz-aware — CET timestamps silently shifted 1-2h, corrupting FOMC/CPI proximity math | SIGNALS-MODULES (NEW) |
 
 ---
 
@@ -136,10 +139,10 @@ data-external      |  30   |  ~18     |  12
 orchestration      |  30   |  ~10     |  20
 infrastructure     |   7   |   0      |   7
 metals-core        |  30   |  ~10     |  20
-signals-modules    | pend  | pend     | pend
+signals-modules    |  28   |  14      |  14
 independent        |  13   |   0      |  13
 -------------------+-------+----------+-----
-TOTALS             | 174   |   66     | 108
+TOTALS             | 202   |  80      | 122
 ```
 
 About 39% of findings carry forward as unfixed. Avanza-API is at 100%. Without a
@@ -192,7 +195,16 @@ Small-sample accuracy inflation pattern (XAG 82% on 34 samples) still uncorrecte
 `metals_signal_tracker.py:643`. Stale warrant catalog (5+ days on disk per git status,
 TTL is 6h) falls back silently with DEBUG-only log.
 
-### signals-modules (PENDING — subagent still running at synthesis time)
+### signals-modules (28 findings · multiple P1)
+Top NEW: `cross_asset_tsmom.py:148-171` — `_compute_bond_momentum` /
+`_compute_equity_momentum` return same direction across all tickers, polarity reversed
+for ~3 of 5 (TLT up is BUY for metals but should be SELL for crypto; SPY up is BUY for
+crypto but should be SELL for metals). `treasury_risk_rotation.py:182-185` — final
+`action` inverted for safe-haven tickers but `sub_signals` dict unchanged, journal sees
+"all subs BUY but action=SELL" for XAU/XAG. `econ_calendar.py:44` — `.replace(tzinfo=UTC)`
+reinterprets wall-clock without converting tz-aware timestamps, CET timestamps shifted
+1-2h, corrupting FOMC/CPI proximity. Zero of 14 prior 2026-05-24 findings remediated;
+all 14 are [REPEAT].
 
 ### independent (13 findings · 3 P0 / 6 P1 / 3 P2 · 100% NEW)
 Cross-cutting + architectural. Notably: 5-loop unrate-limited Binance fan-out, JSON-
