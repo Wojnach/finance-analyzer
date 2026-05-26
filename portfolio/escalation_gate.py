@@ -157,7 +157,7 @@ def _log_decision(
         atomic_append_jsonl(
             log_path,
             {
-                "ts": _dt.datetime.utcnow().isoformat() + "Z",
+                "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                 "reasons": list(reasons or []),
                 "tier": int(tier),
                 "escalate": bool(escalate),
