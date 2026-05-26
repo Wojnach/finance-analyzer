@@ -175,6 +175,71 @@ class TestRotateJsonl:
         result = lr.rotate_jsonl("test.jsonl", {"max_age_days": 30, "ts_field": "ts"})
         assert result["total_lines"] == 1
 
+    def test_size_cap_prunes_oldest_kept_entries(self, _isolate_dirs):
+        """After age-based archival, if file exceeds max_size_mb, drop oldest kept."""
+        path = _isolate_dirs / "test.jsonl"
+        # Production order: oldest at top, newest at bottom (append-only)
+        entries = [{"ts": _ts(20 - i), "val": f"entry_{20 - i}", "pad": "x" * 200}
+                   for i in range(20)]
+        _write_jsonl(path, entries)
+        original_size = path.stat().st_size
+        max_size_bytes = original_size // 2
+        max_size_mb = max_size_bytes / (1024 * 1024)
+        result = lr.rotate_jsonl("test.jsonl", {
+            "max_age_days": 30, "ts_field": "ts",
+            "max_size_mb": max_size_mb, "compress": True,
+        })
+        assert path.stat().st_size <= max_size_bytes * 1.1
+        remaining = _read_jsonl(path)
+        assert len(remaining) < 20
+        assert remaining[-1]["val"] == "entry_1"
+
+    def test_size_cap_no_prune_when_under(self, _isolate_dirs):
+        """Size cap does not prune when file is already under max_size_mb."""
+        path = _isolate_dirs / "test.jsonl"
+        _write_jsonl(path, [{"ts": _ts(1), "val": "a"}, {"ts": _ts(2), "val": "b"}])
+        result = lr.rotate_jsonl("test.jsonl", {
+            "max_age_days": 30, "ts_field": "ts", "max_size_mb": 100,
+        })
+        remaining = _read_jsonl(path)
+        assert len(remaining) == 2
+
+    def test_size_cap_preserves_newest_entries(self, _isolate_dirs):
+        """Size pruning keeps newest entries (at end of file = most recent)."""
+        path = _isolate_dirs / "test.jsonl"
+        # Production order: oldest first (day_10), newest last (day_1)
+        entries = [{"ts": _ts(10 - i), "val": f"day_{10 - i}", "pad": "x" * 500}
+                   for i in range(10)]
+        _write_jsonl(path, entries)
+        entry_size = path.stat().st_size / 10
+        max_size_mb = (entry_size * 3) / (1024 * 1024)
+        result = lr.rotate_jsonl("test.jsonl", {
+            "max_age_days": 30, "ts_field": "ts",
+            "max_size_mb": max_size_mb, "compress": True,
+        })
+        remaining = _read_jsonl(path)
+        assert len(remaining) <= 4
+        assert remaining[-1]["val"] == "day_1"
+
+    def test_size_cap_archives_pruned_entries(self, _isolate_dirs):
+        """Entries pruned by size cap are archived, not lost."""
+        path = _isolate_dirs / "test.jsonl"
+        # Production order: oldest first, newest last
+        entries = [{"ts": _ts(20 - i), "val": f"entry_{20 - i}", "pad": "x" * 200}
+                   for i in range(20)]
+        _write_jsonl(path, entries)
+        original_size = path.stat().st_size
+        max_size_mb = (original_size // 3) / (1024 * 1024)
+        result = lr.rotate_jsonl("test.jsonl", {
+            "max_age_days": 30, "ts_field": "ts",
+            "max_size_mb": max_size_mb, "compress": True,
+        })
+        assert result.get("size_pruned", 0) > 0
+        archive_dir = _isolate_dirs / "archive"
+        assert archive_dir.exists()
+        archived_files = list(archive_dir.glob("test.*.jsonl.gz"))
+        assert len(archived_files) > 0
+
 
 # ---------------------------------------------------------------------------
 # rotate_text

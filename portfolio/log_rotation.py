@@ -198,6 +198,72 @@ ROTATION_POLICIES = {
         "type": "jsonl",
         "ts_field": "ts",
     },
+    # 2026-05-26 (auto-session): 9 high-growth JSONL files that were
+    # growing unbounded. Sizes at discovery: llm_probability_outcomes
+    # 24MB, metals_llm_outcomes 14MB, metals_llm_predictions 14MB.
+    "llm_probability_outcomes.jsonl": {
+        "max_age_days": 60,
+        "max_size_mb": 30,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "metals_llm_outcomes.jsonl": {
+        "max_age_days": 60,
+        "max_size_mb": 20,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "resolved_at",
+    },
+    "metals_llm_predictions.jsonl": {
+        "max_age_days": 30,
+        "max_size_mb": 20,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "mstr_loop_poll.jsonl": {
+        "max_age_days": 14,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "grid_fisher_decisions.jsonl": {
+        "max_age_days": 60,
+        "max_size_mb": 20,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "fin_snipe_manager_log.jsonl": {
+        "max_age_days": 30,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "crypto_value_history.jsonl": {
+        "max_age_days": 90,
+        "max_size_mb": 20,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "oil_value_history.jsonl": {
+        "max_age_days": 90,
+        "max_size_mb": 20,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "sentiment_ab_log.jsonl": {
+        "max_age_days": 30,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
 }
 
 
@@ -299,6 +365,35 @@ def rotate_jsonl(filename, policy, dry_run=False):
                     parse_failures += 1
 
         archived_count = sum(len(v) for v in archive_buckets.values())
+
+        # Size-based pruning: if kept entries exceed max_size_mb, drop
+        # oldest kept entries and archive them. Runs AFTER age-based
+        # classification so age archival always happens first.
+        max_size_mb_policy = policy.get("max_size_mb")
+        size_pruned = 0
+        if max_size_mb_policy and keep_lines:
+            max_size_bytes = int(max_size_mb_policy * 1024 * 1024)
+            estimated_size = sum(len(line.encode("utf-8")) + 1 for line in keep_lines)
+            if estimated_size > max_size_bytes:
+                pruned_lines = []
+                while keep_lines and estimated_size > max_size_bytes:
+                    dropped = keep_lines.pop(0)
+                    estimated_size -= len(dropped.encode("utf-8")) + 1
+                    pruned_lines.append(dropped)
+                    size_pruned += 1
+                for dropped_line in pruned_lines:
+                    try:
+                        entry = json.loads(dropped_line)
+                        ts = _parse_ts(entry.get(ts_field))
+                        if ts:
+                            month_key = ts.strftime("%Y-%m")
+                        else:
+                            month_key = "unparseable"
+                    except json.JSONDecodeError:
+                        month_key = "unparseable"
+                    archive_buckets.setdefault(month_key, []).append(dropped_line)
+                archived_count = sum(len(v) for v in archive_buckets.values())
+
         result = {
             "file": filename,
             "size_mb": round(size_mb, 2),
@@ -307,6 +402,7 @@ def rotate_jsonl(filename, policy, dry_run=False):
             "archived": archived_count,
             "archive_months": sorted(archive_buckets.keys()),
             "parse_failures": parse_failures,
+            "size_pruned": size_pruned,
         }
 
         if archived_count == 0:
