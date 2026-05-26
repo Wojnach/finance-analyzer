@@ -415,6 +415,108 @@ code-level fix.
 
 ---
 
+## SIGNAL-1 — Close walk-forward weight loop
+
+**Discovered:** 2026-05-26 after-hours research.
+**Prior triage:** `data/daily_research_quant.json` (2026-05-26); arxiv 2602.00080.
+**Scope:** M — 2 days estimated.
+
+### What
+
+`train_signal_weights.py` and `signal_weight_optimizer.py` exist and
+produce trained weights, but those weights never flow into
+`_weighted_consensus`. The MWU path was removed as dead code.
+All infrastructure exists — just needs connection.
+
+### Acceptance criteria
+
+Trained weights from `signal_weight_optimizer.py` load at
+`_weighted_consensus` call time. Walk-forward validation shows no
+accuracy regression on 30d holdout.
+
+### Why deferred
+
+Medium-effort integration touching the critical consensus path.
+Needs careful A/B validation to avoid regression.
+
+---
+
+## SIGNAL-2 — Rolling per-horizon IC weighting
+
+**Discovered:** 2026-05-26 after-hours research.
+**Prior triage:** `data/daily_research_quant.json`; `memory/quant_research_priorities.md`;
+arxiv 2509.01393.
+**Scope:** M — 3 days estimated.
+
+### What
+
+Replace accuracy-only signal weighting with EWMA Spearman IC per
+signal/ticker/horizon. `ic_computation.py` exists but only supports
+single-horizon. Per-ticker accuracy is near coin-flip (49-53%),
+but IC captures magnitude prediction that accuracy misses.
+
+### Acceptance criteria
+
+`ic_computation.py` supports per-horizon IC. `_weighted_consensus`
+optionally uses IC-based weights when sample count >= 100.
+
+### Why deferred
+
+Needs `ic_computation.py` per-horizon extension first. Research
+plan ready in `memory/quant_research_priorities.md`.
+
+---
+
+## SIGNAL-3 — Fix dynamic correlation groups (agreement rate)
+
+**Discovered:** 2026-05-26 (known bug since Apr 2026).
+**Prior triage:** `memory/dynamic_corr_bug.md`.
+**Scope:** M — 2 days estimated.
+
+### What
+
+Dynamic correlation groups use Pearson on BUY/SELL/HOLD encoded as
+numeric. HOLD majority (>80% of votes) dilutes Pearson to ~0 for all
+pairs. Fix: use agreement rate (% of cycles where both signals emit
+the same directional vote, excluding HOLD-HOLD pairs).
+
+### Acceptance criteria
+
+Correlation groups computed with agreement rate. At least one
+non-trivial cluster identified in production data.
+
+### Why deferred
+
+Known bug per `memory/dynamic_corr_bug.md`. Needs careful validation
+since correlation groups feed into weight caps.
+
+---
+
+## SIGNAL-4 — Extract gs_ratio_velocity as standalone signal
+
+**Discovered:** 2026-05-26 after-hours research.
+**Scope:** S — 1 day estimated.
+
+### What
+
+Gold/silver ratio velocity is already computed inside
+`metals_cross_assets.py` but buried in the composite signal. XAG
+consensus accuracy is 49.6% vs metals 3h at 67.3% -- extracting
+the strongest sub-feature as a standalone shadow signal could
+surface the edge more cleanly.
+
+### Acceptance criteria
+
+`portfolio/signals/gs_ratio_velocity.py` deployed as shadow signal.
+Accumulates >= 50 directional predictions within 14d.
+
+### Why deferred
+
+Easy but low urgency. SIGNAL-1 (walk-forward weights) has higher
+expected impact.
+
+---
+
 ## ARCH-20 — Signal schema validation missing
 
 **Discovered:** 2026-05-21 auto-session.
