@@ -121,16 +121,19 @@ class TestBug97JsonlTsErrorHandling:
         assert result["journal_written"] is False
         # Should not crash
 
-    def test_telegram_read_failure_yields_not_sent(self, tmp_invocations, tmp_journal):
+    def test_telegram_read_failure_yields_not_sent(self, tmp_invocations, tmp_journal, tmp_telegram):
         """When telegram file read raises, telegram_sent should be False."""
         ai._journal_ts_before = "2026-03-10T09:00:00+00:00"
         ai._telegram_ts_before = "2026-03-10T09:00:00+00:00"
+        ai._journal_count_before = 1
+        ai._telegram_count_before = 0
 
-        # Journal has a new entry
+        # Journal has a new entry (count goes 1 -> 2, so journal_written=True)
         tmp_journal.write_text(
             '{"ts": "2026-03-10T09:00:00+00:00"}\n'
             '{"ts": "2026-03-10T10:00:00+00:00"}\n'
         )
+        # Telegram file empty (count stays 0, so telegram_sent=False)
 
         proc = MagicMock()
         proc.poll.return_value = 0
@@ -138,14 +141,6 @@ class TestBug97JsonlTsErrorHandling:
         ai._agent_start = time.time() - 30
         ai._agent_tier = 2
 
-        call_count = [0]
-        def _failing_on_telegram(path):
-            call_count[0] += 1
-            if call_count[0] == 2:  # Second call = telegram
-                raise PermissionError("access denied")
-            return ai._last_jsonl_ts.__wrapped__(path) if hasattr(ai._last_jsonl_ts, '__wrapped__') else None
-
-        # Use a simpler approach: wrap so journal returns new ts, telegram raises
         with patch("portfolio.agent_invocation._last_jsonl_ts") as mock_ts:
             mock_ts.side_effect = [
                 "2026-03-10T10:00:00+00:00",  # journal call: new timestamp
@@ -157,10 +152,13 @@ class TestBug97JsonlTsErrorHandling:
         assert result["telegram_sent"] is False
         assert result["journal_written"] is True
 
-    def test_both_read_failures_yields_incomplete(self, tmp_invocations):
+    def test_both_read_failures_yields_incomplete(self, tmp_invocations, tmp_journal, tmp_telegram):
         """When both file reads fail, both show False, status is incomplete."""
         ai._journal_ts_before = "2026-03-10T09:00:00+00:00"
         ai._telegram_ts_before = "2026-03-10T09:00:00+00:00"
+        ai._journal_count_before = 0
+        ai._telegram_count_before = 0
+        # Both files empty — count stays 0, so both written/sent = False
 
         proc = MagicMock()
         proc.poll.return_value = 0

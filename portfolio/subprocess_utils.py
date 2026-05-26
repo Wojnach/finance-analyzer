@@ -275,11 +275,11 @@ def kill_orphaned_llama():
     PROCESS_TERMINATE = 0x0001
 
     # --- Get llama-completion.exe processes via PowerShell --------------------
-    ps_cmd = (
-        'powershell.exe -NoProfile -Command "'
-        "Get-CimInstance Win32_Process -Filter \\\"Name='llama-completion.exe'\\\" "
-        '| Select-Object ProcessId,ParentProcessId | ConvertTo-Json"'
-    )
+    ps_cmd = [
+        "powershell.exe", "-NoProfile", "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name='llama-completion.exe'\" "
+        "| Select-Object ProcessId,ParentProcessId | ConvertTo-Json",
+    ]
 
     try:
         result = subprocess.run(
@@ -287,7 +287,6 @@ def kill_orphaned_llama():
             capture_output=True,
             text=True,
             timeout=15,
-            shell=True,
         )
     except Exception as exc:
         logger.debug("PowerShell process query failed: %s", exc)

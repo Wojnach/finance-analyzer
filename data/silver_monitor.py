@@ -793,7 +793,8 @@ def main():
                     })
                     # Try to read back the decision Claude made
                     try:
-                        tg_lines = open(DATA_DIR / "telegram_messages.jsonl", encoding="utf-8").readlines()
+                        with open(DATA_DIR / "telegram_messages.jsonl", encoding="utf-8") as _tgf:
+                            tg_lines = _tgf.readlines()
                         if tg_lines:
                             last = json.loads(tg_lines[-1])
                             if last.get("category") == "analysis":
