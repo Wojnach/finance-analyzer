@@ -1,91 +1,94 @@
-# Improvement Plan — Auto-Session 2026-05-26
+# Improvement Plan — Auto-Session 2026-05-27
 
-**Branch:** `improve/auto-session-2026-05-26`
-**Created:** 2026-05-26 10:00 CET
-**Status:** COMPLETED
+**Branch:** `improve/auto-session-2026-05-27`
+**Created:** 2026-05-27 10:30 CET
+**Status:** IN PROGRESS
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-A: JSONL rotation ignores `max_size_mb` — golddigger_log at 136MB (HIGH) ✓
-**File:** `portfolio/log_rotation.py:240-367` (rotate_jsonl)
-**Impact:** `golddigger_log.jsonl` is 136MB with 293,780 entries despite a
-50MB policy cap. Age-based archival works (2026-03/04 months archived), but
-the size cap is never enforced. `rotate_jsonl()` reads `max_size_mb` from
-the policy dict but never checks it after age pruning. Compare with
-`rotate_text()` which correctly gates on size.
-**Root cause:** High-frequency writers (~10K entries/day) accumulate 30 days
-of data within the age window, far exceeding the size cap.
-**Fix:** After age-based archival, drop oldest kept entries until under cap.
-Size-pruned entries go to monthly archives (not lost). Result dict includes
-`size_pruned` count.
-**Commit:** `b8e1fe46`
+### BUG-A: Escalation gate ThreadPoolExecutor leak (P1)
+**File:** `portfolio/escalation_gate.py:203`
+**Problem:** Creates a new `ThreadPoolExecutor(max_workers=1)` per
+`should_escalate()` call. On timeout (>10s), `shutdown(wait=False)` is called
+but the hung thread lingers. Leaks OS threads over time.
+**Fix:** Module-level singleton executor. Reuse across calls.
 
-### BUG-B: 9 high-growth JSONL files lack rotation policies (HIGH) ✓
-**File:** `portfolio/log_rotation.py` ROTATION_POLICIES dict
-**Fix:** Added rotation policies for all 9 files with appropriate age/size caps.
-**Commit:** `b8e1fe46`
+### BUG-B: Silent exception swallowing — 12 locations (P2)
+**Problem:** `except Exception: pass` hides errors without logging.
+Locations needing fix (cleanup code excluded):
+- `trigger.py:55` — config load
+- `signal_engine.py:3681` — shadow registry import
+- `btc_etf_flow.py:106` — flow data load
+- `crypto_precompute.py:186,196,216` — data parsing (3x)
+- `loop_contract.py:941` — contract state cleanup
+- `grid_fisher.py:1542` — order state cleanup
+- `gold_overnight_bias.py:54` — data load
+- `intraday_seasonality.py:89` — data load
+- `claude_gate.py:159` — process state
+**Fix:** Add `logger.debug()` to each. Keep fail-safe behavior.
 
-### BUG-C: `shell=True` subprocess call in subprocess_utils.py (P1) ✓
-**File:** `portfolio/subprocess_utils.py:285-291`
-**Fix:** Converted PowerShell invocation from `shell=True` string to list args.
-**Commit:** `7c651946`
-
-### BUG-D: Resource leak in silver_monitor.py (P1) ✓
-**File:** `data/silver_monitor.py:796`
-**Fix:** Wrapped raw `open()` in context manager.
-**Commit:** `7c651946`
-
-### BUG-E: BUG-97 test drift — tests pass on stale heuristic (P2) ✓
-**File:** `tests/test_batch2_fixes.py`
-**Fix:** BUG-97 tests updated for 2026-05-17 count-delta heuristic. Added
-`tmp_telegram`/`tmp_journal` fixtures and `_count_before` baselines.
-Fixes 1 pre-existing test failure.
-**Commit:** `7c651946`
-
-### BUG-F: Deprecated `datetime.utcnow()` in escalation_gate (P2) ✓
-**File:** `portfolio/escalation_gate.py:160`
-**Fix:** Replaced with `datetime.now(timezone.utc)`. Eliminates DeprecationWarning.
-**Commit:** `fe54c891`
+### BUG-C: Accuracy-cache-coupled test flakes (P2)
+**File:** `tests/test_consensus.py` — 7 tests
+**Problem:** Tests read production `data/accuracy_cache.json`. When accuracy
+values drift past the 47% gate, assertions about vote counts go stale.
+**Fix:** Mock `get_or_compute_accuracy` in affected tests.
 
 ---
 
-## 2. Architecture Improvements
+## 2. Dead Code & Cleanup
 
-### FEAT-A: Auto-discovery of unmanaged log files ✓
-**File:** `portfolio/log_rotation.py`
-**What:** `find_unmanaged_files()` scans `data/` for JSONL/log/txt files >1MB
-without rotation policies. `rotate_all()` calls this every run and prints
-warnings. Prevents future BUG-B scenarios.
-**Breaking:** `rotate_all()` returns `dict {results, unmanaged}` instead of list.
-**Commit:** `10642459`
+### DEAD-1: Per-ticker consensus gate for removed tickers
+**File:** `signal_engine.py` ~line 788
+**Problem:** Gate entries only apply to AMD, GOOGL, META — tickers removed
+from Tier 1 months ago. Evaluates every cycle but never triggers.
+**Fix:** Remove stale entries. Keep gate mechanism.
 
 ---
 
-## 3. Documentation Updates ✓
+## 3. Documentation Updates
 
-- `docs/SYSTEM_OVERVIEW.md`: Removed log_rotation from untested modules list.
-  Now has 36 tests covering age archival, size pruning, text rotation,
-  unmanaged file detection.
-- **Commit:** `4fbfc640`
+### DOC-1: SYSTEM_OVERVIEW.md refresh
+Stale numbers: signal count (66→69), active list (crypto_evrp disabled),
+line counts, test stats.
 
----
-
-## 4. Test Results
-
-- **10,309 passed**, 26 failed (all pre-existing), 4 skipped
-- **1 pre-existing failure fixed** (`test_telegram_read_failure_yields_not_sent`)
-- **8 new tests added** (4 size-cap tests + 4 unmanaged-files tests)
-- Runtime: 133s parallel (8 workers)
+### DOC-2: IMPROVEMENT_BACKLOG.md additions
+Add new findings: ARCH-21 (dead gate entries), BUG-A (executor leak),
+BUG-C (test flakes).
 
 ---
 
-## 5. Commits (chronological)
+## 4. Execution Batches
 
-1. `263b2c27` — docs: improvement plan for 2026-05-26 auto-session
-2. `b8e1fe46` — fix(log-rotation): enforce max_size_mb for JSONL files + add 9 missing policies
-3. `10642459` — feat(log-rotation): auto-discover unmanaged JSONL/log files >1MB
-4. `7c651946` — fix: shell=True removal, resource leak, BUG-97 test drift
-5. `fe54c891` — fix: replace deprecated datetime.utcnow() in escalation_gate
-6. `4fbfc640` — docs: update SYSTEM_OVERVIEW test coverage for log_rotation
+### Batch 1: Escalation gate + silent-except batch 1 (5 files)
+1. `portfolio/escalation_gate.py` — singleton executor
+2. `portfolio/trigger.py:55` — add logging
+3. `portfolio/signals/btc_etf_flow.py:106` — add logging
+4. `portfolio/crypto_precompute.py:186,196,216` — add logging (3 sites)
+5. `portfolio/loop_contract.py:941` — add logging
+
+### Batch 2: Silent-except batch 2 + dead code (5 files)
+1. `portfolio/signal_engine.py:3681` — add logging + remove dead gate
+2. `portfolio/grid_fisher.py:1542` — add logging
+3. `portfolio/signals/gold_overnight_bias.py:54` — add logging
+4. `portfolio/signals/intraday_seasonality.py:89` — add logging
+5. `portfolio/claude_gate.py:159` — add logging
+
+### Batch 3: Test stabilization
+1. `tests/test_consensus.py` — mock accuracy for flaky tests
+
+### Batch 4: Documentation
+1. `docs/SYSTEM_OVERVIEW.md` — full refresh
+2. `docs/IMPROVEMENT_BACKLOG.md` — add new items
+
+---
+
+## Risk Assessment
+
+**Batch 1-2:** Adding logging = additive only. Executor change = same
+semantics, fewer resources. Fail-open contract preserved. **Low risk.**
+
+**Batch 3:** Test-only changes. No production code. **Zero risk.**
+
+**Batch 4:** Documentation. **Zero risk.**
