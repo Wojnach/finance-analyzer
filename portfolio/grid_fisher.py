@@ -1540,7 +1540,7 @@ class GridFisher:
                     },
                 )
             except Exception:
-                pass
+                logger.debug("grid_fisher: state cleanup failed", exc_info=True)
 
         self._log("rotate", ob_id=inst.ob_id, ticker=inst.ticker,
                   linked_buy_tier=filled_tier,

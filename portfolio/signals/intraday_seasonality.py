@@ -87,7 +87,7 @@ def _get_utc_hour_and_dow(df: pd.DataFrame) -> tuple[int, int]:
                     return utc_ts.hour, utc_ts.weekday()
                 return last_ts.hour, last_ts.weekday()
         except Exception:
-            pass
+            logger.debug("intraday_seasonality: data parse error", exc_info=True)
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.hour, now.weekday()
 

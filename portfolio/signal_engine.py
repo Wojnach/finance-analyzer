@@ -3679,7 +3679,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 from portfolio.shadow_registry import is_promoted
                 _promoted_override = is_promoted(sig_name)
             except Exception:
-                pass
+                logger.debug("shadow_registry import failed for %s", sig_name, exc_info=True)
             if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in _DISABLED_SIGNAL_OVERRIDES and not _promoted_override:
                 # Shadow-safe signals: compute but don't let them vote.
                 # Their predictions go into _shadow_votes for accuracy tracking.

@@ -52,7 +52,7 @@ def _get_utc_time(df: pd.DataFrame) -> tuple[int, int]:
                     return utc_ts.hour, utc_ts.minute
                 return last_ts.hour, last_ts.minute
         except Exception:
-            pass
+            logger.debug("gold_overnight_bias: data parse error", exc_info=True)
     now = datetime.datetime.now(datetime.timezone.utc)
     return now.hour, now.minute
 
