@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-05-25
-Branch: improve/auto-session-2026-05-25
+Updated: 2026-05-27
+Branch: improve/auto-session-2026-05-27
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 66 signal modules (16 active, 63 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 69 signal modules (15 active, 54 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -27,16 +27,16 @@ Two-layer autonomous trading system with 66 signal modules (16 active, 63 disabl
 
 ### Orchestration (5 modules)
 - `main.py` (1532 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8), post-cycle housekeeping (15+ tasks), heartbeat keepalive for Layer 2
-- `agent_invocation.py` (1644 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion watchdog (30s daemon), stack overflow auto-disable, drawdown circuit breaker, trade guards gate, multi-agent mode. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen.
+- `agent_invocation.py` (1724 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion watchdog (30s daemon), stack overflow auto-disable, drawdown circuit breaker, trade guards gate, multi-agent mode. Spawn-vs-watchdog race fixed (2026-05-12): metadata set before Popen.
 - `trigger.py` (651 lines): 5-section change detection — consensus flip (with clock-skew guard), sustained flip (OR-debounce), price >2%, F&G threshold, sentiment reversal, post-trade. Tier classification (T1/T2/T3), density gate, flip cooldown (30 min), ranging dampening, confidence/ATR floors via claude_budget config.
 - `market_timing.py` (342 lines): DST-aware US/EU market hours, NYSE + Swedish holiday calendars (Easter-based), agent invocation window, GPU signal gating
 - `config_validator.py` (87 lines): Startup config validation
 
-### Signal System (66 modules: 66 enhanced, 16 active + 50 disabled)
-- `signal_engine.py` (4476 lines): 66-module voting (16 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
-- `signal_registry.py` (399 lines): Plugin-based signal discovery via importlib, lazy loading. 66 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
+### Signal System (69 modules: 69 enhanced, 15 active + 54 disabled)
+- `signal_engine.py` (4495 lines): 69-module voting (15 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
+- `signal_registry.py` (399 lines): Plugin-based signal discovery via importlib, lazy loading. 69 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
 - `signal_utils.py` (132 lines): Shared helpers — SMA, EMA, RSI, majority_vote
-- `signals/*.py` (64 files, 20,798 lines): Enhanced composite signals, each with 4-8 sub-indicators
+- `signals/*.py` (69 files): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (2070 lines): Per-signal hit rate tracking, accuracy cache, activation rates, thundering-herd lock, degradation detection
 - `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
@@ -138,9 +138,10 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (70 total: 18 active, 52 disabled)
-- **Active (16)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, Credit Spread Risk, On-Chain BTC, Statistical Jump Regime, Crypto EVRP
-- **Disabled (50)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, Momentum Factors (30% recent), BTC Proxy (44.6%), plus 26 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, ConnorsRSI, ADX Regime Switch, BOCPD Regime Switch, Choppiness Regime Gate, Gold Overnight Bias, Sentiment Extremity Gate, etc.)
+### Signal Inventory (69 total: 15 active, 54 disabled)
+- **Active (15)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, On-Chain BTC, Statistical Jump Regime, Drift Regime Gate
+- **Per-ticker overrides** (globally disabled, active on specific tickers): Williams VIX Fix (XAU/XAG), Realized Skewness (XAU), Credit Spread Risk (BTC/ETH), ML Classifier (ETH)
+- **Disabled (54)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, Momentum Factors, BTC Proxy, Credit Spread Risk, Crypto EVRP, plus 28 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, Kalman Trend Momentum, etc.)
 
 ## 6) Configuration
 
@@ -176,9 +177,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 
 ## 7) Test Surface
 
-- ~7,730+ tests across 430 test files
-- Sequential: ~16 min; Parallel (`-n auto`): ~5.5 min (2.9x speedup on 8 workers)
-- 24 pre-existing failures (integration/strategy, consensus thresholds, forecast config)
+- ~10,300+ tests across 418 test files
+- Sequential: ~16 min; Parallel (`-n auto`): ~2 min (8x speedup on 8 workers)
+- 26 pre-existing failures (13 Freqtrade integration + 13 xdist-flaky/state-coupled)
 - Config: `pyproject.toml` → `[tool.pytest.ini_options]`
 - Linter: ruff (line-length=120, target py311)
 - Fixtures: `conftest.py` provides `make_indicators()`, `make_candles()`, `make_ohlcv_df()`, `sample_config`, `config_file`, `tmp_data_dir`

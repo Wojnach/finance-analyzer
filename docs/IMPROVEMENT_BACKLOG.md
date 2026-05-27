@@ -542,3 +542,62 @@ force-HOLD (same as current exception path, but explicit).
 63 signal modules would need return-type updates. Risk of breaking
 working signals during migration. Better done incrementally — validate
 new signals immediately, migrate existing ones in batches.
+
+---
+
+## ~~BUG-A — Escalation gate ThreadPoolExecutor leak~~ RESOLVED
+
+**Discovered:** 2026-05-27 auto-session.
+**Resolved:** 2026-05-27 auto-session (commit e3657a7f).
+
+`portfolio/escalation_gate.py` created a new `ThreadPoolExecutor(max_workers=1)`
+on every `should_escalate()` call. On timeout (>10s) the hung thread lingered.
+Fixed: module-level singleton executor. Same fail-open semantics, no thread leak.
+
+---
+
+## ~~BUG-B — Silent exception swallowing (12 sites)~~ RESOLVED
+
+**Discovered:** 2026-05-27 auto-session.
+**Resolved:** 2026-05-27 auto-session (commits e3657a7f, b7d82290).
+
+12 `except Exception: pass` blocks across portfolio/ were hiding errors without
+logging. Added `logger.debug(..., exc_info=True)` to each while preserving the
+fail-safe control flow. Files: trigger.py, btc_etf_flow.py, crypto_precompute.py
+(3 sites), loop_contract.py, signal_engine.py, grid_fisher.py,
+gold_overnight_bias.py, intraday_seasonality.py.
+
+---
+
+## ~~BUG-C — test_consensus.py accuracy-cache drift~~ RESOLVED
+
+**Discovered:** 2026-05-27 auto-session.
+**Resolved:** 2026-05-27 auto-session (commit b06a2b82).
+
+`test_consensus.py` signal count assertions were stale after crypto_evrp
+disable (commit af2b5336, 2026-05-26). Updated MSTR 10→9, BTC-USD 15→14.
+
+---
+
+## ARCH-21 — Horizon accuracy collapse (3d/5d/10d → 1d)
+
+**Discovered:** 2026-05-27 auto-session (tagged as TODO in signal_engine.py:4117).
+**Scope:** M — needs per-horizon accuracy cache infrastructure.
+
+### What
+
+`signal_engine.py:4119` maps all horizons longer than 12h to "1d" accuracy
+stats: `acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"`.
+Signals that are good at 1d but bad at 5d (or vice versa) get the same
+accuracy weight at all longer horizons.
+
+### Acceptance criteria
+
+Per-horizon accuracy cache entries for 3d, 5d, 10d horizons.
+`_weighted_consensus` uses horizon-specific accuracy when available.
+
+### Why deferred
+
+Requires outcome_tracker changes (different backfill windows) and accuracy_cache
+schema expansion. The current 1d proxy is conservative — it doesn't create
+false positives, just misses horizon-specific edge.
