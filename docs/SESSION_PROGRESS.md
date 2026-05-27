@@ -1,5 +1,129 @@
 # Session Progress
 
+## 2026-05-27 Auto-Improvement Session
+
+**Autonomous 5-phase improvement session. 6 commits, 16 files changed, merged + pushed.**
+
+### Bugs Fixed
+- **BUG-A: escalation_gate ThreadPoolExecutor leak** — created new executor per
+  `should_escalate()` call. Replaced with module-level singleton. (escalation_gate.py)
+- **10 silent exception swallowers** gained debug logging across trigger.py, btc_etf_flow.py,
+  crypto_precompute.py, loop_contract.py, signal_engine.py, grid_fisher.py,
+  gold_overnight_bias.py, intraday_seasonality.py
+
+### Test Fixes (5 pre-existing failures resolved)
+- test_consensus.py: MSTR 10→9, BTC 15→14 after crypto_evrp re-disable
+- test_batch2_fixes.py BUG-92: assertion corrected (failed kill keeps proc, not clears it)
+- test_perception_gate.py: added load_jsonl mock (auth cooldown interference)
+- test_headless_env_var.py: bigbet/iskbets tests updated for 2026-05-13 claude_gate refactor
+  (mock invoke_claude_text not subprocess.run), added claude_gate._clean_env test
+
+### Documentation
+- SYSTEM_OVERVIEW.md refreshed: signal count 66→69, active 16→15, tests ~7730→~10300
+- IMPROVEMENT_BACKLOG.md: added BUG-A/B/C (resolved), ARCH-21 (horizon accuracy collapse)
+- IMPROVEMENT_PLAN.md: session plan
+
+### Test Results
+- 10,316 passed, 18 pre-existing failures (integration/strategy ModuleNotFoundError), 0 new
+- xdist parallel adds ~25 flaky isolation failures (metals_loop module-level state)
+
+Commits: f61aee6c, e3657a7f, b7d82290, b06a2b82, e35a97f1, 5871735a (all pushed)
+
+---
+
+## 2026-05-26 After-Hours Research Session
+
+**Completed 8-phase research protocol. Merged, pushed, loop restarted.**
+
+### P0 Fixes Shipped
+- **Removed stale credit_spread_risk override** for BTC/ETH — signal was at 20% recent
+  blended accuracy but override was re-enabling it (signal_engine.py:710-713)
+- **Re-disabled crypto_evrp** — claimed 80.5% recent was 77 samples; now 43.4% recent,
+  blended 47.0% oscillating at gate boundary. BUY recent 28.6% (tickers.py:94)
+
+### P1 Monitors
+- crypto_macro at 46.5% recent (310 sam) — below 47% gate, auto-gated at runtime
+- qwen3 recent dropped to 46.8% (124 sam) vs 59.7% all-time — low samples, may recover
+
+### Research Deliverables
+- data/daily_research_review.json — Phase 0 daily review
+- data/daily_research_macro.json — Phase 1 market research (Iran deal, BTC ETF outflows)
+- data/daily_research_quant.json — Phase 2 quant research (6 topics, 4 recommendations)
+- data/daily_research_signal_audit.json — Phase 3 signal audit
+- data/daily_research_ticker_deep_dive.json — XAG + BTC deep dives
+- data/morning_briefing.json — Phase 8 briefing
+
+### Backlog Items Added (IMPROVEMENT_BACKLOG.md)
+- SIGNAL-1: Close walk-forward weight loop (2d) — highest ROI
+- SIGNAL-2: Rolling per-horizon IC weighting (3d)
+- SIGNAL-3: Fix dynamic correlation groups / agreement rate (2d)
+- SIGNAL-4: Extract gs_ratio_velocity as standalone signal (1d)
+
+### Key Findings
+- Walk-forward weight loop disconnected: trained weights never reach _weighted_consensus
+- XAG metals signal 67.3% 3h vs consensus 49.6% — metals pipeline is the edge
+- 20+ shadow signals at 0 outcome samples (network I/O blocked or recently added)
+- crypto_evrp was a small-sample illusion (77 → 43.4%)
+
+Commits: af2b5336, 47a1f814, 19a91709, b6bd0e6c, merge 4c1714b4 (all pushed)
+
+---
+
+## 2026-05-26 Signal Research Agent Session
+
+**Completed all 8 phases of signal research protocol.**
+
+### Implemented: kalman_trend_momentum (shadow/disabled)
+- Source: Singha et al (2025), arxiv:2511.08571 (Sharpe 2.88, 43% CAGR gold)
+- Kalman filter [price, velocity] state-space model, 4 sub-indicators
+- Backtest 1d accuracy: XAU 52.4%, XAG 53.4%, BTC 52.5%, ETH 48.1%, MSTR 54.2%
+- 23/23 tests pass, adversarial review done (2 fixes applied)
+- Files: portfolio/signals/kalman_trend_momentum.py, tests/test_signal_kalman_trend_momentum.py
+
+### Research: 87 papers reviewed, 23 new candidates
+- 4 parallel agents: academic-crypto, academic-metals, SSRN/industry, web/blogs
+- Backlog grew 76 → 99 entries; SQLite updated
+- Top 3 next: GYDI (score 85), G/S Ratio ML Gate (75), GSR 80-50 Rule (73)
+
+### Key Findings
+- Hash Ribbons: 89% win rate on 9 signals (already have module, consider activation)
+- MSTR mNAV at 0.83 (17% discount) — new signal candidate
+- Global M2 correlates r=0.78 with BTC (2020-2023)
+- COT dual-timeframe index: 3rd place 2017 World Championship
+- Silver: 6th consecutive deficit, 1.1B oz drawn since 2019
+
+Commits: 7aa3bd4e, 190501d2, 975d0c86, 2d6c67bc (all pushed)
+
+---
+
+## 2026-05-26 Autonomous Improvement Session
+
+**8 commits merged to main, pushed. Worktree cleaned up.**
+
+### Bugs Fixed
+- **JSONL rotation size enforcement** (`log_rotation.py`): `rotate_jsonl()` now enforces `max_size_mb` after age-based archival. golddigger_log.jsonl was 136MB despite 50MB cap — entries within the 30d age window exceeded the size limit. Size-pruned entries go to monthly archives (not lost).
+- **9 missing rotation policies**: Added policies for llm_probability_outcomes, metals_llm_outcomes, metals_llm_predictions, mstr_loop_poll, grid_fisher_decisions, fin_snipe_manager_log, crypto_value_history, oil_value_history, sentiment_ab_log.
+- **shell=True removal** (`subprocess_utils.py`): Converted PowerShell invocation to list args.
+- **Resource leak** (`silver_monitor.py:796`): Wrapped raw `open()` in context manager.
+- **BUG-97 test drift** (`test_batch2_fixes.py`): Tests updated for 2026-05-17 count-delta heuristic. Fixes 1 pre-existing test failure.
+- **Deprecated `datetime.utcnow()`** (`escalation_gate.py`): Replaced with timezone-aware call.
+
+### Features Added
+- **Unmanaged file detection** (`log_rotation.py`): `find_unmanaged_files()` scans data/ for JSONL/log/txt >1MB without rotation policies. `rotate_all()` prints warnings. Prevents future policy gaps.
+- **Performance**: Replaced O(N*K) `list.pop(0)` with O(N) slice in size pruning.
+
+### Test Results
+- 10,309 passed, 26 failed (all pre-existing), 4 skipped
+- 8 new tests (4 size-cap + 4 unmanaged-files)
+- 1 pre-existing failure fixed
+
+### What's Next
+- Wire walk-forward weights into live consensus (highest-ROI signal improvement)
+- IC-based signal weighting (from 2026-05-25 research)
+- Consider dashboard endpoint for log rotation stats (`get_file_stats()` exists but isn't exposed)
+
+---
+
 ## 2026-05-25 After-Hours Research Agent (23:30 CEST)
 
 **Full 8-phase research protocol. 4 commits merged to main, pushed.**
