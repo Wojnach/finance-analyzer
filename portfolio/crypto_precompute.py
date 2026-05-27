@@ -184,7 +184,7 @@ def _fetch_market_data(config: Any = None) -> dict[str, Any]:
                 if r.status_code == 200:
                     out[key_funding] = float(r.json().get("lastFundingRate", 0))
             except Exception:
-                pass
+                logger.debug("crypto_precompute: data parse error", exc_info=True)
             try:
                 r = requests.get(
                     "https://fapi.binance.com/fapi/v1/openInterest",
@@ -194,7 +194,7 @@ def _fetch_market_data(config: Any = None) -> dict[str, Any]:
                 if r.status_code == 200:
                     out[key_oi] = float(r.json().get("openInterest", 0))
             except Exception:
-                pass
+                logger.debug("crypto_precompute: data parse error", exc_info=True)
     except Exception as exc:  # noqa: BLE001
         logger.warning("binance fapi fetch failed: %s", exc)
 
@@ -214,7 +214,7 @@ def _fetch_market_data(config: Any = None) -> dict[str, Any]:
                     out[key_close] = round(last, 4)
                     out[key_pct] = round((last / prev - 1.0) * 100.0, 3) if prev else None
             except Exception:
-                pass
+                logger.debug("crypto_precompute: data parse error", exc_info=True)
     except ImportError:
         logger.info("yfinance not available — skipping DXY/SPY/gold")
     except Exception as exc:  # noqa: BLE001

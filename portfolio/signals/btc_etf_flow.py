@@ -104,7 +104,7 @@ def _get_flow_data():
             _cache_ts = time.time()
             return data
     except Exception:
-        pass
+        logger.debug("btc_etf_flow: failed to load flow cache", exc_info=True)
     return None
 
 

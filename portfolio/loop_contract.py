@@ -939,7 +939,7 @@ def _check_signal_log_reconciliation() -> list[Violation]:
                         first_ts = ts
                     last_ts = ts
             except Exception:
-                pass
+                logger.debug("loop_contract: state cleanup failed", exc_info=True)
 
     if jsonl_count == 0 or first_ts is None:
         return []

@@ -53,7 +53,7 @@ def _load_claude_budget():
         from portfolio.api_utils import load_config
         cfg = (load_config() or {}).get("claude_budget", {}) or {}
     except Exception:
-        pass
+        logger.debug("trigger: config load failed, using defaults", exc_info=True)
     return {k: cfg.get(k, v) for k, v in _CLAUDE_BUDGET_DEFAULTS.items()}
 
 

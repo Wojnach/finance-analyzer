@@ -17,6 +17,7 @@ Contract:
 
 from __future__ import annotations
 
+import concurrent.futures as _cf
 import datetime as _dt
 import json
 import logging
@@ -27,6 +28,8 @@ from typing import Callable
 from portfolio.file_utils import atomic_append_jsonl
 
 logger = logging.getLogger(__name__)
+
+_RUNNER_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="esc_gate")
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 DEFAULT_LOG_PATH = str(DATA_DIR / "escalation_gate.jsonl")
@@ -196,23 +199,15 @@ def should_escalate(
 
     prompt = _build_prompt(reasons_list, tier, signals or {}, held_positions or {}, tickers)
     call = runner or _default_runner
-    # 2026-05-15: explicit 10s wall-clock budget. Ministral is supposed
-    # to be fast (~1-2s); if it hangs we fail open rather than block
-    # the entire trigger pipeline.
-    import concurrent.futures as _cf
-    _ex = _cf.ThreadPoolExecutor(max_workers=1)
     try:
-        _fut = _ex.submit(call, prompt)
+        _fut = _RUNNER_EXECUTOR.submit(call, prompt)
         try:
             raw = _fut.result(timeout=10)
         except _cf.TimeoutError:
             logger.warning("escalation_gate: runner timed out (>10s) — failing open")
             _log_decision(lp, reasons_list, tier, True, 0.0, "runner_timeout", tickers)
-            # Don't wait for the hung thread on shutdown.
-            _ex.shutdown(wait=False, cancel_futures=True)
+            _fut.cancel()
             return True, 0.0, "ministral_unavailable"
-        finally:
-            _ex.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
         logger.warning("escalation_gate: runner raised %s — failing open", e)
         _log_decision(lp, reasons_list, tier, True, 0.0, f"runner_error:{type(e).__name__}", tickers)
