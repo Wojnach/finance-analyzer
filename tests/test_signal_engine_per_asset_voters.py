@@ -71,9 +71,9 @@ class TestPersistenceCyclesFor:
         assert _persistence_cycles_for("XAG-USD") == 1
         assert _persistence_cycles_for("XAU-USD") == 1
 
-    def test_crypto_returns_1(self):
-        assert _persistence_cycles_for("BTC-USD") == 1
-        assert _persistence_cycles_for("ETH-USD") == 1
+    def test_crypto_returns_2(self):
+        assert _persistence_cycles_for("BTC-USD") == 2
+        assert _persistence_cycles_for("ETH-USD") == 2
 
     def test_stock_returns_2(self):
         assert _persistence_cycles_for("MSTR") == 2
