@@ -598,12 +598,14 @@ _PERSISTENCE_MAX_TICKERS = 32      # bound on tracked tickers (prod=5, cap guard
 _persistence_state: dict[str, dict[str, dict]] = {}  # {ticker: {signal: {"vote": str, "cycles": int}}}
 _persistence_lock = threading.Lock()
 
-# 2026-05-11: per-asset relaxation. Metals + crypto run intraday; one cycle
-# of confirmation already costs a minute. Stocks keep 2 cycles because
+# 2026-05-11: per-asset relaxation. Stocks keep 2 cycles because
 # market-hours-only and short windows make whipsaw more expensive.
+# 2026-05-27: crypto raised to 2 after evidence of Now-TF BUY→HOLD
+# noise flips (5 ETH flips on 2026-05-27 alone, 27-33 min cycles).
+# Metals stay at 1 — intraday warrant trading needs responsiveness.
 _PERSISTENCE_CYCLES_BY_ASSET = {
     "METALS": 1,
-    "CRYPTO": 1,
+    "CRYPTO": 2,
     "STOCK": 2,
 }
 def _persistence_cycles_for(ticker: str | None) -> int:
