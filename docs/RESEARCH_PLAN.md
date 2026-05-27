@@ -1,44 +1,55 @@
-# After-Hours Research Plan — 2026-05-26
+# After-Hours Research Plan — 2026-05-27
 
-## Bugs & Problems Found
+## Findings Summary
 
-### P0 (Fixed This Session)
-1. **Stale credit_spread_risk override** — `signal_engine.py:710-713`
-   re-enabled a signal at 20% recent accuracy for BTC/ETH. FIXED: removed override.
-2. **crypto_evrp gate oscillation** — Enabled at claimed 80.5% (77 sam),
-   degraded to 43.4% recent. Blended 47.0% at gate boundary. FIXED: formally disabled.
+### Phase 0: System State
+- System healthy: 0 loop errors, 87 cycles, all 55 signal modules green
+- XAG bought at $74.39 (RSI 21), oscillated to $74.84 by EOD
+- All L2 decisions HOLD/DORMANT (correct — range-bound regime)
+- 3 enabled signals badly degraded: qwen3 36%, econ_calendar 41.5%, crypto_macro 38.2%
+  - All auto-gated by accuracy gate (blended < 47%) — not actively harmful
+- news_event surged to 69.6% recent — star performer
 
-### P0 (Known, Not Fixed)
-3. **Layer 2 agent timeouts** — 15+ triggers this week with no journal entry.
-   Genuine timeouts, not a race condition. Root cause: agent subprocess produces
-   no useful output within tier timeout. Needs prompt efficiency investigation.
-4. **Avanza session expired** since May 23. Needs manual BankID re-login.
+### Phase 1: Market Events
+- Iran 14-point peace deal draft — geopolitical premium unwinding in metals
+- Tomorrow MASSIVE: GDP 2nd estimate, Core PCE, jobless claims (14:30 CET)
+- BTC whale accumulation 270K BTC in 30 days vs 8-day ETF outflow ($2B+)
+- Central bank gold buying +35% QoQ (243t Q1 2026)
+- Silver in 5th year supply deficit, solar demand 230M oz projected
 
-### P1 (Monitor)
-5. **crypto_macro degrading** — 46.5% recent (310 sam). Below 47% gate,
-   auto-gated at runtime. If trend continues, formally disable.
-6. **qwen3 recent degradation** — 46.8% recent (124 sam) vs 59.7% all-time.
-   Recent sample count low, may recover. Monitor.
+### Phase 2: Quant Research
+- TrustTrade selective consensus — weight by inter-signal agreement + temporal stability
+- Fractional Kelly + vol-targeting — 75% growth of full Kelly, <50% max drawdown
+- Adaptive ATR trailing stops — 1.5x ATR low-vol, 3.0x ATR high-vol
 
-## Improvements Prioritized (from research)
+### Phase 3: Signal Audit
+- Accuracy gate correctly handling degraded signals
+- 17 shadow signals at 0 samples — outcome tracking gap
+- Several disabled signals with strong recent accuracy worth investigation
 
-### Implemented This Session
-1. Remove credit_spread_risk override — DONE
-2. Disable crypto_evrp — DONE
+## Implementation Plan
 
-### Defer to Backlog
-3. **Close walk-forward weight loop** — connect trained weights to _weighted_consensus.
-   All infrastructure exists. Est. 2 days. → IMPROVEMENT_BACKLOG.md
-4. **Rolling IC weighting** — replace accuracy-only with EWMA Spearman IC.
-   ic_computation.py needs per-horizon extension. Est. 3 days.
-5. **Fix dynamic correlation groups** — use agreement rate instead of Pearson.
-   Known bug. Est. 2 days.
-6. **Extract gs_ratio_velocity signal** — shadow deploy. Est. 1 day.
-7. **HMM regime detection** — formalize drift_regime_gate. Est. 4 days.
+### Batch 1: Signal temporal consistency filter (HIGH IMPACT)
+Discard signals that flip direction within 2 checks — known noise pattern.
 
-## Research Deliverables
-- `data/daily_research_review.json` — Phase 0 daily review
-- `data/daily_research_macro.json` — Phase 1 market research
-- `data/daily_research_quant.json` — Phase 2 quant research
-- `data/daily_research_signal_audit.json` — Phase 3 signal audit
-- `data/daily_research_ticker_deep_dive.json` — Per-ticker deep dives (XAG, BTC)
+Files:
+- `portfolio/signal_engine.py` — add temporal consistency check
+- `tests/test_signal_consistency.py` — new test file
+
+### Batch 2: Updated morning briefing + Telegram
+Tomorrow has 11 macro events. User needs morning briefing.
+
+Files:
+- `scripts/write_morning_briefing.py` — rewrite for today
+- `data/morning_briefing.json` — output
+
+### Batch 3: Research deliverables + signal audit
+Files:
+- `data/daily_research_signal_audit.json`
+- `data/daily_research_ticker_deep_dive.json`
+
+### Deferred to backlog:
+- Walk-forward weight loop (2d)
+- Fractional Kelly sizing (3d)
+- BTC on-chain disaggregation (3d)
+- Bull/bear adversarial sub-agents for L2 (4d)
