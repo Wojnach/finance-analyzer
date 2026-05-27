@@ -388,6 +388,13 @@ def _register_defaults():
                       "portfolio.signals.stablecoin_supply_ratio",
                       "compute_stablecoin_supply_ratio_signal",
                       requires_context=True, max_confidence=0.7)
+    # MSTR mNAV discount — valuation arbitrage (MSTR only); capped at 0.7
+    # 2026-05-27: market_cap / (BTC_holdings × BTC_price). Discount <0.95x = BUY.
+    # Post-ETF structural shift from 2-3x premiums to sub-1.0x.
+    register_enhanced("mstr_mnav_discount",
+                      "portfolio.signals.mstr_mnav_discount",
+                      "compute_mstr_mnav_discount_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

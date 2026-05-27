@@ -253,6 +253,9 @@ DISABLED_SIGNALS = {
     "stablecoin_supply_ratio",  # 2026-05-27: NEW. SSR z-score + supply momentum + divergence.
                         # DefiLlama stablecoin API. Crypto-only (BTC/ETH).
                         # Shadow mode — accumulate accuracy data before enabling.
+    "mstr_mnav_discount",  # 2026-05-27: NEW. market_cap / (BTC_holdings × BTC_price).
+                        # MSTR-only. Detects NAV discount/premium.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -433,4 +436,6 @@ SIGNAL_NAMES = [
     "finance_llama",
     "meta_trader",
     "kalman_trend_momentum",
+    "stablecoin_supply_ratio",
+    "mstr_mnav_discount",
 ]
