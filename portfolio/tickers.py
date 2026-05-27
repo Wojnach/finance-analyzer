@@ -250,6 +250,9 @@ DISABLED_SIGNALS = {
     "kalman_trend_momentum",  # 2026-05-26: NEW. Kalman filter [price, velocity] state-space.
                         # Source: Singha et al (2025), arxiv:2511.08571, Sharpe 2.88 gold.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "stablecoin_supply_ratio",  # 2026-05-27: NEW. SSR z-score + supply momentum + divergence.
+                        # DefiLlama stablecoin API. Crypto-only (BTC/ETH).
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.

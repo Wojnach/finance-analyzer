@@ -381,6 +381,13 @@ def _register_defaults():
                       "portfolio.signals.kalman_trend_momentum",
                       "compute_kalman_trend_momentum_signal",
                       max_confidence=0.7)
+    # Stablecoin Supply Ratio — SSR z-score + supply momentum + price divergence
+    # 2026-05-27: CryptoQuant SSR, DefiLlama API (free, no auth). Crypto-only.
+    # Low SSR = stablecoin buying power building. Orthogonal to all existing signals.
+    register_enhanced("stablecoin_supply_ratio",
+                      "portfolio.signals.stablecoin_supply_ratio",
+                      "compute_stablecoin_supply_ratio_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
