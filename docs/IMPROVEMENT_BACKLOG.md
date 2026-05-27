@@ -601,3 +601,53 @@ Per-horizon accuracy cache entries for 3d, 5d, 10d horizons.
 Requires outcome_tracker changes (different backfill windows) and accuracy_cache
 schema expansion. The current 1d proxy is conservative — it doesn't create
 false positives, just misses horizon-specific edge.
+
+---
+
+## SIGNAL-5 — TrustTrade temporal consistency filter
+
+**Discovered:** 2026-05-27 research session (ArXiv: TrustTrade selective consensus).
+**Priority:** P1. **Effort:** 3 days.
+
+Discard signals that flip direction within 2 consecutive checks (known noise
+pattern on ETH/BTC Now-TF). Weight by inter-signal agreement + temporal
+stability. Would have filtered all 5 ETH BUY→HOLD flips on 2026-05-27.
+
+### Why deferred
+
+Requires signal history tracking infrastructure. The in-memory persistence
+filter (raised to 2 cycles for crypto on 2026-05-27) partially addresses
+the same symptom. Full TrustTrade implementation needs cross-check temporal
+alignment which is a larger architectural change.
+
+---
+
+## SIGNAL-6 — Fractional Kelly + ATR vol-targeting
+
+**Discovered:** 2026-05-27 research session (ArXiv: fractional Kelly).
+**Priority:** P2. **Effort:** 3 days.
+
+75% growth of full Kelly at <50% max drawdown. Combine with ATR-based
+volatility targeting for regime-adaptive position sizing. Currently using
+fixed position sizing.
+
+### Why deferred
+
+Requires backtesting infrastructure for validation. Need walk-forward
+testing before live deployment.
+
+---
+
+## SIGNAL-7 — Adaptive ATR trailing stops (regime-aware)
+
+**Discovered:** 2026-05-27 research session.
+**Priority:** P3. **Effort:** 2 days.
+
+1.5x ATR in low-vol regimes, 3.0x ATR in high-vol. 45-65% drawdown
+reduction vs fixed stops in backtests. System currently uses fixed ATR
+multipliers.
+
+### Why deferred
+
+Requires regime classification integration with stop-loss management.
+Current fixed stops work acceptably.

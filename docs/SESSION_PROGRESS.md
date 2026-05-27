@@ -1,5 +1,41 @@
 # Session Progress
 
+## 2026-05-27 After-Hours Research Session
+
+**Completed 8-phase research protocol. 5 commits, merged + pushed.**
+
+### Implementations
+- **Crypto persistence raised to 2 cycles** — fixes ETH Now-TF noise (5 BUY→HOLD flips
+  in 27-33 min today). In-memory persistence filter now requires 2 consecutive 60s cycles
+  for crypto signals to count in consensus (was 1). Metals stays at 1.
+- **MSTR mNAV discount signal** — new shadow signal (29 tests). Computes market_cap /
+  (BTC_holdings × BTC_price) to detect when MSTR trades at discount/premium to BTC NAV.
+  Today: 0.94x mNAV (6% discount). Three sub-indicators: level, velocity, z-score.
+  MSTR-only, starts in shadow mode.
+
+### Research Deliverables
+- Phase 0: Daily review — system healthy, XAG bought $74.39, 3 signals degraded (auto-gated)
+- Phase 1: Macro — Iran 14-point peace deal, tomorrow GDP/PCE/claims ALL 14:30 CET
+- Phase 2: Quant — TrustTrade consensus filter, Fractional Kelly, adaptive ATR stops
+- Phase 3: Signal audit — momentum_cluster correctly handled, shadow signals 0% BUY bias
+- Phase 4: Ticker deep dives — XAG G/S ratio 62→55:1, BTC 270K whale accumulation, MSTR 0.94x mNAV
+- Morning briefing Telegram sent
+
+### Deferred to Backlog
+- TrustTrade temporal consistency filter (P1, 3d)
+- Fractional Kelly + ATR vol-targeting (P2, 3d)
+- Adaptive ATR trailing stops (P3, 2d)
+- Walk-forward weight loop (2d)
+- BTC on-chain disaggregation (3d)
+- Bull/bear adversarial sub-agents for L2 (4d)
+
+### Test Results
+- 10,345 passed, 45 pre-existing failures (0 new), 29 new tests for mstr_mnav_discount
+
+Commits: 0916778e, b076e02e, 5e235a89, ee3922af (merge), 5c3921c3 (data)
+
+---
+
 ## 2026-05-27 Auto-Improvement Session
 
 **Autonomous 5-phase improvement session. 6 commits, 16 files changed, merged + pushed.**
