@@ -306,7 +306,8 @@ class TestBug92TaskkillFailure:
             result = ai.invoke_agent(["test"], tier=1)
 
         assert result is False
-        assert ai._agent_proc is None
+        # Kill failed → proc kept to block respawn (not cleared).
+        assert ai._agent_proc is not None
 
 
 # ===========================================================================

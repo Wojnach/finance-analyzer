@@ -36,6 +36,9 @@ class TestAgentInvocationHeadlessEnv:
         monkeypatch.setattr(
             pg, "should_invoke", lambda reasons, tier: (True, "")
         )
+        # Bypass auth cooldown (production invocations.jsonl may have auth_error)
+        from portfolio import file_utils as _fu
+        monkeypatch.setattr(ai, "load_jsonl", lambda *a, **kw: [])
         # Avoid Telegram / log inspection side effects
         monkeypatch.setattr(ai, "_safe_last_jsonl_ts", lambda p, label: None)
         import portfolio.message_store as ms
@@ -68,53 +71,55 @@ class TestAgentInvocationHeadlessEnv:
 
 
 class TestBigbetHeadlessEnv:
+    """2026-05-13: bigbet.invoke_layer2_eval routes through
+    claude_gate.invoke_claude_text (which calls _clean_env →
+    PF_HEADLESS_AGENT=1). Verify the gate path is used."""
 
-    def test_subprocess_run_env_has_flag(self, monkeypatch):
+    def test_routes_through_claude_gate(self, monkeypatch):
         import portfolio.bigbet as bigbet
 
         captured = {}
 
-        def fake_run(cmd, **kwargs):
-            captured["env"] = kwargs.get("env", {})
-            m = MagicMock()
-            m.stdout = '{"approved": false, "probability": 0.3}'
-            m.stderr = ""
-            m.returncode = 0
-            return m
+        def fake_invoke(prompt, caller, model="sonnet", timeout=60):
+            captured["caller"] = caller
+            captured["prompt"] = prompt
+            return ('PROBABILITY: 3\nREASONING: test', True, 0, "invoked")
 
-        monkeypatch.setattr(bigbet.subprocess, "run", fake_run)
-        # Build-prompt stub so we don't need real signal data
+        monkeypatch.setattr(
+            "portfolio.claude_gate.invoke_claude_text", fake_invoke,
+        )
         monkeypatch.setattr(
             bigbet, "_build_eval_prompt",
             lambda *args, **kwargs: "fake prompt",
         )
 
-        fn = getattr(bigbet, "invoke_layer2_" + "eval")
-        fn(
+        bigbet.invoke_layer2_eval(
             ticker="BTC-USD", direction="BUY", conditions=[],
             signals={}, tf_data={}, prices_usd={"BTC-USD": 70000},
             config={"bigbet": {"enabled": True}, "layer2": {"enabled": True}},
         )
 
-        assert captured.get("env", {}).get("PF_HEADLESS_AGENT") == "1"
+        assert "caller" in captured, "invoke_claude_text should have been called"
+        assert "bigbet_layer2" in captured["caller"]
 
 
 class TestIskbetsHeadlessEnv:
+    """2026-05-13: iskbets.invoke_layer2_gate routes through
+    claude_gate.invoke_claude_text (which calls _clean_env →
+    PF_HEADLESS_AGENT=1). Verify the gate path is used."""
 
-    def test_subprocess_run_env_has_flag(self, monkeypatch):
+    def test_routes_through_claude_gate(self, monkeypatch):
         import portfolio.iskbets as iskbets
 
         captured = {}
 
-        def fake_run(cmd, **kwargs):
-            captured["env"] = kwargs.get("env", {})
-            m = MagicMock()
-            m.stdout = '{"approved": true, "reasoning": "fine"}'
-            m.stderr = ""
-            m.returncode = 0
-            return m
+        def fake_invoke(prompt, caller, model="sonnet", timeout=60):
+            captured["caller"] = caller
+            return ('{"approved": true, "reasoning": "fine"}', True, 0, "invoked")
 
-        monkeypatch.setattr(iskbets.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            "portfolio.claude_gate.invoke_claude_text", fake_invoke,
+        )
         monkeypatch.setattr(
             iskbets, "_build_gate_prompt",
             lambda *args, **kwargs: "fake prompt",
@@ -125,7 +130,20 @@ class TestIskbetsHeadlessEnv:
             signals={}, tf_data={}, atr=0.5, iskbets_cfg={}, config={},
         )
 
-        assert captured.get("env", {}).get("PF_HEADLESS_AGENT") == "1"
+        assert "caller" in captured, "invoke_claude_text should have been called"
+        assert "iskbets_l2_gate" in captured["caller"]
+
+
+class TestClaudeGateCleanEnv:
+    """claude_gate._clean_env is the shared env builder for all gate-spawned
+    subprocesses (bigbet, iskbets, escalation). Must set PF_HEADLESS_AGENT."""
+
+    def test_clean_env_sets_headless_flag(self, monkeypatch):
+        from portfolio.claude_gate import _clean_env
+        monkeypatch.setenv("CLAUDECODE", "1")
+        env = _clean_env()
+        assert env.get("PF_HEADLESS_AGENT") == "1"
+        assert "CLAUDECODE" not in env
 
 
 class TestMultiAgentSpecialistHeadlessEnv:

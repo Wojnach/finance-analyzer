@@ -155,7 +155,8 @@ class TestAgentInvocationIntegration:
     @patch("portfolio.perception_gate._load_compact_summary", return_value=_summary())
     @patch("portfolio.agent_invocation._log_trigger")
     @patch("portfolio.journal.write_context", return_value=0)
-    def test_gate_skips_invocation(self, mock_ctx, mock_log, mock_summary, mock_config):
+    @patch("portfolio.agent_invocation.load_jsonl", return_value=[])
+    def test_gate_skips_invocation(self, mock_jsonl, mock_ctx, mock_log, mock_summary, mock_config):
         # 2026-04-17: reset module-level agent_invocation state. Under
         # xdist, other tests leave `_agent_proc` populated so invoke_agent
         # early-returns at the "already running" branch and never calls
