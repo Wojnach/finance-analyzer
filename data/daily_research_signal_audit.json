@@ -1,220 +1,393 @@
 {
-  "date": "2026-05-25",
-  "generated_at": "2026-05-25T20:37:33.908176+00:00",
-  "total_signals": 80,
-  "active": 16,
-  "disabled": 64,
+  "date": "2026-05-27",
+  "audit_scope": "Full signal accuracy, correlation, regime, and gating analysis across 80 registered signals (16 enabled, 64 disabled, ~30 shadow-tracked)",
+
+  "accuracy_gate_mechanics": {
+    "how_it_works": "Blends all-time and 7d-recent accuracy: 70% recent + 30% all-time (normal), 90% recent + 10% all-time when divergence > 15pp (fast-adaptation). Catastrophic floor: if recent <35% with 15+ samples, forces recent-only. The blended accuracy is then checked against a 47% gate (30+ samples) or 50% gate (7000+ samples). Signals below gate are force-HOLD. Directional gate at 43% per-direction. Directional rescue: if overall accuracy fails gate but the specific vote direction has 55%+ accuracy with 30+ samples, signal rescued at 70-95% weight. Circuit breaker relaxes gate by up to 2pp (to 45%) when fewer than 5 active voters remain.",
+    "uses_recent_accuracy": true,
+    "uses_alltime_accuracy": true,
+    "blend_formula": "0.70 * recent + 0.30 * alltime (normal); 0.90 * recent + 0.10 * alltime (fast when divergence >15pp)",
+    "per_ticker_override": "YES — per-ticker accuracy with 30+ samples REPLACES global accuracy, including directional breakdowns. This is the primary mechanism.",
+    "regime_overlay": "YES — regime-specific accuracy (30+ samples) overrides blended accuracy when available.",
+    "horizon_blacklists": "YES — per (ticker, horizon) frozenset in _TICKER_DISABLED_BY_HORIZON. Extensive: 3h, 1d, 3d, 5d have per-ticker blacklists.",
+    "ic_weighting": "YES — Information Coefficient multiplier (IC_ALPHA=2.0, floor=0.6x, cap=1.5x). Phantom performers (|IC|<0.01, 500+ samples) get 0.85x penalty."
+  },
+
   "top_signals": [
     {
-      "signal": "drift_regime_gate",
-      "all_time_1d": "58.1%",
-      "recent_7d": "68.1% (626 sam)",
-      "best_ticker": "ETH-USD 67.2%",
-      "status": "ACTIVE",
-      "verdict": "STAR - consider boosting weight"
+      "name": "drift_regime_gate",
+      "all_time_accuracy": 58.4,
+      "recent_accuracy": 60.4,
+      "samples_alltime": 1610,
+      "samples_recent": 455,
+      "notes": "Best enabled signal. IMPROVING. BUY 50.2%, SELL 72.4% all-time. Recent SELL 62.0%, BUY 59.3%. Well-balanced directional accuracy. No per-ticker blacklists. Regime detection via drift analysis is genuinely capturing market state."
     },
     {
-      "signal": "vwap_zscore_mr",
-      "all_time_1d": "68.4%",
-      "recent_7d": "67.6% (37 sam)",
-      "best_ticker": "XAU-USD 84.2% (19 sam)",
-      "status": "DISABLED",
-      "verdict": "RE-ENABLE - consistently high but low samples"
+      "name": "cot_positioning",
+      "all_time_accuracy": 84.6,
+      "recent_accuracy": 100.0,
+      "samples_alltime": 13,
+      "samples_recent": 3,
+      "notes": "EXTREMELY small sample (13 all-time, 3 recent). Accuracy is meaningless at this volume. Weekly CFTC data = low activation. Do NOT trust the headline number. Needs 50+ samples before any conclusions."
     },
     {
-      "signal": "bb",
-      "all_time_1d": "54.9%",
-      "recent_7d": "60.5% (428 sam)",
-      "best_ticker": "XAU-USD 62.6%",
-      "status": "ACTIVE",
-      "verdict": "STRONG - performing well across tickers"
+      "name": "news_event",
+      "all_time_accuracy": 50.9,
+      "recent_accuracy": 69.6,
+      "samples_alltime": 9618,
+      "samples_recent": 204,
+      "notes": "DRAMATIC recent improvement. BUY is catastrophic (20.5% all-time, 0 recent). But SELL is excellent: 51.2% all-time, 69.6% recent. This is a SELL-only signal in practice. Directional gate protects against BUY votes."
     },
     {
-      "signal": "williams_vix_fix",
-      "all_time_1d": "51.0%",
-      "recent_7d": "61.5% (205 sam)",
-      "best_ticker": "XAU-USD 76.5% (68 sam)",
-      "status": "DISABLED",
-      "verdict": "RE-ENABLE for metals only"
+      "name": "rsi",
+      "all_time_accuracy": 52.4,
+      "recent_accuracy": 53.9,
+      "samples_alltime": 33747,
+      "samples_recent": 399,
+      "notes": "Workhorse signal. Stable. BUY 53.1%/SELL 55.2% recent — balanced and reliable. Massive sample base provides high statistical confidence. Regime-boosted 1.5x in ranging."
     },
     {
-      "signal": "realized_skewness",
-      "all_time_1d": "51.6%",
-      "recent_7d": "64.3% (485 sam)",
-      "best_ticker": "XAU-USD 60.3% (572 sam)",
-      "status": "DISABLED",
-      "verdict": "RE-ENABLE for XAU - strong recent surge"
+      "name": "bb",
+      "all_time_accuracy": 54.8,
+      "recent_accuracy": 51.7,
+      "samples_alltime": 9208,
+      "samples_recent": 323,
+      "notes": "Slight recent degradation (-3.1pp). BUY 46.7% recent (weak), SELL 59.4% recent (strong). SELL-side carrying. Watch for further BUY degradation — if BUY drops below 43%, directional gate should catch it."
     },
     {
-      "signal": "rsi",
-      "all_time_1d": "52.4%",
-      "recent_7d": "57.5% (496 sam)",
-      "best_ticker": "XAU-USD 60.5% (1197 sam)",
-      "status": "ACTIVE",
-      "verdict": "SOLID - best edge on metals"
-    },
-    {
-      "signal": "qwen3",
-      "all_time_1d": "59.7%",
-      "recent_7d": "53.8% (145 sam)",
-      "best_ticker": "BTC-USD 68.3% (63 sam)",
-      "status": "ACTIVE",
-      "verdict": "GOOD overall, excellent for BTC"
-    },
-    {
-      "signal": "onchain",
-      "all_time_1d": "60.0%",
-      "recent_7d": "insufficient",
-      "best_ticker": "BTC-USD only (58.3%)",
-      "status": "ACTIVE",
-      "verdict": "GOOD but BTC-only"
+      "name": "statistical_jump_regime",
+      "all_time_accuracy": 54.1,
+      "recent_accuracy": 52.0,
+      "samples_alltime": 3635,
+      "samples_recent": 569,
+      "notes": "Slight degradation but stable. BUY 49.6%, SELL 53.9% recent. Blacklisted for XAU-USD (50.2% 1d, noise for gold) and MSTR (27.0%). Crypto-only edge."
     }
   ],
+
   "worst_signals": [
     {
-      "signal": "crypto_evrp",
-      "all_time_1d": "55.5%",
-      "recent_7d": "40.2% (127 sam)",
-      "status": "ACTIVE",
-      "verdict": "DISABLE globally, but 64.8% on ETH -- per-ticker gate"
+      "name": "qwen3",
+      "all_time_accuracy": 59.8,
+      "recent_accuracy": 36.0,
+      "samples_alltime": 3989,
+      "samples_recent": 86,
+      "notes": "CRITICAL COLLAPSE: -23.8pp. All-time BUY 33.4%, SELL 72.7% — extreme SELL-only signal. Recent SELL crashed to 32.8% (67 sam). This signal has INVERTED: its historically strong SELL direction is now actively wrong. The directional gate should catch SELL votes at 32.8% (<43% threshold). Blended accuracy = 0.70*36.0 + 0.30*59.8 = 43.1% — BELOW 47% gate. Already being force-HOLD'd by accuracy gate. STATUS: auto-gated, no action needed, but the collapse warrants investigation into what changed in the LLM's reasoning."
     },
     {
-      "signal": "statistical_jump_regime",
-      "all_time_1d": "54.3%",
-      "recent_7d": "46.9% (693 sam)",
-      "per_ticker": "BTC 61.3%, XAG 60.3%, XAU 50.2%",
-      "status": "ACTIVE",
-      "verdict": "Per-ticker gate: keep for BTC/XAG, disable for XAU"
+      "name": "econ_calendar",
+      "all_time_accuracy": 56.1,
+      "recent_accuracy": 41.5,
+      "samples_alltime": 8875,
+      "samples_recent": 745,
+      "notes": "CRITICAL COLLAPSE: -14.6pp. Recent is 100% BUY-only (745 BUY votes, 0 SELL). BUY accuracy 41.5%. This is a perma-BUY signal in current market. The directional bias penalty (extreme, >90% bias = 0.2x weight) should catch this. Blended = 0.70*41.5 + 0.30*56.1 = 45.9% — BELOW 47% gate. Auto-gated. Also regime-gated in ranging. Also per-ticker blacklisted for BTC/ETH at 1d (1.8%), XAG at 1d (29.5%). Triple-layered protection is working."
     },
     {
-      "signal": "news_event",
-      "all_time_1d": "50.6%",
-      "recent_7d": "51.5% (264 sam)",
-      "status": "ACTIVE",
-      "verdict": "MARGINAL - only 50% edge, high complexity"
+      "name": "crypto_macro",
+      "all_time_accuracy": 53.7,
+      "recent_accuracy": 38.2,
+      "samples_alltime": 4745,
+      "samples_recent": 272,
+      "notes": "CRITICAL COLLAPSE: -15.5pp. Recent is 100% BUY-only (272 BUY, 0 SELL). BUY accuracy 38.2%. Extreme directional bias. Blended = 0.70*38.2 + 0.30*53.7 = 42.9% — BELOW 47% gate. Auto-gated. Also per-ticker blacklisted for BTC/ETH at 1d. However, the signal IS still voting BUY in the latest snapshot (ETH, BTC) — this means the accuracy gate is catching it at consensus time but it still computes and eats cycle time."
     },
     {
-      "signal": "credit_spread_risk",
-      "all_time_1d": "50.0%",
-      "per_ticker": "BTC/ETH 57.4%, XAG 17.3%, XAU 35.4%",
-      "status": "DISABLED",
-      "verdict": "CORRECT to disable globally. Re-enable for crypto ONLY."
+      "name": "momentum",
+      "all_time_accuracy": 52.8,
+      "recent_accuracy": 46.4,
+      "samples_alltime": 13195,
+      "samples_recent": 562,
+      "notes": "DEGRADING: -6.4pp. BUY 38.9% recent (terrible), SELL 56.4% recent (decent). Blended = 0.70*46.4 + 0.30*52.8 = 48.3% — ABOVE 47% gate, so it still votes. But BUY direction at 38.9% is BELOW 43% directional gate, so BUY votes are already being blocked. Only SELL votes pass. This is the correct behavior — the directional gate is doing its job."
     },
     {
-      "signal": "fear_greed",
-      "all_time_1d": "58.6%",
-      "status": "ACTIVE",
-      "verdict": "CAUTION - BUY-only signal (never SELL)"
+      "name": "mean_reversion",
+      "all_time_accuracy": 52.6,
+      "recent_accuracy": 49.2,
+      "samples_alltime": 27717,
+      "samples_recent": 575,
+      "notes": "MILD DEGRADATION: -3.4pp. 27K+ samples = very high confidence this is a marginal signal. BUY 43.5% recent (below directional gate 43%), SELL 56.6% recent (decent). BUY votes being blocked by directional gate. 50% gate applies (7000+ samples), so 49.2% recent would put blended at ~50.2% — barely above the 50% high-sample gate. Borderline."
     }
   ],
+
+  "zero_recent_samples_analysis": {
+    "enabled_signals_with_zero_recent": {
+      "fear_greed": "Zero recent activations because: (1) F&G only fires at extremes (<=20 BUY, >=80 SELL), (2) regime-gated in ranging (current regime), (3) sustained fear duration gate suppresses BUY in first 30 days of fear. Current F&G value is likely between 20-80 (neutral), so it correctly produces HOLD. 10K+ all-time samples confirm it works when it fires. NOT a bug — low activation is by design.",
+      "ministral": "Zero recent activations because: (1) regime-gated in ranging (explicitly listed in REGIME_GATED_SIGNALS ranging._default), (2) per-ticker blacklisted for XAG-USD and XAU-USD (metals are main focus), (3) GPU skip outside market hours. With metals being the primary focus and ranging being the current regime, ministral has no ticker where it can fire. This is correct but concerning — the signal has 58% all-time accuracy and is being completely silenced. If regime shifts to trending, it should re-activate.",
+      "metals_cross_asset": "Zero recent activations because: (1) per-ticker blacklisted for XAG-USD AND XAU-USD in _default (the only metals tickers), (2) metals_cross_asset is metals-only by design. The blacklist means this signal can NEVER fire for its intended tickers. If it was blacklisted for poor accuracy (it was), this is correct. The all-time accuracy is 54.6% (518 sam) which is above gate — the blacklist was applied per-ticker where it performed poorly.",
+      "onchain": "Zero recent activations because: onchain is BTC-only (MVRV, SOPR, NUPL). It has 45 all-time samples (60% accuracy) and 0 recent. The signal depends on BGeometrics API (15 calls/day limit). Low activation is inherent to on-chain metrics updating slowly (daily). NOT a bug, just slow data."
+    },
+    "summary": "All four zero-recent enabled signals have valid explanations. No bug detected. However, ministral being completely silenced across all active tickers due to regime+blacklist overlap deserves monitoring — when regime flips to trending, verify it re-activates."
+  },
+
+  "shadow_signal_zero_samples_analysis": {
+    "total_shadow_signals": 30,
+    "with_samples": 18,
+    "with_zero_samples": 12,
+    "zero_sample_reasons": {
+      "network_io_required": ["futures_basis", "vix_term_structure", "gold_real_yield_paradox", "cross_asset_tsmom", "copper_gold_ratio", "network_momentum", "ovx_metals_spillover", "xtrend_equity_spillover", "residual_pair_reversion"],
+      "recently_added_no_outcomes_yet": ["btc_gold_correlation_regime", "kalman_trend_momentum", "stablecoin_supply_ratio"],
+      "no_output_despite_being_shadow_safe": ["absorption_ratio_regime", "mahalanobis_turbulence", "metals_vrp", "breakeven_inflation_momentum", "treasury_risk_rotation", "trend_slope_momentum"],
+      "note": "The 6 shadow-safe signals with 0 samples despite being in _SHADOW_SAFE_SIGNALS need investigation. They should be computing every cycle and having outcomes tracked. Possible causes: (1) they always return HOLD so outcome_tracker skips them, (2) their compute_fn fails silently, (3) outcome_tracker doesn't process shadow votes for these. absorption_ratio_regime and mahalanobis_turbulence are in the shadow list but producing 0 samples even in the recent period — their compute functions may be broken."
+    }
+  },
+
   "correlation_clusters": [
     {
-      "name": "momentum_cluster",
-      "signals": [
-        "momentum",
-        "momentum_factors",
-        "ema",
-        "macd",
-        "trend"
-      ],
-      "correlation": "high",
-      "note": "All use price momentum/trend indicators. Redundant information when trending."
+      "cluster": "pure_trend",
+      "signals": ["ema", "heikin_ashi"],
+      "penalty": "0.20x for follower",
+      "reason": "MA-based trend signals with 85-90% agreement. Both mostly disabled/HOLD in current regime. ema votes occasionally via dead-zone soft conf (0.20). heikin_ashi disabled."
     },
     {
-      "name": "mean_reversion_cluster",
-      "signals": [
-        "mean_reversion",
-        "rsi",
-        "bb"
-      ],
-      "correlation": "moderate",
-      "note": "RSI and BB overlap with mean_reversion but BB has independent volatility component."
+      "cluster": "oscillator_trend",
+      "signals": ["momentum_factors", "oscillators"],
+      "penalty": "0.20x for follower",
+      "reason": "Oscillation-based momentum. Both disabled. momentum_factors 51.8% all-time but 40.6% recent. oscillators 46.4% — both near noise."
     },
     {
-      "name": "llm_cluster",
-      "signals": [
-        "ministral",
-        "qwen3",
-        "claude_fundamental"
-      ],
-      "correlation": "moderate",
-      "note": "All LLMs see similar features. qwen3 has distinct SELL bias (72.7% SELL accuracy)."
+      "cluster": "structural_flow",
+      "signals": ["volume_flow", "macro_regime", "structure"],
+      "penalty": "0.20x for follower",
+      "reason": "Market structure indicators. All three disabled. volume_flow 50.5%, macro_regime 46.9%, structure 48.5% — all near coinflip. Correct to keep disabled."
     },
     {
-      "name": "regime_cluster",
-      "signals": [
-        "drift_regime_gate",
-        "statistical_jump_regime",
-        "vol_ratio_regime",
-        "hurst_regime"
-      ],
-      "correlation": "low-moderate",
-      "note": "Different regime detection methods. drift_regime_gate is star, others mediocre."
+      "cluster": "macro_external",
+      "signals": ["sentiment", "news_event", "calendar", "econ_calendar", "funding"],
+      "penalty": "0.15x for follower",
+      "reason": "External macro signals. Critically, econ_calendar (enabled) is in this cluster with news_event (enabled). If both vote, only the leader gets full weight. news_event 69.6% recent vs econ_calendar 41.5% recent — news_event should be leader. But econ_calendar is also auto-gated by accuracy gate. The cluster structure is correct.",
+      "finding": "fear_greed was correctly REMOVED from this cluster (2026-05-24 split) because it's a contrarian BUY-only signal with different semantics."
+    },
+    {
+      "cluster": "momentum_cluster",
+      "signals": ["rsi", "momentum", "mean_reversion", "bb"],
+      "penalty": "0.15x for follower",
+      "reason": "Core momentum/MR signals with 88-100% agreement. This is CRITICAL: 4 of the 6 most important enabled signals are in one cluster. Only the leader (rsi at 53.9% recent or bb at 51.7% recent) gets full weight. The other 3 get 0.15x. This heavily constrains the consensus from the core voting block.",
+      "concern": "momentum (46.4% recent) and mean_reversion (49.2% recent) are near-noise but bb (51.7%) or rsi (53.9%) will be leader, so the cluster does suppress the weaker members correctly."
+    },
+    {
+      "cluster": "meta_cluster: trend_mega",
+      "signals": ["pure_trend leaders", "oscillator_trend leaders", "structural_flow leaders"],
+      "penalty": "0.35x for 2nd/3rd agreeing leader",
+      "reason": "When all three sub-cluster leaders agree, only the best gets full weight. Prevents 3.0x effective leader weight."
     }
   ],
+
+  "redundancy_analysis": {
+    "most_redundant_pair": "rsi + mean_reversion — both are mean-reversion signals using RSI-derived indicators. In the latest snapshot: XAG rsi=HOLD, mean_reversion=SELL; BTC rsi=HOLD, mean_reversion=SELL. They don't always agree because mean_reversion uses RSI(2/3) + IBS + Gap Fade + BB %B while rsi uses RSI(14). Different lookback periods = different signals. The correlation cluster penalty (0.15x) handles this correctly.",
+    "signals_voting_identically_latest_snapshot": [
+      "econ_calendar + crypto_macro: Both BUY on BTC, ETH (but both accuracy-gated so irrelevant)",
+      "momentum_factors + ema: Both BUY on XAG, XAU (but momentum_factors disabled, ema is soft-vote)",
+      "fibonacci + ema: Both BUY on ETH, XAU (fibonacci disabled, ema soft-vote)",
+      "amihud_illiquidity_regime + connors_rsi2: Both SELL on BTC, ETH (both shadow-only)"
+    ],
+    "independent_signals": "drift_regime_gate, statistical_jump_regime, and cot_positioning are NOT in any correlation cluster and vote independently. These provide the most valuable independent information."
+  },
+
   "regime_performance": {
-    "current_regime": "ranging",
-    "ranging_penalty": "0.75x confidence",
-    "high_vol_penalty": "0.80x confidence",
-    "observation": "In ranging regime, trend-following signals (ema, macd, momentum) systematically underperform. Mean reversion (rsi, bb, mean_reversion) outperform. Current weights do NOT adjust enough for this."
+    "current_regime_by_ticker": {
+      "XAG-USD": "ranging",
+      "XAU-USD": "ranging",
+      "ETH-USD": "ranging",
+      "BTC-USD": "ranging",
+      "MSTR": "trending-down"
+    },
+    "ranging_regime_findings": {
+      "boosted_signals": "rsi 1.5x, bb 1.5x, macd 1.3x, mean_reversion 1.7x, momentum 1.3x, calendar 1.2x",
+      "penalized_signals": "ema 0.5x, oscillators 0.3x, mean_reversion is boosted but has BUY directional gate at 43.5%",
+      "regime_gated_signals_count": 20,
+      "regime_gated_list": "trend, momentum_factors, ema, heikin_ashi, structure, fear_greed, macro_regime, news_event, volatility_sig, forecast, smart_money, oscillators, candlestick, funding, econ_calendar, volume_flow, credit_spread_risk, ministral, claude_fundamental, fibonacci",
+      "finding": "In ranging regime, 20 signals are force-HOLD'd. Of the 16 enabled signals, this gates: momentum_factors (disabled anyway), ema, fear_greed, news_event, econ_calendar, ministral, plus several already-disabled ones. Combined with accuracy gate, the actual voting pool is very thin."
+    },
+    "trending_down_findings": {
+      "boosted_signals": "ema 1.5x, macd 1.3x, trend 1.4x, momentum_factors 1.3x, heikin_ashi 1.2x, structure 1.2x, smart_money 1.1x",
+      "penalized_signals": "rsi 0.7x, bb 0.7x, mean_reversion 0.6x",
+      "note": "MSTR is in trending-down, so its core MR signals (rsi, bb, mean_reversion) are penalized. This is correct — MR signals fight trends."
+    },
+    "regime_accuracy_tracking": "YES — get_or_compute_regime_accuracy() is called and overlays regime-specific accuracy on the blended data when 30+ samples exist. This is a strong feature."
   },
-  "critical_finding": {
-    "title": "Per-ticker signal accuracy divergence is the #1 problem",
-    "detail": "Signals like credit_spread_risk (57% BTC vs 17% XAG) and statistical_jump_regime (61% BTC vs 50% XAU) have massive per-ticker accuracy differences. Using them globally destroys metals/ETH consensus. System has NO EDGE on 4/5 instruments.",
-    "root_cause": "No per-ticker signal gating beyond DISABLED_SIGNALS list.",
-    "fix": "Implement per-ticker per-signal accuracy gating: if signal X has <47% accuracy for ticker Y (>=30 samples), force HOLD for that ticker."
+
+  "enabled_signal_health_summary": {
+    "healthy": [
+      "rsi: 53.9% recent, stable, workhorse",
+      "drift_regime_gate: 60.4% recent, improving, best signal",
+      "statistical_jump_regime: 52.0% recent, stable"
+    ],
+    "degrading_but_auto_protected": [
+      "qwen3: 36.0% recent — auto-gated by accuracy gate (blended 43.1% < 47%)",
+      "econ_calendar: 41.5% recent — auto-gated by accuracy gate + regime gate + per-ticker blacklists",
+      "crypto_macro: 38.2% recent — auto-gated by accuracy gate + per-ticker blacklists"
+    ],
+    "borderline_watch": [
+      "bb: 51.7% recent, -3.1pp from all-time, BUY direction weak at 46.7%",
+      "mean_reversion: 49.2% recent, 27K+ samples → 50% high-sample gate applies, BUY directionally gated",
+      "momentum: 46.4% recent, BUY directionally gated, SELL at 56.4% keeping it alive via directional rescue"
+    ],
+    "silenced_by_design": [
+      "fear_greed: no extremes in current market",
+      "ministral: regime-gated + per-ticker blacklisted for all active tickers",
+      "metals_cross_asset: per-ticker blacklisted for both metals tickers",
+      "onchain: BTC-only, slow-updating data"
+    ],
+    "effective_voter_count_estimate": {
+      "XAG_ranging": "~4-6 active voters after all gates (rsi, bb, mean_reversion SELL only, drift_regime_gate, statistical_jump_regime, possibly momentum SELL only)",
+      "BTC_ranging": "~5-7 active voters (rsi, bb, momentum SELL, mean_reversion SELL, drift_regime_gate, statistical_jump_regime, macd)",
+      "MSTR_trending_down": "~4-6 active voters (ema, momentum, oscillators weakly, drift_regime_gate, possibly bb/rsi at 0.7x)"
+    }
   },
+
+  "shadow_signal_promotion_candidates": [
+    {
+      "name": "amihud_illiquidity_regime",
+      "accuracy": 72.5,
+      "recent_accuracy": 72.5,
+      "samples": 131,
+      "buy_accuracy": 3.1,
+      "sell_accuracy": 94.9,
+      "verdict": "DO NOT PROMOTE. Despite 72.5% headline accuracy, BUY accuracy is 3.1% (32 samples) — catastrophic. This is a SELL-only signal. If promoted, it would need SELL-only directional gating. The 72.5% comes entirely from 94.9% SELL accuracy on 99 samples. Worth watching for SELL-only rescue, but 131 total samples is still small.",
+      "priority": "P3 — monitor"
+    },
+    {
+      "name": "vwap_zscore_mr",
+      "accuracy": 64.9,
+      "recent_accuracy": 51.3,
+      "samples_alltime": 94,
+      "samples_recent": 39,
+      "buy_accuracy_alltime": 60.7,
+      "sell_accuracy_alltime": 71.1,
+      "buy_accuracy_recent": 44.4,
+      "sell_accuracy_recent": 57.1,
+      "verdict": "CAUTION. All-time looks good (64.9%) but recent collapsed to 51.3% (39 sam). Tiny sample size. The 64.9% was likely a small-sample illusion (94 samples). Recent data shows regression toward coinflip. Keep shadow-tracking. Do NOT promote yet.",
+      "priority": "P3 — continue shadow"
+    },
+    {
+      "name": "adx_regime_switch",
+      "accuracy": 61.3,
+      "recent_accuracy": 61.3,
+      "samples": 62,
+      "buy_accuracy": 0.0,
+      "sell_accuracy": 100.0,
+      "verdict": "EXTREMELY suspicious. 100% SELL accuracy on 38 samples, 0% BUY accuracy on 24 samples. This is a pure SELL-only signal where BUY is always wrong. The 61.3% headline comes from SELL dominating. Same pattern in recent (same numbers = no new outcomes tracked since last audit). Sample too small and too asymmetric. Keep shadow-tracking.",
+      "priority": "P3 — continue shadow"
+    },
+    {
+      "name": "choppiness_regime_gate",
+      "accuracy": 60.4,
+      "recent_accuracy": 60.4,
+      "samples": 48,
+      "buy_accuracy": 0.0,
+      "sell_accuracy": 100.0,
+      "verdict": "Same asymmetry as adx_regime_switch: 0% BUY (19 sam), 100% SELL (29 sam). Too small. Too asymmetric. Keep shadow-tracking.",
+      "priority": "P3 — continue shadow"
+    },
+    {
+      "name": "sentiment_extremity_gate",
+      "accuracy": 55.6,
+      "recent_accuracy": 55.6,
+      "samples": 54,
+      "buy_accuracy": 0.0,
+      "sell_accuracy": 90.9,
+      "verdict": "Same BUY=0%/SELL=90%+ pattern. These regime-gate signals all share the same structure: SELL signals are consistently correct because the regime detection is identifying bearish conditions accurately, but BUY signals are always wrong. This is a systemic pattern across shadow signals, not individual signal quality.",
+      "priority": "P3"
+    },
+    {
+      "name": "macd",
+      "accuracy": 44.9,
+      "recent_accuracy": 54.7,
+      "samples_alltime": 6726,
+      "samples_recent": 181,
+      "verdict": "Recovering. All-time 44.9% but recent 54.7% with BUY 59.6%, SELL 48.8%. The all-time poor performance is dragging down the blended score. Currently disabled. Blended = 0.70*54.7 + 0.30*44.9 = 51.8% — above 47% gate. If this recovery sustains for 2-3 more weeks with 300+ recent samples, promotion is warranted. Watch closely.",
+      "priority": "P2 — close monitoring"
+    }
+  ],
+
+  "systemic_pattern_discovery": {
+    "sell_only_shadow_signals": {
+      "signals": ["amihud_illiquidity_regime", "adx_regime_switch", "choppiness_regime_gate", "bocpd_regime_switch", "sentiment_extremity_gate", "autotune_adaptive_cycle", "tsi_chop_mr", "connors_rsi2", "ttm_squeeze", "gold_overnight_bias", "complexity_gap_regime"],
+      "pattern": "11 shadow signals show the SAME pattern: 0% BUY accuracy, 90-100% SELL accuracy. This is NOT 11 independent good SELL signals. This is a systemic bias in the outcome tracking: during this period, prices have been declining enough that SELL predictions are correct and BUY predictions are wrong. These signals are all riding the same bearish tailwind. If the market reverses, ALL of them will flip to terrible accuracy simultaneously.",
+      "implication": "Do NOT promote any of these based on SELL accuracy alone. The edge is not in the signal — it is in the market direction. Need to verify accuracy across both bull and bear regimes before any promotion."
+    },
+    "buy_only_enabled_signals": {
+      "signals": ["econ_calendar (100% BUY recent)", "crypto_macro (100% BUY recent)", "fear_greed (100% BUY all-time)", "onchain (100% BUY all-time)"],
+      "pattern": "Four enabled signals never vote SELL. econ_calendar and crypto_macro have collapsed accuracy because their BUY-only prediction is wrong in the current market. fear_greed and onchain have 0 recent samples, so the bias is hidden.",
+      "implication": "The system has a BUY bias from these signals offset by SELL-dominant shadow signals. In consensus, the accuracy gate is correctly suppressing the BUY-biased enabled signals, but if they re-activate (market turns bullish), they will dominate consensus with untested BUY accuracy."
+    }
+  },
+
   "recommendations": [
     {
-      "priority": 1,
-      "title": "Implement per-ticker signal accuracy gating",
-      "description": "Gate signals per-ticker based on per-ticker accuracy from signal_log.db. If signal has <47% accuracy for a specific ticker with >=30 samples, force HOLD for that ticker.",
-      "expected_impact": "HIGH - could improve metals consensus from 49.6% to 55%+",
-      "effort": "medium",
-      "files": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
-      ]
+      "action": "MONITOR",
+      "signal": "qwen3",
+      "reason": "Collapsed from 59.8% to 36.0% recent. Auto-gated by accuracy gate. Investigate what changed in Qwen3 reasoning — possible model degradation or prompt drift. If collapse persists 2 more weeks, consider formal disable to save GPU compute cycles.",
+      "priority": "P1"
     },
     {
-      "priority": 2,
-      "title": "Re-enable williams_vix_fix for metals (XAU, XAG)",
-      "description": "williams_vix_fix has 76.5% accuracy on XAU (68 sam) and 60.9% on XAG (92 sam). Currently disabled globally. Enable per-ticker.",
-      "expected_impact": "MEDIUM - adds high-accuracy voter for metals",
-      "effort": "easy",
-      "files": [
-        "portfolio/signal_engine.py"
-      ]
+      "action": "MONITOR",
+      "signal": "econ_calendar",
+      "reason": "Collapsed from 56.1% to 41.5% recent, 100% BUY-only. Triple-protected (accuracy gate + regime gate + per-ticker blacklists). Auto-gated correctly. The signal's design (FOMC/CPI proximity) may be structurally broken in current macro environment. Watch for recovery if rate environment changes.",
+      "priority": "P2"
     },
     {
-      "priority": 3,
-      "title": "Disable crypto_evrp or gate it to ETH-only",
-      "description": "crypto_evrp regressed to 40.2% recent. But per-ticker it is 64.8% on ETH. Gate to ETH-only.",
-      "expected_impact": "MEDIUM",
-      "effort": "easy",
-      "files": [
-        "portfolio/tickers.py"
-      ]
+      "action": "MONITOR",
+      "signal": "crypto_macro",
+      "reason": "Collapsed from 53.7% to 38.2%, 100% BUY-only. Auto-gated. DeFi TVL/staking yields/protocol revenue metrics may be disconnected from price action in current regime. Consider: is this signal's input data still arriving? Check if the underlying API calls are returning fresh data.",
+      "priority": "P2"
     },
     {
-      "priority": 4,
-      "title": "Boost drift_regime_gate weight",
-      "description": "drift_regime_gate at 68.1% recent (626 sam) is star performer. No weight boost currently.",
-      "expected_impact": "LOW-MEDIUM",
-      "effort": "easy",
-      "files": [
-        "portfolio/signal_engine.py"
-      ]
+      "action": "INVESTIGATE",
+      "signal": "mean_reversion",
+      "reason": "27K+ samples, 49.2% recent. High-sample gate (50%) applies. Blended ~50.2% — barely above gate. BUY direction already gated at 43.5%. Only SELL votes pass. This is the system's most-sampled signal and it is now marginal. The 1.7x ranging regime boost artificially inflates its effective weight. Consider whether this boost is still justified given the degradation.",
+      "priority": "P2"
     },
     {
-      "priority": 5,
-      "title": "Disable statistical_jump_regime for XAU",
-      "description": "statistical_jump_regime at 50.2% for XAU adds noise. Keep for BTC (61.3%) and XAG (60.3%).",
-      "expected_impact": "LOW",
-      "effort": "easy",
-      "files": [
-        "portfolio/tickers.py"
-      ]
+      "action": "INVESTIGATE",
+      "signal": "bb",
+      "reason": "BUY accuracy 46.7% recent — approaching 43% directional gate. If it drops 3.7pp more, BUY votes will be blocked. Currently bb is in the momentum_cluster; if both bb BUY and mean_reversion BUY get gated, the cluster loses all BUY-side voting capacity. This would create a systematic SELL bias in the core voting block.",
+      "priority": "P2"
+    },
+    {
+      "action": "CONTINUE_SHADOW",
+      "signal": "macd",
+      "reason": "Recovering from 44.9% all-time to 54.7% recent (181 sam). BUY direction strong at 59.6%. If this sustains at 53%+ for 2 more weeks with 300+ total recent samples, promote to enabled. Currently disabled.",
+      "priority": "P2"
+    },
+    {
+      "action": "DO_NOT_PROMOTE",
+      "signal": "amihud_illiquidity_regime",
+      "reason": "72.5% headline accuracy is misleading. 3.1% BUY accuracy = catastrophic. SELL-only edge (94.9%) is part of a systemic bearish-market pattern shared by 11+ shadow signals. Need bull-market validation before any promotion. Small sample (131).",
+      "priority": "P3"
+    },
+    {
+      "action": "DO_NOT_PROMOTE",
+      "signal": "vwap_zscore_mr",
+      "reason": "All-time 64.9% was small-sample illusion (94 sam). Recent collapsed to 51.3% (39 sam). Classic regression to mean. Keep shadow-tracking for 3+ more months.",
+      "priority": "P3"
+    },
+    {
+      "action": "INVESTIGATE",
+      "signal": "shadow_zero_sample_signals",
+      "reason": "absorption_ratio_regime, mahalanobis_turbulence, metals_vrp, breakeven_inflation_momentum, treasury_risk_rotation, trend_slope_momentum are listed in _SHADOW_SAFE_SIGNALS but have 0 samples in both all-time and recent. Their compute functions may be failing silently. Check logs for shadow signal errors.",
+      "priority": "P2"
+    },
+    {
+      "action": "VERIFY",
+      "signal": "ministral",
+      "reason": "58% all-time accuracy (6303 sam) but 0 recent samples because regime gate + per-ticker blacklist silences it everywhere. When regime changes from ranging to trending, verify it re-activates for crypto tickers. Currently wasting GPU compute for zero votes.",
+      "priority": "P3"
+    },
+    {
+      "action": "NO_ACTION_NEEDED",
+      "signal": "fear_greed",
+      "reason": "Zero recent activation is by design (F&G index between 20-80, regime gate in ranging, sustained fear gate). The signal has 58.6% all-time with 10K+ samples and will re-activate at market extremes. Correct behavior.",
+      "priority": "INFO"
     }
+  ],
+
+  "key_findings_summary": [
+    "1. ACCURACY GATE IS WORKING: The three critically degraded enabled signals (qwen3, econ_calendar, crypto_macro) are all being auto-gated. No manual intervention needed.",
+    "2. EFFECTIVE VOTER POOL IS THIN: After all gates, only 4-7 signals actually vote per ticker. The circuit breaker (relax gate by up to 2pp when <5 voters) may be firing frequently.",
+    "3. SELL BIAS IN SHADOW SIGNALS: 11+ shadow signals show 0% BUY / 90%+ SELL accuracy — this is bearish-market tailwind, not genuine signal quality. Do not promote any of them.",
+    "4. BUY BIAS IN ENABLED SIGNALS: econ_calendar, crypto_macro, fear_greed, onchain are BUY-only. Currently suppressed by gates, but if market turns bullish, they will re-activate with untested accuracy.",
+    "5. MOMENTUM_CLUSTER DOMINANCE: 4 core signals (rsi, bb, momentum, mean_reversion) are in one correlation cluster, limiting their combined influence. rsi or bb will be leader; the other 3 get 0.15x weight.",
+    "6. MACD RECOVERY: Best disabled signal recovery story. 44.9% all-time -> 54.7% recent. If sustained, first candidate for re-enabling.",
+    "7. SHADOW TRACKING GAP: 6 shadow-safe signals produce zero samples — compute functions may be broken.",
+    "8. PER-TICKER GATING IS EXTENSIVE: _TICKER_DISABLED_BY_HORIZON has blacklists for all 5 tickers across 5 horizons. This is a strength — prevents bad signals from harming specific instruments."
   ]
 }

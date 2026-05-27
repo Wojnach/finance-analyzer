@@ -1,152 +1,69 @@
 {
-  "date": "2026-05-25",
-  "generated_at": "2026-05-25T20:33:41.619508+00:00",
-  "system_health": {
-    "status": "healthy",
-    "cycle_count": 87,
-    "error_count": 0,
-    "uptime_hours": 14.5,
-    "all_53_signal_modules": "passing",
-    "last_trigger": "ETH-USD flipped BUY->HOLD (sustained) at 20:30 UTC"
-  },
+  "date": "2026-05-27",
   "trades_today": [
     {
-      "type": "layer2_decision",
-      "ts": "2026-05-25T16:15:00Z",
-      "trigger": "BTC-USD flipped SELL->HOLD (sustained)",
-      "tier": 1,
-      "regime": "ranging",
-      "patient_action": "HOLD",
-      "bold_action": "HOLD"
+      "ts": "2026-05-27T11:06:15Z",
+      "action": "BUY",
+      "ticker": "XAG-USD",
+      "units": 105.12,
+      "price": 74.39,
+      "portfolio": "patient",
+      "total_position": "107.68oz @ 4.68 avg"
     }
   ],
   "signals_that_were_right": [
-    {
-      "signal": "drift_regime_gate",
-      "recent_7d": "68.1% (626 samples)",
-      "trend": "improving from 58.1% all-time"
-    },
-    {
-      "signal": "bb",
-      "recent_7d": "60.5% (428 samples)",
-      "trend": "improving from 54.9% all-time"
-    },
-    {
-      "signal": "rsi",
-      "recent_7d": "57.5% (496 samples)",
-      "trend": "improving from 52.4% all-time"
-    },
-    {
-      "signal": "realized_skewness",
-      "recent_7d": "64.3% (485 samples)",
-      "note": "DISABLED but outperforming most active signals"
-    },
-    {
-      "signal": "williams_vix_fix",
-      "recent_7d": "61.5% (205 samples)",
-      "note": "DISABLED but showing strong edge"
-    },
-    {
-      "signal": "hash_ribbons",
-      "recent_7d": "60.7% (107 samples)",
-      "note": "DISABLED but performing well recently"
-    }
+    "news_event: 69.6% recent (204 sam) — best active performer",
+    "drift_regime_gate: 60.4% recent (455 sam) — strong and stable",
+    "rsi: 53.9% recent (399 sam) — consistent, reliable baseline",
+    "cot_positioning: 100% recent (3 sam) — too few samples to trust",
+    "XAG-USD BUY at extreme oversold (RSI 21-22) — price recovered to 4.84 by EOD"
   ],
   "signals_that_were_wrong": [
-    {
-      "signal": "statistical_jump_regime",
-      "all_time": "54.3%",
-      "recent_7d": "46.9% (693 samples)",
-      "trend": "REGRESSING badly"
-    },
-    {
-      "signal": "crypto_evrp",
-      "all_time": "55.5%",
-      "recent_7d": "40.2% (127 samples)",
-      "trend": "REGRESSING"
-    },
-    {
-      "signal": "ministral",
-      "all_time": "58.0%",
-      "recent_7d": "23.1% (13 samples)",
-      "note": "tiny sample, unreliable"
-    },
-    {
-      "signal": "momentum_factors",
-      "recent_7d": "36.2% (726 samples)",
-      "note": "already disabled, correct decision"
-    },
-    {
-      "signal": "intraday_seasonality",
-      "recent_7d": "29.8% (252 samples)",
-      "note": "disabled, worst performer"
-    }
+    "qwen3: 36.0% recent (86 sam) — CRITICAL degradation from 59.8% all-time",
+    "econ_calendar: 41.5% recent (745 sam) — dropped from 56.1% all-time",
+    "crypto_macro: 38.2% recent (272 sam) — dropped from 53.7% all-time",
+    "momentum: 46.4% recent (562 sam) — below accuracy gate threshold",
+    "BTC SELL signals (5-voter noise) — correctly rejected by L2",
+    "ETH BUY/HOLD oscillation — Now TF noise, correctly ignored"
   ],
   "accuracy_changes": {
-    "per_ticker_consensus_1d": {
-      "BTC-USD": {
-        "accuracy": "52.7%",
-        "samples": 4408,
-        "verdict": "marginal edge"
-      },
-      "ETH-USD": {
-        "accuracy": "49.8%",
-        "samples": 4211,
-        "verdict": "BELOW COIN FLIP - no edge"
-      },
-      "XAG-USD": {
-        "accuracy": "49.6%",
-        "samples": 3131,
-        "verdict": "BELOW COIN FLIP - no edge"
-      },
-      "XAU-USD": {
-        "accuracy": "50.5%",
-        "samples": 2785,
-        "verdict": "coin flip - no edge"
-      },
-      "MSTR": {
-        "accuracy": "46.5%",
-        "samples": 2505,
-        "verdict": "BELOW COIN FLIP - negative edge"
-      }
+    "improved": {
+      "news_event": "50.9% -> 69.6% (+18.7pp)",
+      "drift_regime_gate": "58.4% -> 60.4% (+2.0pp)",
+      "macd_disabled": "44.9% -> 54.7% (+9.8pp, still disabled)",
+      "volume_disabled": "51.9% -> 57.8% (+5.9pp, disabled)"
     },
-    "critical_observation": "System consensus has NO EDGE on 4/5 primary instruments. Only BTC shows marginal 52.7% accuracy. This is the #1 problem to fix."
+    "degraded": {
+      "qwen3": "59.8% -> 36.0% (-23.8pp) CRITICAL",
+      "econ_calendar": "56.1% -> 41.5% (-14.6pp) CRITICAL",
+      "crypto_macro": "53.7% -> 38.2% (-15.5pp) CRITICAL",
+      "momentum": "52.8% -> 46.4% (-6.4pp)",
+      "mean_reversion": "52.6% -> 49.2% (-3.4pp)",
+      "bb": "54.8% -> 51.7% (-3.1pp)",
+      "statistical_jump_regime": "54.1% -> 52.0% (-2.1pp)"
+    },
+    "zero_recent_samples_enabled": [
+      "fear_greed (0 recent samples)",
+      "ministral (0 recent samples)",
+      "metals_cross_asset (0 recent samples)",
+      "onchain (0 recent samples)"
+    ]
   },
   "system_errors": [
-    {
-      "type": "accuracy_degradation",
-      "count": 12,
-      "recurring_since": "2026-05-19",
-      "severity": "known"
-    },
-    {
-      "type": "contract_violation_layer2_journal",
-      "count": 14,
-      "recurring_since": "2026-05-20",
-      "severity": "medium",
-      "cause": "Layer 2 agent timing out before writing journal"
-    },
-    {
-      "type": "avanza_session_expired",
-      "count": 4,
-      "recurring_since": "2026-05-21",
-      "severity": "low",
-      "cause": "needs manual BankID re-login"
-    },
-    {
-      "type": "overdue_pickup",
-      "id": "LLM-CRYPTOTRADER-72H",
-      "severity": "low"
-    }
+    "Avanza session expired since May 21 — needs manual BankID login",
+    "Layer 2 contract violations: ~20 triggers without journal entries (agent failing silently)",
+    "Accuracy degradation alerts: 12 signals dropped >15pp (recurring)",
+    "crypto_evrp: 7 total failures (last: 2026-05-24)"
   ],
   "key_observations": [
-    "CRITICAL: Per-ticker consensus at/below 50% for XAG, XAU, ETH, MSTR. System has no predictive edge on these.",
-    "drift_regime_gate is star performer: 68.1% recent (626 sam). Consider increasing its weight.",
-    "Three disabled signals outperforming active ones recently: realized_skewness (64.3%), williams_vix_fix (61.5%), hash_ribbons (60.7%). Evaluate for re-enabling.",
-    "statistical_jump_regime regressing: 54.3% all-time -> 46.9% recent. Consider disabling.",
-    "crypto_evrp regressing: 55.5% all-time -> 40.2% recent. Should be disabled or gated.",
-    "news_event at 50.6% with 9560 samples is marginally above coin flip. Low value for complexity.",
-    "credit_spread_risk at 50.0% with 1809 samples has zero edge. Should review.",
-    "Regime: ranging. Both portfolios in HOLD mode. No active positions changed."
+    "System health green: 0 loop errors, all 55 signal modules returning true, 87 cycles",
+    "Range-bound regime all day — BTC 4.8K-6K, XAG 4.0-4.9",
+    "XAG entry at 4.39 (11:06) was well-timed at RSI 21-22 extreme oversold",
+    "All Layer 2 decisions were HOLD for Patient (XAG position), DORMANT for Bold",
+    "BTC SELL signals (45-52%) were noise — correctly rejected as 5-voter/low-density",
+    "ETH BUY/HOLD flips were Now-TF noise — correctly ignored",
+    "CRITICAL: 3 enabled signals (qwen3, econ_calendar, crypto_macro) badly degraded and actively hurting consensus",
+    "17 shadow signals have 0 accuracy samples — outcome tracking may be broken for them",
+    "Metals trades JSONL only has entries from March 5 — no recent metals loop trades"
   ]
 }
