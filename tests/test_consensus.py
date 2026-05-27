@@ -343,7 +343,8 @@ class TestStockSignalVoteCounts:
         # review C1 surfaced this; production paired-edit was skipped.
         # 2026-05-19: 16 → 10 after additional May disables for MSTR
         # (matches CLAUDE.md "stocks=10 applicable").
-        assert extra["_total_applicable"] == 10
+        # 2026-05-26: 10 → 9 after crypto_evrp re-disabled.
+        assert extra["_total_applicable"] == 9
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):
@@ -354,7 +355,8 @@ class TestStockSignalVoteCounts:
         # 2026-05-19: 26 → 17 after May-2026 disable wave (matches CLAUDE.md
         # "crypto=16 applicable" ± 1 recent addition).
         # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
-        assert extra["_total_applicable"] == 15
+        # 2026-05-26: 15 → 14 after crypto_evrp re-disabled.
+        assert extra["_total_applicable"] == 14
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):
