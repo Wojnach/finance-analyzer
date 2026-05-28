@@ -211,7 +211,8 @@ class TestMetalsSignalConfig:
         # 2026-05-25: 12 → 13 after per-ticker overrides: +williams_vix_fix,
         # +realized_skewness, -statistical_jump_regime for XAU-USD.
         # 2026-05-26: 13 → 12 after re-disabling crypto_evrp (43.4% recent).
-        assert extra["_total_applicable"] == 12
+        # 2026-05-28: 12 → 17 after enabling 5 proven regime signals.
+        assert extra["_total_applicable"] == 17
 
     def test_stocks_total_applicable(self):
         """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""
@@ -240,7 +241,8 @@ class TestMetalsSignalConfig:
         # forecast (research session signal audit).
         # 2026-05-19: 15 → 11 after further May disables.
         # 2026-05-26: 11 → 10 after re-disabling crypto_evrp.
-        assert extra["_total_applicable"] == 10
+        # 2026-05-28: 10 → 15 after enabling 5 proven regime signals.
+        assert extra["_total_applicable"] == 15
 
     def test_crypto_total_applicable(self):
         """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""
@@ -267,4 +269,5 @@ class TestMetalsSignalConfig:
         # 2026-05-19: 23 → 17 after further May disables.
         # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
         # 2026-05-26: 15 → 14 after re-disabling crypto_evrp.
-        assert extra["_total_applicable"] == 14
+        # 2026-05-28: 14 → 19 after enabling 5 proven regime signals.
+        assert extra["_total_applicable"] == 19
