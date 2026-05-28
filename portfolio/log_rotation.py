@@ -264,6 +264,49 @@ ROTATION_POLICIES = {
         "type": "jsonl",
         "ts_field": "ts",
     },
+    # 2026-05-28 (auto-session): 6 unmanaged JSONL files discovered >0.5MB.
+    "claude_fundamental_log.jsonl": {
+        "max_age_days": 60,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "fin_snipe_predictions.jsonl": {
+        "max_age_days": 30,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "accuracy_snapshots.jsonl": {
+        "max_age_days": 90,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "journal_outcomes.jsonl": {
+        "max_age_days": 60,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "invocations.jsonl": {
+        "max_age_days": 30,
+        "max_size_mb": 10,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "local_llm_report_history.jsonl": {
+        "max_age_days": 30,
+        "max_size_mb": 5,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
 }
 
 
