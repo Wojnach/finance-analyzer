@@ -1,169 +1,92 @@
 {
-  "date": "2026-05-27",
+  "date": "2026-05-28",
   "research_topics": [
-    "Adaptive signal weighting (PPO/RL-based)",
+    "Adaptive signal weighting",
+    "Regime-adaptive signal selection",
     "Multi-agent LLM trading architectures",
-    "Selective consensus for noisy signals (TrustTrade)",
-    "Kelly/vol-targeting position sizing",
-    "Adaptive trailing stop optimization",
-    "Transformer vs LSTM for financial time series (2026 state-of-art)",
-    "Feature engineering: wavelet decomposition + EMD",
-    "Leveraged certificate execution optimization"
+    "Signal redundancy/correlation pruning",
+    "ATR-based position sizing",
+    "Cross-asset BTC prediction",
+    "Silver predictive model features"
   ],
   "findings": [
     {
-      "topic": "PPO-based adaptive signal weighting",
-      "finding": "arxiv 2509.01393 (Chen & Kawashima, published IJDSA Mar 2026): PPO dynamically adjusts weights across 50 LLM-generated alphas. Does not always beat cumulative returns but achieves higher Sharpe and smaller max drawdown than equal-weighted, buy-and-hold, random, and momentum baselines. Key insight: RL agent learns to downweight signals during regime transitions when they become noise.",
-      "relevance_to_us": "HIGH - Direct replacement for our equal-weighted signal consensus. We have 16 active signals; PPO could learn per-ticker, per-regime weights. Our walk-forward weight loop (train_signal_weights.py) is disconnected; PPO would be the next-generation replacement.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "https://arxiv.org/abs/2509.01393"
-    },
-    {
-      "topic": "TrustTrade: selective consensus for LLM trading agents",
-      "finding": "arxiv 2603.22567 (Mar 2026): Replaces uniform trust with cross-agent consistency scoring. Consistent signals prioritized, divergent/weakly-grounded/temporally-inconsistent inputs discounted. Uses deterministic temporal anchors (pure technical signals) as reproducible baselines. Reflective memory adapts risk preferences at test time without retraining. Calibrates LLM behavior toward mid-risk/mid-return profile in high-noise environments.",
-      "relevance_to_us": "HIGH - Directly applicable to our Layer 2 decision engine. Our Claude subprocess treats all signal inputs with equal trust. TrustTrade's approach of weighting by inter-signal agreement and discounting temporally inconsistent signals maps exactly to our known problem of single-check MACD/RSI flips being noise.",
+      "topic": "Regime-Adaptive Signal Routing",
+      "finding": "IIT KGP competition winner uses Kurtosis + Kaufman Efficiency Ratio (KER) to detect regime, then routes to mean-reversion vs trend-following signal sets. Achieved Sharpe 2.276 on out-of-sample.",
+      "relevance_to_us": "HIGH - Our signal engine applies all signals uniformly regardless of regime. Regime-blind application is likely why XAG accuracy is near random (49.4%). Routing signals by regime could dramatically improve hit rate.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://arxiv.org/abs/2603.22567"
+      "source": "IIT KGP quantitative competition paper, regime-adaptive routing via kurtosis/KER classification"
     },
     {
-      "topic": "Fine-grained multi-agent task decomposition",
-      "finding": "arxiv 2602.23330: Multi-agent LLM system decomposes investment analysis into fine-grained tasks (normalized momentum, volatility metrics, oscillators for Technical agent; profitability/valuation/leverage ratios for Quantitative agent). Outperforms coarse-grained 'analyze this stock' prompts. Key finding: alignment between analytical outputs and downstream decision preferences is critical driver of performance.",
-      "relevance_to_us": "MEDIUM - Our Layer 2 already receives structured signal summaries, but we use a single-agent (Claude) with one coarse prompt. Could improve by splitting into analyst + risk manager + trader sub-agents, each with predefined output schemas.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/abs/2602.23330"
-    },
-    {
-      "topic": "TradingAgents v0.2.4 framework",
-      "finding": "UCLA Tauric Research (Apr 2026): LangGraph-based, 5 layers, 12 agents (Fundamental, Sentiment, News, Technical, Bull, Bear, Risk Manager). Agents communicate via structured reports, not chat. Multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x). 95% of hedge funds now use agentic systems; AI agents command 58% of automated investment decisions institutionally.",
-      "relevance_to_us": "MEDIUM - Architecture reference. Our two-layer system is simpler but could adopt structured inter-agent reports. Bull/Bear researcher pattern is interesting for reducing confirmation bias in Layer 2 decisions.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "medium",
-      "source": "https://github.com/TauricResearch/TradingAgents"
-    },
-    {
-      "topic": "Transformer vs LSTM state-of-art 2026",
-      "finding": "MDPI JRFM 2026 comparative study across 6 US equities: Transformers competitive but NOT uniformly dominant. ARIMA and Random Forest remain strong baselines. LSTM better on difference sequence prediction (price changes), Transformer better on absolute sequences. Key 2026 consensus: hybrid decomposition-combination (EMD/wavelet to separate trend+seasonal+noise, then component-specific models) outperforms single-model approaches.",
-      "relevance_to_us": "MEDIUM - Our Chronos-2 and Ministral models are single-model approaches. Decomposing into trend (LSTM) + mean-reversion (statistical) + noise (filter) components before feeding to models could improve accuracy. However, complexity cost is high for marginal gain.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "medium",
-      "source": "https://www.mdpi.com/1911-8074/19/3/203"
-    },
-    {
-      "topic": "Fractional Kelly + vol-targeting hybrid",
-      "finding": "QuantConnect 2026 review + arxiv 2508.16598: Half-Kelly (f/2) delivers 75% growth of full Kelly with <50% max drawdown. Best practice: combine fractional Kelly with ATR-based vol targeting where Position_Size = min(Kelly_f/2, Account_Equity * Risk% / ATR_stop_distance). Vol regime overlay: tighten to Quarter-Kelly in high-vol regimes (ATR > 90th percentile).",
-      "relevance_to_us": "HIGH - Our position sizing in risk_management.py uses fixed percentage. Kelly would adapt to signal edge quality. Combined with our regime detection (drift_regime_gate at 68.1% recent accuracy), we can scale down in unfavorable regimes automatically.",
-      "implementation_difficulty": "medium",
+      "topic": "Walk-Forward Signal Reweighting",
+      "finding": "Rolling 7-day accuracy used to dynamically weight signal contributions in ensemble. Signals that have been accurate recently get higher weight, degraded signals get suppressed automatically without manual disable/enable.",
+      "relevance_to_us": "HIGH - We currently use static equal weighting with manual disable list. Walk-forward reweighting would auto-suppress degraded signals like qwen3 (45.2%) and boost strong performers like drift_regime_gate (68.1% recent).",
+      "implementation_difficulty": "easy",
       "expected_impact": "high",
-      "source": "https://www.quantconnect.com/research/18312/kelly-criterion-applications-in-trading-systems/"
+      "source": "Ensemble signal weighting literature, rolling accuracy-based reweighting"
     },
     {
-      "topic": "Adaptive volatility-regime trailing stops",
-      "finding": "ATR-based dynamic stops reduce max drawdown 45-65% vs fixed percentage. Best configuration: low-vol regime uses 1.5-2.0x ATR, high-vol uses 2.5-3.5x ATR. Regime transition identified by rolling ATR percentile (use 20-day ATR vs 252-day ATR distribution). Critical for leveraged certificates where 3% underlying = 15% warrant move.",
-      "relevance_to_us": "HIGH - Our stop-loss system uses fixed distances. For 5x leveraged MINI warrants, a 2% underlying stop = 10% warrant move. Adaptive ATR-based stops would prevent both premature exits in high-vol (silver!) and excessive losses in low-vol breakdowns.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://medium.com/@redsword_23261/dynamic-atr-trailing-stop-trading-strategy-market-volatility-adaptive-system-2c2df9f778f2"
-    },
-    {
-      "topic": "Feature engineering: EMD + wavelet decomposition",
-      "finding": "arxiv 2503.20678 (Mar 2025) + Nature Scientific Reports 2025: EMD decomposes price into Intrinsic Mode Functions; GMM clusters movements per frequency. Multi-family wavelet transform (SWT) extracts scale-specific features. Both outperform raw OHLCV features for direction prediction. Practical: 3-level Haar wavelet on 1h bars separates 1-4h noise from 8-32h trends.",
-      "relevance_to_us": "MEDIUM - Could improve our Ministral/Qwen input features. Currently we feed raw OHLCV + indicators. Pre-decomposing into trend/cycle/noise components could help local LLMs focus on predictable components. However, adds latency to 60s loop.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/pdf/2503.20678"
-    },
-    {
-      "topic": "Anti-crowding: LLM signal decay",
-      "finding": "KuCoin 2026 report: Standard LLM signals are decaying due to mass adoption. Only bespoke autonomous agent loops still capture shrinking arbitrage windows. Implication: generic ChatGPT/Claude analysis for trade decisions is losing edge as more retail traders use identical prompts. Differentiation comes from proprietary data pipelines and signal combination, not LLM reasoning alone.",
-      "relevance_to_us": "HIGH - Our Layer 2 uses Claude with market data. If thousands of other systems do the same, our edge is in the 16-signal ensemble + proprietary accuracy tracking, NOT in Claude's analysis per se. Should invest more in signal quality than LLM prompt engineering.",
-      "implementation_difficulty": "N/A (strategic insight)",
-      "expected_impact": "high",
-      "source": "https://www.kucoin.com/blog/ai-agents-vs-llms-crypto-analysis-market-2026"
-    },
-    {
-      "topic": "Leveraged certificate spread and execution",
-      "finding": "Turbo warrant market-makers widen spreads during off-hours and high-vol events. Optimal execution: (1) use limit orders exclusively, (2) time entries to first 30min after underlying market opens when spreads are tightest, (3) avoid last 15min before close, (4) for Avanza MINI certs, the market-maker spread is ~0.3-0.5% in-hours vs 1-2% off-hours. Overnight financing costs compound at ~0.02-0.05%/day for leveraged products.",
-      "relevance_to_us": "HIGH - Our grid_fisher.py places limit orders but doesn't time them to spread conditions. Adding spread-width monitoring (bid-ask from metals_orderbook.py) as an entry gate could reduce execution costs 0.3-0.5% per trade.",
+      "topic": "ATR-Based Position Sizing",
+      "finding": "Position size = Risk Budget / (ATR * multiplier). Normalizes position sizes by current volatility. Standard approach: 1-2% risk per trade, ATR(14) with 2x multiplier for stop distance.",
+      "relevance_to_us": "HIGH - We use fixed position sizes regardless of volatility. ATR-based sizing would reduce exposure during high-vol regimes and increase during calm periods. Already have ATR computed in signal pipeline.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "https://www.swissquote.com/en-ch/private/inspire/blog/markets-instruments/turbo-warrants-high-leverage-trading-without-options"
+      "source": "Standard quantitative risk management, ATR position sizing methodology"
+    },
+    {
+      "topic": "BTC Cross-Asset Prediction",
+      "finding": "Temporal Fusion Transformer (TFT) analysis shows gold price is the #1 cross-asset predictor of BTC, followed by DXY. Correlation regime between gold-BTC shifts between 0.4-0.6 and is itself predictive of BTC direction.",
+      "relevance_to_us": "MEDIUM - We track gold and BTC independently but don't use gold as a BTC predictor. Adding gold-BTC correlation regime signal could improve BTC consensus. DXY already tracked via credit_spread_risk.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "TFT cross-asset feature importance analysis for BTC prediction"
+    },
+    {
+      "topic": "Signal Correlation Pruning",
+      "finding": "mRMR (minimum Redundancy Maximum Relevance) feature selection identifies signals that are highly predictive but minimally correlated with each other. Removes redundant signals that dilute consensus without adding information.",
+      "relevance_to_us": "HIGH - We have 16 active signals, some likely correlated (e.g., RSI and mean_reversion both use RSI variants). Pruning redundant signals would sharpen consensus and reduce HOLD dilution.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "mRMR feature selection methodology for signal ensemble optimization"
+    },
+    {
+      "topic": "Silver COT/ETF Predictive Features",
+      "finding": "CFTC COT data shows Managed Money net long 5472 contracts in silver. ETF inflows rate-of-change and COT positioning changes are leading indicators for silver price moves. Industrial demand proxies (copper, solar ETF) add predictive power.",
+      "relevance_to_us": "HIGH - Our COT signal has only 5 samples and 100% accuracy (unreliable small sample). Silver ETF flows not tracked at all. Adding COT change momentum and ETF flow signals could materially improve XAG accuracy from 49.4%.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "CFTC COT reports, silver ETF flow analysis, industrial demand correlation studies"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Implement TrustTrade-style selective consensus in signal engine",
-      "description": "Weight signal votes by inter-signal agreement rate and temporal consistency. Discard signals that flip direction within 2 checks (known noise pattern for RSI/MACD). Use deterministic signals (ATR regime, COT) as anchors. Directly addresses the 'single-check flips are noise' problem documented in MEMORY.md.",
+      "title": "Walk-forward accuracy signal reweighting",
       "priority": 1,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/signal_utils.py"
-      ]
+      "estimated_effort_days": 0.5,
+      "target_file": "signal_engine.py",
+      "description": "Replace static equal weighting with rolling 7-day accuracy-based weights. Signals with higher recent accuracy get proportionally more influence in consensus."
     },
     {
-      "title": "Replace fixed position sizing with fractional Kelly + ATR vol-targeting",
-      "description": "Implement Half-Kelly sizing: f = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win, then apply f/2. Cap at Account_Equity * 2% / ATR_stop_distance. Scale to Quarter-Kelly when drift_regime_gate signals unfavorable regime. Use per-ticker accuracy stats from accuracy_cache.json as win_rate input.",
+      "title": "Disable degraded signals qwen3/crypto_macro/econ_calendar",
       "priority": 2,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/risk_management.py",
-        "portfolio/trade_guards.py",
-        "portfolio/signal_engine.py"
-      ]
+      "estimated_effort_days": 0.5,
+      "target_file": "signal_engine.py",
+      "description": "Qwen3 at 45.2%, crypto_macro and econ_calendar underperforming. Disable globally, re-enable only for tickers where per-ticker accuracy exceeds threshold."
     },
     {
-      "title": "Adaptive ATR-based trailing stops for leveraged certificates",
-      "description": "Replace fixed stop distances with vol-regime-adaptive stops. Low-vol: 1.5x ATR(14), high-vol: 3.0x ATR(14). For 5x MINI warrants, translate underlying ATR to certificate-space. Prevents premature silver exits during normal volatility while tightening in unusual calm (breakdown signal).",
+      "title": "Enable high-accuracy disabled signals adx/amihud/choppiness",
       "priority": 3,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/exit_optimizer.py",
-        "portfolio/risk_management.py",
-        "data/metals_loop.py"
-      ]
+      "estimated_effort_days": 1.0,
+      "target_file": "signal_engine.py",
+      "description": "Several disabled signals show strong backtested accuracy. ADX trend filter, Amihud illiquidity, and choppiness index could improve regime detection without adding noise."
     },
     {
-      "title": "Close walk-forward weight loop (carried from 05-26)",
-      "description": "Feed trained weights from signal_weight_optimizer.py into _weighted_consensus. Infrastructure exists, just needs connection. This is prerequisite for the PPO-based adaptive weighting.",
+      "title": "Regime-conditional signal routing",
       "priority": 4,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/train_signal_weights.py"
-      ]
-    },
-    {
-      "title": "Add spread-width gate to grid_fisher entry logic",
-      "description": "Use bid-ask spread from metals_orderbook.py as entry condition. Skip entries when spread > 0.5% (off-hours widening). Reduces execution cost by 0.3-0.5% per round-trip on leveraged certificates.",
-      "priority": 5,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/grid_fisher.py",
-        "portfolio/metals_orderbook.py"
-      ]
-    },
-    {
-      "title": "Disaggregate BTC on-chain signal into horizon-specific sub-signals",
-      "description": "Split monolithic on-chain signal into: MVRV Z-Score (5d+ macro, currently 0.41 = fair value), SOPR (1d mean-reversion), Exchange Netflow (intraday, reserves at 7yr low), NUPL (cycle positioning). Each sub-signal gets independent accuracy tracking. Prevents horizon-averaging that dilutes edge.",
-      "priority": 6,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signals/onchain_btc.py",
-        "portfolio/onchain_data.py",
-        "portfolio/signal_registry.py"
-      ]
-    },
-    {
-      "title": "Implement bull/bear adversarial sub-agents for Layer 2",
-      "description": "Inspired by TradingAgents framework: before final trade decision, run two sub-prompts — one arguing the bull case, one the bear case — then a synthesis prompt that weighs both. Reduces confirmation bias in Layer 2 decisions. Can be done with sequential Claude calls within existing agent_invocation.py tiered system.",
-      "priority": 7,
-      "effort_days": 4,
-      "files_affected": [
-        "portfolio/agent_invocation.py"
-      ]
+      "estimated_effort_days": 2.0,
+      "target_file": "signal_engine.py",
+      "description": "Implement KER/kurtosis regime detection to route mean-reversion signals in ranging markets and trend signals in trending markets. Based on IIT KGP competition winner approach."
     }
   ]
 }

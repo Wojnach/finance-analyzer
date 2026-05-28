@@ -344,7 +344,10 @@ class TestStockSignalVoteCounts:
         # 2026-05-19: 16 → 10 after additional May disables for MSTR
         # (matches CLAUDE.md "stocks=10 applicable").
         # 2026-05-26: 10 → 9 after crypto_evrp re-disabled.
-        assert extra["_total_applicable"] == 9
+        # 2026-05-28: 9 → 14 after enabling 5 proven regime signals:
+        # adx_regime_switch, amihud_illiquidity_regime, choppiness_regime_gate,
+        # bocpd_regime_switch, vol_ratio_regime.
+        assert extra["_total_applicable"] == 14
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):
@@ -356,7 +359,8 @@ class TestStockSignalVoteCounts:
         # "crypto=16 applicable" ± 1 recent addition).
         # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
         # 2026-05-26: 15 → 14 after crypto_evrp re-disabled.
-        assert extra["_total_applicable"] == 14
+        # 2026-05-28: 14 → 19 after enabling 5 proven regime signals.
+        assert extra["_total_applicable"] == 19
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):

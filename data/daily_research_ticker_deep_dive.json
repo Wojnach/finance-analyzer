@@ -1,198 +1,116 @@
 {
-  "date": "2026-05-27",
-  "tickers_analyzed": ["XAG-USD", "BTC-USD", "MSTR"],
+  "date": "2026-05-28",
+  "tickers_analyzed": ["XAG-USD", "BTC-USD"],
   "deep_dives": [
     {
       "ticker": "XAG-USD",
       "key_predictive_features": [
-        "Gold/silver ratio velocity (ratio compressed 62:1 to 55:1 in single week May 2026 — strongest move in years)",
-        "COT speculative net long: 24,671 contracts (34,591 long - 9,920 short) as of May 19, down 1,978 from prior week — moderate deleveraging",
-        "Commercial net short: -42,668 contracts (69,776 short vs 27,108 long) — producers heavily hedged at these levels",
-        "DXY 5d momentum (inverse correlation remains strong)",
-        "Copper/gold ratio (industrial demand proxy)",
-        "China silver export license restrictions (Jan 2026 tightening squeezing physical supply)",
-        "Solar PV industrial demand — BUT 19% demand drop expected in 2026 as manufacturers substitute away from silver at $75+ prices",
-        "ETF/ETP retail inflows overwhelming industrial demand pullback",
-        "Supply deficit: 46.3 Moz shortfall projected (6th consecutive year)"
+        "Gold-silver ratio velocity",
+        "COT managed money positioning",
+        "ETF inflows rate-of-change",
+        "Real yield inverse",
+        "DXY inverse",
+        "Industrial demand proxies (copper, solar, EV)",
+        "Geopolitical risk premium",
+        "Central bank gold buying (indirect silver support)"
       ],
       "fundamental_drivers": {
-        "supply_deficit": "46.3 Moz shortfall projected for 2026, sixth consecutive deficit year. Mine supply constrained because silver is 70%+ byproduct of base metal mining — production decisions follow copper/zinc/lead economics, not silver price.",
-        "industrial_demand": "Solar PV demand expected to DROP 19% in 2026 as high prices ($75+) force manufacturer substitution. However, AI data center + 5G + EV demand partially offsets. Net industrial still growing but slower.",
-        "physical_market": "China tightened silver export licenses Jan 2026, squeezing global physical supply. Retail coin/bar demand surging despite high prices, causing liquidity squeezes.",
-        "central_bank_context": "Silver not directly held by central banks (unlike gold), but benefits from gold safe-haven rotation. Gold central bank buying (reserve diversification) supports metals complex broadly.",
-        "real_yield_headwind": "Treasury yields remain elevated — CPI at 3.8% in April, highest since Sep 2023. Fed rate cut expectations pushed back. Non-yielding metals face headwind, but deficit + industrial demand offsetting."
+        "supply_deficit": "5th consecutive year of supply deficit. Mine output declining as silver is 70%+ byproduct of base metal mining.",
+        "industrial_demand": "Solar PV, EV, and AI data center demand accelerating. Structural demand growth outpacing supply additions.",
+        "central_bank_diversification": "Central bank gold buying supports metals complex broadly, creating indirect tailwind for silver.",
+        "mine_output": "Primary silver mine output declining. New project pipeline thin. Supply response to price is slow due to byproduct economics."
       },
       "cross_asset_correlations": {
-        "gold": "Strong positive (0.85+). Gold/silver ratio at 55:1 (below 50yr avg of 65-70), implying silver outperformance phase. Ratio below 60 historically signals silver acceleration.",
-        "DXY": "Strong inverse. DXY strength = silver weakness.",
-        "copper": "Moderate positive (industrial demand proxy). Watch copper/gold ratio for industrial vs safe-haven regime.",
-        "US_10Y_real_yield": "Moderate inverse. Higher real yields = gold/silver headwind. Currently elevated.",
-        "SPX": "Weak positive in risk-on, decouples in crisis. Silver's dual role (industrial + monetary) creates regime-dependent correlation."
+        "XAU": "0.85+ (strong positive, gold-silver ratio is key relative value metric)",
+        "DXY": "-0.7 (strong inverse, dollar strength = silver weakness)",
+        "US10Y_real": "-0.6 (moderate inverse, higher real yields = precious metals headwind)",
+        "copper": "0.5 (moderate positive, shared industrial demand driver)",
+        "oil": "0.3 (weak positive, energy cost input to mining)"
       },
       "seasonal_patterns": {
-        "current_position": "Late May — entering historically weak June period. June is one of worst months for silver (seasonal pattern: sharp decline).",
-        "Q2_pattern": "April-June shows weakness, with June marking seasonal low.",
-        "Q3_recovery": "July is historically 2nd best month (63.6% positive), strong recovery from June lows through September.",
-        "Q4_consolidation": "Oct-Dec relatively flat, absorbing gains.",
-        "tactical_implication": "User holds 107.68 oz at ~$74.84. Seasonal weakness into June could offer add-to-position opportunity if thesis holds. July-September recovery phase historically strong.",
-        "best_months": "January (69.5% positive), July (63.6% positive)",
-        "worst_months": "June, September"
+        "strong_months": "January-March (historically strong, post-year-end rebalancing + industrial restocking)",
+        "weak_months": "August-September (summer doldrums, reduced industrial activity)",
+        "recovery_months": "October-November (Q4 recovery, year-end positioning)",
+        "current_position": "Late May — entering historically mixed summer period"
       },
-      "papers_and_models": [
-        "CME Group 2026 Precious Metals Outlook: gold/silver ratio velocity and DXY momentum as strongest predictors",
-        "Silver Institute 2026 forecast: sustained supply deficit exposes market to squeeze risk",
-        "BofA (Widmer): 10-15% investment demand increase causes outsized price effects due to silver's smaller/less liquid market vs gold",
-        "ING Think: volatility set to drive silver in 2026, structural deficit vs rate headwinds"
-      ],
       "recommended_new_signals": [
         {
-          "signal": "cot_commercial_hedge_ratio",
-          "description": "Track commercial net short as % of open interest. When commercials are extremely hedged (>65% of OI short), it often marks interim tops. Currently at 69,776/100,751 = 69.2% — near extreme.",
-          "expected_accuracy": "60-65% on 5d horizon",
-          "implementation": "Extend existing COT signal to track commercial positioning ratio, not just speculative net"
+          "signal": "silver_etf_flow_momentum",
+          "description": "Track rolling 5-day net ETF flow momentum for silver ETFs (SLV, PSLV). Contrarian BUY on extreme outflows, momentum SELL on euphoric inflows.",
+          "expected_accuracy": "55-60% on 5d horizon"
         },
         {
-          "signal": "gs_ratio_rate_of_change",
-          "description": "Gold/silver ratio 5-day ROC. The 62:1 to 55:1 compression in a single week was a major signal. Fast ratio compression = silver outperformance acceleration.",
-          "expected_accuracy": "55-60% on 3d horizon",
-          "implementation": "Extract from metals_cross_assets.py where ratio is already computed. Deploy as shadow signal."
+          "signal": "cot_managed_money_change",
+          "description": "Week-over-week change in Managed Money net positioning. Large increases in net long signal trend continuation, large decreases signal potential reversal.",
+          "expected_accuracy": "55-60% on 5d horizon"
         },
         {
-          "signal": "china_physical_premium",
-          "description": "Shanghai vs COMEX silver premium tracks physical tightness. China export license restrictions create measurable premium differential.",
-          "expected_accuracy": "55-60% on 5d horizon, data availability uncertain",
-          "implementation": "Would need Shanghai exchange data feed. Defer unless free API found."
+          "signal": "gold_silver_ratio_zscore",
+          "description": "Z-score of gold-silver ratio vs 60-day rolling mean. Extreme readings (>2 or <-2) signal mean-reversion in relative value.",
+          "expected_accuracy": "60-65% on 10d horizon"
         },
         {
-          "signal": "silver_seasonality_overlay",
-          "description": "Confidence adjustment based on monthly seasonal pattern. Reduce SELL confidence in January/July (strong months), reduce BUY confidence in June/September (weak months).",
-          "expected_accuracy": "N/A (modifier, not standalone signal)",
-          "implementation": "Add to existing seasonality framework in signals/calendar_signal.py"
+          "signal": "industrial_demand_composite",
+          "description": "Composite of copper price, solar ETF performance, and EV sales data as proxy for silver industrial demand trajectory.",
+          "expected_accuracy": "55-60% on 10d horizon"
         }
       ],
-      "implementation_notes": "Priority 1: gs_ratio_rate_of_change (data already computed, 1 day effort). Priority 2: cot_commercial_hedge_ratio (extends existing COT, 1-2 day effort). Priority 3: silver_seasonality_overlay (modifier only, 0.5 day effort). China physical premium deferred — data sourcing problem."
+      "implementation_notes": "XAG accuracy at 49.4% is near random. Primary issue is regime-blind signal application — mean-reversion signals fire during trends and trend signals fire during ranges. Silver currently at $73 correcting from $121 ATH. Adding regime-conditional routing and silver-specific features (COT, ETF flows, gold-silver ratio z-score) is highest priority for improving XAG hit rate."
     },
     {
       "ticker": "BTC-USD",
       "key_predictive_features": [
-        "MVRV Z-Score: 0.41 as of May 8 — fair value zone, neither overvalued nor undervalued. Market trading near aggregate realized cost basis.",
-        "Exchange reserves at 7-year low — structural supply squeeze on exchanges",
-        "Whale accumulation: net-bought 270K BTC in 30 days despite ETF outflows",
-        "ETF flows: 6-day outflow streak through May 22, draining $1.55B. Total 2026 net inflows only $536M remaining. Record single-day outflow $635M on May 13.",
-        "Options skew: Put/Call OI ratio 1.16 (bearish lean), Put/Call premium ratio 5.17 (significantly bearish). 63.3% short positioning — most bearishly skewed major asset.",
-        "BlackRock IBIT holds $62B BTC — institutional anchor",
-        "Funding rates: near neutral for BTC, only LINK showing negative funding",
-        "CPI at 3.8% (highest since Sep 2023) — rate cut expectations pushed back, macro headwind"
+        "Gold price (#1 cross-asset predictor per TFT analysis)",
+        "DXY (strong inverse relationship)",
+        "MVRV Z-Score: 0.41 (fair value zone)",
+        "ETF flows: 6-day outflow streak",
+        "Fed policy expectations (rate cut timing)",
+        "On-chain SOPR and NUPL: 0.28",
+        "Funding rates (derivatives positioning)",
+        "Exchange netflow (reserves at multi-year lows)"
       ],
       "fundamental_drivers": {
-        "on_chain": "MVRV Z-Score at 0.41 = fair value, no extreme readings. Exchange reserves at 7yr low is structurally bullish (less liquid supply). Whale accumulation (270K BTC / 30 days) diverges from ETF outflows — smart money accumulating while institutional ETF holders retreat.",
-        "etf_dynamics": "May 2026 ETF outflows driven by macro (CPI 3.8%, rate cut delay). BlackRock (-$68.9M) and Fidelity (-$36.3M) contributing. But total 2026 net inflows still positive at $536M — not a capitulation signal yet. ETF flow reversals are mean-reverting (April was strongest month since Oct 2025 at $2.44B inflows).",
-        "derivatives": "63.3% short positioning is EXTREME. Put/Call premium ratio 5.17 means puts are ~5x more expensive than calls. This creates significant short squeeze potential if price holds above $80K. Historically, such extreme short positioning resolves with a squeeze rather than following through.",
-        "macro_headwind": "CPI 3.8%, highest since Sep 2023. Fed rate cuts pushed back. Strong dollar. BTC struggling at $75-80K range. However, whale accumulation during macro headwinds is classic pre-breakout pattern."
+        "halving_cycle": "Post-halving cycle dynamics. Historically 12-18 months post-halving is strongest period. Currently 25 months post-April 2024 halving.",
+        "etf_demand": "ETF demand floor with +4500 BTC net YTD despite recent outflow streak. BlackRock IBIT holds $62B. Institutional anchor for price.",
+        "mstr_accumulation": "MicroStrategy holds 843K BTC. Continued weekly purchases via ATM program creating consistent bid.",
+        "fed_policy": "Potential Fed rate cuts in H2 2026 would be tailwind for risk assets including BTC. CPI at 3.8% is headwind until cuts materialize."
       },
       "cross_asset_correlations": {
-        "MSTR": "90-day correlation 0.874 with IBIT. MSTR amplifies BTC moves with ~1.5x beta in practice despite declining mNAV premium.",
-        "gold": "Weak positive (both 'hard money' assets), but gold has been significantly outperforming BTC in 2026 due to central bank buying.",
-        "SPX": "Moderate positive in risk-on. BTC increasingly trading as risk asset, correlated with tech/growth.",
-        "DXY": "Moderate inverse. Strong dollar = BTC headwind.",
-        "US_10Y": "Moderate inverse. Higher yields compress risk asset valuations."
+        "XAU": "0.4-0.6 (moderate positive, both 'hard money' assets, correlation regime shifts are predictive)",
+        "DXY": "-0.5 (moderate inverse, strong dollar = BTC headwind)",
+        "SPX": "0.5 (moderate positive, BTC increasingly trades as risk asset)",
+        "VIX": "-0.4 (moderate inverse, risk-off = BTC weakness)",
+        "US10Y": "-0.3 (weak inverse, higher yields compress risk asset valuations)"
       },
       "seasonal_patterns": {
-        "current_position": "Late May — historically mixed for BTC.",
-        "q2_pattern": "BTC typically consolidates in Q2 after Q1 moves. 2026 following this pattern (rangebound $75-85K).",
-        "q3_breakout": "Q3 (Jul-Sep) historically strong for BTC breakouts. 2021, 2023, 2024 all had significant Q3 rallies.",
-        "tactical_implication": "SELL signals were noise all day on May 27. With MVRV at fair value, extreme short positioning (63.3%), and whale accumulation, the setup favors patience through Q2 consolidation for Q3 breakout. System should reduce SELL signal confidence during rangebound periods."
+        "strongest_quarter": "Q4 (October-December historically strongest for BTC)",
+        "weak_months": "May (historically weak, 'sell in May' effect applies to BTC)",
+        "post_halving": "12-18 months post-halving historically produces cycle peak. April 2024 halving implies peak window April 2025-October 2025 already passed, but cycle may be extended.",
+        "current_position": "Late May — entering historically mixed summer. Q3 breakout potential based on prior cycles (2021, 2023, 2024 all had significant Q3 rallies)."
       },
-      "papers_and_models": [
-        "Bitcoin Foundation 2026: best indicators for market timing (MVRV, SOPR, exchange netflow, NVT)",
-        "SpotedCrypto May 2026: whale + ETF divergence analysis",
-        "CoinMarketCap: ETF 6-day outflow analysis and mean-reversion patterns",
-        "AhaSignals: MVRV-based price prediction tracker"
-      ],
       "recommended_new_signals": [
         {
-          "signal": "etf_flow_momentum",
-          "description": "Track rolling 5-day net ETF flow momentum. 6-day outflow streaks historically mean-revert. BUY signal when cumulative 5d outflow exceeds -$1B (contrarian). SELL on 5d inflow > $2B (overheating).",
-          "expected_accuracy": "55-60% on 5d horizon",
-          "implementation": "Data available from CoinGlass API or Glassnode. Would need new data source integration."
+          "signal": "gold_btc_correlation_regime",
+          "description": "Track rolling 30-day correlation between gold and BTC. Regime shifts in correlation (from positive to negative or vice versa) are predictive of BTC direction changes.",
+          "expected_accuracy": "55-60% on 5d horizon"
         },
         {
-          "signal": "options_skew_extreme",
-          "description": "Put/Call premium ratio > 4.0 = extreme bearish skew = contrarian BUY. Current 5.17 is extreme. Track via Deribit or CoinGlass options data. Historical: extreme put skew resolves via squeeze 65%+ of time.",
-          "expected_accuracy": "60-65% on 7d horizon",
-          "implementation": "Needs Deribit API or CoinGlass options endpoint. Not currently integrated."
+          "signal": "etf_flow_momentum_zscore",
+          "description": "Z-score of rolling 5-day net ETF flows. Extreme outflows (z < -2) are contrarian BUY signal. Extreme inflows (z > 2) signal overheating.",
+          "expected_accuracy": "55-60% on 5d horizon"
         },
         {
-          "signal": "whale_etf_divergence",
-          "description": "When whale accumulation (exchange outflows) diverges from ETF outflows, it signals institutional vs retail divergence. Whale-side historically wins. Currently: whales buying 270K/30d while ETFs hemorrhaging.",
-          "expected_accuracy": "55-60% on 10d+ horizon",
-          "implementation": "Combine existing exchange netflow from onchain_data.py with new ETF flow data source."
+          "signal": "dxy_trend_direction",
+          "description": "DXY 20-day EMA direction as BTC regime signal. Rising DXY = headwind for BTC (reduce BUY confidence), falling DXY = tailwind (boost BUY confidence).",
+          "expected_accuracy": "55-60% on 5d horizon"
         },
         {
-          "signal": "mvrv_zone_regime",
-          "description": "Partition MVRV Z-Score into zones: <0 (deep value BUY), 0-1 (fair value HOLD), 1-3 (heated SELL), >3 (euphoria strong SELL). Currently at 0.41 = fair value HOLD. Better than current monolithic on-chain composite.",
-          "expected_accuracy": "65-70% on 10d+ horizon (macro cycle signal, not short-term)",
-          "implementation": "Refactor existing onchain_btc.py to separate MVRV into standalone zone-based signal."
+          "signal": "mvrv_zscore_regime_zones",
+          "description": "Partition MVRV Z-Score into actionable zones: <0 (deep value BUY), 0-1 (fair value HOLD), 1-3 (heated reduce), >3 (euphoria SELL). Currently at 0.41 = fair value HOLD.",
+          "expected_accuracy": "65-70% on 10d+ horizon"
         }
       ],
-      "implementation_notes": "Priority 1: mvrv_zone_regime (data already collected via onchain_data.py, just needs zone logic, 1 day). Priority 2: options_skew_extreme (needs new data source, high expected accuracy, 2-3 days). Priority 3: etf_flow_momentum (new data source + contrarian logic, 2 days). Priority 4: whale_etf_divergence (composite of existing + new, 2 days). Key insight: today's all-day SELL noise was likely from short-term signals ignoring the macro fair-value + extreme short positioning setup. The mvrv_zone_regime signal would have correctly generated HOLD, overriding noisy short-term SELL signals."
-    },
-    {
-      "ticker": "MSTR",
-      "key_predictive_features": [
-        "mNAV premium/discount: currently 0.94x (6% DISCOUNT to NAV). Stock at $159.93, BTC NAV ~$170+. First sustained discount since 2022.",
-        "BTC correlation: 90-day correlation 0.874 with IBIT. Acts as ~1.5x leveraged BTC play.",
-        "BTC holdings: 843,738 BTC at avg cost $75,700/coin. Total purchase price $63.87B. Recent buy: 24,869 BTC at $80,985/coin (May 11-17).",
-        "Options market: IV 63.7%, total OI $42.3B ($22.1B calls, $20.19B puts). P/C OI ratio ~0.91 (slightly bullish tilt). Avg duration 150.6 days.",
-        "Dilution risk: continued ATM share sales to fund BTC purchases. Market pricing in dilution via NAV discount.",
-        "Debt load: $8.2B corporate debt backed by volatile BTC collateral"
-      ],
-      "fundamental_drivers": {
-        "nav_dynamics": "MSTR trading at 0.94x mNAV is a structural shift. Market says the corporate wrapper (debt, dilution, management overhead, regulatory risk) DESTROYS value rather than creates it. This is a reversal from 2024-2025 when MSTR traded at 2-3x mNAV. The compression was partially caused by the Bitcoin ETF options market cannibalizing MSTR's 'leveraged BTC exposure' value proposition.",
-        "btc_correlation": "87.4% correlation with IBIT means MSTR tracks BTC closely but with higher vol (IV 63.7%). The beta is approximately 1.5x — a 10% BTC move produces a ~15% MSTR move. This makes MSTR a leveraged play on BTC with corporate credit risk layered on top.",
-        "capital_structure": "$8.2B debt with BTC collateral. If BTC drops below ~$50K, debt coverage ratios become strained. Current BTC at ~$80K provides ~60% cushion over implied liquidation threshold. The ongoing ATM dilution funds BTC purchases but erodes per-share BTC exposure.",
-        "earnings_irrelevance": "MSTR's software business is negligible relative to BTC treasury. Earnings are essentially a mark-to-market of BTC holdings plus interest expense on debt. Stock is a pure BTC derivative with credit wrapping.",
-        "etf_options_competition": "VanEck analysis: Bitcoin ETF options (IBIT options) have partially 'killed' MSTR's premium by offering direct leveraged BTC exposure without corporate risk. This structural headwind is unlikely to reverse."
-      },
-      "cross_asset_correlations": {
-        "BTC": "0.874 (90-day). Primary driver. MSTR = leveraged BTC + credit risk.",
-        "IBIT": "0.874 (90-day). Near-identical to BTC correlation, confirming MSTR tracks spot BTC.",
-        "SPX": "Moderate positive (0.4-0.5). MSTR is listed equity, so inherits some equity market beta.",
-        "US_10Y": "Moderate inverse. Higher yields = higher cost of debt for MSTR + BTC headwind.",
-        "VIX": "Moderate inverse. Risk-off = MSTR weakness (both as equity and as BTC proxy)."
-      },
-      "seasonal_patterns": {
-        "current_position": "MSTR follows BTC seasonality + US equity market seasonality. Currently in 'sell in May' period.",
-        "earnings_catalysts": "Q2 earnings (Aug) and any BTC purchase announcements are primary catalysts. Strategy has been buying BTC weekly via ATM program.",
-        "btc_halvening_cycle": "BTC halving was April 2024. Historically, 12-18 months post-halving (Apr-Oct 2025) is strongest period. We're now 25 months post-halving — later cycle. MSTR amplifies these cycle dynamics."
-      },
-      "papers_and_models": [
-        "VanEck 2026: 'Deconstructing Strategy (MSTR): Premium, Leverage, and Capital Structure' — detailed NAV decomposition",
-        "MarketVector: 'Did ETF Options Kill MicroStrategy?' — structural premium compression analysis",
-        "BitMEX 2026: 'MicroStrategy vs Bitcoin: Which to Trade' — correlation and leverage analysis",
-        "TradingKey: MSTR stock price prediction 2026-2030 framework"
-      ],
-      "recommended_new_signals": [
-        {
-          "signal": "mstr_mnav_discount_depth",
-          "description": "Track mNAV ratio. Below 1.0 = discount to NAV = potential value. At 0.94x, MSTR is effectively offering BTC at 6% discount to spot. BUY signal when mNAV < 0.95, SELL when mNAV > 1.5. Currently: BUY zone.",
-          "expected_accuracy": "60-65% on 10d horizon (mean-reverts toward 1.0-1.2 range)",
-          "implementation": "Compute from MSTR market cap / (BTC holdings * BTC price). Data available from strategy.com/mstr-tracker or bitcoinquant.co."
-        },
-        {
-          "signal": "mstr_btc_beta_deviation",
-          "description": "When MSTR deviates from expected 1.5x BTC beta (underperforms or outperforms), it mean-reverts. Track rolling 5d MSTR return / BTC return ratio. Mean reversion when ratio deviates >2 std from 1.5.",
-          "expected_accuracy": "55-60% on 3-5d horizon",
-          "implementation": "Pure price computation, no new data sources needed. Use existing MSTR + BTC-USD prices."
-        },
-        {
-          "signal": "mstr_options_iv_percentile",
-          "description": "MSTR IV at 63.7%. Track IV percentile rank over 252 days. High IV percentile (>80th) = mean-reversion opportunity after vol crush. Low IV (<20th) = potential breakout setup.",
-          "expected_accuracy": "55-60% on 5-10d horizon",
-          "implementation": "Would need options data feed. Could proxy via historical MSTR realized vol vs implied."
-        }
-      ],
-      "implementation_notes": "Priority 1: mstr_mnav_discount_depth (most actionable — current 6% discount is a clear value signal. Simple computation from existing data. 1 day effort). Priority 2: mstr_btc_beta_deviation (no new data needed, pure math, 0.5 day effort). Priority 3: mstr_options_iv_percentile (needs options data, defer). Key insight: today's 25% confidence BUY signals were calibration traps because the system doesn't know MSTR is at a NAV discount — it's treating MSTR as a generic stock. Adding mNAV awareness would have generated a higher-confidence BUY signal at 0.94x NAV."
+      "implementation_notes": "BTC consensus accuracy at 52.7%. Key issues: on-chain signal has only 45 samples (unreliable), no gold-BTC correlation signal exists despite gold being #1 predictor, ETF flows not tracked as a signal. BTC at $73K is fair-value per MVRV Z-Score 0.41. Adding MVRV zone-based regime signal and gold-BTC correlation tracking would address the two largest gaps in BTC signal coverage."
     }
   ]
 }

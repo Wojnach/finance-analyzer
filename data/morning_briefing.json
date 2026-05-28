@@ -1,116 +1,61 @@
 {
-  "date": "2026-05-28",
-  "generated_at": "2026-05-27T20:42:24.030865+00:00",
-  "market_outlook": "cautious_bearish",
+  "date": "2026-05-29",
+  "generated_at": "2026-05-28T20:45:00Z",
+  "market_outlook": "neutral",
   "confidence": 0.55,
-  "outlook_reasoning": "Tomorrow (May 28) is the heaviest macro day this week: GDP 2nd estimate (consensus 0.5% vs 2.0% advance = potential stagflation shock), Core PCE, jobless claims, durable goods, personal income/spending ALL at 14:30 CET. Iran peace deal unwinding geopolitical premium in metals. BTC whale accumulation diverges from ETF outflows — squeeze setup but not yet triggered. Range-bound regime across all instruments.",
   "key_levels": {
-    "XAG-USD": {
-      "support": 73.5,
-      "resistance": 76.5,
-      "current": 74.84,
-      "note": "Bought 105.12oz at $74.39 today (RSI 21). Total 107.68oz @ $74.68 avg. GSR compressed 62:1 to 55:1 (strong silver outperformance signal). COT: 24,671 net long, commercials heavily hedged. 5th year supply deficit. Solar demand 230M oz."
-    },
-    "XAU-USD": {
-      "support": 4400,
-      "resistance": 4480,
-      "current": 4456,
-      "note": "Central banks buying +35% QoQ (243t Q1). Iran deal = geopolitical premium unwind risk. Structural floor from CB buying."
-    },
-    "BTC-USD": {
-      "support": 73500,
-      "resistance": 77000,
-      "current": 75012,
-      "note": "Whale accumulation 270K BTC in 30 days (largest since 2013). MVRV Z-Score 0.41 (fair value zone). 8-day ETF outflow ($2B+) but exchange reserves at 7-year low. 63.3% short positioning — squeeze potential if $77K breaks."
-    },
-    "ETH-USD": {
-      "support": 2000,
-      "resistance": 2150,
-      "current": 2052,
-      "note": "74% futures longs crowded. -2.94% 7d. Now-TF signals are pure noise (flips within 30 min). Wait for BTC breakout."
-    },
-    "MSTR": {
-      "support": 148,
-      "resistance": 165,
-      "current": 155.7,
-      "note": "Trading at 0.94x mNAV (6% DISCOUNT to BTC NAV). 843,738 BTC at $75,700 avg cost. Structural shift from 2-3x premiums in 2024-25. ETF options killed premium."
-    }
+    "XAG-USD": {"support": 72.0, "resistance": 75.5, "current": 73.46},
+    "XAU-USD": {"support": 4350, "resistance": 4530, "current": 4528},
+    "BTC-USD": {"support": 70000, "resistance": 76000, "current": 73256},
+    "ETH-USD": {"support": 1900, "resistance": 2100, "current": 1989},
+    "MSTR": {"support": 145, "resistance": 165, "current": 154.7}
   },
   "trade_ideas": [
     {
       "instrument": "XAG-USD",
-      "direction": "HOLD",
-      "rationale": "Position 107.68oz @ $74.68 avg. Bought at extreme oversold (RSI 21). Mean-reversion bounce underway but medium-TF still SELL. ATR stop ~$74.25. Iran deal headwind short-term. WAIT for GDP/PCE reaction tomorrow before adding.",
-      "entry_zone": "N/A (holding)",
-      "target": "$120 long-term",
-      "stop": "$74.25 (ATR trailing)",
+      "direction": "LONG (patience)",
+      "rationale": "Silver correcting from $121 ATH to $73. Supply deficit structural for 5th year. COT longs light (5472 contracts). BofA $135-$309 target. Gold-silver ratio compressing. Wait for $72 support test with RSI oversold + volume expansion before re-entering.",
+      "entry_zone": "72.0-73.0 on RSI <30 with volume expansion",
+      "target": "80.0 (near-term), 120.0 (prophecy)",
+      "stop": "70.0 (-4.1% from entry)",
       "confidence": 0.55
     },
     {
-      "instrument": "BTC-USD",
-      "direction": "HOLD",
-      "rationale": "No position. Whale accumulation + short squeeze setup BUT $77K breakout needed for confirmation. SELL signals all day were noise (5-voter, 36% density). GDP miss tomorrow = risk-off = BTC down. Wait.",
-      "entry_zone": "Above $77K with RVOL >1.2x",
-      "target": "$85K-$100K",
-      "stop": "$73.5K",
-      "confidence": 0.3
+      "instrument": "XAU-USD",
+      "direction": "LONG (watch)",
+      "rationale": "Gold at $4528, institutional targets $5000. Central bank buying structural. Iran ceasefire MOU may reduce safe-haven premium near-term. FOMC Jun 16 key catalyst. 4B/1S voters but weighted HOLD.",
+      "entry_zone": "4350-4400 on pullback",
+      "target": "4700-5000",
+      "stop": "4250 (-3.4%)",
+      "confidence": 0.45
     },
     {
-      "instrument": "MSTR",
-      "direction": "WATCH",
-      "rationale": "At 6% discount to NAV — historically rare. If BTC breaks $77K, MSTR could reprice sharply upward. But trending-down regime, RSI 36, only 1 signal voter. New signal idea: mstr_mnav_discount_depth.",
-      "entry_zone": "$148-150 (if BTC confirms)",
-      "target": "$180-200",
-      "stop": "$140",
-      "confidence": 0.25
+      "instrument": "BTC-USD",
+      "direction": "NEUTRAL (wait)",
+      "rationale": "BTC at $73K in fair-value zone (MVRV Z 0.41). ETF outflows 6 days ($1.26B). Short-term bearish (52% signals). Post-halving peak window active but no catalyst. Wait for sustained break above $75K with volume.",
+      "entry_zone": "Above 75000 with RVOL > 1.5x",
+      "target": "85000-100000",
+      "stop": "70000 (-6.7%)",
+      "confidence": 0.40
     }
-  ],
-  "system_improvements_implemented": [
-    "Added stablecoin_supply_ratio signal (crypto-only, shadow mode)",
-    "FGL adversarial review: 17 P0 findings across 8 subsystems",
-    "Completed research deliverables: macro, quant, signal audit, ticker deep dives"
   ],
   "system_improvements_proposed": [
-    {
-      "title": "TrustTrade-style temporal consistency filter",
-      "priority": 1,
-      "effort": "3 days",
-      "impact": "Filter Now-TF noise (ETH BUY/HOLD flips within 30 min)"
-    },
-    {
-      "title": "Fractional Kelly + ATR vol-targeting",
-      "priority": 2,
-      "effort": "3 days",
-      "impact": "75% growth of full Kelly, <50% max drawdown"
-    },
-    {
-      "title": "Adaptive ATR trailing stops (regime-aware)",
-      "priority": 3,
-      "effort": "2 days",
-      "impact": "45-65% drawdown reduction vs fixed stops"
-    },
-    {
-      "title": "MSTR mNAV discount signal",
-      "priority": 4,
-      "effort": "1 day",
-      "impact": "Would have caught today's 6% discount opportunity"
-    }
+    "Enable 3 high-accuracy disabled signals (adx_regime_switch 67%, amihud 68%, choppiness 67.7%)",
+    "Verify accuracy gate is catching collapsed signals (qwen3 31.8%, crypto_macro 30.1%)",
+    "Investigate Layer 2 contract violations (18 triggers with no journal entry)",
+    "Walk-forward accuracy-based signal reweighting (priority for next session)"
   ],
   "risk_warnings": [
-    "CRITICAL: GDP 2nd estimate + Core PCE + jobless claims ALL at 14:30 CET tomorrow. If GDP misses (0.5% vs 2.0%) + PCE hot = stagflation shock. Risk-off for all assets.",
-    "Iran peace deal: 14-point framework MOU. Metals selling as geopolitical premium unwinds. If deal fails = metals bid, if signed = further metals selloff.",
-    "BTC ETF outflows: 8 consecutive days, $2B+ total. But smart money (whales) accumulating aggressively — divergence could resolve violently either way.",
-    "XAG COT: commercials heavily hedged at 69.2% of OI — historically signals interim top risk. Position at avg cost, no cushion for aggressive stop.",
-    "Signal accuracy: 3 enabled signals (qwen3, econ_calendar, crypto_macro) badly degraded but auto-gated. momentum at 46.4% recent is borderline.",
-    "Avanza session expired since May 21 — no warrant trading possible."
+    "Iran ceasefire deal fragile - collapse would spike oil, boost metals, uncertain for crypto",
+    "PCE inflation at 3-year high - Fed may turn more hawkish",
+    "BTC ETF outflows accelerating - 6 consecutive days",
+    "Friday low liquidity + month-end rebalancing = amplified moves",
+    "Multiple enabled signals with severe accuracy degradation - consensus quality compromised"
   ],
   "research_highlights": [
-    "Gold/silver ratio compressed from 62:1 to 55:1 in one week — strongest move in years, silver outperformance signal.",
-    "MSTR at 0.94x mNAV — 6% discount to bitcoin NAV is structural shift from 2-3x premiums. ETF options killed the premium.",
-    "BTC 63.3% short + Put/Call premium 5.17 = extreme bearish skew. 270K whale accumulation in 30 days diverges from $2B+ ETF outflows.",
-    "ArXiv: Fractional Kelly + vol-targeting achieves 75% growth at <50% drawdown.",
-    "ArXiv: TrustTrade selective consensus filters temporally inconsistent signals.",
-    "Signal audit: momentum_cluster (rsi, momentum, mean_reversion, bb) all in same correlation group — only leader gets full weight. System handles this correctly.",
-    "Shadow signals at 0% BUY / 90-100% SELL = bearish market tailwind, not genuine quality. None should be promoted from current data."
+    "Regime-adaptive signal routing (Sharpe 2.276 in competition) - high priority for implementation",
+    "Gold is #1 cross-asset predictor of BTC (TFT research) - not currently used",
+    "Silver COT positioning light at 5472 contracts (vs multiples at $121 high) - potential bullish setup",
+    "Walk-forward signal reweighting is easy/high-impact - implement ASAP"
   ]
 }

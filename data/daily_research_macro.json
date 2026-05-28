@@ -1,35 +1,27 @@
 {
-  "date": "2026-05-27",
-  "market_summary": "Iran draft peace deal dominates: Iranian state TV reports 14-point framework MOU with US would reopen Strait of Hormuz within 30 days, clear mines, lift port blockade. Oil crashed (WTI -6% to $88.3, Brent -4% to $96.28) on the news. Equities mixed — Dow +300pts to new ATH on lower oil/consumer staples, but Nasdaq lagged (QCOM -9.7%, NVDA -2.6%, AMD -2.8%). Gold fell ~1.5-2% to ~$4,400 as geopolitical premium continues unwinding. Silver slid to $74.50 (-$1.80). BTC held ~$75K, slight intraday gain. MSTR at $159.93 (-57% YoY from $457 high). MASSIVE data day tomorrow: GDP 2nd estimate, PCE, jobless claims, durable goods, personal income/spending all at 8:30 ET.",
+  "date": "2026-05-28",
+  "market_summary": "S&P 500 +0.58% to 7563, Nasdaq +0.91%, Dow +0.05%. Markets recovered from morning dip after PCE inflation data came in largely in line. AI/software stocks led (MSFT/ORCL/PLTR +3-4%), financials lagged (V/BLK -2%). Snowflake +30% on strong outlook. US-Iran 60-day ceasefire MOU reportedly agreed, easing oil premium. Bond yields eased. PCE inflation rose to 3-year high but market shrugged it off.",
   "key_events_tomorrow": [
-    "GDP Q1 2nd Estimate 8:30 ET — Advance was 2.0%, TradingEconomics showing 0.5% actual (massive miss if confirmed, stagflation signal)",
-    "Core PCE Price Index YoY 8:30 ET — Previous 3.3%, forecast 3.3%, TE showing 3.2% actual (slight cool)",
-    "Core PCE MoM 8:30 ET — Previous 0.3%, forecast 0.3%, TE showing 0.3% actual (in-line)",
-    "PCE Price Index YoY 8:30 ET — Previous 3.8%, forecast 3.8%, TE showing 3.5% actual (cooling)",
-    "PCE Price Index MoM 8:30 ET — Previous 0.5%, forecast 0.5%, TE showing 0.7% actual (HOT month)",
-    "Personal Income MoM 8:30 ET — Previous 0.4%, forecast 0.5%, TE showing 0.6% actual",
-    "Personal Spending MoM 8:30 ET — Previous 0.5%, forecast 0.6%, TE showing 0.9% actual (very strong)",
-    "Initial Jobless Claims 8:30 ET — Previous 211K, forecast 215K, TE showing 209K actual (strong labor)",
-    "Durable Goods Orders 8:30 ET — Previous 3.5%, forecast 3.4%, TE showing 0.8% actual (big miss)",
-    "New Home Sales 10:00 ET — Previous 670K, forecast 660K, TE showing 682K actual",
-    "Iran deal headline flow — remains primary risk driver for oil/metals"
+    "May 29 (Friday): No major US economic releases scheduled",
+    "Month-end rebalancing flows expected (last trading day of May)",
+    "Memorial Day weekend approaching - lower liquidity expected",
+    "Watch for US-Iran ceasefire deal developments"
   ],
   "overnight_risks": [
-    "Iran deal fragility — draft is unofficial, US has not confirmed terms. Breakdown = immediate oil spike + gold/silver safe-haven bid. Deal confirmation = further oil downside + metals pressure",
-    "GDP 0.5% vs 2.0% advance = stagflation shock if confirmed. Growth collapsing while PCE MoM runs hot (0.7% vs 0.5% forecast). Risk-off potential for Asia open",
-    "Japan wholesale inflation accelerating — BOJ tightening speculation adding pressure on Asian equities, stronger yen could support gold",
-    "BTC ETF outflow streak now 8 consecutive days (>$2B total). ETH ETFs 10 days of outflows ($216M/week). Dark pool IBIT trade (29.2M shares, $1.3B) triggered 1.5% BTC drop",
-    "China property sector instability + weak consumer demand persists — risk to global growth narrative",
-    "Personal spending 0.9% MoM vs 0.6% forecast — if confirmed, implies consumers front-running tariffs, not organic strength. Reversal risk in Q2"
+    "Iran ceasefire deal could collapse - oil spike risk",
+    "PCE inflation at 3-year high may shift Fed rhetoric",
+    "Month-end portfolio rebalancing could cause unusual moves",
+    "BTC ETF outflows 6 consecutive days (.26B) - could accelerate",
+    "Lower Friday liquidity amplifies moves"
   ],
   "instrument_news": {
-    "XAG-USD": "Silver at $74.50, down $1.80. Iran deal premium unwind continues. BUT structural bull case intensifying: Silver Institute confirms 5th consecutive year of supply deficit. Solar PV demand projected 230M oz in 2026 (29% of industrial). AI data center silver demand (GPU thermal, connectors) expected to double by 2030. COT: non-commercial 34,591 long vs 9,920 short — specs trimming longs but not aggressively shorting. Support $72-73, resistance $78.80. Industrial demand floor holding despite geopolitical headwind.",
-    "XAU-USD": "Gold ~$4,400, down 1.5-2%. Central bank buying surged to 243 tonnes Q1 2026 (+35% QoQ from 207t Q4 2025). BUT gold ETF outflows: $2.17B out vs $1.09B in last week — US and China led withdrawals ($635M and $623M respectively). COT: non-commercial 211K long vs 51K short, positioning not extreme. SSGA target $5,000. Iran deal + oil crash reducing inflation hedge demand near-term. Watch PCE data — if YoY cooling confirmed (3.5% vs 3.8%), real yields rise = gold headwind.",
-    "BTC-USD": "BTC ~$75K, slight gain. CoinDesk reports BTC/gold 3-month uptrend has snapped. On-chain bullish: MVRV Z-Score 1.2 (far below cycle top 3.8), whale accumulation 270K BTC in 30 days (largest since 2013), exchange reserves at 7-year low (~3M BTC), long-term holders control 78.3% of supply (up from 74.1%). ETF outflows are bearish near-term (8-day streak, >$2B). Fear & Greed at 25 (extreme fear). Classic accumulation zone setup: smart money buying while retail exits.",
-    "ETH-USD": "ETH ~$2,272-2,274. ETF outflows worse than BTC: 10 consecutive days, $216M/week. Following BTC lower with compressed ETH/BTC ratio. No independent catalyst. SEC delayed tokenized stock exemption ruling — removes a potential near-term catalyst. Needs BTC to lead any recovery.",
-    "MSTR": "Strategy (MSTR) at $159.93, market cap $57.77B. Holdings now 843,738 BTC (up from 818,334 on May 3). Bought 24,869 BTC for $2.01B at avg $80,985 on May 17. Also retired $1.5B convertible debt at below-par. Average cost basis $75,700. At BTC $75K, they're roughly at cost basis — NAV discount widening. Funded via ATM equity + STRC preferred. -57.28% from 52-week high of $457.22."
+    "XAG-USD": "Silver correcting from highs. BofA target 35-09 year-end (bullish), UBS cut to 0 (cautious). 5th consecutive year supply deficit. Industrial demand (solar/EV/AI) accelerating. COT longs high but not extreme. Gold-silver ratio compressing as expected.",
+    "XAU-USD": "Gold +1.04% to 528. Institutional forecasters still see 000. Central bank buying structural, not cyclical. Iran ceasefire would reduce safe-haven bid. FOMC Jun 16 key catalyst.",
+    "BTC-USD": "Trading ~3K, down from 7K range. MVRV Z-Score 0.41 (fair value). ETF outflows .26B over 6 days. Short-term bearish (52% of 23 signals). Support 3-75K. MSTR holds 843,738 BTC (4% of total supply).",
+    "ETH-USD": "Trading ~989, down 53% from ATH. Whale accumulation 140K ETH (22M in 96h). DeFi TVL 5.74B (68% dominance). Glamsterdam upgrade June 2026 could triple L1 throughput. 37M ETH staked (30% supply). Structurally bullish but near-term weak.",
+    "MSTR": "At 54.70, BTC treasury 843,738 BTC worth ~9.1B (128% of market cap). Recent purchase 535 BTC on May 11. Stock tracks BTC with leverage - bearish while BTC weak."
   },
-  "metals_outlook": "Near-term bearish pressure from Iran deal risk-off unwind and oil crash. Gold ETF outflows ($2.17B) outpacing inflows ($1.09B). However, structural supports are formidable: central bank buying 243t in Q1 (+35% QoQ), silver in 5th year of supply deficit, solar/AI industrial demand accelerating (230M oz from solar alone). COT positioning not extreme — no forced liquidation risk. If GDP truly printed 0.5% (vs 2.0% advance), stagflation narrative strengthens the medium-term metals bull case even as near-term Iran optimism weighs. Silver $120 thesis timeline extends if Iran deal holds but structural deficit thesis unaffected. Key watch: PCE data tomorrow — cooling YoY (3.5% vs 3.8%) with hot MoM (0.7%) = mixed signal for real yields.",
-  "oil_outlook": "Oil crashed on Iran deal: WTI -6% to $88.3, Brent -4% to $96.28. Iran commits to clearing Hormuz mines, reopening shipping within 30 days of deal. Draft is 14-point framework, 60-day normalization period, no tolls, Iran manages strait with Oman. CRITICAL CAVEAT: deal is draft only, US has not confirmed. Oil-metals correlation: lower oil reduces inflation expectations, reducing gold's inflation-hedge appeal. But lower oil also reduces recession risk, supporting risk assets. If deal collapses: immediate reversal — WTI back above $94, gold/silver bid. OPEC+ would need to respond to any Hormuz reopening with supply management.",
-  "sentiment_shift": "Macro regime shifting: (1) Iran deal creating massive geopolitical premium deflation across oil and metals, (2) GDP potentially collapsing to 0.5% while PCE MoM runs hot = textbook stagflation, (3) BTC on-chain metrics screaming accumulation zone (MVRV 1.2, whale buying 270K BTC, exchange reserves 7yr low) while ETF flows screaming distribution (8-day outflow streak), (4) Equities bifurcating — Dow ATH on consumer staples while tech sells off. This is a regime transition environment. Dominant narrative could flip overnight depending on Iran deal confirmation/collapse and PCE print interpretation. Position for volatility, not direction."
+  "metals_outlook": "Bullish medium-term. Gold at 528 with institutional targets to 000. Silver supply deficit structural. Central bank buying persistent. Iran ceasefire MOU could temporarily reduce safe-haven premium but structural drivers intact. FOMC Jun 16 key: hawkish hold expected given PCE, but 8-4 dissent suggests eventual cuts. Watch gold-silver ratio for compression continuation.",
+  "oil_outlook": "Brent ~3, WTI ~1. US-Iran 60-day ceasefire MOU reported - would gradually reopen Strait of Hormuz and normalize energy exports. If deal holds, downward pressure on oil (0-70 target per JPM). If deal collapses, 20+ spike risk. UAE exit from OPEC+ adds supply uncertainty. Net: bearish bias with geopolitical tail risk.",
+  "sentiment_shift": "Risk-on tilt. Equity markets at new records. PCE inflation elevated but market looking through it. Iran ceasefire reduces tail risk. AI trade dominating (MSFT/ORCL/PLTR). Crypto weak near-term but fair-value per on-chain. Month-end rebalancing may cause temporary dislocations."
 }
