@@ -1264,18 +1264,97 @@ def _reset_crash_counter():
         _save_crash_counter(0)
 
 
-def _sleep_for_next_cycle(previous_cycle_started, interval_s):
+def _sleep_for_next_cycle(previous_cycle_started, interval_s, beat=None,
+                          beat_interval_s=60.0):
     """Sleep until the next scheduled cycle start.
 
     Anchors cadence to cycle start time so the loop period remains close to the
     configured interval instead of drifting by the work duration each cycle.
+
+    2026-05-29: when ``beat`` is given, the (up to ~600s) sleep is chunked into
+    <=``beat_interval_s`` slices and ``beat()`` is called after each slice. The
+    cycle interval (600s) is 2x the dashboard staleness gate (300s), so a single
+    bare sleep let the loop heartbeat age past "stale" for ~half of every cycle,
+    producing false "loop down" signals on a perfectly healthy loop. Beating
+    every 60s keeps last_heartbeat fresh with 5x headroom.
+
+    The chunk loop is ``time.monotonic()`` DEADLINE-anchored (not
+    slice-accumulating, not wall-clock) so an NTP step or OS suspend mid-sleep
+    cannot drift the cadence or produce a negative/huge sleep. ``beat()`` is
+    best-effort: exceptions are caught (``Exception`` only — KeyboardInterrupt
+    must still propagate so a console Ctrl+C between cycles exits cleanly) and
+    logged.
     """
     elapsed = time.monotonic() - previous_cycle_started
     remaining = interval_s - elapsed
-    if remaining > 0:
+    if remaining <= 0:
+        logger.warning("Loop overran target cadence by %.1fs", abs(remaining))
+        return
+    if beat is None:
         time.sleep(remaining)
         return
-    logger.warning("Loop overran target cadence by %.1fs", abs(remaining))
+    deadline = time.monotonic() + remaining
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        time.sleep(min(beat_interval_s, left))
+        try:
+            beat()
+        except Exception:
+            logger.warning("inter-cycle heartbeat beat failed", exc_info=True)
+
+
+# Consecutive inter-cycle beat failures before escalating to critical_errors.jsonl.
+_BEAT_ESCALATE_AFTER = 3
+# A single beat (load-modify-write of health_state.json under _health_lock)
+# taking longer than this hints at lock/disk contention worth surfacing.
+_BEAT_SLOW_WARN_S = 2.0
+
+
+def _heartbeat_beat(fail_streak: int) -> int:
+    """Beat ``health_state.json`` ``last_heartbeat`` once; return the updated
+    consecutive-failure streak.
+
+    Module-level (not a ``loop()`` closure) so it is unit-testable. Beats ONLY
+    ``last_heartbeat`` via ``health.heartbeat()`` — NOT ``data/heartbeat.txt``
+    (which must stay a cycle-END-only marker for the startup crash-detector,
+    premortem #1). A persistent write failure (disk full / permissions) would
+    otherwise freeze liveness while the loop keeps running, so after
+    ``_BEAT_ESCALATE_AFTER`` consecutive failures this records ONE
+    ``critical_errors.jsonl`` entry (premortem #3). ``except Exception`` ONLY —
+    KeyboardInterrupt (BaseException) propagates so a console Ctrl+C still exits
+    the loop cleanly (premortem #5).
+    """
+    t0 = time.monotonic()
+    try:
+        from portfolio.health import heartbeat as _hb
+        _hb()
+    except Exception:
+        fail_streak += 1
+        logger.warning("inter-cycle heartbeat beat failed (streak=%d)",
+                       fail_streak, exc_info=True)
+        if fail_streak == _BEAT_ESCALATE_AFTER:
+            try:
+                from portfolio.claude_gate import record_critical_error
+                record_critical_error(
+                    category="heartbeat_write_failing",
+                    caller="main._heartbeat_beat",
+                    message=(f"Inter-cycle heartbeat write failed "
+                             f"{_BEAT_ESCALATE_AFTER}x consecutively; "
+                             "health_state.json may be unwritable (disk full / "
+                             "permissions). Loop is running but liveness is frozen — "
+                             "the dashboard will flag it stale."),
+                    context={"streak": fail_streak},
+                )
+            except Exception:
+                logger.error("failed to escalate heartbeat_write_failing", exc_info=True)
+        return fail_streak
+    dur = time.monotonic() - t0
+    if dur > _BEAT_SLOW_WARN_S:
+        logger.warning("inter-cycle heartbeat beat slow: %.1fs "
+                       "(_health_lock / disk contention?)", dur)
+    return 0
 
 
 def loop(interval=None):
@@ -1298,7 +1377,13 @@ def loop(interval=None):
         try:
             last_beat = datetime.fromisoformat(heartbeat_file.read_text().strip())
             age_seconds = (datetime.now(UTC) - last_beat).total_seconds()
-            if age_seconds > 300:  # 5 minutes — previous loop likely crashed
+            # 2026-05-29: 1200s = 2x the 600s cycle interval. heartbeat.txt is a
+            # cycle-END-only marker, so after a CLEAN shutdown it is already up to
+            # ~600s old; the old 300s threshold false-fired "previous loop likely
+            # crashed" on every clean restart. 1200s still catches a genuine
+            # multi-cycle silent death (heartbeat.txt would be far older) while
+            # suppressing the clean-restart false positive.
+            if age_seconds > 1200:  # 2x cycle interval — previous loop likely crashed
                 age_min = int(age_seconds // 60)
                 msg = f"_LOOP RESTARTED_ — previous heartbeat was {age_min}m ago. Possible crash."
                 logger.warning(msg)
@@ -1359,6 +1444,19 @@ def loop(interval=None):
 
     last_state = None
     last_cycle_started = time.monotonic()
+
+    # 2026-05-29: keep health_state.json `last_heartbeat` fresh during the long
+    # inter-cycle sleep (interval 600s > dashboard 300s stale gate). _heartbeat_beat
+    # beats ONLY `last_heartbeat` — deliberately NOT data/heartbeat.txt, which must
+    # stay a cycle-END-only marker so loop()'s startup crash-detector can still spot
+    # a genuine silent crash+restart (premortem #1). The closure just threads the
+    # consecutive-failure streak through the module-level helper.
+    _beat_fail_streak = 0
+
+    def _cycle_beat() -> None:
+        nonlocal _beat_fail_streak
+        _beat_fail_streak = _heartbeat_beat(_beat_fail_streak)
+
     while True:
         market_state, active_symbols, sleep_interval = get_market_state()
         if interval:
@@ -1369,7 +1467,7 @@ def loop(interval=None):
                 market_state, len(active_symbols), sleep_interval
             )
             last_state = market_state
-        _sleep_for_next_cycle(last_cycle_started, sleep_interval)
+        _sleep_for_next_cycle(last_cycle_started, sleep_interval, beat=_cycle_beat)
         cycle_started = time.monotonic()
         try:
             report = run(force_report=False, active_symbols=active_symbols)
