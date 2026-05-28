@@ -1,5 +1,41 @@
 # Session Progress
 
+## 2026-05-29 Bug-hunt + heartbeat fix (interactive)
+
+### What was done
+- **Digest** of the whole repo (10 parallel readers) — see prior session notes.
+- **Adversarial bug-hunt** (find→2-lens-refute): 17 confirmed bugs fixed +9
+  regression tests. Merged to main `77b43289`. Covered: agent.log auth-scan
+  offset, prune-robust L2 completion, Avanza CONFIRM-path size guards, grid EOD
+  phantom inventory / per-tier cap / partial-fill stop, dashboard auth
+  cold-start fail-closed, CF JWT iss, golddigger state rollback, oil price
+  freshness, naive-ts startup-check crash, fix-agent meta respawn, MSTR outcome
+  tz, price_source yfinance alias, "Now" TF price label.
+- **Heartbeat inter-cycle staleness fix** (this session, /fgl, branch
+  `fix/heartbeat-intercycle-staleness`, merged main `e0e84271`):
+  - Root cause: cycle interval 600s is 2× the 300s staleness gate, but
+    `last_heartbeat` only refreshed at cycle-end → dashboard/digest showed the
+    healthy loop "stale" for ~half of every cycle. Latent regression from the
+    60s→600s interval bump.
+  - Fix: chunk the inter-cycle sleep (`_sleep_for_next_cycle`), beat
+    `health.heartbeat()` every 60s, monotonic deadline-anchored. heartbeat.txt
+    stays cycle-END-only (premortem #1 — preserves crash detection); its
+    startup-detector threshold 300s→1200s (stop clean-restart false alarms).
+    `_heartbeat_beat` escalates to critical_errors.jsonl after 3 strikes. +11
+    tests. Adversarial review clean.
+
+### What's next / notes
+- **PUSH PENDING**: local main is ahead of origin by the bughunt + heartbeat
+  commits. User must run `! git push` (classifier blocks push-to-main from CC).
+- Avanza BankID session expired → `python scripts/avanza_login.py` for live
+  metals/grid orders.
+- Cold-start first cycle after a loop restart runs slow (~125s signal phase)
+  because the accuracy cache is cold (acc_load 56-66s/ticker); transient,
+  self-resolves. Not fixed (would need a warm-start cache prime).
+- Full suite: 29 pre-existing failures (15 Freqtrade integration + xdist
+  isolation flakes + 4 stable pre-existing), all confirmed present on main
+  before these changes.
+
 ## 2026-05-28 After-Hours Research Session
 
 ### What was done
