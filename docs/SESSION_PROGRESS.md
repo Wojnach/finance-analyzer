@@ -1,5 +1,41 @@
 # Session Progress
 
+## 2026-05-28 FGL Adversarial Review (8 subsystems)
+
+**Review only — NO production code changed.** Output: `docs/fgl/2026-05-28/` (commit
+`d53e9bba`, pushed). 8-subsystem partition reviewed against an empty git baseline via
+per-subsystem worktrees; 5 `pr-review-toolkit:code-reviewer` + 3 `caveman:cavecrew-reviewer`
+in parallel + an independent orchestrator pass that cross-critiqued/recalibrated every P0.
+
+### Both live critical-error streams root-caused
+- **`avanza_account_mismatch` (daily since 05-23):** `avanza_session.py:139`
+  `_get_playwright_context` reuses the cached Playwright context without re-validating the
+  ~24h BankID session; `is_session_expiring_soon()` exists but is never called on reuse.
+  Compounded by `avanza_account_check.py:225` (expiry treated as transient) + `:426` (API
+  error→None, empty-vs-401 indistinguishable).
+- **`contract_violation` L2 "failing silently" (233/7d):** mostly FALSE POSITIVE —
+  `loop_contract.py:410` compares `journal_ts >= last_trigger` with zero tolerance, but
+  journal ts is whole-second cycle-start vs microsecond trigger time. Secondary REAL gap:
+  timeout-kill path (`agent_invocation.py:1444-1457`) writes no journal stub AND
+  `timeout`/`failed` absent from `_KNOWN_FAILURE_STATUSES` → a real hang stays hidden.
+
+### Cross-cutting themes
+1. empty/None/stale silently read as valid/live/flat (≥6 sites; the most pervasive risk).
+2. dead safety controls on critical paths (trade_validation, trade_risk_classifier,
+   portfolio_validator not wired; signal_weights/optimizer dead).
+3. write-atomic but not RMW-serialized cross-process (portfolio_mgr threading-lock-only;
+   no JSON-state sidecar lock).
+
+### Other top items (see synthesis §4 fix order)
+risk_management ATR stop no floor/barrier-aware; kelly_sizing no-FIFO look-ahead;
+metals_loop exit-0-on-crash + no per-cycle isolation; grid_fisher eod naked-window;
+SHORT P&L inversion (flag-gated, keep `SHORT_ENABLED=False`); alpha_vantage quota race;
+fx_rates out-of-band not cached. 2 infra P0s disproven on read (file_utils:240 false
+positive, health:156 →P2).
+
+**Next:** implement §4 fix order (start with the two live incidents — both small/surgical),
+each behind its own worktree + test. Overdue pickup `LLM-CRYPTOTRADER-72H` still pending.
+
 ## 2026-05-28 Auto-Improvement Session
 
 **6 commits on `improve/auto-session-2026-05-28`. 12 files modified.**
