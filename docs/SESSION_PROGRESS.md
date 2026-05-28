@@ -1,5 +1,35 @@
 # Session Progress
 
+## 2026-05-28 After-Hours Research Session
+
+### What was done
+- Phase 0: Daily review — analyzed system health, 20 journal entries, signal accuracy
+- Phase 1: Market research — macro events (PCE inflation, Iran ceasefire MOU, AI stocks rally)
+- Phase 2: Quant research — walk-forward optimization, regime routing, ATR sizing, BTC/XAG deep dives
+- Phase 3: Signal audit — found 4 severely degraded enabled signals, 8 high-accuracy disabled signals
+- Phase 4: Morning briefing synthesized for 2026-05-29
+
+### Implementation (branch: research/daily-2026-05-28)
+1. Enabled 5 proven shadow signals: adx_regime_switch (67%), amihud_illiquidity_regime (68%), choppiness_regime_gate (67.7%), bocpd_regime_switch (58.5%), vol_ratio_regime (57.2%)
+2. Added walk-forward accuracy tier multiplier — signals weighted 0.5x-2.0x based on accuracy tiers (strong edge gets 2x, marginal gets 0.75x)
+3. Updated vote count tests (stock 9→14, crypto 14→19)
+4. Research deliverables written to data/ (review, macro, quant, signal audit, morning briefing)
+
+### Key findings
+- qwen3 collapsed: 59.7% all-time → 31.8% recent (-28pp)
+- crypto_macro collapsed: 53.0% → 30.1% (-23pp)
+- econ_calendar collapsed: 55.4% → 35.2% (-20pp)
+- These should be caught by accuracy gate (blended < 47%) at consensus time
+- Disabled signals adx/amihud/choppiness outperforming all enabled signals
+- Gold is #1 cross-asset BTC predictor (research finding)
+- Silver COT positioning light at 5472 contracts (bullish setup)
+
+### What's next
+- Merge research branch into main and push
+- Monitor newly enabled signals — accuracy gate auto-disables if <47%
+- Future: regime-conditional signal routing (priority 4, 2 days effort)
+- Future: ATR-based position sizing for portfolio trades
+
 ## 2026-05-28 FGL Adversarial Review (8 subsystems)
 
 **Review only — NO production code changed.** Output: `docs/fgl/2026-05-28/` (commit
