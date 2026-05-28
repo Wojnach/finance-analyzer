@@ -84,14 +84,16 @@ class TestBug107DigestZeroDivision:
             assert isinstance(msg, str)
 
     def test_daily_digest_handles_zero_initial_value(self):
-        """daily_digest P&L must not crash when initial_value_sek is 0."""
-        # We test the specific P&L calculation pattern
+        """daily_digest P&L must not crash when initial_value_sek is 0.
+
+        BUG-A fix (2026-05-28): ``is None`` check preserves 0 instead of
+        silently replacing with INITIAL_CASH_SEK.  A zero-guard on the
+        division returns 0.0% PnL.
+        """
         initial = 0
         total = 500000
-        # The fix should use `or INITIAL_CASH_SEK` fallback
-        safe_initial = initial or 500000
-        pnl = ((total - safe_initial) / safe_initial) * 100
-        assert pnl == 0.0  # 500K / 500K = 0% change
+        pnl = ((total - initial) / initial) * 100 if initial else 0.0
+        assert pnl == 0.0
 
 
 # ---------------------------------------------------------------------------

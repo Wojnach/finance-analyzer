@@ -231,6 +231,8 @@ def _stop_server():
         except Exception:
             with suppress(Exception):
                 _local_proc.kill()
+            with suppress(Exception):
+                _local_proc.wait(timeout=5)
     _local_proc = None
     _local_model = None
 

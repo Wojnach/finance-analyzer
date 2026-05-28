@@ -779,7 +779,7 @@ def run(force_report=False, active_symbols=None):
     initial_val = state.get("initial_value_sek")
     if initial_val is None:
         initial_val = INITIAL_CASH_SEK
-    pnl_pct = ((total - initial_val) / initial_val) * 100
+    pnl_pct = ((total - initial_val) / initial_val) * 100 if initial_val else 0.0
     logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", f"{total:,.0f}", pnl_pct, "{:,.0f}".format(state['cash_sek']))
 
     if not STATE_FILE.exists():

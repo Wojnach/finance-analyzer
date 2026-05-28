@@ -151,7 +151,7 @@ def _build_digest_message():
     p_initial = state.get("initial_value_sek")
     if p_initial is None:
         p_initial = INITIAL_CASH_SEK
-    p_pnl = ((p_total - p_initial) / p_initial) * 100
+    p_pnl = ((p_total - p_initial) / p_initial) * 100 if p_initial else 0.0
     p_holdings = [
         t for t, h in state.get("holdings", {}).items() if h.get("shares", 0) > 0
     ]

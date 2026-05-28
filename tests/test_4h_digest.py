@@ -410,13 +410,11 @@ class TestMaybeSendDigest:
     def test_zero_initial_value_not_replaced(self):
         """BUG-A: initial_value_sek=0 must NOT fall back to INITIAL_CASH_SEK.
 
-        The old code used ``or INITIAL_CASH_SEK`` which treated 0 as falsy.
-        With the fix, 0 is preserved and PnL is calculated against 0
-        (which triggers ZeroDivisionError in the PnL formula — the caller
-        is expected to guard, but the value must not silently become 500K).
+        The old code used ``or INITIAL_CASH_SEK`` which treated 0 as falsy,
+        silently replacing it with 500K.  The fix uses ``is None`` to
+        preserve 0, and a zero-guard on division returns 0.0% PnL.
         """
         from portfolio.digest import _build_digest_message
-        from portfolio import portfolio_mgr
 
         state = {
             "cash_sek": 0, "initial_value_sek": 0,
@@ -424,10 +422,10 @@ class TestMaybeSendDigest:
         }
         data = self._make_data_dir(state)
         with self._patch_data(data):
-            # ZeroDivisionError is expected because PnL% = (total-0)/0
-            # The important thing: code does NOT silently replace 0 with 500K
-            with pytest.raises(ZeroDivisionError):
-                _build_digest_message()
+            msg = _build_digest_message()
+            assert "*4H DIGEST*" in msg
+            assert "Patient:" in msg
+            assert "+0.0%" in msg
 
     def _make_data_dir(self, patient_state):
         """Create a temp data dir with minimal files and given patient state."""
