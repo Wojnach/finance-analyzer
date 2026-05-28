@@ -469,6 +469,10 @@ def _start_server(name):
             time.sleep(1)
         logger.warning("llama-server %s startup timed out", name)
         proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
         return False
     except Exception as e:
         logger.warning("llama-server %s launch failed: %s", name, e)
