@@ -31,7 +31,7 @@ def rsa_keypair():
     return priv, pub_pem
 
 
-def _make_jwt(priv_key, *, aud, email, iss="https://t.example/cdn-cgi/access",
+def _make_jwt(priv_key, *, aud, email, iss="https://t.cloudflareaccess.com",
               exp_offset=600):
     import time
     now = int(time.time())
@@ -139,6 +139,20 @@ class TestSignatureVerification:
         priv, pub = rsa_keypair
         token = _make_jwt(priv, aud="aud123", email="user@x.com",
                           exp_offset=-1)
+        with _patch_jwks_client(pub):
+            claims = cfa.verify_cf_jwt(
+                token, "user@x.com",
+                team_domain="t.cloudflareaccess.com",
+                aud_tag="aud123",
+            )
+        assert claims is None
+
+    def test_wrong_issuer_fails(self, rsa_keypair):
+        """A validly-signed token whose iss does not match the team domain
+        must be rejected (2026-05-28 fix #10 — issuer verification)."""
+        priv, pub = rsa_keypair
+        token = _make_jwt(priv, aud="aud123", email="user@x.com",
+                          iss="https://attacker.cloudflareaccess.com")
         with _patch_jwks_client(pub):
             claims = cfa.verify_cf_jwt(
                 token, "user@x.com",

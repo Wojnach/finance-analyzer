@@ -484,7 +484,17 @@ def run(force_report=False, active_symbols=None):
             tfs = collect_timeframes(source)
             tf_elapsed = time.monotonic() - t0
 
-            now_entry = tfs[0][1] if tfs else None
+            # 2026-05-28: take the live price from the "Now" (15m) timeframe by
+            # LABEL, not position. collect_timeframes() drops timeframes whose
+            # fetch hangs past _TF_POOL_TIMEOUT, so tfs[0] is merely the
+            # lowest-index SURVIVOR — if the "Now" fetch is the one dropped while
+            # a slower TF (e.g. 12h) survives, tfs[0] would be that longer TF and
+            # its 1h close would be mislabeled as the live 15m price and stored as
+            # the signal_log base price. Match on label and fall back to an
+            # explicit 15m re-fetch otherwise.
+            now_entry = next(
+                (entry for label, entry in tfs if label == "Now"), None
+            ) if tfs else None
             now_df = None
             if now_entry and "indicators" in now_entry:
                 ind = now_entry["indicators"]

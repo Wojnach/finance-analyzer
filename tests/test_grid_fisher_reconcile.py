@@ -155,6 +155,14 @@ def fake_session():
 def fisher(fake_session, tmp_path, monkeypatch):
     # Disable inter-order sleep so tests are instant.
     monkeypatch.setattr(gf, "GRID_DIRECTION_FLIP_COOLDOWN_MIN", 30, raising=True)
+    # This fixture standardises on 3 tiers (below) for ladder-shape tests, but
+    # 3 x 1200 SEK legs = 3600 SEK exceeds the production 3000 SEK
+    # per-instrument cap. Since 2026-05-28 the cap is enforced per-tier (not
+    # just at function entry), so raise it here to a value that doesn't gate
+    # these placement-mechanics tests. The dedicated cap test
+    # (test_skips_when_cap_breached) forces 1,000,000 SEK of inventory and so
+    # still trips this higher cap.
+    monkeypatch.setattr(gf, "GRID_PER_INSTRUMENT_MAX_SEK", 100_000, raising=True)
     f = GridFisher(
         session=fake_session,
         catalog=CATALOG,
@@ -299,6 +307,58 @@ class TestReconcileFills:
         assert res.filled_buys == [("1650161", 0, 42.50)]
         assert inst.buy_ladder[1].status == ORDER_ARMED
 
+    def test_partial_fill_on_resting_order_is_protected(self):
+        """2026-05-28 fix #8: a buy order that partially fills while STILL
+        resting (its id is still in open_order_ids) is skipped by the tier
+        loop, leaving the filled units unrecorded and stop-less. reconcile
+        must detect the live-vs-recorded surplus, align inventory up, and flag
+        a stop rearm so the tick protects those units."""
+        state = gf.GridFisherState(session_id="2026-05-11")
+        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
+                               cert_name="BULL", active_direction="LONG")
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY1", price=42.50, qty=24,
+            placed_ts="t", status=ORDER_ARMED,
+        ))
+        state.by_instrument["1650161"] = inst
+        # Order BUY1 still resting (in open_order_ids) but 10 units already
+        # arrived in the live position; inventory_units is still 0.
+        positions = [{"orderbook_id": "1650161", "volume": 10}]
+        res = reconcile_against_live(state, open_order_ids={"BUY1"},
+                                     positions=positions)
+        assert inst.inventory_units == 10          # aligned up to live
+        assert inst.stop_needs_rearm is True        # flagged for protection
+        assert inst.avg_entry_price == pytest.approx(42.50)  # estimated from tier
+        assert ("1650161", 10) in res.under_protected
+        assert inst.buy_ladder[0].status == ORDER_ARMED  # remainder still resting
+
+
+class TestEodReconcile:
+    def test_eod_sell_tracked_and_reconciled(self, fisher, fake_session):
+        """2026-05-28 fix #6: the EOD market-flat sell must be tracked as a
+        sell-ladder tier so reconcile records its fill and decrements
+        inventory — otherwise phantom inventory triggers another full-size
+        sell the next session."""
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        inst.inventory_units = 10
+        inst.avg_entry_price = 42.0
+
+        touched = fisher.eod_market_flat()
+        assert touched == 1
+        assert inst.eod_sell_order_id is not None
+        eod_tiers = [t for t in inst.sell_ladder if t.tier == gf.EOD_SELL_TIER]
+        assert len(eod_tiers) == 1
+        assert eod_tiers[0].status == ORDER_ARMED
+        assert eod_tiers[0].qty == 10
+
+        # Order fills overnight: it leaves the open list, live position is 0.
+        fake_session.open_orders = []
+        fake_session.positions = []
+        reconcile = reconcile_against_live(fisher.state, set(), [])
+        assert inst.inventory_units == 0  # phantom inventory cleared
+        assert any(ob == "1650161" for ob, *_ in reconcile.filled_sells)
+
 
 # ---------------------------------------------------------------------------
 # Placement
@@ -357,6 +417,23 @@ class TestPlacement:
         inst.avg_entry_price = 1000.0
         placed = fisher.place_buy_ladder(inst, bid=42.50)
         assert placed == 0
+
+    def test_per_instrument_cap_enforced_per_tier(self, fisher, fake_session, monkeypatch):
+        """2026-05-28 fix #7: held inventory below the cap passes the entry
+        gate, but the per-tier check must stop placing once accumulated
+        notional (inventory + armed legs) would breach the cap — it cannot
+        place a full fresh ladder on top of existing inventory."""
+        monkeypatch.setattr(gf, "GRID_PER_INSTRUMENT_MAX_SEK", 3000, raising=True)
+        inst = fisher.state.by_instrument["1650161"]
+        inst.active_direction = "LONG"
+        # Held notional 1500 SEK (< 3000 entry gate). Each fresh leg ~1200 SEK:
+        # tier1 -> 2700 (ok), tier2 -> 3900 (> 3000, blocked).
+        inst.inventory_units = 30
+        inst.avg_entry_price = 50.0
+        placed = fisher.place_buy_ladder(inst, bid=42.50)
+        assert placed == 1
+        # Total planned notional must never exceed the cap.
+        assert inst.planned_notional_sek() <= 3000
 
     def test_skips_when_session_loss_breached(self, fisher, fake_session):
         inst = fisher.state.by_instrument["1650161"]

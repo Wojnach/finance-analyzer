@@ -10,6 +10,7 @@ Usage:
 """
 
 import contextlib
+import copy
 import logging
 import os
 import time
@@ -345,14 +346,53 @@ def run(live: bool = False, once: bool = False) -> int:
                     _last_session_check = time.time()
                     _report.session_alive = session_ok
 
+                # 2026-05-28: snapshot position state BEFORE step() on the live
+                # execution path. step() mutates + persists the bot's position
+                # (open/close) inline, decoupled from whether the Avanza order
+                # actually succeeds. If _execute_order fails (CSRF / rejection /
+                # exception), restore this snapshot so internal state matches the
+                # unchanged real account. Without it, a failed SELL/STOP marks the
+                # position closed and the bot stops monitoring a real, still-open
+                # leveraged position (unbounded loss); a failed BUY leaves a
+                # phantom position.
+                _will_execute = bool(live and page and cfg.trade_enabled)
+                _state_snapshot = copy.deepcopy(bot.state) if _will_execute else None
+
                 action = bot.step()
                 _report.bot_step_completed = True
                 if action:
                     _report.action_taken = str(action)
 
                 if action:
-                    if live and page and cfg.trade_enabled:
-                        _execute_order(page, action, config, cfg.avanza_account_id, cfg=cfg)
+                    if _will_execute:
+                        order_ok = False
+                        try:
+                            order_ok = bool(_execute_order(
+                                page, action, config, cfg.avanza_account_id, cfg=cfg))
+                        except Exception as _oe:  # noqa: BLE001
+                            logger.error("GoldDigger: order execution raised: %s", _oe)
+                            order_ok = False
+                        if not order_ok:
+                            # Order did NOT reach/confirm at Avanza — undo the
+                            # optimistic state mutation step() already persisted.
+                            if _state_snapshot is not None:
+                                bot.state = _state_snapshot
+                                with contextlib.suppress(Exception):
+                                    bot.state.save(cfg.state_file)
+                            logger.error(
+                                "GoldDigger: order FAILED for %s %sx @ %.2f — rolled "
+                                "back position state to match Avanza",
+                                action.get("action"), action.get("quantity", 0),
+                                action.get("price", 0),
+                            )
+                            if notifications_enabled:
+                                _send_telegram(
+                                    f"*GOLDDIGGER ORDER FAILED*\n"
+                                    f"{action.get('action')} {action.get('quantity', 0)}x "
+                                    f"@ {action.get('price', 0):.2f} SEK was not executed; "
+                                    f"internal state rolled back. Check Avanza.",
+                                    config,
+                                )
                     else:
                         tag = "signal-only" if (live and not cfg.trade_enabled) else "dry-run"
                         logger.info("[%s] Would execute: %s %d @ %.2f — %s",

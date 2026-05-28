@@ -608,7 +608,18 @@ def _scan_agent_log_for_auth_failure(label: str, extra_context: dict | None = No
         if not agent_log_path.exists():
             return False
         with open(agent_log_path, "rb") as f:
-            f.seek(_agent_log_start_offset)
+            # 2026-05-28: guard against agent.log being rotated/truncated mid-run.
+            # log_rotation.rotate_text() truncates the live file to empty when it
+            # crosses 10MB; that rotation runs hourly in _run_post_cycle while a
+            # T2/T3 agent runs for minutes. If it fires, the captured byte offset
+            # now points PAST EOF of the fresh small file, so f.seek()+read()
+            # returns b'' and detect_auth_failure('') short-circuits to False —
+            # silently disabling the very auth-failure detection that exists to
+            # catch the Mar-Apr 2026 "Not logged in" exit-0 outage. When the file
+            # has shrunk below our start offset, scan the whole (new) file instead.
+            cur_size = agent_log_path.stat().st_size
+            start = _agent_log_start_offset if _agent_log_start_offset <= cur_size else 0
+            f.seek(start)
             new_output = f.read().decode("utf-8", errors="replace")
         ctx = {
             "tier": _agent_tier,
@@ -624,6 +635,31 @@ def _scan_agent_log_for_auth_failure(label: str, extra_context: dict | None = No
     except Exception as e:
         logger.warning("Auth-error scan of agent.log failed (%s): %s", label, e)
         return False
+
+
+def _detect_append(count_after, count_before, ts_after, ts_before):
+    """Return True if a new line was genuinely appended between baseline and now.
+
+    2026-05-28: the bare ``count_after > count_before`` count-delta (introduced
+    2026-05-17 to fix the mtime false-POSITIVE) is corrupted by the per-cycle
+    ``prune_jsonl(max_entries=5000)`` that _run_post_cycle runs against
+    layer2_journal.jsonl and telegram_messages.jsonl. While a T2/T3 agent runs
+    for minutes, prune can truncate the file back to the cap, so a genuine append
+    yields ``count_after <= count_before`` and the run is mislabeled "incomplete"
+    (firing a spurious *L2 INCOMPLETE* alert — observed live with the telegram
+    file sitting at the 5000-line boundary).
+
+    Fix: trust the count delta only when it is positive. When the count did NOT
+    increase, a prune may have masked the append — fall back to the newest-entry
+    timestamp, which prune cannot disturb (prune keeps the most-recent lines, so
+    the last entry's ts only changes when something is appended).
+    """
+    if count_after > count_before:
+        return True
+    # count unchanged or dropped -> possible prune/truncation race. The agent's
+    # entry, if written, is the newest line and survives the prune; a changed
+    # last-entry ts is therefore the reliable append signal here.
+    return ts_after is not None and ts_after != ts_before
 
 
 def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
@@ -1482,8 +1518,12 @@ def _check_agent_completion_locked():
     # even if mtime / contents shifted underneath us.
     journal_count_after = count_jsonl_lines(JOURNAL_FILE)
     telegram_count_after = count_jsonl_lines(TELEGRAM_FILE)
-    journal_written = journal_count_after > _journal_count_before
-    telegram_sent = telegram_count_after > _telegram_count_before
+    journal_written = _detect_append(
+        journal_count_after, _journal_count_before, journal_ts_after, _journal_ts_before
+    )
+    telegram_sent = _detect_append(
+        telegram_count_after, _telegram_count_before, telegram_ts_after, _telegram_ts_before
+    )
 
     # 2026-04-13: Scan agent.log for auth-error markers (see claude_gate.py
     # detect_auth_failure). Claude CLI can exit 0 while printing "Not logged

@@ -319,8 +319,17 @@ def collect_timeframes(source):
     tfs = STOCK_TIMEFRAMES if is_stock else TIMEFRAMES
     source_key = source.get("alpaca") or source.get("binance") or source.get("binance_fapi")
 
-    # BUG-179: Submit all timeframe fetches with timeout to prevent hangs
-    with ThreadPoolExecutor(max_workers=len(tfs), thread_name_prefix=f"tf_{source_key}") as pool:
+    # BUG-179: Submit all timeframe fetches with timeout to prevent hangs.
+    # OR-I-001 (2026-05-28): do NOT use the `with ThreadPoolExecutor(...)` context
+    # manager — its __exit__ calls shutdown(wait=True), which blocks the calling
+    # ticker thread until every still-running fetch returns, defeating the
+    # _TF_POOL_TIMEOUT and starving the outer 8-worker ticker pool when an upstream
+    # source hangs (the same defect already fixed for the outer pool in main.py).
+    # Use explicit construction + finally shutdown(wait=False, cancel_futures=True)
+    # so a timeout returns promptly, leaking the stuck thread (bounded by
+    # fetch_with_retry's own socket timeout) instead of blocking on it.
+    pool = ThreadPoolExecutor(max_workers=len(tfs), thread_name_prefix=f"tf_{source_key}")
+    try:
         futures = {
             pool.submit(_fetch_one_timeframe, source, source_key, label, interval, limit, ttl): label
             for label, interval, limit, ttl in tfs
@@ -337,6 +346,8 @@ def collect_timeframes(source):
                          source_key, stuck)
             for f in futures:
                 f.cancel()
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # Maintain original timeframe order
     tf_order = {label: i for i, (label, _, _, _) in enumerate(tfs)}

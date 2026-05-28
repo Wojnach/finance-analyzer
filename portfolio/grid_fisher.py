@@ -56,6 +56,13 @@ ORDER_FILLED = "FILLED"
 ORDER_CANCELLED = "CANCELLED"
 ORDER_REJECTED = "REJECTED"
 
+# Sentinel sell-tier index for the EOD market-flat liquidation order. Negative
+# so it can never collide with a real tier index (>=0). Tracking the EOD sell
+# as a sell-ladder tier (2026-05-28) lets reconcile_against_live record its fill
+# and decrement inventory_units — without it the EOD sell was invisible to
+# reconcile, leaving phantom inventory that re-fired a full-size sell next session.
+EOD_SELL_TIER = -1
+
 
 # ---------------------------------------------------------------------------
 # Schema dataclasses (used for in-memory representation; persisted as dicts)
@@ -661,6 +668,11 @@ class ReconcileResult:
     cancelled_buys: list[tuple[str, int]] = field(default_factory=list)
     cancelled_sells: list[tuple[str, int]] = field(default_factory=list)
     inventory_drift: list[tuple[str, int, int]] = field(default_factory=list)
+    # (ob_id, extra_units) where live volume EXCEEDS recorded inventory — a buy
+    # order that partially filled while still resting (so reconcile's tier loop
+    # skipped it). Those units carry no stop until the order fully fills/cancels;
+    # the caller flags a stop rearm so the tick protects them. (2026-05-28)
+    under_protected: list[tuple[str, int]] = field(default_factory=list)
 
 
 def _position_volume_for(positions: list[dict[str, Any]], ob_id: str) -> int:
@@ -749,12 +761,36 @@ def reconcile_against_live(
                 tier.status = ORDER_CANCELLED
                 res.cancelled_sells.append((ob_id, tier.tier))
 
-        # Final drift check — only used for logging; the caller decides
-        # whether to forcibly align (we do not auto-rewrite inventory).
+        # Final drift check — logged for every mismatch.
         if live_vol != inst.inventory_units:
             res.inventory_drift.append(
                 (ob_id, inst.inventory_units, live_vol)
             )
+            # 2026-05-28: when we hold MORE than recorded, a buy order
+            # partially filled while still resting (Avanza keeps a partial in
+            # the open list with reduced volume, so the tier-loop `continue`
+            # above skipped it). Those filled units never went through
+            # record_fill / rotate_on_buy_fill, so they have NO stop-loss. Align
+            # inventory up to the live volume and flag a stop rearm so the tick
+            # places a protective stop on the real held size. Estimate the
+            # entry of the extra units from the cheapest armed buy tier (the
+            # resting order that is filling); keep prior avg if no armed tier.
+            # We forgo the take-profit rotation on these units (they exit via
+            # stop / EOD) — a missed-profit, never a naked position.
+            if live_vol > inst.inventory_units:
+                extra = live_vol - inst.inventory_units
+                armed = inst.armed_buy_tiers()
+                est_price = min((o.price for o in armed), default=0.0)
+                if est_price <= 0:
+                    est_price = inst.avg_entry_price
+                if est_price > 0:
+                    prev_units = inst.inventory_units
+                    inst.avg_entry_price = (
+                        (inst.avg_entry_price * prev_units) + (est_price * extra)
+                    ) / live_vol
+                inst.inventory_units = live_vol
+                inst.stop_needs_rearm = True
+                res.under_protected.append((ob_id, int(extra)))
     return res
 
 
@@ -1363,6 +1399,21 @@ class GridFisher:
                           reason=tier.skip_reason, price=tier.price,
                           qty=tier.qty)
                 continue
+            # 2026-05-28: re-check the PER-INSTRUMENT cap per tier, not only at
+            # function entry. hit_per_instrument_cap() at the top sees only the
+            # state before this ladder; when the instrument already carries
+            # rotated inventory below the cap (e.g. ~2400 SEK < 3000), the entry
+            # gate passes and the loop would then place both fresh legs
+            # (2x1200) — pushing single-instrument planned notional to ~4800 SEK,
+            # ~60% over GRID_PER_INSTRUMENT_MAX_SEK. planned_notional_sek()
+            # accumulates as tiers are appended below, so this projection tracks
+            # the running total. Mirrors the global-cap per-tier guard.
+            inst_projected = inst.planned_notional_sek() + tier.notional_sek
+            if inst_projected > GRID_PER_INSTRUMENT_MAX_SEK:
+                self._log("skip_cap", ob_id=inst.ob_id, ticker=inst.ticker,
+                          tier=tier.index, projected=round(inst_projected, 0),
+                          cap=GRID_PER_INSTRUMENT_MAX_SEK)
+                break
             if global_cap_sek is not None:
                 projected = (global_planned_notional(self.state)
                              + tier.notional_sek)
@@ -1646,6 +1697,24 @@ class GridFisher:
         for ob, cached, live in reconcile.inventory_drift:
             self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
 
+        # 2026-05-28: units from a partial fill on a still-resting buy were just
+        # aligned into inventory by reconcile (under_protected) and flagged for a
+        # stop rearm. If the instrument has no stop level yet (these units never
+        # rotated), derive one from the (estimated) avg entry + configured stop
+        # pct so the rearm block below can actually place protection.
+        if reconcile.under_protected:
+            from portfolio.grid_tiers import build_exit_levels
+            for ob, extra in reconcile.under_protected:
+                inst = self.state.by_instrument[ob]
+                self._log("under_protected_inventory", ob_id=ob,
+                          ticker=inst.ticker, extra_units=extra,
+                          inventory_units=inst.inventory_units)
+                if inst.stop_loss_price is None and inst.avg_entry_price > 0:
+                    _, stop_price = build_exit_levels(
+                        inst.avg_entry_price, self._target_pct, self._stop_pct,
+                    )
+                    inst.stop_loss_price = stop_price
+
         for inst in self.state.by_instrument.values():
             if inst.stop_needs_rearm and inst.inventory_units > 0 and inst.stop_loss_price:
                 if not self._probe_only:
@@ -1914,6 +1983,20 @@ class GridFisher:
                 # Same retry-next-tick rationale as the None branch.
                 continue
             inst.eod_sell_order_id = str(order_id)
+            # 2026-05-28: also track the EOD sell as a sell-ladder tier so
+            # reconcile_against_live sees its fill and decrements inventory_units.
+            # Previously only eod_sell_order_id was stored, so when the EOD order
+            # filled at the broker inventory_units was never reduced — leaving
+            # phantom inventory that triggered another full-size SELL the next
+            # session (roll_session clears eod_sell_order_id but left inventory
+            # stale). The EOD_SELL_TIER index can't collide with real tiers.
+            inst.sell_ladder.append(TierOrder(
+                tier=EOD_SELL_TIER,
+                order_id=str(order_id),
+                price=aggressive,
+                qty=inst.inventory_units,
+                placed_ts=self.now_fn(),
+            ))
             self._log("eod_market_sell", ob_id=inst.ob_id,
                       ticker=inst.ticker, qty=inst.inventory_units,
                       price=aggressive, order_id=str(order_id))

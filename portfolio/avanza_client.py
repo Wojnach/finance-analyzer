@@ -347,6 +347,22 @@ def _place_order(orderbook_id, order_type, price, volume, valid_until):
     if price <= 0:
         raise ValueError(f"Price must be > 0, got {price}")
 
+    # 2026-05-28: mirror the H8 / BUG-211 size guards from
+    # avanza_session._place_order. The human-confirmed order flow
+    # (avanza_orders -> avanza_control -> THIS function) does NOT pass through
+    # avanza_session, so without these the only protection against a malformed
+    # order (LLM unit error, runaway loop) reaching Avanza is the human CONFIRM
+    # step — which cannot catch a plausible-looking but wrong total. Keep the
+    # thresholds identical to avanza_session so the two execution paths agree.
+    order_total = round(volume * price, 2)
+    if order_total < 1000.0:  # H8: minimum order size (avoid outsized min-courtage)
+        raise ValueError(f"Order total {order_total:.2f} SEK below minimum 1000 SEK")
+    MAX_ORDER_TOTAL_SEK = 50_000.0  # BUG-211: cap single-call full-account exposure
+    if order_total > MAX_ORDER_TOTAL_SEK:
+        raise ValueError(
+            f"Order total {order_total:.2f} SEK exceeds maximum {MAX_ORDER_TOTAL_SEK:.0f} SEK"
+        )
+
     client = get_client()
     account_id = get_account_id()
     expiry = valid_until or date.today()

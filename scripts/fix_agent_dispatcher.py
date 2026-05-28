@@ -57,6 +57,23 @@ AGENT_MAX_TURNS = 30
 AGENT_MODEL = "opus"
 AGENT_ALLOWED_TOOLS = "Read,Edit,Bash"
 
+# 2026-05-28: the dispatcher's OWN meta-failure records — written at
+# level=critical with resolution=None — must never be treated as actionable
+# code faults by the next run. Otherwise the dispatcher spawns an Opus fix
+# agent to "fix" a fix_agent_failed / dispatcher_crashed / state_corrupt
+# entry, which is not a fixable code fault (CLAUDE.md treats repeated
+# fix_agent_failed as a give-up / manual-investigation signal, not a respawn
+# trigger). These stay in the journal (so check_critical_errors.py still
+# surfaces them to humans) but are excluded from _find_unresolved here.
+_DISPATCHER_META_CATEGORIES = frozenset({
+    "fix_agent_failed",
+    "fix_agent_dispatcher_crashed",
+    "fix_agent_state_corrupt",
+    "fix_attempt_started",
+    "fix_attempt_completed",
+    "fix_attempt_skipped",
+})
+
 logger = logging.getLogger("fix_agent_dispatcher")
 
 
@@ -167,6 +184,10 @@ def _find_unresolved(entries: list[dict], lookback_h: int) -> list[dict]:
     for e in entries:
         # Only treat "critical" level entries as actionable; skip info/resolution lines
         if e.get("level") != "critical":
+            continue
+        # Never re-dispatch on the dispatcher's own meta-failure records
+        # (these are written at level=critical but are not fixable code faults).
+        if e.get("category") in _DISPATCHER_META_CATEGORIES:
             continue
         if e.get("resolution") is not None:
             continue

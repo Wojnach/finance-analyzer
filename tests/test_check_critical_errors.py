@@ -19,6 +19,21 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+def test_naive_timestamp_does_not_crash(tmp_path):
+    """2026-05-28 fix #13: a resolution/error line whose ts omits the tz
+    offset (naive) must not crash find_unresolved by comparing naive vs
+    aware datetimes — it would hide ALL unresolved errors behind a traceback."""
+    journal = tmp_path / "crit.jsonl"
+    naive_now = datetime.now().replace(microsecond=0).isoformat()  # no tz offset
+    _write_entries(journal, [
+        {"ts": naive_now, "level": "critical", "category": "x",
+         "caller": "c", "message": "m", "resolution": None, "context": {}},
+    ])
+    # Must not raise; the naive ts is coerced to UTC and surfaces as unresolved.
+    unresolved = cce.find_unresolved(cce._load_entries(journal), days=7)
+    assert len(unresolved) == 1
+
+
 def test_no_journal_returns_zero(tmp_path):
     exit_code = cce.main(["--journal", str(tmp_path / "missing.jsonl")])
     assert exit_code == 0

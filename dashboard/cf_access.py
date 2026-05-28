@@ -140,7 +140,12 @@ def verify_cf_jwt(
             signing_key.key,
             algorithms=["RS256"],
             audience=aud_tag,
-            options={"require": ["exp", "iat", "aud"]},
+            # 2026-05-28: verify the issuer too (CF Access iss == the team
+            # domain). The team-scoped JWKS endpoint already blocks cross-tenant
+            # tokens at signature time, but checking iss matches the docstring's
+            # claim and is belt-and-suspenders against a future JWKS misconfig.
+            issuer=f"https://{team_domain}",
+            options={"require": ["exp", "iat", "aud", "iss"]},
         )
     except jwt.PyJWTError as e:
         logger.warning("cf_access: JWT decode failed err=%r", e)

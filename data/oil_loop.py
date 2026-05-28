@@ -136,14 +136,36 @@ def release_singleton_lock(lock_path: str | None) -> None:
 # ---------------------------------------------------------------------------
 # Live price fetch
 # ---------------------------------------------------------------------------
+# 2026-05-28: max acceptable age of a "live" oil price bar. CL=F/BZ=F have no
+# free real-time source, so price_source routes them to yfinance, which lags
+# ~10-15 min — that lag (≤900s) is tolerated here, but a daily-fallback bar
+# (yesterday's / Friday's close) must NOT be passed off as a live price into
+# the stop/TP/entry math. 1800s admits the yfinance lag while rejecting a stale
+# daily close. Generous on purpose; the staleness check fails OPEN (keeps the
+# price) on any timestamp-parse error so a tz quirk never blocks a real price.
+_PRICE_MAX_AGE_SEC = 1800
+
+
+def _bar_age_seconds(hist) -> float | None:
+    """Best-effort age (seconds) of the last bar in *hist*, or None if unknown."""
+    try:
+        ts = hist.index[-1]
+        epoch = ts.timestamp()  # pandas Timestamp -> POSIX (UTC)
+        return time.time() - float(epoch)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def fetch_live_prices() -> dict[str, float]:
-    """Fetch WTI/Brent live prices via the canonical price_source router.
+    """Fetch WTI/Brent prices via the canonical price_source router.
 
     Returns dict mapping config tickers (OIL-USD) to USD spot price. The
-    underlying yfinance symbol is taken from cfg.DATA_SOURCES. The router
-    (`portfolio.price_source.fetch_klines`) prefers Binance FAPI for
-    real-time CL=F (per oil_precompute.py 2026-04-14 routing), with
-    yfinance fallback. Failures land as missing keys — the caller treats
+    underlying symbol is taken from cfg.DATA_SOURCES. NOTE: CL=F/BZ=F have
+    NO free real-time feed, so ``portfolio.price_source.fetch_klines`` routes
+    them to yfinance (NOT Binance FAPI — there is no oil perpetual), which
+    lags ~10-15 min. A freshness guard rejects bars older than
+    ``_PRICE_MAX_AGE_SEC`` so a stale daily-fallback close is never used as a
+    live price. Failures / stale bars land as missing keys — the caller treats
     them as "skip this instrument".
     """
     out: dict[str, float] = {}
@@ -166,6 +188,14 @@ def fetch_live_prices() -> dict[str, float]:
                 # gapped (weekend, between sessions).
                 hist = fetch_klines(sym, interval="1d", limit=2, period="5d")
             if hist is None or hist.empty:
+                continue
+            # Freshness guard: never feed a stale bar into trade math as "live".
+            age = _bar_age_seconds(hist)
+            if age is not None and age > _PRICE_MAX_AGE_SEC:
+                logger.warning(
+                    "price %s (%s): bar is %.0fs stale (> %ds) — skipping as not live",
+                    ticker, sym, age, _PRICE_MAX_AGE_SEC,
+                )
                 continue
             last = float(hist["close"].dropna().iloc[-1])
             if last > 0:

@@ -4224,12 +4224,24 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     _PER_TICKER_MIN_SAMPLES = 30
     if not _accuracy_failed and _ticker_acc_data:
         for sig_name, t_stats in _ticker_acc_data.items():
-            if t_stats.get("total", 0) >= _PER_TICKER_MIN_SAMPLES:
+            # 2026-05-28: coerce both reads. A corrupt/partially-written
+            # ticker_signal_accuracy_cache.json row can carry total>=30 with a
+            # missing or null `accuracy`; the old raw subscript t_stats["accuracy"]
+            # raised KeyError, and round(None*100) raised TypeError — the one
+            # un-coerced numeric read in the gating cascade. Skip such rows rather
+            # than letting the exception escape generate_signal (which would drop
+            # the whole ticker for the cycle), mirroring the _safe_* coercion used
+            # everywhere else in the cascade.
+            t_total = _safe_sample_count(t_stats.get("total"))
+            if t_total >= _PER_TICKER_MIN_SAMPLES:
+                t_acc = _safe_accuracy(t_stats.get("accuracy"), default=None)
+                if t_acc is None:
+                    continue
                 override = {
-                    "accuracy": t_stats["accuracy"],
-                    "total": t_stats["total"],
+                    "accuracy": t_acc,
+                    "total": t_total,
                     "correct": t_stats.get("correct", 0),
-                    "pct": t_stats.get("pct", round(t_stats["accuracy"] * 100, 1)),
+                    "pct": t_stats.get("pct", round(t_acc * 100, 1)),
                 }
                 # Copy directional fields for per-ticker directional gating.
                 # Without these, _weighted_consensus directional gate falls back

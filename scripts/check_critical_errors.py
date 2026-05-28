@@ -30,9 +30,19 @@ DEFAULT_DAYS = 7
 
 def _parse_ts(ts: str) -> datetime | None:
     try:
-        return datetime.fromisoformat(ts)
+        parsed = datetime.fromisoformat(ts)
     except (ValueError, TypeError):
         return None
+    # 2026-05-28: coerce naive timestamps to UTC. A hand-authored or
+    # agent-appended resolution line that omits the tz offset (e.g. a bare
+    # datetime.now().isoformat()) yields a naive datetime; comparing it against
+    # the aware `cutoff` in find_unresolved raises "can't compare offset-naive
+    # and offset-aware datetimes", which — with no try/except around the
+    # comparison — crashes the entire session-start check and hides ALL
+    # unresolved critical errors. session_start_bottle.py already does this.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 def _load_entries(journal: Path) -> list[dict]:

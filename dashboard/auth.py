@@ -27,11 +27,14 @@ from __future__ import annotations
 import functools
 import hmac
 import json
+import logging
 import threading
 import time
 from pathlib import Path
 
 from flask import jsonify, make_response, request
+
+logger = logging.getLogger(__name__)
 
 # Path resolution mirrors dashboard/app.py — config.json sits at the repo
 # root, two levels up from this file.
@@ -55,29 +58,64 @@ _CFG_VALUE: dict | None = None
 _CFG_AT: float = 0.0
 _CFG_LOCK = threading.Lock()
 _CFG_TTL = 60.0
+# Tracks whether the most recent config read SUCCEEDED (or found the file
+# genuinely absent). False only when the file is present but could not be
+# read/parsed. Used by require_auth to fail CLOSED on a cold-start read
+# failure instead of mistaking an unreadable config for "no token configured".
+_LAST_READ_OK: bool = True
 
 
-def _read_config_uncached() -> dict:
+def _read_config_uncached() -> tuple[dict, bool]:
+    """Read config.json.
+
+    Returns ``(data, ok)``. ``ok`` is True on a successful parse OR when the
+    file is genuinely absent (FileNotFoundError → the documented "no config →
+    no token → open access" backward-compat case). ``ok`` is False when the
+    file IS present but a transient/corrupt read failed — the caller must NOT
+    treat that as "no token configured" (2026-05-28: that cold-start path
+    previously cached {} and fail-OPENed the dashboard for 60s).
+    """
     try:
         with open(CONFIG_PATH, encoding="utf-8") as fp:
             data = json.load(fp)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return {}
+        return (data if isinstance(data, dict) else {}), True
+    except FileNotFoundError:
+        return {}, True
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return {}, False
 
 
 def _get_config() -> dict:
-    """Read config.json with a 60-second in-memory cache."""
-    global _CFG_VALUE, _CFG_AT
+    """Read config.json with a 60-second in-memory cache.
+
+    Caches only successful reads. On a read failure with a warm cache, keeps
+    serving the last-known-good value (B11) without advancing the timestamp so
+    the next request retries promptly. On a cold-start read failure, returns
+    {} WITHOUT caching it (so the next request retries) and leaves
+    ``_LAST_READ_OK`` False so auth can fail closed.
+    """
+    global _CFG_VALUE, _CFG_AT, _LAST_READ_OK
     now = time.monotonic()
     with _CFG_LOCK:
         if _CFG_VALUE is not None and (now - _CFG_AT) < _CFG_TTL:
             return _CFG_VALUE
-        fresh = _read_config_uncached()
-        if fresh or _CFG_VALUE is None:
+        fresh, ok = _read_config_uncached()
+        _LAST_READ_OK = ok
+        if ok:
             _CFG_VALUE = fresh
-        _CFG_AT = now
-        return _CFG_VALUE
+            _CFG_AT = now
+            return _CFG_VALUE
+        # Read failed (file present but unreadable/corrupt).
+        if _CFG_VALUE is not None:
+            return _CFG_VALUE  # warm cache: serve last-known-good
+        return {}  # cold start: do NOT cache; do NOT fail open (see _config_is_known)
+
+
+def _config_is_known() -> bool:
+    """True when we have a trustworthy config view (cached good value, or the
+    last read succeeded/was genuinely absent). False only on a cold-start read
+    failure where granting open access would be unsafe."""
+    return _CFG_VALUE is not None or _LAST_READ_OK
 
 
 def _get_dashboard_token() -> str | None:
@@ -122,6 +160,17 @@ def require_auth(f):
     def decorated(*args, **kwargs):
         expected = _get_dashboard_token()
         if expected is None:
+            # 2026-05-28: only fail OPEN when config is genuinely token-less.
+            # If the config file is present but a cold-start read failed, we
+            # don't actually know whether a token is configured — fail CLOSED
+            # (503) rather than granting unauthenticated access on an
+            # all-interfaces bind. Self-heals once a read succeeds (~next req).
+            if not _config_is_known():
+                logger.warning(
+                    "Dashboard auth: config unreadable on cold start — failing "
+                    "closed (503) instead of granting open access."
+                )
+                return jsonify({"error": "config_unavailable"}), 503
             return f(*args, **kwargs)
 
         # 0. Cloudflare Access — added 2026-05-02, JWT-verified 2026-05-14.

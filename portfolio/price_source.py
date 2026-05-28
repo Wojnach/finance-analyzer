@@ -50,6 +50,23 @@ _BINANCE_SPOT = {
     "ETH-USD": "ETHUSDT", "ETHUSDT": "ETHUSDT",
 }
 
+# 2026-05-28: yfinance does not recognize the dashed/Binance metal aliases
+# (XAG-USD/XAU-USD return an EMPTY frame; XAGUSDT/XAUUSDT are unknown). The
+# emergency yfinance fallback below was calling _fetch_yfinance() with the
+# ORIGINAL ticker, so a Binance-FAPI outage on silver/gold lost data entirely
+# instead of failing over (the docstring advertises alias-awareness but it
+# wasn't applied on the fallback path). Translate to the yfinance futures
+# symbol first.
+_YFINANCE_ALIAS = {
+    "XAG-USD": "SI=F", "XAGUSDT": "SI=F",
+    "XAU-USD": "GC=F", "XAUUSDT": "GC=F",
+}
+
+
+def _to_yfinance_symbol(ticker: str) -> str:
+    """Map a Binance/dashed alias to a yfinance-valid symbol (identity if none)."""
+    return _YFINANCE_ALIAS.get(ticker, ticker)
+
 # CBOE-proprietary volatility indices. No free live alternative exists —
 # these remain on yfinance by design. If you ever find a real-time feed,
 # update this set AND the router.
@@ -219,7 +236,7 @@ def fetch_klines(
         if source == "alpaca":
             return _fetch_alpaca(ticker, interval, limit)
         # yfinance fallback
-        return _fetch_yfinance(ticker, interval, period=period, limit=limit)
+        return _fetch_yfinance(_to_yfinance_symbol(ticker), interval, period=period, limit=limit)
     except Exception as exc:
         # If a primary source (Binance/Alpaca) fails AND the ticker isn't
         # explicitly yfinance-only, fall through to yfinance as emergency
@@ -232,7 +249,9 @@ def fetch_klines(
                 source, ticker, exc,
             )
             try:
-                return _fetch_yfinance(ticker, interval, period=period, limit=limit)
+                return _fetch_yfinance(
+                    _to_yfinance_symbol(ticker), interval, period=period, limit=limit
+                )
             except Exception as exc2:
                 raise SourceUnavailableError(
                     f"All sources failed for {ticker}: primary={source} "

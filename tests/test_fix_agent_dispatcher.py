@@ -69,6 +69,23 @@ def _critical_entry(
     }
 
 
+def test_dispatcher_meta_categories_excluded(env):
+    """2026-05-28 fix #14: the dispatcher's own meta-failure records
+    (fix_agent_failed / dispatcher_crashed / state_corrupt), written at
+    level=critical, must NOT be re-detected as actionable — otherwise the
+    dispatcher spawns a fix agent to 'fix' the fix agent. A genuine error in
+    the same batch must still be returned."""
+    entries = [
+        _critical_entry(category="fix_agent_failed", caller="dispatcher"),
+        _critical_entry(category="fix_agent_dispatcher_crashed", caller="dispatcher"),
+        _critical_entry(category="fix_agent_state_corrupt", caller="dispatcher"),
+        _critical_entry(category="auth_failure", caller="layer2_t3"),
+    ]
+    unresolved = dispatcher._find_unresolved(entries, dispatcher.LOOKBACK_H)
+    cats = {e["category"] for e in unresolved}
+    assert cats == {"auth_failure"}
+
+
 # ---------------------------------------------------------------------------
 # No-op paths
 # ---------------------------------------------------------------------------

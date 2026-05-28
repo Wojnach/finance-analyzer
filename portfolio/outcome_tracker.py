@@ -266,10 +266,23 @@ def _fetch_historical_price(ticker, target_ts):
         start_date = (target_dt - timedelta(days=5)).strftime("%Y-%m-%d")
         end_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
         t = yf.Ticker(YF_MAP[ticker])
-        h = t.history(start=start_date, end=end_date)
+        # 2026-05-28: pin auto_adjust=False so the outcome close uses the same
+        # split-only adjustment as the Alpaca IEX base price (adjustment="split")
+        # captured at snapshot time, avoiding a cross-feed adjustment offset that
+        # can flip change_pct sign on small moves.
+        h = t.history(start=start_date, end=end_date, auto_adjust=False)
         if h.empty:
             return None
-        target_date = target_dt.date()
+        # 2026-05-28: yfinance's daily index is tz-aware in the EXCHANGE
+        # timezone (e.g. America/New_York), but target_dt is UTC. Comparing
+        # h.index.date (NY-local) against target_dt.date() (UTC) selected the
+        # wrong calendar day for horizons landing in the early-UTC hours (the
+        # same-UTC-day NY bar closes up to ~18h after the intended target),
+        # mislabeling MSTR accuracy. Convert the target into the bars' own
+        # timezone before taking the date.
+        idx_tz = getattr(h.index, "tz", None)
+        target_local = target_dt.astimezone(idx_tz) if idx_tz is not None else target_dt
+        target_date = target_local.date()
         candidates = h[h.index.date <= target_date]
         if candidates.empty:
             return float(h["Close"].iloc[0])
