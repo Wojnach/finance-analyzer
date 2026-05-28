@@ -127,7 +127,10 @@ class TestVoteCountIntegrity:
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
-        assert extra["_total_applicable"] == 10
+        # 2026-05-28: 10 → 15 after enabling 5 regime signals (adx_regime_switch,
+        # amihud_illiquidity_regime, choppiness_regime_gate, bocpd_regime_switch,
+        # vol_ratio_regime).
+        assert extra["_total_applicable"] == 15
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
@@ -140,30 +143,32 @@ class TestVoteCountIntegrity:
         2026-05-25: 12 → 13 after per-ticker overrides: +williams_vix_fix,
         +realized_skewness, -statistical_jump_regime for XAU-USD.
         2026-05-26: 13 → 12 after re-disabling crypto_evrp.
+        2026-05-28: 12 → 17 after enabling 5 regime signals.
         """
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 12
+        assert extra["_total_applicable"] == 17
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_all_stock_symbols_have_10_applicable(self, _mock, _gpu_mock):
-        """Every stock symbol should have exactly 10 total applicable signals.
+        """Every stock symbol should have exactly 15 total applicable signals.
 
         2026-05-12: dropped 18→15 after disabling volatility_sig, dxy_cross_asset,
         forecast (research session signal audit).
         2026-05-19: 15 → 11 after further May disables.
         2026-05-26: 11 → 10 after re-disabling crypto_evrp.
+        2026-05-28: 10 → 15 after enabling 5 regime signals.
         """
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 10, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 10"
+            assert extra["_total_applicable"] == 15, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 15"
 
 
 # ---------------------------------------------------------------------------

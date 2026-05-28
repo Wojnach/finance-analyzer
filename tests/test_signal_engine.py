@@ -1627,35 +1627,31 @@ def _make_neutral_indicators():
 class TestAccuracyTierMult:
     """Tests for the walk-forward accuracy tier multiplier."""
 
-    def test_strong_edge_gets_2x(self):
+    def test_strong_edge_gets_1_25x(self):
         from portfolio.signal_engine import _accuracy_tier_mult
-        assert _accuracy_tier_mult(0.68) == 2.0
-        assert _accuracy_tier_mult(0.65) == 2.0
+        assert _accuracy_tier_mult(0.68) == 1.25
+        assert _accuracy_tier_mult(0.65) == 1.25
 
-    def test_good_edge_gets_1_5x(self):
+    def test_good_edge_gets_1_15x(self):
         from portfolio.signal_engine import _accuracy_tier_mult
-        assert _accuracy_tier_mult(0.60) == 1.5
-        assert _accuracy_tier_mult(0.63) == 1.5
+        assert _accuracy_tier_mult(0.60) == 1.15
+        assert _accuracy_tier_mult(0.63) == 1.15
 
-    def test_moderate_edge_gets_1_2x(self):
+    def test_moderate_edge_gets_1_05x(self):
         from portfolio.signal_engine import _accuracy_tier_mult
-        assert _accuracy_tier_mult(0.55) == 1.2
-        assert _accuracy_tier_mult(0.58) == 1.2
+        assert _accuracy_tier_mult(0.55) == 1.05
+        assert _accuracy_tier_mult(0.58) == 1.05
 
     def test_baseline_gets_1x(self):
         from portfolio.signal_engine import _accuracy_tier_mult
         assert _accuracy_tier_mult(0.50) == 1.0
         assert _accuracy_tier_mult(0.53) == 1.0
 
-    def test_marginal_gets_0_75x(self):
+    def test_below_baseline_gets_1x(self):
         from portfolio.signal_engine import _accuracy_tier_mult
-        assert _accuracy_tier_mult(0.47) == 0.75
-        assert _accuracy_tier_mult(0.48) == 0.75
-
-    def test_weak_gets_0_5x(self):
-        from portfolio.signal_engine import _accuracy_tier_mult
-        assert _accuracy_tier_mult(0.40) == 0.5
-        assert _accuracy_tier_mult(0.0) == 0.5
+        assert _accuracy_tier_mult(0.47) == 1.0
+        assert _accuracy_tier_mult(0.40) == 1.0
+        assert _accuracy_tier_mult(0.0) == 1.0
 
     def test_monotonically_increasing(self):
         from portfolio.signal_engine import _accuracy_tier_mult

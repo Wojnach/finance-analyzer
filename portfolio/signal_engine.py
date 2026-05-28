@@ -508,18 +508,17 @@ _RECENCY_WEIGHT_FAST = 0.90
 _RECENCY_MIN_SAMPLES = 30  # match ACCURACY_GATE_MIN_SAMPLES (was 50 default)
 
 # Walk-forward accuracy tier multiplier (2026-05-28 research session).
-# Amplifies the weight difference between high and low accuracy signals.
-# Raw accuracy (0.52 vs 0.68) gives only 1.3x difference. Tier multipliers
-# create 4x difference between coin-flip and edge signals, making
-# high-accuracy signals (regime detectors at 67-68%) dominate consensus.
-# Applied to blended accuracy AFTER direction-specific weight assignment.
+# Boosts high-accuracy signals and dampens marginal ones, amplifying the
+# weight difference beyond what raw accuracy provides. Intentionally
+# conservative (1.0x-1.25x range) to avoid breaking confidence calibration
+# while still giving proven regime signals meaningful extra influence.
+# Applied AFTER direction-specific weight assignment.
 _ACCURACY_TIER_THRESHOLDS = (
-    (0.65, 2.0),   # strong edge: 2.0x
-    (0.60, 1.5),   # good edge: 1.5x
-    (0.55, 1.2),   # moderate edge: 1.2x
-    (0.50, 1.0),   # baseline: 1.0x (no adjustment)
-    (0.47, 0.75),  # marginal: 0.75x (near gate threshold)
-    (0.0,  0.5),   # weak: 0.5x (should be gated but may be rescued)
+    (0.65, 1.25),  # strong edge: 1.25x boost (regime signals at 67-68%)
+    (0.60, 1.15),  # good edge: 1.15x
+    (0.55, 1.05),  # moderate: 1.05x (barely noticeable)
+    (0.50, 1.0),   # baseline: no adjustment
+    (0.0,  1.0),   # below baseline: no penalty (accuracy gate handles this)
 )
 
 
@@ -528,7 +527,7 @@ def _accuracy_tier_mult(accuracy: float) -> float:
     for threshold, mult in _ACCURACY_TIER_THRESHOLDS:
         if accuracy >= threshold:
             return mult
-    return 0.5
+    return 1.0
 
 
 # Crisis regime: when multiple macro-external signals are simultaneously
@@ -2704,11 +2703,6 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             weight = 0.5
         if _rescued:
             weight *= _rescue_mult
-        # Walk-forward accuracy tier multiplier: amplify weight differences
-        # between high-accuracy and marginal signals. Uses the same accuracy
-        # value that was just assigned as base weight (direction-specific or
-        # overall, blended by recency).
-        weight *= _accuracy_tier_mult(weight if not _rescued else acc)
         # IC-based weight adjustment: boost signals with high return-magnitude
         # predictive power, penalize phantom performers with zero IC.
         if ic_global:

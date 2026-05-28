@@ -117,7 +117,7 @@ Backlog reference: `docs/IMPROVEMENT_BACKLOG.md`.
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-16 active signals (80 modules registered, 64 disabled) across 7 timeframes for 5 Tier-1
+21 active signals (80 modules registered, 59 disabled) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -129,7 +129,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 17 active signals (65 modules) → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 21 active signals (65 modules) → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -199,9 +199,9 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (80 Modules · 16 Active · 64 Disabled)
+## Signal System (80 Modules · 21 Active · 59 Disabled)
 
-### Active (16 globally + per-ticker overrides)
+### Active (21 globally + per-ticker overrides)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL (52.4% 1d, 34K sam)
 2. BB(20,2) — Bollinger Band breakout (54.9% 1d, 9K sam)
 3. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL) (58.6% 1d, 10K sam)
@@ -218,6 +218,11 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 14. Statistical Jump Regime — Jump detection for regime changes (54.3% 1d, 3K sam)
 15. Crypto EVRP — Crypto equity variance risk premium (55.5% 1d, 366 sam)
 16. Drift Regime Gate — Regime detection via drift analysis (58.1% 1d, 1.5K sam, 68.1% recent)
+17. ADX Regime Switch — ADX dual regime meta-signal, trend/range transitions (67.0% 1d, 182 sam)
+18. Amihud Illiquidity Regime — Illiquidity ratio regime detection (68.0% 1d, 225 sam)
+19. Choppiness Regime Gate — CHOP index regime suppression (67.7% 1d, 158 sam)
+20. BOCPD Regime Switch — Bayesian Online Changepoint Detection (58.5% 1d, 207 sam)
+21. Vol Ratio Regime — Volatility ratio regime detection (57.2% 1d, 586 sam)
 
 Per-ticker overrides (disabled globally, active for specific tickers):
 - Williams VIX Fix → XAU (76.5%, 68 sam), XAG (60.9%, 92 sam)
@@ -225,7 +230,7 @@ Per-ticker overrides (disabled globally, active for specific tickers):
 - Credit Spread Risk → BTC (57.4%, 652 sam), ETH (57.4%, 652 sam)
 - ML Classifier → ETH (55.1% 3h, 1206 sam)
 
-### Disabled (49 — force-HOLD via DISABLED_SIGNALS)
+### Disabled (44 — force-HOLD via DISABLED_SIGNALS)
 Core disabled: ML Classifier, MACD, EMA, Volume Confirmation, Funding Rate,
 Sentiment, Forecast (Chronos), Claude Fundamental, Fibonacci
 
@@ -237,10 +242,10 @@ Pending validation (added Apr-May 2026): Futures Basis, Hurst Regime,
 Shannon Entropy, VIX Term Structure, Gold Real Yield Paradox, Cross-Asset
 TSMOM, Copper/Gold Ratio, Network Momentum, OVX Metals Spillover, XTrend
 Equity Spillover, Complexity Gap Regime, Realized Skewness, Mahalanobis
-Turbulence, Crypto EVRP, Hash Ribbons, Drift Regime Gate, Vol Ratio Regime,
-Residual Pair Reversion, Williams VIX Fix, Treasury Risk Rotation, Intraday
-Seasonality, Cubic Trend Persistence, VWAP Z-Score MR, Gold Overnight Bias,
-Metals VRP, Breakeven Inflation Momentum, Trend Slope Momentum
+Turbulence, Crypto EVRP, Hash Ribbons, Residual Pair Reversion, Williams
+VIX Fix, Treasury Risk Rotation, Intraday Seasonality, Cubic Trend
+Persistence, VWAP Z-Score MR, Gold Overnight Bias, Metals VRP, Breakeven
+Inflation Momentum, Trend Slope Momentum
 
 ### Signal Mechanics
 - **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
@@ -248,11 +253,12 @@ Metals VRP, Breakeven Inflation Momentum, Trend Slope Momentum
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
 - **Volume/ADX gates**: RVOL <0.5 forces HOLD
-- **Applicable signals**: crypto=16, stocks=10, metals=12
+- **Accuracy tier boost**: 1.25x for 65%+ accuracy, 1.15x for 60%+, 1.05x for 55%+
+- **Applicable signals**: crypto=19, stocks=15, metals=17
 
 ## Instruments
 
-### Tier 1: Full signals (17 active × 7 timeframes)
+### Tier 1: Full signals (21 active × 7 timeframes)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
@@ -275,7 +281,7 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (65-signal voting, 17 active), `signal_registry.py` (plugin discovery),
+`signal_engine.py` (65-signal voting, 21 active), `signal_registry.py` (plugin discovery),
 `signals/*.py` (38 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
