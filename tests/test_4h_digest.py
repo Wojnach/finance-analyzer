@@ -407,6 +407,50 @@ class TestMaybeSendDigest:
                 _maybe_send_digest({})
                 mock_build.assert_not_called()
 
+    def test_zero_initial_value_not_replaced(self):
+        """BUG-A: initial_value_sek=0 must NOT fall back to INITIAL_CASH_SEK.
+
+        The old code used ``or INITIAL_CASH_SEK`` which treated 0 as falsy,
+        silently replacing it with 500K.  The fix uses ``is None`` to
+        preserve 0, and a zero-guard on division returns 0.0% PnL.
+        """
+        from portfolio.digest import _build_digest_message
+
+        state = {
+            "cash_sek": 0, "initial_value_sek": 0,
+            "total_fees_sek": 0, "holdings": {}, "transactions": [],
+        }
+        data = self._make_data_dir(state)
+        with self._patch_data(data):
+            msg = _build_digest_message()
+            assert "*4H DIGEST*" in msg
+            assert "Patient:" in msg
+            assert "+0.0%" in msg
+
+    def _make_data_dir(self, patient_state):
+        """Create a temp data dir with minimal files and given patient state."""
+        import tempfile
+        from pathlib import Path
+        d = Path(tempfile.mkdtemp())
+        (d / "portfolio_state.json").write_text(json.dumps(patient_state))
+        (d / "agent_summary.json").write_text(json.dumps({"fx_rate": 10.5, "signals": {}}))
+        _write_jsonl(d / "invocations.jsonl", [])
+        _write_jsonl(d / "layer2_journal.jsonl", [])
+        _write_jsonl(d / "signal_log.jsonl", [])
+        return d
+
+    def _patch_data(self, data_dir):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch("portfolio.digest.DATA_DIR", data_dir))
+        stack.enter_context(patch("portfolio.digest.INVOCATIONS_FILE", data_dir / "invocations.jsonl"))
+        stack.enter_context(patch("portfolio.digest.JOURNAL_FILE", data_dir / "layer2_journal.jsonl"))
+        stack.enter_context(patch("portfolio.digest.SIGNAL_LOG_FILE", data_dir / "signal_log.jsonl"))
+        stack.enter_context(patch("portfolio.digest.AGENT_SUMMARY_FILE", data_dir / "agent_summary.json"))
+        stack.enter_context(patch("portfolio.digest.BOLD_STATE_FILE", data_dir / "portfolio_state_bold.json"))
+        stack.enter_context(patch("portfolio.portfolio_mgr.STATE_FILE", data_dir / "portfolio_state.json"))
+        return stack
+
     def test_sends_when_interval_elapsed(self):
         with patch("portfolio.digest._get_last_digest_time", return_value=time.time() - 20000), \
              patch("portfolio.digest._build_digest_message", return_value="*4H DIGEST*\ntest"), \

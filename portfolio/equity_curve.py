@@ -173,7 +173,7 @@ def compute_metrics(curve: list[dict], strategy: str) -> dict:
     # --- Total return ---
     first_val = values[0]
     last_val = values[-1]
-    total_return_pct = ((last_val - first_val) / first_val) * 100
+    total_return_pct = ((last_val - first_val) / first_val) * 100 if first_val else 0.0
     result["total_return_pct"] = round(total_return_pct, 4)
 
     # --- Annualized return ---

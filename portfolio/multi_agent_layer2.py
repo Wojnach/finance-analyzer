@@ -174,6 +174,7 @@ def launch_specialists(
             "--allowedTools", "Read,Write",
             "--max-turns", str(spec["max_turns"]),
         ]
+        log_fh = None
         try:
             log_path = DATA_DIR / f"_specialist_{name}.log"
             log_fh = open(log_path, "w", encoding="utf-8")
@@ -190,6 +191,8 @@ def launch_specialists(
             procs.append(proc)
             logger.info("Specialist %s launched pid=%s", name, proc.pid)
         except Exception as e:
+            if log_fh is not None:
+                log_fh.close()
             logger.error("Failed to launch specialist %s: %s", name, e)
 
     return procs

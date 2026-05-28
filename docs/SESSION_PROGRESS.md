@@ -1,5 +1,34 @@
 # Session Progress
 
+## 2026-05-28 Auto-Improvement Session
+
+**6 commits on `improve/auto-session-2026-05-28`. 12 files modified.**
+
+### Bug Fixes
+- **Falsy-zero initial_value_sek**: `x or 500000` treated 0 as falsy in 3 files
+  (digest.py, daily_digest.py, main.py). Fixed to `if x is None` pattern.
+- **Zero-guard PnL division**: 5 locations where division by zero possible when
+  initial_value or current_price is 0 (digest, daily_digest, main, equity_curve,
+  risk_management).
+- **Zombie process leak**: `llama_server.stop_server()` killed process without
+  `wait()` — zombie persisted. Added `proc.wait(timeout=5)`.
+- **File handle leak**: `multi_agent_layer2.launch_specialists()` — if Popen
+  raised, the log file handle was never closed. Fixed init-to-None pattern.
+- **Dashboard error handler**: `@app.errorhandler(Exception)` swallowed 404s.
+  Changed to `@app.errorhandler(500)` which only catches actual server errors.
+
+### Improvements
+- **Log rotation**: 6 JSONL files growing unbounded now have rotation policies
+  (claude_fundamental_log, fin_snipe_predictions, accuracy_snapshots,
+  journal_outcomes, invocations, local_llm_report_history).
+- **Cache-Control headers**: `/api/` responses now include `no-store, max-age=0`.
+- **Diagnostic logging**: `autonomous.py` throttle warning now includes traceback.
+
+### Test Results
+- 10,361 passed, 30 failed (all pre-existing). Zero new failures.
+
+---
+
 ## 2026-05-27 After-Hours Research Session
 
 **Completed 8-phase research protocol. 5 commits, merged + pushed.**

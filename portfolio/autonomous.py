@@ -825,7 +825,7 @@ def _update_throttle():
         from portfolio.file_utils import atomic_write_json
         atomic_write_json(THROTTLE_FILE, data)
     except Exception:
-        logger.warning("Failed to update throttle file")
+        logger.warning("Failed to update throttle file", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
