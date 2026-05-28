@@ -1622,3 +1622,46 @@ def _make_neutral_indicators():
         "close": 100, "volume": 1000, "avg_volume": 1000,
         "atr": 1.0, "adx": 20, "rvol": 1.0,
     }
+
+
+class TestAccuracyTierMult:
+    """Tests for the walk-forward accuracy tier multiplier."""
+
+    def test_strong_edge_gets_2x(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        assert _accuracy_tier_mult(0.68) == 2.0
+        assert _accuracy_tier_mult(0.65) == 2.0
+
+    def test_good_edge_gets_1_5x(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        assert _accuracy_tier_mult(0.60) == 1.5
+        assert _accuracy_tier_mult(0.63) == 1.5
+
+    def test_moderate_edge_gets_1_2x(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        assert _accuracy_tier_mult(0.55) == 1.2
+        assert _accuracy_tier_mult(0.58) == 1.2
+
+    def test_baseline_gets_1x(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        assert _accuracy_tier_mult(0.50) == 1.0
+        assert _accuracy_tier_mult(0.53) == 1.0
+
+    def test_marginal_gets_0_75x(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        assert _accuracy_tier_mult(0.47) == 0.75
+        assert _accuracy_tier_mult(0.48) == 0.75
+
+    def test_weak_gets_0_5x(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        assert _accuracy_tier_mult(0.40) == 0.5
+        assert _accuracy_tier_mult(0.0) == 0.5
+
+    def test_monotonically_increasing(self):
+        from portfolio.signal_engine import _accuracy_tier_mult
+        values = [0.30, 0.45, 0.48, 0.52, 0.57, 0.62, 0.70]
+        mults = [_accuracy_tier_mult(v) for v in values]
+        for i in range(len(mults) - 1):
+            assert mults[i] <= mults[i + 1], (
+                f"mult({values[i]})={mults[i]} > mult({values[i+1]})={mults[i+1]}"
+            )
