@@ -1,131 +1,87 @@
-# PLAN — Implement btc_gold_correlation_regime Signal
+# PLAN — Fix inter-cycle heartbeat staleness (false "loop down")
 
-**Date:** 2026-05-25
-**Type:** New signal module (starts disabled/shadow)
-**Branch:** `feat/btc-gold-corr-regime`
+Branch: `fix/heartbeat-intercycle-staleness`
+Date: 2026-05-29
 
-## Objective
+## Problem
 
-Implement `btc_gold_correlation_regime` — a cross-asset intermarket signal measuring
-the 30-day rolling Pearson correlation between BTC and Gold daily returns. Extreme
-negative correlation (z < -2.0) historically precedes BTC rallies; high positive
-correlation (z > 1.5) precedes mean-reversion. Composite score 8.05/10.
+The Layer 1 main loop refreshes its liveness heartbeat **only once per cycle**,
+but the cycle interval (600s) is **2× the staleness threshold (300s)**, so the
+heartbeat ages past "stale" for roughly half of every cycle even when the loop
+is perfectly healthy.
 
-## Signal Spec
+### Evidence
+- `portfolio/market_timing.py:20-22`: `INTERVAL_MARKET_OPEN/CLOSED/WEEKEND = 600`
+  (bumped from 60s "pre-daemon era").
+- `portfolio/main.py` loop body (1362-1404): each cycle does
+  `_sleep_for_next_cycle(last_cycle_started, sleep_interval)` → a single
+  `time.sleep(remaining)` with **no heartbeat**, then `run()` (whose end calls
+  `update_health()` → `last_heartbeat`), then `atomic_write_text(heartbeat.txt)`.
+  So both heartbeats refresh ~once / 600s and age 0→600s during the sleep.
+- `portfolio/health.py:152` `check_staleness(max_age_seconds=300)` → consumed by
+  `get_health_summary()` → dashboard `/api/health` status; and `digest.py:241-247`
+  (`heartbeat_age < 300` = ok, else "Xm stale").
+- `portfolio/main.py:1301` startup crash-detector: heartbeat.txt age > 300s →
+  logs "previous loop likely crashed" + Telegram. With 600s cycles, every clean
+  restart fires this false alarm (heartbeat.txt up to 600s old at restart).
 
-- **Formula**: `corr_30d = pearson(btc_returns[-30:], gold_returns[-30:])`.
-  `z = (corr_30d - rolling_mean_252d) / rolling_std_252d`.
-  BUY BTC when z < -2.0. SELL when z > 1.5.
-  For XAU-USD: inverse (BUY when z > 1.5, SELL when z < -2.0).
-- **Parameters**: corr_window=30, z_lookback=252, buy_z=-2.0, sell_z=1.5
-- **Data**: OHLCV only — BTC via `binance_klines("BTCUSDT")`, XAU via `binance_fapi_klines("XAUUSDT")`
-- **Target assets**: BTC-USD, XAU-USD (cross-asset)
-- **Category**: intermarket
-- **Max confidence**: 0.7 (external counterpart data)
-- **Starts**: DISABLED (shadow mode)
+### Scope / non-issues (verified during explore)
+- `loop_health` watchdog monitors only the 60s swing loops
+  (crypto/oil/mstr/metals/golddigger via `*_loop.heartbeat`), **NOT** the main
+  loop — so there is no false restart of the main loop, only false
+  dashboard/digest staleness + a false restart-alert Telegram.
+- This is a latent regression from the 60s→600s interval bump, independent of
+  the 2026-05-28 bug-hunt fixes (`health.py` / sleep path untouched there).
+- The cold-start first-cycle delay observed during the restart (acc_load
+  56-66s/ticker on a cold accuracy cache → ~125s signal phase) is a *separate*,
+  transient symptom that also delayed the first post-restart `update_health`.
+  Not fixed here (transient; self-resolves once the accuracy cache warms).
 
-## Files to Create/Modify
+## Fix
 
-| # | File | Action |
-|---|------|--------|
-| 1 | `portfolio/signals/btc_gold_correlation_regime.py` | CREATE ~100 lines |
-| 2 | `portfolio/signal_registry.py` | ADD register_enhanced() call |
-| 3 | `portfolio/tickers.py` | ADD to SIGNAL_NAMES + DISABLED_SIGNALS |
-| 4 | `tests/test_signal_btc_gold_correlation_regime.py` | CREATE ~120 lines |
+Keep both heartbeats fresh **during the inter-cycle sleep** by beating every
+~60s (5× headroom under the 300s gate), reusing the existing `health.heartbeat()`
+(touches only `last_heartbeat`, leaves cycle stats intact).
 
-## Implementation Details
+### Change 1 — `portfolio/main.py::_sleep_for_next_cycle`
+Add an optional `beat` callback + `beat_interval_s=60.0`. When `beat` is given,
+chunk the remaining sleep into <=`beat_interval_s` slices and call `beat()` after
+each slice. Deadline-anchored (preserves cadence). `beat()` exceptions are
+caught + logged (never abort the loop). When `beat is None`, behaviour is
+unchanged (single `time.sleep`) — keeps the helper generic and existing callers
+unaffected.
 
-### Signal Module (`portfolio/signals/btc_gold_correlation_regime.py`)
+### Change 2 — `portfolio/main.py::loop`
+Define a loop-local `_cycle_beat()` that refreshes BOTH heartbeats:
+`health.heartbeat()` (health_state.json `last_heartbeat`) and
+`atomic_write_text(DATA_DIR/"heartbeat.txt", now)`. Pass it to
+`_sleep_for_next_cycle(...)` at line ~1372. Failure-tolerant.
 
-Pattern follows `metals_cross_asset.py` for cross-asset data fetching:
-- Internal fetch of counterpart asset data (BTC fetches XAU, XAU fetches BTC)
-- Thread-safe cache with TTL (4h, matching metals_cross_asset pattern)
-- `_compute_zscore()` helper
-- `compute_btc_gold_correlation_regime_signal(df, context)` main function
-- Returns `{"action": ..., "confidence": ..., "sub_signals": {...}, "indicators": {...}}`
-- HOLD when insufficient data (<252 bars) or fetch failure
+No change to `health.py`, `market_timing.py`, the interval values, or the
+staleness thresholds. The 300s gate is correct; the cadence was the bug.
 
-### Registration
+## Why not alternatives
+- *Lower the interval back to 60s*: rejected — the 600s interval is intentional
+  (token-budget / load reduction per the daemon-era change); the heartbeat
+  cadence, not the work cadence, is what must stay < 300s.
+- *Raise the 300s thresholds to >600s*: rejected — would blind the dashboard to
+  a genuinely hung loop for 10+ min; the gate should stay tight.
+- *Wrap the sleep in `heartbeat_keepalive()`*: viable but only beats
+  health_state.json, not heartbeat.txt, and spins a daemon thread per cycle.
+  The callback approach beats both on the main thread (no extra thread, no
+  `_health_lock` cross-thread contention) and is trivially testable.
 
-```python
-register_enhanced(
-    "btc_gold_correlation_regime",
-    "portfolio.signals.btc_gold_correlation_regime",
-    "compute_btc_gold_correlation_regime_signal",
-    requires_context=True,
-    max_confidence=0.7,
-)
-```
-
-### tickers.py Changes
-
-- Add `"btc_gold_correlation_regime"` to `SIGNAL_NAMES` list
-- Add `"btc_gold_correlation_regime"` to `DISABLED_SIGNALS` set with comment
-
-### Tests
-
-- Valid BUY (z < -2.0), SELL (z > 1.5), HOLD (neutral z)
-- Insufficient data → HOLD
-- Counterpart fetch failure → HOLD
-- XAU inverse logic
-- Confidence capped at 0.7
-- Output schema validation
-
-## Execution Order
-
-1. Commit PLAN.md
-2. Spawn premortem agent
-3. Create worktree `Q:/fa-btc-gold-wt` on branch `feat/btc-gold-corr-regime`
-4. Implement signal module
-5. Register + tickers.py
-6. Tests
-7. Run pytest
-8. Adversarial review subagent
-9. Fix findings
-10. Full test suite
-11. Merge to main, push
-12. Clean up worktree
-13. Update progress tracking files
+## Execution order
+1. Write this plan, commit. (this step)
+2. Premortem (fresh agent) -> append narratives -> commit.
+3. Implement Change 1 + 2.
+4. Tests: new `tests/test_intercycle_heartbeat.py` — assert
+   `_sleep_for_next_cycle` beats ~N times under a fake clock and respects the
+   deadline; assert `beat=None` path unchanged. Commit.
+5. Adversarial review subagent on the branch; fix P1/P2.
+6. `pytest -n auto` targeted (`test_loop_*`, `test_health*`, `test_heartbeat*`,
+   `test_dashboard_system_status`) + the new test.
+7. Merge to main, push (user runs `! git push`), restart loops.
 
 ## Premortem
-
-### F1: Applicable-count tripwire tests break
-Adding to SIGNAL_NAMES while NOT in DISABLED_SIGNALS (or later promotion) breaks
-hardcoded count assertions in `test_consensus.py` and `test_metals.py`.
-**Hook:** Verify signal is in DISABLED_SIGNALS. Update tripwire counts if needed.
-
-### F2: Lock contention on dual counterpart fetches
-BTC and XAU processed in parallel — both fetch each other's data. Module-level lock
-around fetch = contention. metals_cross_asset uses `_fred_cache_lock` but FRED is
-fast; Binance can be slow.
-**Hook:** Use `shared_state._cached()` with per-ticker cache keys instead of custom lock.
-No lock held across network calls.
-
-### F3: Layer 2 double-counts correlated signals
-New signal + metals_cross_asset share gold-price common factor. Not in
-`_STATIC_CORRELATION_GROUPS` = phantom independent confirmation.
-**Hook:** Add to correlation group with metals_cross_asset, or document decision
-to leave unclustered with measured correlation evidence.
-
-### F4: Weekend gold zero-returns bias correlation toward 0
-Gold flat on weekends, BTC trades 24/7. Dilutes correlation, can push z < -2.0
-spuriously. Phantom BUY accumulates false accuracy on weekend rises.
-**Hook:** Count zero-return days in gold series. If >25% in 30d window, emit HOLD.
-Add `stale_data_ratio` indicator.
-
-### F5: NaN z-scores from insufficient history / timestamp misalignment
-Binance XAU FAPI may have <252 days history. NaN z-score → HOLD (safe) but NaN
-in indicators dict → `json.dumps(NaN)` = invalid JSON downstream.
-Also: array-position alignment vs timestamp alignment bug.
-**Hook:** Guard z-score computation with length check. Align on datetime index
-(merge/join), not array position. Replace NaN with 0.0 before returning.
-
-### F6: Signal in SIGNAL_NAMES but not registered in _register_defaults()
-Silently never runs. No error. No shadow tracking. Can sit dead for weeks.
-**Hook:** Add registration. Verify in test that signal name appears in
-`get_enhanced_signals()`.
-
-### F7: 4h cache stale during macro events — ACCEPT
-Matches metals_cross_asset TTL precedent. Signal starts disabled; stale-cache
-artifacts will degrade shadow accuracy, caught by 47% gate before promotion.
-TODO: add to MACRO_WINDOW_DOWNWEIGHT_SIGNALS when promoted.
+_(populated by the premortem agent in the next step)_
