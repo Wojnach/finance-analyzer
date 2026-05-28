@@ -58,11 +58,21 @@ def add_cors_headers(response):
         response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         response.headers["Access-Control-Allow-Credentials"] = "false"
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
     return response
+
+@app.errorhandler(500)
+def _handle_api_error(error):
+    if request.path.startswith("/api/"):
+        logger.error("Unhandled error on %s: %s", request.path, error, exc_info=True)
+        return jsonify({"error": "internal_error", "path": request.path}), 500
+    return error
+
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 TRAINING_DIR = Path(__file__).resolve().parent.parent / "training" / "lora"
