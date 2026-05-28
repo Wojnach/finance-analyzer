@@ -256,6 +256,11 @@ DISABLED_SIGNALS = {
     "mstr_mnav_discount",  # 2026-05-27: NEW. market_cap / (BTC_holdings × BTC_price).
                         # MSTR-only. Detects NAV discount/premium.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "gs_kalman_zscore_regime",  # 2026-05-28: NEW. Gold-Silver ratio Kalman-filtered z-score MR.
+                        # Source: SSRN G/S ratio MR with ML regime gate. Score 7.6/10.
+                        # Metals-only (XAU/XAG). Non-redundant vs metals_cross_asset
+                        # (which uses simple SMA z-score, not Kalman).
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -438,4 +443,5 @@ SIGNAL_NAMES = [
     "kalman_trend_momentum",
     "stablecoin_supply_ratio",
     "mstr_mnav_discount",
+    "gs_kalman_zscore_regime",
 ]
