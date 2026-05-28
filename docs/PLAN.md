@@ -51,14 +51,32 @@ caught + logged (never abort the loop). When `beat is None`, behaviour is
 unchanged (single `time.sleep`) — keeps the helper generic and existing callers
 unaffected.
 
-### Change 2 — `portfolio/main.py::loop`
-Define a loop-local `_cycle_beat()` that refreshes BOTH heartbeats:
-`health.heartbeat()` (health_state.json `last_heartbeat`) and
-`atomic_write_text(DATA_DIR/"heartbeat.txt", now)`. Pass it to
-`_sleep_for_next_cycle(...)` at line ~1372. Failure-tolerant.
+### Change 2 — `portfolio/main.py::loop` (REVISED after premortem #1)
+Define a loop-local `_cycle_beat()` that refreshes ONLY
+`health.heartbeat()` (health_state.json `last_heartbeat`). It does **NOT**
+touch `data/heartbeat.txt` — per premortem #1, beating heartbeat.txt during the
+sleep would defeat the startup crash-detector (heartbeat.txt must stay a
+cycle-END-only marker so a crash+restart within 5min is still detected). Pass
+`beat=_cycle_beat` to the inter-cycle `_sleep_for_next_cycle(...)`.
+`_cycle_beat` tracks consecutive failures; after 3 consecutive failures it
+writes ONE `critical_errors.jsonl` entry (category `heartbeat_write_failing`)
+so a persistent write failure escalates instead of dying in the log
+(premortem #3). Logs a WARNING if a single beat takes >2s (premortem #2).
+The beat wrapper uses `except Exception` ONLY (never bare/BaseException) so a
+console Ctrl+C still propagates (premortem #5).
+
+### Change 3 — `portfolio/main.py::loop` startup crash-detector threshold
+Bump the heartbeat.txt staleness threshold at main.py:1301 from 300s to 1200s
+(2× the 600s cycle interval). With 600s cycles, heartbeat.txt is up to 600s old
+even after a CLEAN shutdown, so the 300s check false-fires "previous loop likely
+crashed" on every clean restart. 1200s still catches a genuine multi-cycle
+silent death while suppressing the clean-restart false positive. Same root cause
+(threshold assumed a fast heartbeat); does NOT mask real crashes (those leave
+heartbeat.txt far older than 1200s).
 
 No change to `health.py`, `market_timing.py`, the interval values, or the
-staleness thresholds. The 300s gate is correct; the cadence was the bug.
+dashboard's 300s `check_staleness` gate. The dashboard gate is correct; the
+heartbeat *cadence* was the bug.
 
 ## Why not alternatives
 - *Lower the interval back to 60s*: rejected — the 600s interval is intentional
@@ -83,5 +101,34 @@ staleness thresholds. The 300s gate is correct; the cadence was the bug.
    `test_dashboard_system_status`) + the new test.
 7. Merge to main, push (user runs `! git push`), restart loops.
 
-## Premortem
-_(populated by the premortem agent in the next step)_
+## Premortem (fresh agent, 5 narratives — all addressed)
+
+1. **Crash detector goes blind (silent failure) — CRITICAL.** Beating
+   heartbeat.txt during sleep would keep it <300s old at all times, so a hard
+   crash + restart-within-5min (the common case) suppresses the "loop crashed"
+   Telegram — masking the exact silent-outage class CLAUDE.md guards.
+   → **FIX ADOPTED:** `_cycle_beat` does NOT write heartbeat.txt; heartbeat.txt
+   stays a cycle-end-only marker. Dashboard staleness keys off `last_heartbeat`
+   (which we beat), not heartbeat.txt. (Change 2 revised.)
+2. **`_health_lock` contention / write amplification.** +10 full-file
+   load-modify-writes per cycle under the lock shared with
+   signal_health/module_failures/keepalive. → **ACCEPT:** os.replace is atomic,
+   60s cadence is trivial, and the inter-cycle sleep does NOT overlap the
+   keepalive thread (keepalive only runs inside run()). Added a >2s beat-duration
+   WARNING to surface lock/disk stalls. (Change 2.)
+3. **Swallowed persistent write failure (silent).** If health_state.json becomes
+   unwritable, every beat throws + is swallowed → frozen heartbeat, loop "looks"
+   alive. → **FIX ADOPTED:** consecutive-failure counter; 3 consecutive failures
+   → one `critical_errors.jsonl` entry (routes to fix-agent). (Change 2.)
+4. **monotonic vs wall-clock drift / OS suspend (test passes, prod differs).**
+   A wall-clock or slice-accumulating chunk loop diverges from the monotonic
+   anchor across NTP step / hibernate (see loop_contract `os_suspend_likely`).
+   → **FIX ADOPTED:** chunk loop is `time.monotonic()` deadline-anchored;
+   each slice = `min(beat_interval, deadline-now)`. Test drives a fake monotonic
+   that JUMPS mid-sleep and asserts prompt return, no negative/huge sleeps.
+5. **KeyboardInterrupt swallowed → un-interruptible loop.** A too-broad
+   `except BaseException`/bare `except` in the beat wrapper would eat Ctrl+C.
+   → **FIX ADOPTED:** wrapper is `except Exception` only (KeyboardInterrupt is
+   BaseException, propagates); dated comment + a test asserting KI propagates
+   out of the chunked sleep. The sleep call stays OUTSIDE the loop body's
+   KI-catching try (current behavior preserved: KI between cycles exits cleanly).
