@@ -99,7 +99,8 @@ DISABLED_SIGNALS = {
     # "drift_regime_gate" RE-ENABLED 2026-05-22: 58.4% 1d all-time (1231 sam),
     # 66.5% 1d_recent (651 sam). Strongest regime filter. Accuracy gate
     # auto-disables if performance degrades below 47%.
-    "vol_ratio_regime",  # pending live validation (added 2026-04-29)
+    # "vol_ratio_regime" RE-ENABLED 2026-05-28: 57.2% accuracy (586 sam).
+                        # Highest sample count among regime signals. Well above 47% gate.
     "residual_pair_reversion",  # pending live validation (added 2026-04-30)
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
     "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
@@ -112,7 +113,9 @@ DISABLED_SIGNALS = {
     "trend_slope_momentum",  # pending live validation (added 2026-05-14)
     "ttm_squeeze",  # pending live validation (added 2026-05-16)
     "tsi_chop_mr",  # pending live validation (added 2026-05-17)
-    "amihud_illiquidity_regime",  # pending live validation (added 2026-05-18)
+    # "amihud_illiquidity_regime" RE-ENABLED 2026-05-28: 68.0% accuracy (225 sam).
+                        # Amihud illiquidity ratio regime detection. Highest accuracy
+                        # of any signal in the system. Accuracy gate auto-disables below 47%.
     "absorption_ratio_regime",  # pending live validation (added 2026-05-19)
     "sentiment_extremity_gate",  # pending live validation (added 2026-05-20)
     "credit_spread_risk",  # 2026-05-21: 23% blended 1d (0.90×20% recent + 0.10×50% alltime).
@@ -221,19 +224,19 @@ DISABLED_SIGNALS = {
                         # signals fail in ranging markets. 49.9% at 3h (marginal).
     "connors_rsi2",     # 2026-05-19: NEW. RSI(2) ultra-short MR for BTC/ETH only.
                         # Shadow mode — accumulate accuracy data before enabling.
-    "adx_regime_switch",  # 2026-05-19: NEW. ADX dual regime meta-signal. Detects
-                        # trend/range transitions via ADX + DI spread. All assets.
-                        # Shadow mode — accumulate accuracy data before enabling.
-    "choppiness_regime_gate",  # 2026-05-22: NEW. CHOP regime gate. CHOP>61.8=choppy
-                        # (suppress directional), CHOP<38.2=trending. All assets.
-                        # Shadow mode — accumulate accuracy data before enabling.
+    # "adx_regime_switch" RE-ENABLED 2026-05-28: 67.0% accuracy (182 sam).
+                        # Strongest regime signal in the system. ADX dual regime meta-signal.
+                        # Accuracy gate auto-disables if performance degrades below 47%.
+    # "choppiness_regime_gate" RE-ENABLED 2026-05-28: 67.7% accuracy (158 sam).
+                        # CHOP regime gate — suppresses directional signals in choppy markets.
+                        # Accuracy gate auto-disables if performance degrades below 47%.
     "autotune_adaptive_cycle",  # 2026-05-23: NEW. Ehlers AutoTune adaptive cycle
                         # detection via autocorrelation periodogram + bandpass filter.
                         # Cross-asset, OHLCV-only. Score 8.1/10.
                         # Shadow mode — accumulate accuracy data before enabling.
-    "bocpd_regime_switch",  # 2026-05-24: NEW. BOCPD regime switch (trend↔MR).
-                        # Bayesian Online Changepoint Detection. Cross-asset. Score 8.25/10.
-                        # Shadow mode — accumulate accuracy data before enabling.
+    # "bocpd_regime_switch" RE-ENABLED 2026-05-28: 58.5% accuracy (207 sam).
+                        # BOCPD regime switch (trend-MR). Bayesian Online Changepoint Detection.
+                        # Accuracy gate auto-disables if performance degrades below 47%.
     "btc_gold_correlation_regime",  # 2026-05-25: NEW. BTC-Gold correlation z-score.
                         # Intermarket cross-asset (BTC+XAU). Score 8.05/10.
                         # Shadow mode — accumulate accuracy data before enabling.
