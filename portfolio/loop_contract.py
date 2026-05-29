@@ -372,9 +372,6 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     _KNOWN_FAILURE_STATUSES = frozenset({
         "incomplete",
         "auth_error",
-        "timeout",
-        "failed",
-        "stack_overflow",
     })
     if latest_l2_inv and latest_l2_inv.get("status") in _LEGITIMATE_SKIP_STATUSES:
         inv_ts = _parse_iso(

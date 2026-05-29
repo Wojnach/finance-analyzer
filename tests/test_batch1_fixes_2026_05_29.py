@@ -13,16 +13,14 @@ UTC = timezone.utc
 # ---------- B1-1: loop_contract known failure statuses ----------
 
 class TestLoopContractStatuses:
-    def test_known_failure_statuses_includes_timeout(self):
-        """Verify _KNOWN_FAILURE_STATUSES has timeout/failed/stack_overflow."""
-        import portfolio.loop_contract as lc
-        with open(lc.__file__) as f:
+    def test_timeout_handled_via_journal_stub(self):
+        """Timeout is handled via journal stub (B1-3), not _KNOWN_FAILURE_STATUSES.
+        The journal stub at the timeout-kill path satisfies the journal check."""
+        import portfolio.agent_invocation as ai
+        with open(ai.__file__) as f:
             content = f.read()
-        idx = content.index("_KNOWN_FAILURE_STATUSES")
-        block = content[idx:idx+300]
-        assert "timeout" in block
-        assert "failed" in block
-        assert "stack_overflow" in block
+        assert "timeout_stub" in content
+        assert "atomic_append_jsonl(JOURNAL_FILE, timeout_stub)" in content
 
 
 # ---------- B1-2: loop_contract journal timestamp tolerance ----------
