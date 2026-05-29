@@ -1,5 +1,48 @@
 # Session Progress
 
+## 2026-05-29 Auto-improvement session (autonomous)
+
+### What was done
+- **Exploration**: 6 parallel agents covered core loop, signal engine, portfolio/risk,
+  dashboard, metals/Avanza, data/infra. Cross-referenced with FGL 2026-05-28 synthesis.
+- **Plan**: `docs/IMPROVEMENT_PLAN.md` — 20 bugs found, 18 fixed in 3 batches.
+
+**Batch 1 — 8 critical fixes** (commit `24382477`):
+  - loop_contract: 5s journal timestamp tolerance → stops 233 false CRITICALs/week
+  - agent_invocation: timeout journal stub → closes silent-failure gap
+  - risk_management: 3% ATR stop-loss floor → prevents Mar-3 instant-fill class
+  - kelly_sizing: FIFO round-trip matching → was avg_buy_price look-ahead
+  - accuracy_stats: None-handling in blend_accuracy_data → crash guard
+  - metals_loop: non-zero exit code on crash → supervisor-visible
+  - sentiment_extremity_gate: crypto-only ticker guard → wrong F&G for metals/stocks
+
+**Batch 2 — 8 reliability fixes** (commit `e2e6272f`):
+  - metals_loop: per-cycle try/except isolation → one bad cycle ≠ loop death
+  - forecast_accuracy: rsplit for horizon suffix parsing
+  - dashboard: info disclosure fixes (path + exception sanitization)
+  - signal_engine: soft-confidence weight cap at 0.30
+  - signal_registry: max_confidence [0,1] validation
+  - message_store: type safety for muted_categories
+  - trade_guards: warning log on corrupt timestamp
+
+**Batch 3 — Signal quality** (commit `1c09d351`):
+  - outcome_tracker: invalidate horizon weight cache after backfill
+  - equity_curve: reuse daily_vol for Sharpe (O(n) elimination)
+
+**Post-fix** (commit `0a3329c1`):
+  - Reverted _KNOWN_FAILURE_STATUSES expansion — journal stub is the correct fix
+
+### Test results
+- Full suite: 10,438 passed, 30 pre-existing xdist flakes, 4 skipped
+- 20 new regression tests + 3 existing tests updated
+- All 30 failures confirmed pre-existing in isolation
+
+### What's next
+- Deferred: cross-process JSON-state lock (Theme 3), sentinel/fail-closed (Theme 1),
+  dead controls wiring (Theme 2), Avanza session re-validation
+- Avanza BankID session still expired since May 23 — needs `python scripts/avanza_login.py`
+- PUSH: done (`28cfc1e9`)
+
 ## 2026-05-29 Bug-hunt + heartbeat fix (interactive)
 
 ### What was done
