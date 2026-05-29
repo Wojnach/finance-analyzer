@@ -455,21 +455,22 @@ class TestSmallSample:
 
 class TestRegimeWeights:
     def test_trending_up_boosts_heikin_ashi(self):
-        # ema is REGIME-GATED in trending-up (BUG-152); test heikin_ashi (1.2x, not gated)
-        votes = {"heikin_ashi": "BUY", "rsi": "SELL"}
-        acc = _acc_dict(["heikin_ashi", "rsi"], 0.6, 50)
+        # rsi is REGIME-GATED in trending-up (2026-05-29); use cot_positioning (1.0x, ungated)
+        votes = {"heikin_ashi": "BUY", "cot_positioning": "SELL"}
+        acc = _acc_dict(["heikin_ashi", "cot_positioning"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # heikin_ashi: 0.6 * 1.2 = 0.72, rsi: 0.6 * 0.7 = 0.42
+        # heikin_ashi: 0.6 * 1.2 = 0.72, cot_positioning: 0.6 * 1.0 = 0.6
         assert action == "BUY"
-        assert conf == pytest.approx(0.72 / (0.72 + 0.42), abs=0.01)
+        assert conf == pytest.approx(0.72 / (0.72 + 0.6), abs=0.01)
 
     def test_trending_up_boosts_macd(self):
-        votes = {"macd": "BUY", "rsi": "SELL"}
-        acc = _acc_dict(["macd", "rsi"], 0.6, 50)
+        # rsi is REGIME-GATED in trending-up (2026-05-29); use cot_positioning (1.0x, ungated)
+        votes = {"macd": "BUY", "cot_positioning": "SELL"}
+        acc = _acc_dict(["macd", "cot_positioning"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # macd: 0.6 * 1.3 = 0.78, rsi: 0.6 * 0.7 = 0.42
+        # macd: 0.6 * 1.3 = 0.78, cot_positioning: 0.6 * 1.0 = 0.6
         assert action == "BUY"
-        assert conf == pytest.approx(0.78 / (0.78 + 0.42), abs=0.01)
+        assert conf == pytest.approx(0.78 / (0.78 + 0.6), abs=0.01)
 
     def test_trending_down_same_as_trending_up(self):
         """trending-down has same multipliers as trending-up."""
@@ -531,12 +532,14 @@ class TestRegimeWeights:
 
     def test_signal_not_in_regime_gets_1x(self):
         """A signal not listed in the regime dict gets multiplier 1.0."""
-        votes = {"sentiment": "BUY", "rsi": "SELL"}
-        acc = _acc_dict(["sentiment", "rsi"], 0.6, 50)
+        # rsi is REGIME-GATED in trending-up (2026-05-29); use cot_positioning (1.0x, ungated)
+        # to prove it gets default 1.0x by competing against heikin_ashi (1.2x boosted)
+        votes = {"heikin_ashi": "BUY", "cot_positioning": "SELL"}
+        acc = _acc_dict(["heikin_ashi", "cot_positioning"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # sentiment: 0.6 * 1.0 = 0.6, rsi: 0.6 * 0.7 = 0.42
+        # heikin_ashi: 0.6 * 1.2 = 0.72, cot_positioning: 0.6 * 1.0 = 0.6
         assert action == "BUY"
-        assert conf == pytest.approx(0.6 / 1.02, abs=0.01)
+        assert conf == pytest.approx(0.72 / 1.32, abs=0.01)
 
     def test_regime_weight_stacks_with_accuracy(self):
         """High accuracy + favorable regime = large effective weight."""
@@ -736,25 +739,25 @@ class TestEdgeCases:
 
     def test_all_factors_combined(self):
         """Accuracy + gate + regime + activation all working together."""
-        # ema is gated in trending-up; use heikin_ashi (1.2x, not gated) as BUY voter
-        votes = {"heikin_ashi": "BUY", "bad_rsi": "BUY", "bb": "SELL"}
+        # bb is gated in trending-up (2026-05-29); use cot_positioning (1.0x, ungated) as SELL voter
+        votes = {"heikin_ashi": "BUY", "bad_acc": "BUY", "cot_positioning": "SELL"}
         acc = {
             "heikin_ashi": _acc(0.7, 100),
-            "bad_rsi": _acc(0.3, 100),  # gated (0.3 < 0.45, 100 >= 30)
-            "bb": _acc(0.6, 50),
+            "bad_acc": _acc(0.3, 100),  # gated (0.3 < 0.45, 100 >= 30)
+            "cot_positioning": _acc(0.6, 50),
         }
         activation = {
             "heikin_ashi": {"normalized_weight": 1.5},
-            "bad_rsi": {"normalized_weight": 0.8},
-            "bb": {"normalized_weight": 1.0},
+            "bad_acc": {"normalized_weight": 0.8},
+            "cot_positioning": {"normalized_weight": 1.0},
         }
         action, conf = _weighted_consensus(votes, acc, "trending-up", activation)
         # heikin_ashi BUY: 0.7 * 1.2 (regime) * 1.5 (act) = 1.26
-        # bad_rsi: gated → skipped entirely
-        # bb SELL: 0.6 * 0.7 (regime for bb in trending-up) * 1.0 (act) = 0.42
-        # BUY total: 1.26, SELL total: 0.42
+        # bad_acc: gated → skipped entirely
+        # cot_positioning SELL: 0.6 * 1.0 (regime) * 1.0 (act) = 0.6
+        # BUY total: 1.26, SELL total: 0.6
         assert action == "BUY"
-        assert conf == pytest.approx(1.26 / (1.26 + 0.42), abs=0.01)
+        assert conf == pytest.approx(1.26 / (1.26 + 0.6), abs=0.01)
 
     def test_confidence_never_exceeds_1(self):
         votes = {"s1": "BUY"}
@@ -781,8 +784,9 @@ class TestEdgeCases:
 
     def test_accuracy_data_for_nonexistent_signal(self):
         """Extra accuracy data for signals not in votes is harmless."""
-        votes = {"rsi": "BUY"}
-        acc = {"rsi": _acc(0.7, 50), "phantom": _acc(0.99, 1000)}
+        # rsi is REGIME-GATED in trending-up (2026-05-29); use drift_regime_gate (ungated)
+        votes = {"drift_regime_gate": "BUY"}
+        acc = {"drift_regime_gate": _acc(0.7, 50), "phantom": _acc(0.99, 1000)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
         assert conf == 1.0

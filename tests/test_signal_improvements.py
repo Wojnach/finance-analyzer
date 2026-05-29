@@ -319,21 +319,14 @@ class TestWeightedConsensus:
         assert action == "BUY"
 
     def test_low_sample_uses_neutral_weight(self):
-        # 2026-05-10: history of this test —
-        # 2026-04-17: original used funding+volume; funding gated in ranging.
-        # Switched to sentiment+volume. Then 2026-04-27 sentiment was also
-        # added to REGIME_GATED_SIGNALS[ranging] (40.1% accuracy, BUY bias).
-        # Now sentiment force-HOLDs and volume SELL alone wins.
-        # Use rsi+bb instead — both ungated in ranging, both have the SAME
-        # 1.5x regime multiplier so the tie property still holds when
-        # accuracy weights collapse to neutral 0.5 under low samples.
-        votes = {"rsi": "BUY", "bb": "SELL"}
+        # 2026-05-29: rsi+bb are now in momentum_cluster (correlation penalty
+        # breaks tie). Use two unclustered signals with equal regime weight.
+        votes = {"drift_regime_gate": "BUY", "cot_positioning": "SELL"}
         acc = {
-            "rsi": {"accuracy": 0.9, "total": 5},  # too few samples
-            "bb": {"accuracy": 0.9, "total": 5},
+            "drift_regime_gate": {"accuracy": 0.9, "total": 5},
+            "cot_positioning": {"accuracy": 0.9, "total": 5},
         }
         action, conf = _weighted_consensus(votes, acc, "ranging")
-        # Both collapse to weight 0.5 × 1.5 = 0.75 → tie → HOLD.
         assert action == "HOLD"
 
     def test_all_hold_returns_hold(self):
@@ -345,15 +338,16 @@ class TestWeightedConsensus:
 
 class TestRegimeWeights:
     def test_trend_signals_boosted_in_trending(self):
-        votes = {"ema": "BUY", "rsi": "SELL"}
+        # 2026-05-29: ema AND rsi both gated in trending-up now.
+        # Use drift_regime_gate (ungated) vs statistical_jump_regime (ungated).
+        votes = {"drift_regime_gate": "BUY", "statistical_jump_regime": "SELL"}
         acc = {
-            "ema": {"accuracy": 0.6, "total": 50},
-            "rsi": {"accuracy": 0.6, "total": 50},
+            "drift_regime_gate": {"accuracy": 0.6, "total": 1780},
+            "statistical_jump_regime": {"accuracy": 0.55, "total": 3783},
         }
         action, _ = _weighted_consensus(votes, acc, "trending-up")
-        # ema is regime-gated in trending-up at default horizon (0-11% accuracy)
-        # → forced HOLD, only rsi SELL remains
-        assert action == "SELL"
+        # drift_regime_gate has higher accuracy → BUY wins
+        assert action == "BUY"
 
     def test_reversion_signals_boosted_in_ranging(self):
         votes = {"rsi": "BUY", "ema": "SELL"}
