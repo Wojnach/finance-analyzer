@@ -229,16 +229,17 @@ class TestWeightedConsensusRegime:
         assert action == "BUY"
         assert conf > 0.6  # ema significantly outweighs rsi
 
-    def test_trending_up_gates_ema_at_1d(self):
+    def test_trending_up_gates_ema_and_rsi_at_1d(self):
         # BUG-152: ema gated in trending-up at _default/1d horizon
+        # 2026-05-29: rsi also gated in trending-up (mean-reversion cluster)
         votes = {"ema": "BUY", "rsi": "SELL"}
         accuracy = {
             "ema": {"accuracy": 0.6, "total": 50},
             "rsi": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "trending-up")
-        # ema is regime-gated → HOLD, only rsi SELL remains
-        assert action == "SELL"
+        # Both ema and rsi are regime-gated → HOLD
+        assert action == "HOLD"
 
     def test_ranging_boosts_rsi_and_bb(self):
         # 2026-05-19: swapped claude_fundamental → cot_positioning. claude_fundamental
@@ -952,7 +953,7 @@ class TestCorrelationDedup:
             return_value=_STATIC_CORRELATION_GROUPS,
         ):
             action_agree, conf_agree = _weighted_consensus(
-                votes_3leaders, acc, "trending-up")
+                votes_3leaders, acc, "unknown")
 
         # Now test with leaders disagreeing — one votes SELL
         votes_disagree = dict(votes_3leaders)
@@ -964,7 +965,7 @@ class TestCorrelationDedup:
             return_value=_STATIC_CORRELATION_GROUPS,
         ):
             action_disagree, conf_disagree = _weighted_consensus(
-                votes_disagree, acc, "trending-up")
+                votes_disagree, acc, "unknown")
 
         # When leaders agree, BUY confidence should be LOWER than when they
         # all vote independently at full weight (meta-penalty reduces weight)
@@ -1069,16 +1070,19 @@ class TestRegimeGating:
         # mean_reversion gated on 3h in trending => ema BUY wins
         assert action == "BUY"
 
-    def test_trending_up_does_not_gate_mean_reversion_on_1d(self):
-        """In trending-up at 1d, 'mean_reversion' is NOT gated (65.4%)."""
-        votes = {"mean_reversion": "SELL", "ema": "BUY"}
+    def test_trending_up_gates_mean_reversion_on_1d(self):
+        """2026-05-29: mean_reversion now gated in trending-up at _default.
+        Consensus accuracy was 32.5% in trending-up because mean-reversion
+        cluster (100% correlated) fired counter-trend SELL with amplified weight.
+        """
+        votes = {"mean_reversion": "SELL", "drift_regime_gate": "BUY"}
         accuracy = {
             "mean_reversion": {"accuracy": 0.65, "total": 332},
-            "ema": {"accuracy": 0.41, "total": 568},
+            "drift_regime_gate": {"accuracy": 0.58, "total": 1780},
         }
         action, conf = _weighted_consensus(votes, accuracy, "trending-up", horizon="1d")
-        # mean_reversion NOT gated on 1d => mean_reversion SELL can win
-        assert action == "SELL"
+        # mean_reversion gated in trending-up => drift_regime_gate BUY wins
+        assert action == "BUY"
 
     def test_no_gating_in_ungated_regime(self):
         """In high-vol regime, trend is NOT gated."""
@@ -1171,25 +1175,22 @@ class TestActivityRateCap:
     def test_normal_activity_no_penalty(self):
         """Signals with <70% activation rate are not penalized.
 
-        2026-05-19: swapped fibonacci → mean_reversion (fibonacci disabled
-        2026-04-29 and dropped from ranging weights; with weight=1.0 it
-        lost to rsi). mean_reversion has 1.7 boost in ranging.
+        2026-05-29: swapped rsi/mean_reversion → drift_regime_gate/cot_positioning
+        (rsi+mean_reversion are now in the same correlation cluster).
         """
-        votes = {"rsi": "SELL", "mean_reversion": "BUY"}
+        votes = {"cot_positioning": "SELL", "drift_regime_gate": "BUY"}
         accuracy = {
-            "rsi": {"accuracy": 0.55, "total": 24000},
-            "mean_reversion": {"accuracy": 0.55, "total": 600},
+            "cot_positioning": {"accuracy": 0.55, "total": 400},
+            "drift_regime_gate": {"accuracy": 0.58, "total": 1780},
         }
         activation = {
-            "rsi": {"activation_rate": 0.35, "normalized_weight": 1.0},
-            "mean_reversion": {"activation_rate": 0.02, "normalized_weight": 1.0},
+            "cot_positioning": {"activation_rate": 0.35, "normalized_weight": 1.0},
+            "drift_regime_gate": {"activation_rate": 0.02, "normalized_weight": 1.0},
         }
         action, conf = _weighted_consensus(
             votes, accuracy, "ranging", activation_rates=activation
         )
-        # rsi: 0.55 * 1.5(regime ranging) * 1.0 = 0.825
-        # mean_reversion: 0.55 * 1.7(regime ranging) * 1.0 = 0.935
-        # mean_reversion BUY wins
+        # drift_regime_gate has higher accuracy and higher regime boost
         assert action == "BUY"
 
 
@@ -1701,23 +1702,24 @@ class TestTrendingUpRegimeGating:
     """BUG-152: SELL-biased signals must be gated in trending-up at 1d."""
 
     def test_trending_up_gates_sell_biased_signals_at_default(self):
-        """All 8 signals should be gated at _default/1d in trending-up."""
+        """All trend-gated + mean-reversion cluster gated in trending-up."""
         from portfolio.signal_engine import _get_regime_gated
         gated = _get_regime_gated("trending-up")
         expected = {"trend", "ema", "volume_flow", "macro_regime",
                     "momentum_factors", "claude_fundamental", "funding",
-                    "fear_greed"}
+                    "fear_greed",
+                    "rsi", "mean_reversion", "momentum", "bb",
+                    "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix"}
         assert expected == gated
 
-    def test_trending_up_does_not_gate_sell_biased_at_3h(self):
-        """SELL-biased signals work short-term — NOT gated at 3h."""
+    def test_trending_up_gates_mr_cluster_at_3h(self):
+        """Mean-reversion cluster gated at 3h in trending-up."""
         from portfolio.signal_engine import _get_regime_gated
         gated = _get_regime_gated("trending-up", "3h")
-        # Only mean_reversion is gated at 3h in trending-up
-        assert "trend" not in gated
-        assert "ema" not in gated
-        assert "volume_flow" not in gated
         assert "mean_reversion" in gated
+        assert "rsi" in gated
+        assert "bb" in gated
+        assert "sentiment" in gated
 
     def test_trending_up_gating_forces_hold_in_consensus(self):
         """Gated signals should not participate in consensus vote."""

@@ -26,11 +26,11 @@ class TestCorrelationGroups:
             assert len(members) >= 2, f"Group {name} should have at least 2 members"
 
     def test_momentum_cluster_exists(self):
-        """momentum_cluster should contain rsi, mean_reversion, momentum, bb.
+        """momentum_cluster should contain all mean-reversion family signals.
 
-        2026-05-20: bb re-added — 100% agreement with mean_reversion (n=99)
-        confirmed via 50-snapshot correlation audit. Unclustered bb inflated
-        total weight to 2.30x for one opinion.
+        2026-05-29: expanded to 7 members — added connors_rsi2,
+        sentiment_extremity_gate, williams_vix_fix (all 100% agreement
+        confirmed on 500-snapshot correlation audit).
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
@@ -40,6 +40,9 @@ class TestCorrelationGroups:
         assert "rsi" in mc_group
         assert "momentum" in mc_group
         assert "bb" in mc_group
+        assert "connors_rsi2" in mc_group
+        assert "sentiment_extremity_gate" in mc_group
+        assert "williams_vix_fix" in mc_group
 
     def test_volatility_cluster_removed(self):
         """volatility_cluster was dissolved (RES-2026-04-21).
@@ -1180,9 +1183,9 @@ class TestPerClusterCorrelationPenalties:
         assert "momentum_cluster" in _CLUSTER_CORRELATION_PENALTIES
         assert _CLUSTER_CORRELATION_PENALTIES["momentum_cluster"] < _CORRELATION_PENALTY
 
-    def test_momentum_cluster_penalty_is_015(self):
+    def test_momentum_cluster_penalty_is_010(self):
         from portfolio.signal_engine import _CLUSTER_CORRELATION_PENALTIES
-        assert _CLUSTER_CORRELATION_PENALTIES["momentum_cluster"] == 0.15
+        assert _CLUSTER_CORRELATION_PENALTIES["momentum_cluster"] == 0.10
 
     def test_default_penalty_unchanged(self):
         from portfolio.signal_engine import _CORRELATION_PENALTY

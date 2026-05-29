@@ -1345,16 +1345,20 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # claude_fundamental 5.9% trending-up (34 samples) — BUG-154
         # 2026-04-09: funding gated at 1d (29.9%), active at 3h (74.2%)
         # 2026-04-13: fear_greed 25.9% at 1d (170 sam) — destructive in ALL regimes at 1d
+        # 2026-05-29: Added mean-reversion cluster (rsi, mean_reversion, momentum, bb).
+        # Correlation audit: consensus accuracy in trending-up is 32.5% (4332 decisions).
+        # Root cause: mean-reversion cluster (100% correlated, 6 signals) fires counter-
+        # trend SELL into uptrends with amplified weight. Gate the whole cluster at _default.
         "_default": frozenset({
             "trend", "ema", "volume_flow", "macro_regime",
             "momentum_factors", "claude_fundamental",
             "funding", "fear_greed",
+            "rsi", "mean_reversion", "momentum", "bb",
+            "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix",
         }),
-        # mean_reversion 3h_recent=45.5% — gate on short horizons
-        # SELL-biased signals work short-term even in uptrends — do NOT gate at 3h
         # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
-        "3h": frozenset({"mean_reversion", "sentiment"}),
-        "4h": frozenset({"mean_reversion", "sentiment"}),
+        "3h": frozenset({"mean_reversion", "sentiment", "rsi", "bb"}),
+        "4h": frozenset({"mean_reversion", "sentiment", "rsi", "bb"}),
     },
     "trending-down": {
         # BUG-155: bb 21.7% in trending-down (false reversal signals)
@@ -1365,19 +1369,23 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # BUG-165: smart_money 10.0% in trending-down (130 samples) — worst signal
         # 2026-04-09: funding gated at 1d, active at 3h
         # 2026-04-13: fear_greed 25.9% at 1d (170 sam) — destructive in ALL regimes at 1d
+        # 2026-05-29: Added full mean-reversion cluster. Consensus accuracy in trending-
+        # down is 35.8%. rsi/mean_reversion/momentum fire counter-trend BUY (buy the dip)
+        # and get amplified by 100% correlation. Gate entire cluster at _default.
         "_default": frozenset({
             "bb", "claude_fundamental",
             "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
-            "smart_money",  # BUG-165: 10.0% accuracy in trending-down
+            "smart_money",
             "funding", "fear_greed",
-            # 2026-04-27: sentiment 40.1% at 1d_recent (202 sam), BUY-only bias.
-            # Was only gated at 3h/4h; actively harmful at longer horizons too.
             "sentiment",
+            "rsi", "mean_reversion", "momentum",
+            "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix",
         }),
-        # 3h: trend signals may still work short-term; keep mean_reversion gated
         # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
-        "3h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment"}),
-        "4h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment"}),
+        "3h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment",
+                         "rsi", "momentum"}),
+        "4h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment",
+                         "rsi", "momentum"}),
     },
     "high-vol": {
         # 2026-04-09: funding gated at 1d, active at 3h
@@ -1868,7 +1876,13 @@ _STATIC_CORRELATION_GROUPS = {
     # 1.0+2*0.15=1.30x = 2.30x total for one opinion. With bb in cluster:
     # 1.0 + 3*0.15 = 1.45x — still generous but no longer double-counting.
     # BB's edge in ranging is real (57.6% recent) but so is the redundancy.
-    "momentum_cluster": frozenset({"mean_reversion", "rsi", "momentum", "bb"}),
+    # 2026-05-29: Added connors_rsi2, sentiment_extremity_gate, williams_vix_fix.
+    # Correlation audit (500 snapshots): all three agree 100% with rsi/bb/mean_reversion
+    # on both BTC-USD and XAG-USD. Were voting at full 1.0x weight — pure redundancy.
+    "momentum_cluster": frozenset({
+        "mean_reversion", "rsi", "momentum", "bb",
+        "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix",
+    }),
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
     # 2026-05-18: Added credit_spread_risk. Signal correlation analysis shows 100%
@@ -1888,10 +1902,12 @@ _STATIC_CORRELATION_GROUPS = {
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 # Per-cluster overrides: momentum_cluster signals agree 88-100% of the time.
-# 2026-05-20: momentum_cluster back to 4 members (bb re-added, 100% agreement confirmed).
-# At 0.15x: 1.0 + 3*0.15 = 1.45x effective weight.
+# 2026-05-29: momentum_cluster expanded to 7 members (added connors_rsi2,
+# sentiment_extremity_gate, williams_vix_fix — all 100% agreement confirmed).
+# At 0.10x: 1.0 + 6*0.10 = 1.60x effective weight. Lower penalty than before
+# because 7 identical opinions should not get 7x weight.
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
-    "momentum_cluster": 0.15,
+    "momentum_cluster": 0.10,
     # 2026-04-30: split trend_direction (9 members, 0.12x) into 3 sub-clusters.
     # Each has 3 members at 0.20x: effective weight per cluster = 1.0 + 2*0.20 = 1.40x.
     # Previous total: 1.96x from 1 cluster. New total: 3 * 1.40x = 4.20x BUT with
