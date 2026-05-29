@@ -5,7 +5,26 @@ import json
 
 import pytest
 
+from portfolio import llm_confidence_calibration as _cal
 from portfolio import llm_probability_log as mod
+
+
+@pytest.fixture(autouse=True)
+def _no_calibration_map(tmp_path, monkeypatch):
+    """Isolate these tests from the production confidence-calibration map.
+
+    2026-05-29: derive_probs_from_result now consults
+    data/llm_confidence_calibration.json in its confidence-split fallback.
+    These tests assert the RAW split (action gets `confidence`, others split
+    the rest) so they must run with NO map present — point _MAP_PATH at a
+    nonexistent tmp file so calibrate() returns confidence unchanged. The
+    calibration-active behavior is covered in
+    tests/test_llm_confidence_calibration.py.
+    """
+    monkeypatch.setattr(_cal, "_MAP_PATH", tmp_path / "__no_calibration_map__.json")
+    _cal._invalidate_cache()
+    yield
+    _cal._invalidate_cache()
 
 
 @pytest.fixture

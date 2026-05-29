@@ -305,6 +305,26 @@ def derive_probs_from_result(
                     "HOLD": float(neu) / total,
                 }
 
+    # 2026-05-29 (llm-confidence-calibration): for signals that emit only a
+    # scalar confidence (ministral, qwen3), that confidence is anti-calibrated
+    # — high self-reported confidence on directionally-wrong calls drove the
+    # logged Brier WORSE than uniform (ministral 0.785, qwen3 0.793 vs 0.667).
+    # Replace the raw confidence with the empirically-fitted P(correct) from
+    # data/llm_confidence_calibration.json before splitting. calibrate() is
+    # identity (returns conf unchanged) when no map exists, the signal is
+    # absent, or anything goes wrong — so this can never make Brier worse than
+    # the synthetic baseline, and the hot loop never raises. Applied ONLY here
+    # in the confidence-split fallback; the avg_scores branch above (sentiment
+    # family) already carries real per-class scores and is left untouched. See
+    # portfolio/llm_confidence_calibration.py for why we do not read real token
+    # logprobs on the batched ministral/qwen3 inference path.
+    try:
+        from portfolio.llm_confidence_calibration import calibrate as _calibrate
+        conf = _clamp_confidence(float(_calibrate(signal_name, action, conf)))
+    except Exception:
+        # Never let calibration break the logger — keep the raw conf.
+        pass
+
     # Confidence-split fallback. Three regimes:
     #   - conf >= 1.0: model fully certain
     #   - 0 < conf < 1.0: standard split, action gets conf, others split (1-conf)/2
