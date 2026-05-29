@@ -296,6 +296,23 @@ def compute_credit_spread_signal(
     if not values or len(values) < 20:
         return empty
 
+    # Calm-regime gate (Lee 2026, European Financial Management): credit spread-
+    # crypto correlation is state-dependent — near-zero predictive power when
+    # HY OAS < 3.5% (calm). Signal only activates in stress (OAS > 4%) or when
+    # spreads are widening fast (momentum > 30bp/5d). At ~3% OAS (May 2026),
+    # this signal was 0% accurate on 33 recent samples — pure noise in calm.
+    _CALM_OAS_THRESHOLD = 3.5
+    _STRESS_OAS_THRESHOLD = 4.0
+    current_oas = values[0]
+    if current_oas < _CALM_OAS_THRESHOLD:
+        logger.debug("credit_spread: OAS %.2f < %.1f — calm regime, force HOLD",
+                      current_oas, _CALM_OAS_THRESHOLD)
+        return {
+            "action": "HOLD", "confidence": 0.0,
+            "sub_signals": {"calm_regime_gate": "HOLD"},
+            "indicators": {"hy_oas": current_oas, "calm_gate": True},
+        }
+
     # Compute sub-indicators
     zscore_action, zscore_ind = _oas_zscore_signal(values, safe_haven)
     mom_action, mom_ind = _oas_momentum_signal(values, safe_haven)
