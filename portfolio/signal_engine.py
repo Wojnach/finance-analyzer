@@ -4542,6 +4542,25 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if ticker:
         _record_phase(ticker, "consensus_gate", _phase_start)
 
+    # Seasonal confidence modifier for metals (XAG, XAU)
+    # 2026-05-29: Silver seasonality analysis shows June is historically the
+    # worst month (73% win rate Jan-Apr inverts to weakness). COT divergence
+    # (specs reducing longs while price holds) is a 2-4 week correction signal.
+    # Scale BUY confidence down in weak months, up in strong months.
+    if ticker in ("XAG-USD", "XAU-USD") and action == "BUY":
+        import datetime as _dt
+        month = _dt.datetime.now(_dt.timezone.utc).month
+        _SEASONAL_BUY_MULT = {
+            1: 1.15, 2: 1.15, 3: 1.15, 4: 1.10,  # Jan-Apr strong
+            5: 1.0, 6: 0.70, 7: 1.10, 8: 1.05,    # June weak, Jul-Aug recovery
+            9: 0.80, 10: 1.10, 11: 1.0, 12: 1.0,   # Sep weak, Oct strong
+        }
+        seasonal_mult = _SEASONAL_BUY_MULT.get(month, 1.0)
+        if seasonal_mult != 1.0:
+            conf = conf * seasonal_mult
+            extra_info["seasonal_mult"] = seasonal_mult
+            extra_info["seasonal_month"] = month
+
     # Update cross-ticker consensus cache for synthetic cross-asset signals
     if ticker:
         with _cross_ticker_lock:
