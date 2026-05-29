@@ -189,7 +189,8 @@ def send_or_store(msg, config, category="analysis"):
     tg_cfg = config.get("telegram", {})
 
     # Per-category blocklist: mute specific categories
-    muted = set(tg_cfg.get("muted_categories", []))
+    _raw_muted = tg_cfg.get("muted_categories", [])
+    muted = set(_raw_muted) if isinstance(_raw_muted, list) else set()
     if category in muted:
         log_message(cleaned, category=category, sent=False)
         logger.info("Message muted [%s]: %.60s...", category, cleaned.replace("\n", " "))
@@ -197,7 +198,8 @@ def send_or_store(msg, config, category="analysis"):
 
     # Global mute gate: skip Telegram send unless category is whitelisted
     if tg_cfg.get("mute_all", False):
-        unmuted = set(tg_cfg.get("unmuted_categories", []))
+        _raw_unmuted = tg_cfg.get("unmuted_categories", [])
+        unmuted = set(_raw_unmuted) if isinstance(_raw_unmuted, list) else set()
         if category not in unmuted:
             log_message(cleaned, category=category, sent=False)
             logger.info("Message muted [%s]: %.60s...", category, cleaned.replace("\n", " "))

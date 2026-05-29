@@ -4,6 +4,8 @@ Covers: check_drawdown, compute_stop_levels, get_position_ages,
 _compute_portfolio_value, transaction_cost_analysis.
 """
 
+import pytest
+
 import datetime
 import json
 import pathlib
@@ -828,8 +830,8 @@ class TestComputeStopLevelsAtrEdgeCases:
         assert r["triggered"] is False  # 2100 > 1880
         assert r["pnl_pct"] == 5.0  # (2100-2000)/2000 * 100
 
-    def test_zero_atr_stop_equals_entry(self):
-        """ATR = 0 means stop equals entry price exactly."""
+    def test_zero_atr_uses_3pct_floor(self):
+        """ATR = 0 uses the 3% minimum floor, not zero distance."""
         holdings = {
             "XAG-USD": {"shares": 100, "avg_cost_usd": 30.0},
         }
@@ -839,9 +841,9 @@ class TestComputeStopLevelsAtrEdgeCases:
 
         result = compute_stop_levels(holdings, summary)
         r = result["XAG-USD"]
-        # stop = 30 * (1 - 0) = 30.0
-        assert r["stop_price_usd"] == 30.0
-        assert r["triggered"] is False  # 31 > 30
+        # stop = 30 * (1 - 3/100) = 29.10 (3% floor applied)
+        assert r["stop_price_usd"] == pytest.approx(29.1, abs=0.01)
+        assert r["triggered"] is False  # 31 > 29.1
 
     def test_ticker_not_in_signals_market_closed(self):
         """Ticker missing from signals (market closed) returns note, no stop."""

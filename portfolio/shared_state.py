@@ -125,6 +125,14 @@ def _cached(key, ttl, func, *args):
         return None
 
 
+def invalidate_cached(key: str) -> bool:
+    """Remove a specific key from _tool_cache, forcing recompute on next access."""
+    with _cache_lock:
+        removed = key in _tool_cache
+        _tool_cache.pop(key, None)
+    return removed
+
+
 def _cached_or_enqueue(key, ttl, enqueue_fn, context,
                         should_enqueue_fn=None, max_stale_factor=None):
     """Check cache — if fresh return it, if expired enqueue for batch and return stale.

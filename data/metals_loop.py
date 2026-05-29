@@ -7165,7 +7165,9 @@ Positions: {pos_summary}{prob_summary}""")
 
         try:
             last_holdings_diff_ts = 0.0
+            _consecutive_cycle_errors = 0
             while True:
+              try:
                 cycle_started = time.monotonic()
                 check_count += 1
 
@@ -7846,6 +7848,18 @@ Positions: {pos_summary}{prob_summary}""")
                 _write_heartbeat(check_count, POSITIONS)
 
                 _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
+                _consecutive_cycle_errors = 0
+              except KeyboardInterrupt:
+                raise
+              except Exception as cycle_err:
+                _consecutive_cycle_errors += 1
+                log(f"Cycle {check_count} error (#{_consecutive_cycle_errors}): {cycle_err}")
+                logger.error("Cycle %d failed", check_count, exc_info=True)
+                if _consecutive_cycle_errors >= 5:
+                    log(f"FATAL: {_consecutive_cycle_errors} consecutive cycle errors — stopping")
+                    send_telegram(f"*METALS LOOP*: {_consecutive_cycle_errors} consecutive cycle errors — stopping")
+                    return 1
+                time.sleep(min(10 * _consecutive_cycle_errors, 60))
 
         except KeyboardInterrupt:
             log("Stopped by user")
@@ -7853,6 +7867,7 @@ Positions: {pos_summary}{prob_summary}""")
             log(f"FATAL: {e}")
             traceback.print_exc()
             send_telegram(f"*METALS LOOP CRASH*: {e}")
+            return 1
         finally:
             _kill_claude()
             if LLM_AVAILABLE:

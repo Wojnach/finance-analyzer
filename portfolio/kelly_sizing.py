@@ -65,43 +65,17 @@ def _compute_trade_stats(transactions, ticker=None):
         dict: {win_rate, avg_win_pct, avg_loss_pct, total_trades, wins, losses}
               Returns None if insufficient data (fewer than 2 round-trips).
     """
-    # Group transactions by ticker
-    from collections import defaultdict
-    buys_by_ticker = defaultdict(list)
-    sells_by_ticker = defaultdict(list)
+    # FGL §4: Use FIFO round-trip matching (not avg_buy_price) to compute
+    # win-rate and payoff. Reuses equity_curve._pair_round_trips for
+    # consistent FIFO semantics.
+    from portfolio.equity_curve import _pair_round_trips
 
-    for t in transactions:
-        t_ticker = t.get("ticker", "")
-        if ticker and t_ticker != ticker:
-            continue
-        action = t.get("action", "")
-        if action == "BUY":
-            buys_by_ticker[t_ticker].append(t)
-        elif action == "SELL":
-            sells_by_ticker[t_ticker].append(t)
+    filtered_txns = transactions
+    if ticker:
+        filtered_txns = [t for t in transactions if t.get("ticker") == ticker]
 
-    # Compute P&L for each sell vs weighted average buy price
-    pnl_list = []
-    for t_ticker, sells in sells_by_ticker.items():
-        buys = buys_by_ticker.get(t_ticker, [])
-        if not buys:
-            continue
-
-        # Compute weighted average buy price (in SEK per share)
-        total_shares_bought = sum(b.get("shares", 0) for b in buys)
-        total_cost = sum(b.get("total_sek", 0) for b in buys)
-        if total_shares_bought <= 0:
-            continue
-        avg_buy_price = total_cost / total_shares_bought
-
-        for sell in sells:
-            sell_shares = sell.get("shares", 0)
-            sell_total = sell.get("total_sek", 0)
-            if sell_shares <= 0:
-                continue
-            sell_price_per_share = sell_total / sell_shares
-            pnl_pct = (sell_price_per_share - avg_buy_price) / avg_buy_price * 100
-            pnl_list.append(pnl_pct)
+    round_trips = _pair_round_trips(filtered_txns)
+    pnl_list = [rt["pnl_pct"] for rt in round_trips]
 
     if len(pnl_list) < 2:
         return None

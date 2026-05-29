@@ -766,6 +766,25 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
         tier=_agent_tier or fallback_tier,
     )
 
+    # FGL §B: Write a journal stub so the loop_contract checker sees a
+    # journal entry for this trigger. Without this, genuine timeouts are
+    # an invisible gap — the contract fires a false "no journal" violation
+    # that's indistinguishable from the timestamp-skew false positives.
+    try:
+        timeout_reasons = _agent_reasons or fallback_reasons or []
+        timeout_stub = {
+            "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "status": "timeout",
+            "tier": _agent_tier or fallback_tier,
+            "triggers": timeout_reasons,
+            "patient": {"action": "HOLD", "reason": f"Layer 2 timed out after {elapsed:.0f}s"},
+            "bold": {"action": "HOLD", "reason": f"Layer 2 timed out after {elapsed:.0f}s"},
+        }
+        atomic_append_jsonl(JOURNAL_FILE, timeout_stub)
+        logger.info("Wrote timeout journal stub for T%s (%s)", _agent_tier, timeout_reasons)
+    except Exception as e:
+        logger.warning("Failed to write timeout journal stub: %s", e)
+
     if kill_ok:
         _agent_proc = None
     else:

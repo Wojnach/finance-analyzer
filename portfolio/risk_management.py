@@ -371,7 +371,10 @@ def compute_stop_levels(holdings: dict, agent_summary: dict) -> dict:
 
         # 2x ATR stop-loss — cap ATR at 15% to prevent meaninglessly wide stops for warrants
         atr_pct = min(atr_pct, 15.0)
-        stop_price = entry_price * (1 - 2 * atr_pct / 100)
+        # FGL §3: enforce minimum 3% stop distance from entry to prevent
+        # instant-fill on low-ATR instruments (Mar 3 incident class)
+        stop_distance_pct = max(2 * atr_pct, 3.0)
+        stop_price = entry_price * (1 - stop_distance_pct / 100)
 
         # Distance from current price to stop
         if stop_price > 0 and current_price > 0:

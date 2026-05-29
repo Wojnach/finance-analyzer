@@ -407,7 +407,7 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
             latest_journal_entry.get("timestamp")
             or latest_journal_entry.get("ts")
         )
-    if journal_ts is not None and journal_ts >= last_trigger:
+    if journal_ts is not None and journal_ts >= last_trigger - timedelta(seconds=5):
         return []  # Journal was written after the trigger. Contract passes.
 
     # Precondition 5 (2026-04-18): violation dedup. The contract runs every

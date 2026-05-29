@@ -18,6 +18,8 @@ def register_enhanced(name: str, module_path: str, func_name: str,
                       requires_context: bool = False,
                       max_confidence: float = 1.0):
     """Programmatically register an enhanced signal module."""
+    if not (0.0 <= max_confidence <= 1.0):
+        raise ValueError(f"max_confidence must be in [0, 1], got {max_confidence}")
     _ENHANCED_SIGNALS[name] = {
         "name": name,
         "type": "enhanced",
