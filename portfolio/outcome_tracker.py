@@ -581,7 +581,11 @@ def backfill_outcomes(max_entries=2000):
         try:
             from portfolio.accuracy_stats import invalidate_signal_utility_cache
             invalidate_signal_utility_cache()
-            logger.info("Signal utility cache invalidated after backfill (%d entries)", updated)
+            # Also invalidate horizon weight caches in signal_engine
+            from portfolio.shared_state import invalidate_cached
+            for h in ("1h", "3h", "4h", "12h", "1d", "3d", "5d", "10d"):
+                invalidate_cached(f"dynamic_horizon_weights_{h}")
+            logger.info("Signal utility + horizon weight caches invalidated after backfill (%d entries)", updated)
         except Exception:
             logger.debug("Could not invalidate signal utility cache", exc_info=True)
 
