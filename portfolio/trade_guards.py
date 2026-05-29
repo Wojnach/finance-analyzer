@@ -163,8 +163,8 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
                         "remaining_min": round(remaining, 1),
                     },
                 })
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as e:
+            logger.warning("trade_guards: corrupt timestamp in cooldown check for %s: %s", ticker, e)
 
     # --- Guard 2: Consecutive-loss escalation (informational) ---
     if consecutive >= 2:

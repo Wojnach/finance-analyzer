@@ -2774,6 +2774,8 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         if soft is not None:
             try:
                 weight *= float(soft)
+                # Cap soft-vote weight so dead-zone votes never dominate
+                weight = min(weight, 0.30)
             except (TypeError, ValueError):
                 pass
         if vote == "BUY":

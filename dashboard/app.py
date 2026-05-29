@@ -70,7 +70,7 @@ def add_cors_headers(response):
 def _handle_api_error(error):
     if request.path.startswith("/api/"):
         logger.error("Unhandled error on %s: %s", request.path, error, exc_info=True)
-        return jsonify({"error": "internal_error", "path": request.path}), 500
+        return jsonify({"error": "internal_error"}), 500
     return error
 
 
@@ -1070,7 +1070,8 @@ def api_validate_portfolio():
         from portfolio.portfolio_validator import validate_portfolio
         errors = validate_portfolio(data)
     except Exception as e:
-        return jsonify({"valid": False, "errors": [f"Validation error: {e}"]}), 500
+        logger.exception("validate_portfolio error")
+        return jsonify({"valid": False, "errors": ["Validation failed"]}), 500
 
     return jsonify({
         "valid": len(errors) == 0,

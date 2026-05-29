@@ -151,7 +151,7 @@ def compute_forecast_accuracy(ticker=None, horizon="24h", days=None,
 
             # Only check sub-signals matching the requested horizon
             if "_" in sub_name:
-                sub_horizon = sub_name.split("_", 1)[1]
+                sub_horizon = sub_name.rsplit("_", 1)[1]
                 if sub_horizon != horizon:
                     continue
 
