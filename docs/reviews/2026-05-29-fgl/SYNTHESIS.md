@@ -20,6 +20,11 @@ cross-critiqued and deduped below. **Review-only — no code was changed.**
 | orchestrator pass| 1  | 4  | 2  | 0  | (me) |
 | **TOTAL**        | **8** | **40** | **49** | **29** | 126 findings |
 
+> Counts are reviewers' self-assigned severities. **Post-synthesis verification downgraded
+> 2 of the 8 P0s** (`file_utils.py:269`, `telegram_poller.py:361` — see §2) to P1, giving
+> ~6 verified P0 + 2 over-rated. The cavecrew (infrastructure/avanza) reviewer ran hotter on
+> severity than the code-reviewer agents; weight its P0 labels accordingly.
+
 Headline: **the consensus hot path, metals execution invariants, and atomic-write core
 are well hardened** (years of incident-driven patching shows). The risk has migrated to
 (a) the *detection* layer that is supposed to catch silent failures — now chronically
@@ -62,20 +67,26 @@ Spot-checked by orchestrator (✓ = independently verified at HEAD this session)
    limiter, no `_invoke_lock` serialization. The master kill switch cannot stop specialist
    spawns; 3 specialists + main L2 + bigbet/iskbets can hit Claude concurrently. (Live only
    when `multi_agent` config flag is enabled — confirm before prioritizing.)
-2. **infrastructure — `file_utils.py:269`**: Windows `msvcrt.locking()` sidecar lock for
-   `atomic_append_jsonl` is never released on process crash → stale lock blocks **all**
-   JSONL writers (signal_log, telegram_messages, critical_errors, journal). A crash mid-append
-   can wedge the whole logging substrate. → stale-lock reap (mtime>5min AND PID dead).
-   *(Orchestrator note: I independently verified `atomic_write_json`/`atomic_write_text` are
-   correct; I did NOT review the sidecar-lock path — this subagent caught what I missed. No
-   coverage gap.)*
-3. **infrastructure — `telegram_poller.py:361`**: runtime write to the `config.json`
-   **symlink-to-external-secrets** for notification mode; read→write race can corrupt/destroy
-   API keys (the file leaked once already, Mar 15). → forbid runtime config writes; use a
-   transient state file. **Highest-confidence "must not ship near" item.**
-4. **infrastructure — `http_retry.py:76`**: returns `None` without distinguishing fatal
-   (401 bad token / 400 malformed) from transient (503/timeout) → a bad Telegram/API token
-   retries forever masquerading as transient. → return `(response, error_type)`.
+2. **infrastructure — `file_utils.py:269` — ⚠ DOWNGRADED to P1 after verification**:
+   the subagent claimed the `msvcrt` sidecar lock is "never released on crash → held
+   forever." **False premise** — the `finally` (lines 259-265) releases on normal/exception
+   exit, and Windows releases `msvcrt` byte-range locks when the OS closes the handle on
+   *process termination*. A crashed process does NOT leave a permanent lock. The REAL
+   (lesser) risk: `LK_LOCK` is blocking with no caller timeout, so a **live-but-hung**
+   holder can stall other JSONL writers. → add a bounded acquire + stale detection for the
+   live-hang case, not a crash-reap. *(Orchestrator verified `atomic_write_json`/
+   `atomic_write_text`/`atomic_append_jsonl` are otherwise correct.)*
+3. **infrastructure — `telegram_poller.py:361` — ⚠ DOWNGRADED to P1 after verification**:
+   the subagent claimed a read→write race "destroys API keys." **Already guarded** — the
+   BUG-210 check at `:350` refuses the write when the loaded config has `<5` keys (catches
+   the transient-unreadable `{}` case), and `atomic_write_json` resolves the symlink + writes
+   atomically. Residual real risk is *architectural*: the poller still writes through the
+   `config.json`-to-external-secrets symlink at runtime (rewrites the whole secrets file to
+   change one notification flag), violating "never write config.json." → use a transient
+   state file for notification mode. Real, but not the catastrophic-key-loss P0 as filed.
+4. **infrastructure — `http_retry.py:76` — likely P1, not verified**: returns `None`
+   without distinguishing fatal (401/400) from transient (503/timeout) → a bad token retries
+   forever as transient. Design-robustness gap; severity P1. → return `(response, error_type)`.
 5. **portfolio-risk — `warrant_portfolio.py:257`**: SELL on a `config_key` not in holdings
    (or over-sell) appends the transaction but never reduces units / records the over-sell →
    phantom holdings, ledger fails reconciliation. → refuse + log CRITICAL.
@@ -160,7 +171,14 @@ loop restart mid-trade hides the trade from overtrading guards.
     priority on that.
 - **Spot-checks that PASSED (not hallucinated):** `loop_health.py:215` status-hardcode ✓;
   `multi_agent_layer2.py:181` raw Popen bypass ✓; `file_utils.atomic_write_json` correctness
-  (no finding) ✓. Premortem hallucination-risk mitigated for the items I could reach.
+  (no finding) ✓; `warrant_portfolio.py:257` over-sell, `autonomous.py:83` raise-before-journal
+  (both corroborated by their subagents' detail).
+- **Spot-checks that FAILED verification (severity corrected here):** `file_utils.py:269`
+  "lock held forever on crash" — wrong premise (OS releases on process death; `finally`
+  releases on exit) → P1. `telegram_poller.py:361` "race destroys API keys" — BUG-210 `<5
+  keys` guard already prevents it → P1 (residual = architectural coupling only). Both were the
+  cavecrew reviewer's P0s. This is the premortem's "hallucinated/over-rated finding" mode
+  caught by the synthesis layer doing its job.
 
 ---
 
