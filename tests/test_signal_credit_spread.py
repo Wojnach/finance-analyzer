@@ -238,8 +238,8 @@ class TestAssetClassDirectionality:
         result = compute_credit_spread_signal(df, context=ctx)
         assert result["action"] == "SELL"
 
-    def test_silver_risk_on_is_sell(self, monkeypatch):
-        """Silver should get SELL signal in risk-on (tight spreads)."""
+    def test_silver_calm_regime_is_hold(self, monkeypatch):
+        """Silver in calm credit regime (OAS < 3.5) should be HOLD."""
         monkeypatch.setattr(
             "portfolio.signals.credit_spread._fetch_hy_oas",
             lambda key: _make_oas_values(current=2.0, mean=3.0, std=0.3),
@@ -247,10 +247,11 @@ class TestAssetClassDirectionality:
         df = _make_df()
         ctx = {"ticker": "XAG-USD", "config": {"golddigger": {"fred_api_key": "test"}}}
         result = compute_credit_spread_signal(df, context=ctx)
-        assert result["action"] == "SELL"
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("calm_gate") is True
 
-    def test_eth_risk_on_is_buy(self, monkeypatch):
-        """ETH should get BUY signal in risk-on (tight spreads)."""
+    def test_eth_calm_regime_is_hold(self, monkeypatch):
+        """ETH in calm credit regime (OAS < 3.5) should be HOLD."""
         monkeypatch.setattr(
             "portfolio.signals.credit_spread._fetch_hy_oas",
             lambda key: _make_oas_values(current=2.0, mean=3.0, std=0.3),
@@ -258,7 +259,30 @@ class TestAssetClassDirectionality:
         df = _make_df()
         ctx = {"ticker": "ETH-USD", "config": {"golddigger": {"fred_api_key": "test"}}}
         result = compute_credit_spread_signal(df, context=ctx)
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("calm_gate") is True
+
+    def test_silver_stress_regime_is_buy(self, monkeypatch):
+        """Silver in stress (OAS > 4.0) should get BUY (safe haven, risk-off)."""
+        monkeypatch.setattr(
+            "portfolio.signals.credit_spread._fetch_hy_oas",
+            lambda key: _make_oas_values(current=5.0, mean=3.0, std=0.3),
+        )
+        df = _make_df()
+        ctx = {"ticker": "XAG-USD", "config": {"golddigger": {"fred_api_key": "test"}}}
+        result = compute_credit_spread_signal(df, context=ctx)
         assert result["action"] == "BUY"
+
+    def test_eth_stress_regime_is_sell(self, monkeypatch):
+        """ETH in stress (OAS > 4.0) should get SELL (risk asset, risk-off)."""
+        monkeypatch.setattr(
+            "portfolio.signals.credit_spread._fetch_hy_oas",
+            lambda key: _make_oas_values(current=5.0, mean=3.0, std=0.3),
+        )
+        df = _make_df()
+        ctx = {"ticker": "ETH-USD", "config": {"golddigger": {"fred_api_key": "test"}}}
+        result = compute_credit_spread_signal(df, context=ctx)
+        assert result["action"] == "SELL"
 
     def test_mstr_supported(self, monkeypatch):
         """MSTR should be recognized as a risk asset."""
