@@ -29,8 +29,7 @@ _MIN_HISTORY = 10
 
 _OI_Z_THRESHOLD = 1.5
 _FR_Z_THRESHOLD = 2.0
-_LS_LONG_THRESHOLD = 0.62
-_LS_SHORT_THRESHOLD = 0.38
+_LS_EXTREME_THRESHOLD = 0.62
 
 
 def _zscore(values: list[float]) -> float:
@@ -114,9 +113,9 @@ def _ls_contrarian_vote(ls_history: list[dict] | None) -> tuple[str, dict]:
 
     indicators = {"long_pct": long_pct, "short_pct": short_pct}
 
-    if long_pct > _LS_LONG_THRESHOLD:
+    if long_pct >= _LS_EXTREME_THRESHOLD:
         return "SELL", indicators
-    if short_pct > (1 - _LS_SHORT_THRESHOLD):
+    if short_pct >= _LS_EXTREME_THRESHOLD:
         return "BUY", indicators
 
     return "HOLD", indicators
