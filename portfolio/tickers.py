@@ -264,6 +264,12 @@ DISABLED_SIGNALS = {
                         # Metals-only (XAU/XAG). Non-redundant vs metals_cross_asset
                         # (which uses simple SMA z-score, not Kalman).
                         # Shadow mode — accumulate accuracy data before enabling.
+    "crypto_derivatives_composite",  # 2026-05-29: NEW. OI z-score + funding rate z-score +
+                        # L/S ratio contrarian. Crypto-only (BTC/ETH). Score 7.85/10.
+                        # Source: Gate.com, AINvest, Phemex. Differentiated from
+                        # futures_flow by using z-score extremes for contrarian signals
+                        # rather than raw OI trend/divergence.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -447,4 +453,5 @@ SIGNAL_NAMES = [
     "stablecoin_supply_ratio",
     "mstr_mnav_discount",
     "gs_kalman_zscore_regime",
+    "crypto_derivatives_composite",
 ]
