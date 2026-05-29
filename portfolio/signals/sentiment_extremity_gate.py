@@ -27,6 +27,8 @@ from portfolio.signal_utils import safe_float
 
 logger = logging.getLogger(__name__)
 
+_CRYPTO_TICKERS = frozenset({"BTC-USD", "ETH-USD"})
+
 MIN_ROWS = 20
 
 # --- F&G fetch with caching (60s TTL, same pattern as signal_engine) ------
@@ -157,6 +159,12 @@ def compute_sentiment_extremity_gate_signal(
         }
 
     ticker = (context or {}).get("ticker")
+    if ticker and ticker not in _CRYPTO_TICKERS:
+        return {
+            "action": "HOLD", "confidence": 0.0,
+            "sub_signals": {"reason": "non_crypto_ticker"},
+            "indicators": {},
+        }
     fg_value = _get_fg_value(ticker)
 
     if fg_value is None:

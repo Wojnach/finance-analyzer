@@ -7853,6 +7853,7 @@ Positions: {pos_summary}{prob_summary}""")
             log(f"FATAL: {e}")
             traceback.print_exc()
             send_telegram(f"*METALS LOOP CRASH*: {e}")
+            return 1
         finally:
             _kill_claude()
             if LLM_AVAILABLE:

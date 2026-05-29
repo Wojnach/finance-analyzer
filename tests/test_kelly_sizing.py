@@ -126,11 +126,12 @@ class TestComputeTradeStats:
         assert result is None  # Only 1 round-trip
 
     def test_two_round_trips(self):
-        """Two round-trips give valid stats."""
+        """Two round-trips give valid stats (FIFO matching)."""
         txs = [
-            {"ticker": "BTC-USD", "action": "BUY", "shares": 1, "total_sek": 100_000},
-            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 110_000},
-            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 90_000},
+            {"ticker": "BTC-USD", "action": "BUY", "shares": 1, "total_sek": 100_000, "fee_sek": 0, "timestamp": "2026-01-01T00:00:00Z"},
+            {"ticker": "BTC-USD", "action": "BUY", "shares": 1, "total_sek": 100_000, "fee_sek": 0, "timestamp": "2026-01-02T00:00:00Z"},
+            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 110_000, "fee_sek": 0, "timestamp": "2026-01-03T00:00:00Z"},
+            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 90_000, "fee_sek": 0, "timestamp": "2026-01-04T00:00:00Z"},
         ]
         result = _compute_trade_stats(txs)
         assert result is not None
@@ -162,14 +163,16 @@ class TestComputeTradeStats:
         assert result["wins"] == 0
 
     def test_ticker_filter(self):
-        """Filter to specific ticker."""
+        """Filter to specific ticker (FIFO matching)."""
         txs = [
-            {"ticker": "BTC-USD", "action": "BUY", "shares": 1, "total_sek": 100_000},
-            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 110_000},
-            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 120_000},
-            {"ticker": "ETH-USD", "action": "BUY", "shares": 10, "total_sek": 50_000},
-            {"ticker": "ETH-USD", "action": "SELL", "shares": 10, "total_sek": 30_000},
-            {"ticker": "ETH-USD", "action": "SELL", "shares": 10, "total_sek": 25_000},
+            {"ticker": "BTC-USD", "action": "BUY", "shares": 1, "total_sek": 100_000, "fee_sek": 0, "timestamp": "2026-01-01T00:00:00Z"},
+            {"ticker": "BTC-USD", "action": "BUY", "shares": 1, "total_sek": 100_000, "fee_sek": 0, "timestamp": "2026-01-02T00:00:00Z"},
+            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 110_000, "fee_sek": 0, "timestamp": "2026-01-03T00:00:00Z"},
+            {"ticker": "BTC-USD", "action": "SELL", "shares": 1, "total_sek": 120_000, "fee_sek": 0, "timestamp": "2026-01-04T00:00:00Z"},
+            {"ticker": "ETH-USD", "action": "BUY", "shares": 10, "total_sek": 50_000, "fee_sek": 0, "timestamp": "2026-01-01T00:00:00Z"},
+            {"ticker": "ETH-USD", "action": "BUY", "shares": 10, "total_sek": 50_000, "fee_sek": 0, "timestamp": "2026-01-02T00:00:00Z"},
+            {"ticker": "ETH-USD", "action": "SELL", "shares": 10, "total_sek": 30_000, "fee_sek": 0, "timestamp": "2026-01-03T00:00:00Z"},
+            {"ticker": "ETH-USD", "action": "SELL", "shares": 10, "total_sek": 25_000, "fee_sek": 0, "timestamp": "2026-01-04T00:00:00Z"},
         ]
         btc_result = _compute_trade_stats(txs, ticker="BTC-USD")
         eth_result = _compute_trade_stats(txs, ticker="ETH-USD")

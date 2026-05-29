@@ -911,8 +911,10 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
     for sig_name in all_signal_names:
         at = alltime.get(sig_name) or {}
         rc = recent.get(sig_name) or {}
-        at_acc = at.get("accuracy", 0.5) if at else 0.5
-        rc_acc = rc.get("accuracy", 0.5) if rc else 0.5
+        _at_raw = at.get("accuracy") if at else None
+        at_acc = _at_raw if isinstance(_at_raw, (int, float)) else 0.5
+        _rc_raw = rc.get("accuracy") if rc else None
+        rc_acc = _rc_raw if isinstance(_rc_raw, (int, float)) else 0.5
         rc_samples = rc.get("total", 0) if rc else 0
         at_samples = at.get("total", 0) if at else 0
 
