@@ -25,6 +25,11 @@ Auto-promotion semantics (--promote):
       * n_with_outcome >= promotion_criteria.min_samples
       * accuracy >= promotion_criteria.min_accuracy
       * (if specified) join_rate >= 1 - max_missing_outcome_rate
+      * brier_mean <= promotion_criteria.max_brier (default 0.66 ≈ uniform;
+        2026-05-29) — only enforced once Brier is computed on enough matched
+        samples, so a thin sample never blocks on a noisy Brier. A shadow
+        whose logged probability distribution scores worse than a uniform
+        guess on its directional outcomes must never auto-promote.
     Uses n_with_outcome (matched samples), not raw log count — a HOLD-only
     scaffold that nobody validates against outcomes must not auto-promote.
 
@@ -58,9 +63,21 @@ from portfolio.shadow_registry import (  # noqa: E402
     stale_shadows,
 )
 
+# 2026-05-29 (brier-ceiling): default Brier ceiling for promotion. 0.66 ≈ a
+# uniform 1/3-each guess (multi-class Brier of uniform = 2/3). A shadow whose
+# logged distribution scores worse than a coin-flip-ish guess on its directional
+# outcomes must never auto-promote. Backward-compat: registry entries lacking
+# `promotion_criteria.max_brier` fall back to this value.
+_DEFAULT_MAX_BRIER = 0.66
+
+# Action classes for the multi-class Brier accumulation in
+# _compute_signal_stats — kept local so the script has no extra import.
+_BRIER_ACTIONS = ("BUY", "HOLD", "SELL")
+
 
 def _compute_signal_stats(window_days: float | None = None) -> dict:
-    """Return per-signal {n, n_matched, correct, n_directional} from log+outcomes.
+    """Return per-signal {n, n_matched, correct, n_directional, brier_sum}
+    from log+outcomes.
 
     Only DIRECTIONAL predictions (``confidence > 0`` AND
     ``chosen in {BUY, SELL}``) count toward ``n_matched`` and ``correct``.
@@ -75,6 +92,15 @@ def _compute_signal_stats(window_days: float | None = None) -> dict:
     outcome rate is computed on the full sample, but the promotion gate
     (accuracy = correct / n_matched) only fires when the model actually
     emitted directional predictions.
+
+    2026-05-29 (brier-ceiling): ``brier_sum`` accumulates the multi-class
+    Brier score (Σ_c (P(c)-I[c==outcome])^2) over the SAME directional+joined
+    rows that feed ``correct``/``n_matched``, so ``brier_mean =
+    brier_sum / n_matched`` is the calibration metric the promotion gate
+    checks against ``promotion_criteria.max_brier``. This mirrors the
+    canonical leaderboard computation in
+    ``dashboard/app.py:_compute_llm_leaderboard`` (which must match this
+    function) — both score over directional, outcome-joined rows only.
 
     When ``window_days`` is provided, only log rows within that lookback
     are counted — used by ``--retire`` to focus on recent performance
@@ -115,7 +141,9 @@ def _compute_signal_stats(window_days: float | None = None) -> dict:
             except (TypeError, ValueError):
                 continue
         d = per_sig.setdefault(
-            sig, {"n": 0, "n_matched": 0, "correct": 0, "n_directional": 0},
+            sig,
+            {"n": 0, "n_matched": 0, "correct": 0, "n_directional": 0,
+             "brier_sum": 0.0},
         )
         d["n"] += 1
         if not is_directional_prediction(row):
@@ -128,17 +156,40 @@ def _compute_signal_stats(window_days: float | None = None) -> dict:
         d["n_matched"] += 1
         if row.get("chosen") == actual:
             d["correct"] += 1
+        # 2026-05-29 (brier-ceiling): accumulate multi-class Brier over the
+        # logged distribution vs. the realized outcome, mirroring
+        # dashboard/app.py:_compute_llm_leaderboard so the gate and the
+        # dashboard agree on brier_mean.
+        probs = row.get("probs")
+        if isinstance(probs, dict) and actual in _BRIER_ACTIONS:
+            d["brier_sum"] += sum(
+                (float(probs.get(c, 0.0)) - (1.0 if c == actual else 0.0)) ** 2
+                for c in _BRIER_ACTIONS
+            )
     return per_sig
 
 
 def _eligible_for_promotion(entry: dict, stats: dict) -> tuple[bool, str]:
-    """Return (eligible, reason). reason explains gate failure for printing."""
+    """Return (eligible, reason). reason explains gate failure for printing.
+
+    2026-05-29 (brier-ceiling): in addition to the sample-count / accuracy /
+    missing-rate gates, a shadow is rejected when its calibration Brier
+    exceeds ``promotion_criteria.max_brier`` (default 0.66 ≈ uniform). The
+    Brier is the mean of ``stats['brier_sum'] / matched`` over the same
+    directional, outcome-joined rows that feed accuracy. Crucially the Brier
+    ceiling only blocks when it is COMPUTED on a real sample (matched >=
+    min_samples, or >= 30 when no min_samples is set): a shadow that simply
+    hasn't accumulated enough joined outcomes yet must not be blocked on a
+    noisy/uncomputable Brier — only on a Brier that is computed and bad.
+    """
     if entry.get("status") != "shadow":
         return False, f"status={entry.get('status')}"
     criteria = entry.get("promotion_criteria") or {}
     min_samples = criteria.get("min_samples")
     min_acc = criteria.get("min_accuracy")
     max_missing = criteria.get("max_missing_outcome_rate")
+    # Backward-compatible: entries without max_brier fall back to the default.
+    max_brier = criteria.get("max_brier", _DEFAULT_MAX_BRIER)
     n = stats.get("n", 0)
     matched = stats.get("n_matched", 0)
     correct = stats.get("correct", 0)
@@ -153,6 +204,19 @@ def _eligible_for_promotion(entry: dict, stats: dict) -> tuple[bool, str]:
         missing_rate = 1.0 - (matched / n)
         if missing_rate > max_missing:
             return False, f"missing={missing_rate:.2f} > max={max_missing}"
+    # 2026-05-29 (brier-ceiling): reject worse-than-uniform calibration. Only
+    # enforce when the Brier is computed on enough matched samples — gate it
+    # on the same bar as min_samples (or 30 when min_samples is unset) so a
+    # too-thin sample never blocks on a noisy Brier; the accuracy/min_samples
+    # checks above already guard thin samples, but `brier_sum` may be absent
+    # on stats dicts built before this change, so default it to None.
+    if max_brier is not None:
+        brier_sum = stats.get("brier_sum")
+        brier_min = min_samples if min_samples else 30
+        if brier_sum is not None and matched >= brier_min:
+            brier_mean = brier_sum / matched
+            if brier_mean > max_brier:
+                return False, f"brier {brier_mean:.3f} > max {max_brier}"
     return True, f"matched={matched} accuracy={accuracy:.3f} — promote"
 
 
@@ -210,7 +274,10 @@ def main(argv: list[str] | None = None) -> int:
         all_stats = _compute_signal_stats()
         retire_stats = _compute_signal_stats(window_days=30) if args.retire else {}
 
-        _default_stats = {"n": 0, "n_matched": 0, "correct": 0, "n_directional": 0}
+        _default_stats = {
+            "n": 0, "n_matched": 0, "correct": 0, "n_directional": 0,
+            "brier_sum": 0.0,
+        }
         for sig, entry in sorted(reg["shadows"].items()):
             stats = all_stats.get(sig, dict(_default_stats))
             if args.promote:

@@ -27,7 +27,8 @@ Schema
       "promotion_criteria": {
         "min_samples": 200,
         "min_accuracy": 0.60,
-        "max_missing_outcome_rate": 0.20
+        "max_missing_outcome_rate": 0.20,
+        "max_brier": 0.66
       },
       "last_reviewed_ts": "2026-04-21T13:45:00+00:00",
       "status": "shadow",
@@ -302,6 +303,7 @@ def seed_defaults(path: Path | str | None = None) -> None:
                 "min_samples": 200,
                 "min_accuracy": 0.60,
                 "max_missing_outcome_rate": 0.20,
+                "max_brier": 0.66,
             },
             "notes": "Parser fix shipped 2026-04-09 (fde9cf8+28aa5d0). "
                      "Accuracy vs outcomes not yet measured — awaiting "
@@ -313,6 +315,7 @@ def seed_defaults(path: Path | str | None = None) -> None:
                 "min_samples": 200,
                 "min_accuracy": 0.60,
                 "max_missing_outcome_rate": 0.20,
+                "max_brier": 0.66,
             },
             "notes": "CPU-cheap shadow alongside CryptoBERT/Trading-Hero-LLM. "
                      "86% neutral output, 87.9% primary-agreement — likely "
@@ -324,6 +327,7 @@ def seed_defaults(path: Path | str | None = None) -> None:
                 "min_samples": 500,
                 "min_accuracy": 0.55,
                 "min_subprocess_success_rate": 0.90,
+                "max_brier": 0.66,
             },
             "notes": "Un-retired 2026-04-21 afternoon with proper vote-pool "
                      "isolation (shadow sub-signal excluded from "
@@ -335,6 +339,7 @@ def seed_defaults(path: Path | str | None = None) -> None:
             "promotion_criteria": {
                 "min_samples": 200,
                 "min_accuracy": 0.55,
+                "max_brier": 0.66,
             },
             "notes": "Registered but force-HOLD via DISABLED_SIGNALS pending "
                      "live validation.",
@@ -344,6 +349,7 @@ def seed_defaults(path: Path | str | None = None) -> None:
             "promotion_criteria": {
                 "min_samples": 200,
                 "min_accuracy": 0.55,
+                "max_brier": 0.66,
             },
             "notes": "Registered but force-HOLD via DISABLED_SIGNALS pending "
                      "live validation.",

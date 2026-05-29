@@ -318,9 +318,20 @@ def derive_probs_from_result(
     # family) already carries real per-class scores and is left untouched. See
     # portfolio/llm_confidence_calibration.py for why we do not read real token
     # logprobs on the batched ministral/qwen3 inference path.
+    calibrated = False
     try:
         from portfolio.llm_confidence_calibration import calibrate as _calibrate
-        conf = _clamp_confidence(float(_calibrate(signal_name, action, conf)))
+        new_conf = _clamp_confidence(float(_calibrate(signal_name, action, conf)))
+        # A calibrated value is one the map actually changed. We track this so
+        # the argmax floor below is bypassed ONLY for calibrated values: an
+        # anti-calibrated model with empirical p_correct < 1/3 must be allowed
+        # to assign the chosen action LESS probability than the alternatives —
+        # that low chosen-class probability is the entire point and is exactly
+        # what lowers Brier. The raw, non-calibrated split keeps the floor so a
+        # bare conf=0.05 doesn't contradict the chosen argmax.
+        if abs(new_conf - conf) > 1e-12:
+            calibrated = True
+        conf = new_conf
     except Exception:
         # Never let calibration break the logger — keep the raw conf.
         pass
@@ -355,7 +366,16 @@ def derive_probs_from_result(
     # Standard split. If conf is very small (e.g. 0.05) the action would
     # still be below the others (0.475 each), contradicting the argmax.
     # Floor the action just above 1/3 in that regime so the argmax holds.
-    if conf < 1.0 / 3.0 + 0.05:
+    #
+    # 2026-05-29 (llm-confidence-calibration): the floor is SKIPPED when the
+    # value came from the calibration map. An anti-calibrated model whose
+    # empirical p_correct is below 1/3 must keep that low probability on the
+    # chosen action (the alternatives then get more) — flooring it back up to
+    # 1/3+0.05 would silently re-inflate exactly the overconfidence the map
+    # exists to remove, defeating the Brier improvement. log_vote does not
+    # require chosen == argmax(probs); it validates only that `chosen` is a
+    # valid action, so a calibrated chosen-class < 1/3 is a legal, honest row.
+    if not calibrated and conf < 1.0 / 3.0 + 0.05:
         conf = 1.0 / 3.0 + 0.05
     remainder = (1.0 - conf) / 2.0
     probs = {"BUY": remainder, "HOLD": remainder, "SELL": remainder}
