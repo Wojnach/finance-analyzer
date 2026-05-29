@@ -1,5 +1,39 @@
 # Session Progress
 
+## 2026-05-29 FGL adversarial review (review-only, no code changes)
+
+8-subsystem partition, 8 fresh review subagents (6× pr-review-toolkit:code-reviewer,
+2× caveman:cavecrew-reviewer) + 1 orchestrator independent pass. **126 findings**
+(8 P0 / 40 P1 / 49 P2 / 29 P3). Docs in `docs/reviews/2026-05-29-fgl/` — read
+`SYNTHESIS.md` first.
+
+**Headline (cross-confirmed by 2 independent passes):** the silent-failure DETECTION
+layer is itself failing. 39 standing `critical_errors.jsonl` entries (28× journal-contract)
+= alert fatigue by design — the tripwire built to catch the Mar–Apr auth outage is in the
+desensitized state that let that outage run 3 weeks. Root cause: `autonomous.py:83`
+raise-before-journal logs `autonomous_{why}` → fires a CRITICAL indistinguishable from a
+real silent L2 failure; entries are append-only and never auto-resolved.
+
+**Other P0s:** `multi_agent_layer2.py:181` bypasses claude_gate (kill switch/rate
+limiter/lock); `file_utils.py:269` JSONL sidecar lock never released on crash (wedges all
+writers); `telegram_poller.py:361` runtime write to config.json secrets symlink;
+`http_retry.py:76` fatal-vs-transient conflation; `warrant_portfolio.py:257` phantom/over-sell;
+avanza order `orderId="?"` placeholder + unvalidated `orderbook_id`.
+
+**Recurring themes:** (A) success-status-but-broken silent failures, (B) regime gates
+leaking directional votes, (C) leverage-blind risk/stop math on real-money certs,
+(D) cancel-before-replace leaves positions naked, (E) RMW races on shared JSON under 8 workers.
+
+**Well-hardened (no P0):** consensus hot path, metals execution invariants (stop-loss API,
+cert direction, caps, EOD double-sell guard), atomic_write_json core.
+
+**Next:** Tier-0 = restore the detector (auto-resolution + root-cause tagging + autonomous
+failure-stub) + re-establish expired Avanza session. Then the 8 P0 bugs. Avanza-api line
+numbers need re-confirm (subagent file-write failed; reconstructed from summary). Untouched
+subsystems for a follow-up sweep: golddigger/elongir/mstr_loop/strategies/dashboard-export.
+
+---
+
 ## 2026-05-29 Auto-improvement session (autonomous)
 
 ### What was done
