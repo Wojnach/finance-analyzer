@@ -270,6 +270,11 @@ DISABLED_SIGNALS = {
                         # futures_flow by using z-score extremes for contrarian signals
                         # rather than raw OI trend/divergence.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "eth_btc_ratio_roc_zscore",  # 2026-05-30: NEW. ETH/BTC ratio ROC z-score.
+                        # Crypto rotation signal — rising ratio = altseason, falling = BTC flight.
+                        # 3 sub-signals: ROC z-score, ratio vs SMA50, ROC acceleration.
+                        # Score 7.85/10. Source: Bybit, TechJuice, after-hours research.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -454,4 +459,5 @@ SIGNAL_NAMES = [
     "mstr_mnav_discount",
     "gs_kalman_zscore_regime",
     "crypto_derivatives_composite",
+    "eth_btc_ratio_roc_zscore",
 ]

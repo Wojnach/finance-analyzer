@@ -115,6 +115,10 @@ def _register_defaults():
                       "portfolio.signals.crypto_derivatives_composite",
                       "compute_crypto_derivatives_composite_signal",
                       requires_context=True, max_confidence=0.7)
+    register_enhanced("eth_btc_ratio_roc_zscore",
+                      "portfolio.signals.eth_btc_ratio_roc_zscore",
+                      "compute_eth_btc_ratio_roc_zscore_signal",
+                      requires_context=True, max_confidence=0.7)
     # Crypto macro — options max pain, gold-BTC rotation, exchange reserves (crypto only); capped at 0.7
     register_enhanced("crypto_macro", "portfolio.signals.crypto_macro",
                       "compute_crypto_macro_signal", requires_context=True, max_confidence=0.7)
