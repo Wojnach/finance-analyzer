@@ -254,9 +254,22 @@ def record_warrant_transaction(config_key, action, units, price_sek, underlying_
                 "underlying_entry_price_usd": underlying_price_usd,
                 "name": name or config_key,
             }
-    elif action == "SELL" and config_key in holdings:
+    elif action == "SELL":
+        if config_key not in holdings:
+            logger.warning(
+                "Warrant SELL refused: %s not in holdings (units=%d, price=%.2f)",
+                config_key, units, price_sek,
+            )
+            return
         existing = holdings[config_key]
-        remaining = existing.get("units", 0) - units
+        current_units = existing.get("units", 0)
+        if units > current_units:
+            logger.warning(
+                "Warrant SELL clamped: %s has %d units but selling %d — clamping to %d",
+                config_key, current_units, units, current_units,
+            )
+            units = current_units
+        remaining = current_units - units
         if remaining <= 0:
             del holdings[config_key]
         else:

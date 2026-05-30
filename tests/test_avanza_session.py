@@ -874,3 +874,27 @@ class TestPlaywrightLockSerialization:
             f"Mixed api_*/api_*/api_* not serialized: max concurrent={max_active[0]}. "
             "All three methods must share _pw_lock or trades will corrupt."
         )
+
+
+class TestPlaceOrderValidation:
+    """Validate _place_order input guards (orderbook_id, volume, price)."""
+
+    def test_empty_orderbook_id_raises(self):
+        from portfolio.avanza_session import _place_order
+        with pytest.raises(ValueError, match="orderbook_id is required"):
+            _place_order("BUY", "", 100.0, 10)
+
+    def test_none_orderbook_id_raises(self):
+        from portfolio.avanza_session import _place_order
+        with pytest.raises(ValueError, match="orderbook_id is required"):
+            _place_order("BUY", None, 100.0, 10)
+
+    def test_non_numeric_orderbook_id_raises(self):
+        from portfolio.avanza_session import _place_order
+        with pytest.raises(ValueError, match="must be numeric"):
+            _place_order("BUY", "abc", 100.0, 10)
+
+    def test_valid_numeric_orderbook_id_passes_guard(self):
+        from portfolio.avanza_session import _place_order
+        with pytest.raises(ValueError, match="non-whitelisted account"):
+            _place_order("BUY", "12345", 100.0, 10, account_id="999999")
