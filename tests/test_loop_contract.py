@@ -883,3 +883,120 @@ class TestFileUtilsIntegration:
         source = inspect.getsource(lc.check_layer2_journal_activity)
         assert "json.load(" not in source
         assert "json.loads(" not in source
+
+
+class TestLayer2JournalSuccessSuppression:
+    """2026-05-30: contract should NOT fire when the latest invocation
+    completed with status=success and journal_written=true, even if the
+    journal entry timestamp precedes the trigger timestamp."""
+
+    def test_success_with_journal_written_suppresses_violation(self, tmp_path):
+        from datetime import datetime, timedelta, timezone
+        from portfolio.loop_contract import check_layer2_journal_activity
+
+        now = datetime(2026, 5, 29, 14, 51, 0, tzinfo=timezone.utc)
+        trigger_time = datetime(2026, 5, 29, 14, 30, 45, tzinfo=timezone.utc)
+        journal_ts = datetime(2026, 5, 29, 14, 29, 59, tzinfo=timezone.utc)
+        invocation_ts = datetime(2026, 5, 29, 14, 37, 6, tzinfo=timezone.utc)
+
+        health = {
+            "last_trigger_time": trigger_time.isoformat(),
+            "last_trigger_reason": "ETH-USD flipped SELL->BUY (sustained)",
+            "last_invocation_tier": 2,
+        }
+        journal_entry = {"ts": journal_ts.isoformat(), "trigger": "prior entry"}
+        invocation_entry = {
+            "ts": invocation_ts.isoformat(),
+            "status": "success",
+            "journal_written": True,
+            "exit_code": 0,
+            "tier": 2,
+        }
+        config = {"layer2": {"enabled": True}}
+
+        with patch("portfolio.loop_contract.load_json") as mock_load, \
+             patch("portfolio.loop_contract.last_jsonl_entry") as mock_last:
+
+            def load_side_effect(path, **kwargs):
+                s = str(path)
+                if "config" in s:
+                    return config
+                if "health" in s:
+                    return health
+                if "contract_state" in s:
+                    return {}
+                return kwargs.get("default")
+
+            mock_load.side_effect = load_side_effect
+
+            def last_entry_side_effect(path):
+                s = str(path)
+                if "invocations" in s:
+                    return invocation_entry
+                if "journal" in s:
+                    return journal_entry
+                return None
+
+            mock_last.side_effect = last_entry_side_effect
+
+            violations = check_layer2_journal_activity(now=now)
+            assert violations == [], (
+                f"Expected no violations when invocation succeeded with "
+                f"journal_written=true, got: {violations}"
+            )
+
+    def test_success_without_journal_written_still_fires(self, tmp_path):
+        from datetime import datetime, timezone
+        from portfolio.loop_contract import check_layer2_journal_activity
+
+        now = datetime(2026, 5, 29, 14, 51, 0, tzinfo=timezone.utc)
+        trigger_time = datetime(2026, 5, 29, 14, 30, 45, tzinfo=timezone.utc)
+        journal_ts = datetime(2026, 5, 29, 14, 29, 59, tzinfo=timezone.utc)
+        invocation_ts = datetime(2026, 5, 29, 14, 37, 6, tzinfo=timezone.utc)
+
+        health = {
+            "last_trigger_time": trigger_time.isoformat(),
+            "last_trigger_reason": "test trigger",
+            "last_invocation_tier": 2,
+        }
+        journal_entry = {"ts": journal_ts.isoformat()}
+        invocation_entry = {
+            "ts": invocation_ts.isoformat(),
+            "status": "success",
+            "journal_written": False,
+            "exit_code": 0,
+            "tier": 2,
+        }
+        config = {"layer2": {"enabled": True}}
+
+        with patch("portfolio.loop_contract.load_json") as mock_load, \
+             patch("portfolio.loop_contract.last_jsonl_entry") as mock_last, \
+             patch("portfolio.loop_contract.atomic_write_json"), \
+             patch("portfolio.claude_gate.record_critical_error"):
+
+            def load_side_effect(path, **kwargs):
+                s = str(path)
+                if "config" in s:
+                    return config
+                if "health" in s:
+                    return health
+                if "contract_state" in s:
+                    return {}
+                return kwargs.get("default")
+
+            mock_load.side_effect = load_side_effect
+
+            def last_entry_side_effect(path):
+                s = str(path)
+                if "invocations" in s:
+                    return invocation_entry
+                if "journal" in s:
+                    return journal_entry
+                return None
+
+            mock_last.side_effect = last_entry_side_effect
+
+            violations = check_layer2_journal_activity(now=now)
+            assert len(violations) == 1, (
+                f"Expected 1 violation when journal_written=false, got: {violations}"
+            )
