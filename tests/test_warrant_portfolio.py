@@ -372,6 +372,8 @@ class TestRecordWarrantTransaction:
         record_warrant_transaction("MINI-SILVER", "SELL", 100, 70.0, 89.50, 5)
         state = mock_save.call_args[0][0]
         assert "MINI-SILVER" not in state["holdings"]
+        txn = state["transactions"][-1]
+        assert txn["units"] == 50, "Transaction must record clamped units, not requested"
 
 
 # ============================================================

@@ -269,6 +269,7 @@ def record_warrant_transaction(config_key, action, units, price_sek, underlying_
                 config_key, current_units, units, current_units,
             )
             units = current_units
+            txn["units"] = units
         remaining = current_units - units
         if remaining <= 0:
             del holdings[config_key]
