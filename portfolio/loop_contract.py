@@ -400,6 +400,23 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
             if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
                 return []
 
+    # Precondition 6 (2026-05-30): suppress when the most recent invocation
+    # completed successfully WITH journal_written=true. The Layer 2 agent
+    # writes journal entries with signal-snapshot timestamps, which can be
+    # 30-60s before the trigger timestamp (trigger detection and journal
+    # writing use independent datetime.now() calls). This caused 21 false-
+    # positive violations in the week of 2026-05-26 where every invocation
+    # was status=success/journal_written=true but the contract checker saw
+    # the journal ts as "before the trigger" because the agent used the
+    # signal snapshot time, not the completion time.
+    if latest_l2_inv and latest_l2_inv.get("status") == "success":
+        if latest_l2_inv.get("journal_written"):
+            inv_ts = _parse_iso(
+                latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
+            )
+            if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
+                return []
+
     # For violation context only (non-blocking): surface
     # last_invocation_caller / status / ts in the alert details.
     #

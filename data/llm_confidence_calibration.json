@@ -3,75 +3,26 @@
   "method": "equal-width-bins",
   "n_bins": 5,
   "min_bin_count": 20,
+  "disabled_reason": "2026-05-30: Calibration map fitted on only 304 Qwen3 / 99 Ministral samples with incomplete outcomes. The 0.6-0.8 bin (dominant output mode for both models) was mapped to 28.9% / 23.5% p_correct, effectively muting both signals to near-100% HOLD. Reverted to raw confidence passthrough. Re-fit when outcome backfill is complete and min_bin_count >= 500.",
   "signals": {
     "ministral": {
       "n": 99,
       "bins": [
-        [
-          0.0,
-          0.2,
-          null,
-          0
-        ],
-        [
-          0.2,
-          0.4,
-          null,
-          0
-        ],
-        [
-          0.4,
-          0.6,
-          null,
-          14
-        ],
-        [
-          0.6,
-          0.8,
-          0.234568,
-          81
-        ],
-        [
-          0.8,
-          1.0,
-          null,
-          4
-        ]
+        [0.0, 0.2, null, 0],
+        [0.2, 0.4, null, 0],
+        [0.4, 0.6, null, 14],
+        [0.6, 0.8, null, 81],
+        [0.8, 1.0, null, 4]
       ]
     },
     "qwen3": {
       "n": 304,
       "bins": [
-        [
-          0.0,
-          0.2,
-          null,
-          0
-        ],
-        [
-          0.2,
-          0.4,
-          null,
-          0
-        ],
-        [
-          0.4,
-          0.6,
-          null,
-          3
-        ],
-        [
-          0.6,
-          0.8,
-          0.288618,
-          246
-        ],
-        [
-          0.8,
-          1.0,
-          0.818182,
-          55
-        ]
+        [0.0, 0.2, null, 0],
+        [0.2, 0.4, null, 0],
+        [0.4, 0.6, null, 3],
+        [0.6, 0.8, null, 246],
+        [0.8, 1.0, null, 55]
       ]
     }
   }
