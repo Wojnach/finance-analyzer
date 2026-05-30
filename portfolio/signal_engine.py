@@ -1083,6 +1083,16 @@ MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER = 0.5
 # others — its accuracy collapses the most).
 MACRO_WINDOW_FORCE_HOLD_SIGNALS = frozenset({"claude_fundamental"})
 
+# Signals that are pure regime detectors — they inform OTHER signals'
+# gating but should not contribute directional votes to consensus.
+# Their compute functions still return full output (for accuracy tracking)
+# but the engine forces their vote to HOLD before consensus.
+# FGL review 2026-05-29 Theme B: amihud/choppiness had 67-68% accuracy
+# as directional voters — left out of this set pending manual evaluation.
+# Add a signal here when its purpose is "suppress others in regime X"
+# rather than "predict direction."
+REGIME_GATE_ONLY_SIGNALS: frozenset[str] = frozenset()
+
 # 5-minute cache. econ_dates is hardcoded so the underlying data
 # doesn't change between cycles, but we still pay an iteration over
 # ECON_EVENTS each call. Caching avoids that hit per signal per ticker
@@ -4101,6 +4111,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     macro_active_effective = _is_macro_window_cached()
     if macro_active_effective and MACRO_WINDOW_FORCE_HOLD_SIGNALS:
         for sig_name in MACRO_WINDOW_FORCE_HOLD_SIGNALS:
+            if sig_name in votes and votes[sig_name] != "HOLD":
+                votes[sig_name] = "HOLD"
+
+    if REGIME_GATE_ONLY_SIGNALS:
+        for sig_name in REGIME_GATE_ONLY_SIGNALS:
             if sig_name in votes and votes[sig_name] != "HOLD":
                 votes[sig_name] = "HOLD"
 
