@@ -25,12 +25,18 @@ import subprocess
 import time
 from pathlib import Path
 
-from portfolio.claude_gate import check_claude_gates, detect_auth_failure
+from portfolio.claude_gate import (
+    check_claude_gates,
+    detect_auth_failure,
+    _kill_process_tree,
+)
+from portfolio.file_utils import atomic_append_jsonl
 
 logger = logging.getLogger("portfolio.multi_agent_layer2")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
+INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 
 SPECIALISTS = {
     "technical": {
@@ -190,6 +196,17 @@ def launch_specialists(
             proc._name = name
             procs.append(proc)
             logger.info("Specialist %s launched pid=%s", name, proc.pid)
+            try:
+                from datetime import UTC, datetime
+                atomic_append_jsonl(INVOCATIONS_FILE, {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "caller": f"multi_agent_specialist_{name}",
+                    "status": "invoked",
+                    "pid": proc.pid,
+                    "ticker": ticker,
+                })
+            except Exception:
+                logger.debug("Failed to log specialist invocation", exc_info=True)
         except Exception as e:
             if log_fh is not None:
                 log_fh.close()
@@ -219,9 +236,12 @@ def wait_for_specialists(
             if not success:
                 logger.warning("Specialist %s exited with code %d", name, proc.returncode)
         except subprocess.TimeoutExpired:
-            logger.warning("Specialist %s timed out, killing", name)
-            proc.kill()
-            proc.wait(timeout=5)
+            logger.warning("Specialist %s timed out, killing process tree", name)
+            _kill_process_tree(proc, label=f"specialist_{name}")
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
             results[name] = False
         finally:
             log_fh = getattr(proc, "_log_fh", None)
