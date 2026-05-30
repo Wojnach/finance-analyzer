@@ -726,3 +726,104 @@ write_heartbeat() hardcoded "status":"ok" ignoring ok param. Fixed.
 **Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
 
 401/403/404 retried like 503. Fixed: FATAL_STATUS set, immediate return.
+
+---
+
+## QUANT-1 — ETF flow momentum signal (BTC)
+
+**Discovered:** 2026-05-30 after-hours research. **Status:** Proposed.
+
+Track BTC spot ETF net flows as a new signal module. 5-day rolling sum:
+>$500M weekly outflow = SELL, >$500M inflow = BUY. Currently the strongest
+single predictor for BTC price direction (6-day outflow streak = $2.54B
+correlates with $73K weakness). Data from CoinGlass or similar API.
+
+**Effort:** 2 days. **Files:** `portfolio/signals/etf_flow.py`, `signal_registry.py`.
+**Priority:** P2.
+
+---
+
+## QUANT-2 — VIX-Rank continuous volatility scaling
+
+**Discovered:** 2026-05-30 quant research (ArXiv 2508.16598). **Status:** Proposed.
+
+Replace discrete regime multipliers (ranging=0.75, high-vol=0.80) with
+continuous `conf *= (1 - vol_rank)` where `vol_rank` is the percentile of
+current realized vol over a lookback window. GVZ already fetched for metals
+via `metals_cross_assets.py`. For crypto, use realized vol percentile.
+
+**Effort:** 1 day. **Files:** `portfolio/signal_engine.py` lines 3044-3050.
+**Priority:** P2. **Risk:** Affects all trade decisions — needs thorough backtesting.
+
+---
+
+## QUANT-3 — Friction-adjusted Kelly sizing for gold warrants
+
+**Discovered:** 2026-05-30 quant research (ArXiv 2511.08571). **Status:** Proposed.
+
+Adapt the friction-adjusted fractional Kelly formula (lambda=0.40, Sharpe 2.88
+walk-forward on gold futures) for XAU warrant position sizing. Formula:
+`f* = (-3γn^1.5 + sqrt(9γ²n³ + 16σ²(μ-nk))) / (4σ²)`.
+3-layer sizing: vol target, regime confidence, friction-aware Kelly.
+
+**Effort:** 2 days. **Files:** `portfolio/risk_management.py`, `portfolio/golddigger/`.
+**Priority:** P2.
+
+---
+
+## QUANT-4 — Gold-silver pair trade with Kalman filter
+
+**Discovered:** 2026-05-30 quant research. **Status:** Proposed.
+
+Add cointegration-based dynamic hedge ratio (Kalman filter) to the existing
+gold/silver ratio velocity signal in `metals_cross_asset`. ML regime filter
+(Gradient Boosting) trained on volatility, macro, and sentiment features
+distinguishes stable vs unstable spread conditions. Could coordinate XAU/XAG
+warrant entries.
+
+**Effort:** 3 days. **Files:** `portfolio/signals/metals_cross_asset.py`.
+**Priority:** P2.
+
+---
+
+## QUANT-5 — Berry Phase Rate geometric regime detector
+
+**Discovered:** 2026-05-30 quant research (ArXiv 2605.17117). **Status:** Proposed.
+
+Maps returns into complex Hilbert space, extracts Berry Phase Rate as regime
+indicator. Orthogonal to all 6 existing regime signals (|rho|=0.22). Simple
+overlay rule: exit to cash when z-score >2.0 cut max drawdown from -55% to -27%.
+Novel but requires eigendecomposition per timestep.
+
+**Effort:** 5 days. **Files:** new signal module.
+**Priority:** P3.
+
+---
+
+## QUANT-6 — Walk-forward validation gate for IC weighting
+
+**Discovered:** 2026-05-30 quant research (ArXiv 2601.05716). **Status:** Required.
+
+Cautionary finding: adaptive in-sample signal weights FAIL out-of-sample.
+Any IC-based weighting implementation (per `memory/quant_research_priorities.md`)
+MUST use strict walk-forward validation (train on N days, test on next M days,
+roll forward). Current accuracy_stats.py uses all available data.
+
+**Effort:** 2 days. **Files:** `portfolio/accuracy_stats.py`, `portfolio/signal_engine.py`.
+**Priority:** P1 (prerequisite for IC weighting).
+
+---
+
+## INFRA-1 — LLM confidence calibration v2
+
+**Discovered:** 2026-05-30. **Status:** Proposed.
+
+The current calibration map (commit 82bac99a) was reverted because it was
+fitted on only 304 Qwen3 / 99 Ministral samples with incomplete outcomes.
+Re-implement with: (a) minimum 500 samples per bin, (b) out-of-sample
+validation on holdout set, (c) outcome backfill complete before fitting,
+(d) per-action resolution (BUY/SELL/HOLD calibrated separately).
+
+**Effort:** 2 days. **Files:** `scripts/fit_llm_confidence_calibration.py`,
+`portfolio/llm_confidence_calibration.py`, `data/llm_confidence_calibration.json`.
+**Priority:** P2.
