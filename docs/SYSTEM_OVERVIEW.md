@@ -5,7 +5,7 @@ Branch: improve/auto-session-2026-05-27
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 69 signal modules (15 active, 54 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 80 signal modules (21 active, 59 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -198,9 +198,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-05-20)
+## 9) Known Issues (as of 2026-05-30)
 
-**244+ bugs fixed** across 70+ sessions (BUG-15 through BUG-244).
+**255+ bugs fixed** across 75+ sessions (BUG-15 through BUG-255).
 Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 
 ### Open Issues
@@ -213,6 +213,18 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - BUG-149: meta_learner orphaned (predict() never called from production)
 - TEST-1: GPU gate (`gpu_gate.py`) has zero test coverage
 - TEST-3: 26+ pre-existing test failures (integration, config, state isolation)
+
+### 2026-05-30 Fixes (this session)
+
+11 bugs fixed from FGL adversarial review (2026-05-29):
+- **Tier 0**: autonomous.py failure journal stub + loop_contract autonomous status handling — stops 22+ false CRITICALs/week
+- **P0-1**: warrant_portfolio over-sell validation (refuse SELL of non-existent, clamp over-sell)
+- **P0-2**: avanza_orders orderId="?" placeholder rejection (mark error, alert via Telegram)
+- **P0-3**: avanza_session orderbook_id validation (non-empty + numeric before POST)
+- **P0-4**: multi_agent_layer2 tree-kill + invocation journaling (claude_gate protections)
+- **Theme B**: choppiness_regime_gate tie-breaker removal + engine-level REGIME_GATE_ONLY_SIGNALS mechanism
+- **Theme F**: loop_health status="ok" hardcode → now uses `ok` parameter
+- **Theme A**: http_retry fatal-vs-transient typing (401/403/404 not retried)
 
 ### Findings from 2026-05-04 Auto Session
 

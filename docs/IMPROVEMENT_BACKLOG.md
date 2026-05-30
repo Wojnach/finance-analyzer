@@ -651,3 +651,78 @@ multipliers.
 
 Requires regime classification integration with stop-loss management.
 Current fixed stops work acceptably.
+
+---
+
+## ~~FGL-T0 — Alert fatigue: autonomous failure stubs~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+autonomous.py exception before journal write → no stub → loop_contract
+fires false CRITICAL. Fixed: failure journal stub + loop_contract
+recognizes `autonomous_*` statuses. Stops 22+ false CRITICALs/week.
+
+---
+
+## ~~FGL-P0-1 — Warrant SELL of non-existent position~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+SELL with config_key not in holdings was silently ignored. Transaction
+was recorded but holdings unchanged → ledger mismatch. Fixed: refuse
+SELL of missing position; clamp over-sell to held units.
+
+---
+
+## ~~FGL-P0-2 — Avanza orderId="?" placeholder~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+Missing orderId on SUCCESS response defaulted to "?", saved as real ID.
+Downstream cancel/track operations fail. Fixed: reject and mark error
+with Telegram alert.
+
+---
+
+## ~~FGL-P0-3 — Avanza orderbook_id unvalidated~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+_place_order accepted None/""/non-numeric orderbook_id. Fixed: validate
+non-empty + numeric before POST.
+
+---
+
+## ~~FGL-P0-4 — Multi-agent claude_gate bypass~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+Specialist spawns bypassed claude_gate's process tree killing and
+invocation journaling. Fixed: use _kill_process_tree on timeout; log
+specialist invocations to invocations.jsonl.
+
+---
+
+## ~~FGL-TB — Choppiness tie-breaker leak~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+choppiness_regime_gate forced direction@0.35 when votes were HOLD.
+Injects signal where sub-signals disagree. Fixed: removed the override.
+Added REGIME_GATE_ONLY_SIGNALS engine mechanism for future use.
+
+---
+
+## ~~FGL-TF — loop_health status hardcode~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+write_heartbeat() hardcoded "status":"ok" ignoring ok param. Fixed.
+
+---
+
+## ~~FGL-TA — http_retry fatal-vs-transient~~ RESOLVED
+
+**Discovered:** 2026-05-29 FGL review. **Resolved:** 2026-05-30 auto-session.
+
+401/403/404 retried like 503. Fixed: FATAL_STATUS set, immediate return.
