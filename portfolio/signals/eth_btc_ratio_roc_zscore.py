@@ -99,21 +99,15 @@ def _compute_ratio(df: pd.DataFrame, context: dict) -> pd.Series | None:
 
 
 def _ratio_roc_zscore_vote(ratio: pd.Series, ticker: str) -> tuple[str, dict]:
-    if len(ratio) < _ROC_PERIOD + _Z_LOOKBACK:
-        roc_vals = ratio.pct_change(_ROC_PERIOD).dropna()
-        if len(roc_vals) < 10:
-            return "HOLD", {}
-    else:
-        roc_vals = ratio.pct_change(_ROC_PERIOD).dropna()
-
+    roc_vals = ratio.pct_change(_ROC_PERIOD).dropna()
     if len(roc_vals) < 10:
         return "HOLD", {}
 
     recent = roc_vals.iloc[-min(len(roc_vals), _Z_LOOKBACK):]
     mean_val = float(recent.mean())
-    std_val = float(recent.std())
+    std_val = float(recent.std(ddof=0))
 
-    if std_val < 1e-10:
+    if math.isnan(std_val) or std_val < 1e-10:
         return "HOLD", {"ratio_roc": float(roc_vals.iloc[-1]), "ratio_roc_z": 0.0}
 
     latest_roc = float(roc_vals.iloc[-1])
@@ -176,9 +170,9 @@ def _roc_acceleration_vote(ratio: pd.Series, ticker: str) -> tuple[str, dict]:
 
     recent = roc_of_roc.iloc[-min(len(roc_of_roc), _Z_LOOKBACK):]
     mean_val = float(recent.mean())
-    std_val = float(recent.std())
+    std_val = float(recent.std(ddof=0))
 
-    if std_val < 1e-10:
+    if math.isnan(std_val) or std_val < 1e-10:
         return "HOLD", {"roc_accel": float(roc_of_roc.iloc[-1]), "roc_accel_z": 0.0}
 
     latest = float(roc_of_roc.iloc[-1])

@@ -173,9 +173,31 @@ class TestSubSignals:
 
 
 class TestIndicatorValues:
-    def test_indicators_are_finite(self):
+    def test_indicators_are_finite_or_nan(self):
         df = _make_df(n=200)
         ctx = _make_context("ETH-USD", n=200)
         result = compute_eth_btc_ratio_roc_zscore_signal(df, ctx)
         for k, v in result["indicators"].items():
             assert isinstance(v, float), f"{k} is not float: {type(v)}"
+
+
+class TestEdgeCases:
+    def test_flat_ratio_returns_hold(self):
+        n = 200
+        flat = pd.DataFrame({
+            "open": [3000.0] * n,
+            "high": [3001.0] * n,
+            "low": [2999.0] * n,
+            "close": [3000.0] * n,
+            "volume": [5000.0] * n,
+        })
+        btc_flat = pd.DataFrame({
+            "open": [60000.0] * n,
+            "high": [60001.0] * n,
+            "low": [59999.0] * n,
+            "close": [60000.0] * n,
+            "volume": [5000.0] * n,
+        })
+        ctx = {"ticker": "ETH-USD", "all_prices": {"BTC-USD": btc_flat}}
+        result = compute_eth_btc_ratio_roc_zscore_signal(flat, ctx)
+        assert result["action"] == "HOLD"
