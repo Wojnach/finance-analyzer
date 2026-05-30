@@ -345,6 +345,34 @@ class TestRecordWarrantTransaction:
         assert txn["underlying"] == "XAG-USD"
         assert "timestamp" in txn
 
+    @patch("portfolio.warrant_portfolio.save_warrant_state")
+    @patch("portfolio.warrant_portfolio.load_warrant_state")
+    def test_sell_nonexistent_position_refused(self, mock_load, mock_save):
+        """SELL of a position not in holdings should return early, not save."""
+        from portfolio.warrant_portfolio import record_warrant_transaction
+        mock_load.return_value = {"holdings": {}, "transactions": []}
+        record_warrant_transaction("MINI-SILVER", "SELL", 100, 70.0, 89.50, 5)
+        mock_save.assert_not_called()
+
+    @patch("portfolio.warrant_portfolio.save_warrant_state")
+    @patch("portfolio.warrant_portfolio.load_warrant_state")
+    def test_sell_oversell_clamped(self, mock_load, mock_save):
+        """Selling more units than held should clamp to held units."""
+        from portfolio.warrant_portfolio import record_warrant_transaction
+        mock_load.return_value = {
+            "holdings": {
+                "MINI-SILVER": {
+                    "units": 50, "entry_price_sek": 50.0,
+                    "underlying": "XAG-USD", "leverage": 5,
+                    "underlying_entry_price_usd": 79.50,
+                }
+            },
+            "transactions": [],
+        }
+        record_warrant_transaction("MINI-SILVER", "SELL", 100, 70.0, 89.50, 5)
+        state = mock_save.call_args[0][0]
+        assert "MINI-SILVER" not in state["holdings"]
+
 
 # ============================================================
 # PR-P1-1 regression: avg-in must update underlying_entry_price_usd

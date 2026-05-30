@@ -376,8 +376,23 @@ def _execute_confirmed_order(order: dict, config: dict) -> None:
             return
 
         status = result.get("orderRequestStatus", "UNKNOWN")
-        order_id = result.get("orderId", "?")
+        order_id = result.get("orderId")
         msg_text = result.get("message", "")
+
+        if status == "SUCCESS" and not order_id:
+            order["status"] = "error"
+            order["error"] = "API returned SUCCESS but no orderId"
+            logger.critical(
+                "Order %s placed but Avanza returned no orderId — cannot track. result=%s",
+                order["id"], result,
+            )
+            send_telegram(
+                f"AVANZA {action} WARNING\n"
+                f"{order['instrument_name']}: placed but no order ID returned.\n"
+                f"Manual verification required.",
+                config,
+            )
+            return
 
         if status == "SUCCESS":
             order["status"] = "executed"

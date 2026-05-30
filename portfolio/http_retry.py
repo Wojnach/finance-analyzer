@@ -13,6 +13,7 @@ DEFAULT_RETRIES = 3
 DEFAULT_BACKOFF = 1.0  # seconds
 DEFAULT_BACKOFF_FACTOR = 2.0
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+FATAL_STATUS = {400, 401, 403, 404, 405, 410, 422}
 
 _SECRET_URL_RE = re.compile(r"/bot[0-9]+:[A-Za-z0-9_-]+/")
 
@@ -42,6 +43,9 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
                 resp = requester.request(method, url, headers=headers, params=params, timeout=timeout)
 
             if resp.status_code not in RETRYABLE_STATUS:
+                if resp.status_code in FATAL_STATUS:
+                    logger.warning("HTTP %s (fatal) from %s — not retrying",
+                                   resp.status_code, _redact_url(url))
                 return resp
 
             if attempt < retries:

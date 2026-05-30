@@ -120,9 +120,6 @@ def compute_choppiness_regime_gate_signal(df: pd.DataFrame,
     if regime == "TREND":
         votes = [direction, roc_vote]
         action, confidence = majority_vote(votes, count_hold=False)
-        if action == "HOLD" and direction != "HOLD":
-            action = direction
-            confidence = 0.35
     else:
         votes = [direction, roc_vote]
         action, confidence = majority_vote(votes, count_hold=False)

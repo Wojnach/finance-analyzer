@@ -581,6 +581,11 @@ def _place_order(
     valid_until: str | None = None,
 ) -> dict:
     """Internal: place a BUY or SELL limit order."""
+    if not orderbook_id or not str(orderbook_id).strip():
+        raise ValueError(f"orderbook_id is required, got {orderbook_id!r}")
+    ob_str = str(orderbook_id).strip()
+    if not ob_str.isdigit():
+        raise ValueError(f"orderbook_id must be numeric, got {orderbook_id!r}")
     if volume < 1:
         raise ValueError(f"volume must be >= 1, got {volume}")
     if price <= 0:
@@ -607,7 +612,7 @@ def _place_order(
 
     payload = {
         "accountId": effective_account_id,
-        "orderbookId": str(orderbook_id),
+        "orderbookId": ob_str,
         "side": side,
         "condition": "NORMAL",
         "price": price,

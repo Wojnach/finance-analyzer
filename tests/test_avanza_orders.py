@@ -601,6 +601,29 @@ class TestExecuteConfirmedOrder:
         assert order["status"] == "error"
         assert "Auth failed" in order["error"]
 
+    def test_success_without_orderid_marks_error(self, config):
+        """API returns SUCCESS but no orderId — must reject, not save placeholder."""
+        order = {
+            "id": "test-no-id",
+            "action": "BUY",
+            "orderbook_id": "5533",
+            "instrument_name": "SAAB B",
+            "volume": 50,
+            "price": 245.0,
+            "total_sek": 12250.0,
+        }
+        with patch.object(mod, "place_buy_order") as mock_buy, \
+             patch.object(mod, "send_telegram") as mock_tg:
+            mock_buy.return_value = {
+                "orderRequestStatus": "SUCCESS",
+                "message": "",
+            }
+            mod._execute_confirmed_order(order, config)
+
+        assert order["status"] == "error"
+        assert "no orderId" in order["error"]
+        assert mock_tg.called
+
 
 # --- _notify_expired ---
 

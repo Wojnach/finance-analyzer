@@ -372,6 +372,7 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     _KNOWN_FAILURE_STATUSES = frozenset({
         "incomplete",
         "auth_error",
+        "autonomous_failed",
     })
     if latest_l2_inv and latest_l2_inv.get("status") in _LEGITIMATE_SKIP_STATUSES:
         inv_ts = _parse_iso(
@@ -385,6 +386,19 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         )
         if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
             return []
+    # Autonomous invocations (status = "autonomous_*") write their own
+    # journal entries. If the journal stub exists, the check above at
+    # line ~410 already passes. This catches the edge case where
+    # autonomous succeeded but the invocation status doesn't match
+    # any of the above frozensets.
+    if latest_l2_inv:
+        status = latest_l2_inv.get("status", "")
+        if isinstance(status, str) and status.startswith("autonomous"):
+            inv_ts = _parse_iso(
+                latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
+            )
+            if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
+                return []
 
     # For violation context only (non-blocking): surface
     # last_invocation_caller / status / ts in the alert details.

@@ -336,3 +336,54 @@ def test_verify_contract_runs_layer2_check(contract_env):
     violations = loop_contract.verify_contract(report)
     # Only the layer2 violation should appear (all other invariants OK).
     assert any(v.invariant == "layer2_journal_activity" for v in violations)
+
+
+# ---------------------------------------------------------------------------
+# Autonomous status suppression (2026-05-30)
+# ---------------------------------------------------------------------------
+
+def test_no_violation_when_autonomous_invocation_recent(contract_env):
+    """autonomous_* invocations should suppress the journal contract
+    because autonomous writes its own journal entry (or failure stub)."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(hours=2)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "BTC-USD consensus BUY",
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(trigger_ts + timedelta(seconds=1)),
+         "reasons": ["BTC-USD consensus BUY"],
+         "status": "autonomous_layer2_disabled",
+         "tier": 2},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    assert loop_contract.check_layer2_journal_activity() == []
+
+
+def test_no_violation_when_autonomous_failed_status(contract_env):
+    """autonomous_failed is a known failure status — suppresses violation."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(hours=2)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "test",
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(trigger_ts + timedelta(seconds=1)),
+         "reasons": ["test"],
+         "status": "autonomous_failed",
+         "tier": 2},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    assert loop_contract.check_layer2_journal_activity() == []
