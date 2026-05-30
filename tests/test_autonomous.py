@@ -724,6 +724,25 @@ class TestAutonomousDecision:
                 10.5, _patient_state(), ["test"], {}, tier=3, triggered_tickers=set(),
             )
 
+    def test_failure_stub_written_on_exception(self):
+        """When _autonomous_decision_inner raises, a journal stub must be written."""
+        from portfolio.autonomous import autonomous_decision
+        with patch("portfolio.autonomous._classify_tickers", side_effect=RuntimeError("boom")):
+            autonomous_decision(
+                _base_config(), {"BTC-USD": _make_signal()}, {"BTC-USD": 67000},
+                10.5, _patient_state(), ["BTC-USD consensus BUY"], {},
+                tier=2, triggered_tickers=set(),
+            )
+        assert self.journal_file.exists()
+        entries = [json.loads(l) for l in self.journal_file.read_text().strip().split("\n")]
+        assert len(entries) == 1
+        stub = entries[0]
+        assert stub["status"] == "autonomous_failed"
+        assert stub["source"] == "autonomous"
+        assert "patient" in stub["decisions"]
+        assert "bold" in stub["decisions"]
+        assert stub["tier"] == 2
+
     def test_multiple_tickers(self):
         from portfolio.autonomous import autonomous_decision
         config = _base_config()

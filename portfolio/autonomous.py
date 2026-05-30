@@ -85,8 +85,29 @@ def autonomous_decision(config, signals, prices_usd, fx_rate, state,
             config, signals, prices_usd, fx_rate, state,
             reasons, tf_data, tier, triggered_tickers,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("autonomous_decision failed")
+        _write_failure_stub(reasons, tier, exc)
+
+
+def _write_failure_stub(reasons, tier, exc):
+    """Write a journal stub so loop_contract sees an entry for this trigger."""
+    try:
+        stub = {
+            "ts": datetime.now(UTC).isoformat(),
+            "source": "autonomous",
+            "status": "autonomous_failed",
+            "trigger": "; ".join(reasons) if reasons else "unknown",
+            "tier": tier,
+            "decisions": {
+                "patient": {"action": "HOLD", "reason": f"Autonomous failed: {exc!r}"[:200]},
+                "bold": {"action": "HOLD", "reason": f"Autonomous failed: {exc!r}"[:200]},
+            },
+        }
+        atomic_append_jsonl(JOURNAL_FILE, stub)
+        logger.info("Wrote autonomous failure stub for T%s (%s)", tier, reasons)
+    except Exception:
+        logger.warning("Failed to write autonomous failure stub", exc_info=True)
 
 
 def _autonomous_decision_inner(config, signals, prices_usd, fx_rate, state,
