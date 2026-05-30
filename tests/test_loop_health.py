@@ -178,3 +178,19 @@ class TestReadLoopHealthRollup:
         )
         assert rollup["checked_at"] == fixed_now.isoformat()
         assert rollup["stale_threshold_seconds"] == loop_health.STALE_THRESHOLD_SECONDS
+
+
+class TestWriteHeartbeat:
+    def test_ok_true_writes_status_ok(self, tmp_path):
+        hb = tmp_path / "test.heartbeat"
+        loop_health.write_heartbeat(hb, cycle=1, ok=True)
+        data = json.loads(hb.read_text())
+        assert data["status"] == "ok"
+        assert data["ok"] is True
+
+    def test_ok_false_writes_status_degraded(self, tmp_path):
+        hb = tmp_path / "test.heartbeat"
+        loop_health.write_heartbeat(hb, cycle=1, ok=False)
+        data = json.loads(hb.read_text())
+        assert data["status"] == "degraded"
+        assert data["ok"] is False

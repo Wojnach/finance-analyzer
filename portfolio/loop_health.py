@@ -211,7 +211,7 @@ def write_heartbeat(
         ts = (now or _now_utc()).isoformat()
         payload: dict[str, Any] = {
             "ts": ts,
-            "status": "ok",
+            "status": "ok" if ok else "degraded",
             "cycle": cycle,
             "ok": ok,
             "n_positions": n_positions,
