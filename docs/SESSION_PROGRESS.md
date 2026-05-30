@@ -1,5 +1,74 @@
 # Session Progress
 
+## 2026-05-30 FGL Full-Codebase Adversarial Review (docs-only)
+
+Ran the `/fgl` protocol as a **review**, not an implementation: partitioned ~120K
+LOC into 8 subsystems, spawned 8 fresh review subagents in parallel (6×
+`pr-review-toolkit:code-reviewer`, 2× `caveman:cavecrew-reviewer`) against a
+whole-subsystem diff vs an orphan `fgl/empty-baseline` branch in a clean worktree,
+plus an independent orchestrator pass on the foundations + cross-cutting themes.
+
+**Output:** `docs/fgl-review-2026-05-30/` — `02-SYNTHESIS.md` (start here),
+`01-subsystem-findings.md` (verbatim), `00-own-pass.md` (foundations + cross-critique).
+~60 distinct findings after cross-critique: **P0:5 · P1:~22 · P2:~25 · P3:~16.**
+
+**5 P0s:** silent Avanza session-expiry outage (`avanza_session.py:89` — the active
+unresolved 2026-05-23 critical error); stop-loss reachable via the wrong endpoint
+(`avanza_control.py:356`); negative warrant value, no knockout floor
+(`warrant_portfolio.py:100`, source-validated); `price_source` silent stale-yfinance
+fallback (`price_source.py:240`); Layer-2 `failed` writes no journal stub
+(`agent_invocation.py:1622` — real silent crash).
+
+**Flagship correction (evidence over opinion):** the ~20×/week `contract_violation`
+was diagnosed by BOTH the orchestration subagent and my own pass as the
+`skipped_busy`-clobber (main.py:989). **Live `contract_violations.jsonl` data
+refuted it** — 72% of fires have `last_invocation_status="success"` (a contract
+window/timestamp-lag defect), only ~3% are `skipped_busy`. Two independent static
+analyses agreed and were both ~3% of the picture; only the live journal caught it.
+
+**5 meta-themes** (each = one structural fix closing a class of bugs): atomic-RMW
+bypass · silent stale-data fallback · producer/consumer contract drift · EOD-flat
+reachability for leveraged inventory · constant-price history reconstruction.
+
+**What's next (remediation roadmap in §4 — NOT done this session, docs-only):**
+Sprint 1 = the 5 P0s + metals EOD-flat-always. Sprint 2 = contract-window fix +
+single atomic-RMW path. No code changed; no live-config/threshold changes (need
+human approval per playbook). Worktree + `fgl/empty-baseline` branch cleaned up.
+
+## 2026-05-29 After-Hours Research Session (22:30 CET)
+
+### Research Findings
+1. **Signal correlation audit**: Mean-reversion cluster (bb, rsi, mean_reversion, connors_rsi2,
+   sentiment_extremity_gate, williams_vix_fix) agrees 100% — 6 signals counted as 6 votes.
+2. **Trending regime accuracy CATASTROPHIC**: 32.5% trending-up, 35.8% trending-down. Root
+   cause: mean-reversion cluster fires counter-trend with amplified weight.
+3. **Qwen3 collapsed**: 59.7% all-time to 26.7% recent. Likely memorization contamination
+   (MemGuard-Alpha paper confirms the pattern). Auto-gated by recency blend.
+4. **Credit spread 0%**: Fires in calm credit regime (HY OAS ~3%). Lee 2026 paper confirms
+   state-dependent: zero predictive power when OAS < 3.5%.
+5. **XAG entering June seasonal weakness**: 73% win rate Jan-Apr inverts. COT divergence
+   (specs reducing longs while price holds) = 2-4 week correction warning.
+
+### Implementation (3 commits on research/daily-2026-05-29)
+1. **fix(signals): gate mean-reversion cluster in trending regimes** — expanded momentum_cluster
+   from 4 to 7 members, gated full cluster in trending-up/down at _default, reduced penalty
+   0.15x to 0.10x. 269+141 tests pass.
+2. **feat(signals): add seasonal confidence modifier for metals** — June 0.70x BUY, Sep 0.80x,
+   Jan-Apr 1.10-1.15x. Zero-cost confidence multiplier for XAG/XAU.
+3. **fix(signals): add calm-regime gate to credit_spread_risk** — HOLD when HY OAS < 3.5%.
+   Fixes 0% recent accuracy by eliminating noise in calm credit environments.
+
+### Market Context (May 29)
+- SP500 7,580 (9th weekly gain). Gold above $4,500 on inline PCE. BTC sideways $73K.
+- Iran ceasefire deal unsigned — Monday gap risk. NFP June 5 CRITICAL.
+- Patient: XAG 53.84oz at $74.68 (+1.4%). Bold: DORMANT.
+
+### Next Steps
+- Deferred: WMA signal weighting (P1), COT divergence detector (P1), ETF flow signal for BTC (P0)
+- Investigate qwen3 collapse root cause (GPU model or market regime shift?)
+- Run walk-forward backtest on new regime gating to validate improvement
+- Re-enable improved signals (oscillators 55.1%, macd 54.1%) as shadow
+
 ## 2026-05-29 FGL adversarial review (review-only, no code changes)
 
 8-subsystem partition, 8 fresh review subagents (6× pr-review-toolkit:code-reviewer,
