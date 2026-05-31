@@ -1,93 +1,61 @@
 {
-  "date": "2026-05-28",
-  "trades_today": [
+  "date": "2026-05-30",
+  "trades_today": [],
+  "positions": {
+    "patient": {
+      "XAG-USD": {"qty_oz": 53.84, "avg_cost": 74.68, "last_price": 75.44, "pnl_pct": 1.02}
+    },
+    "bold": "DORMANT â€” no positions"
+  },
+  "layer2_decisions_today": [
     {
-      "ts": "2026-05-28T07:34:53+00:00",
-      "portfolio": "patient",
-      "action": "SELL 50% XAG-USD",
-      "price": 73.46,
-      "reasoning": "ATR stop breached, 5/6 SELL voters, all TFs aligned bearish"
+      "ts": "2026-05-30T08:23:34Z",
+      "trigger": "new-trigger (session-open check)",
+      "patient": "HOLD",
+      "bold": "DORMANT",
+      "notes": "Only one journal entry today. Last trigger: ETH-USD HOLD->SELL at 20:24 UTC."
     }
   ],
-  "bold_status": "DORMANT — no breakout setups, full cash",
-  "layer2_invocations": 20,
-  "layer2_holds": 19,
-  "layer2_trades": 1,
   "signals_that_were_right": [
-    "news_event (71.7% recent, best enabled signal)",
-    "fear_greed (58.6% all-time, stable)",
-    "ministral (58.0% all-time, stable)",
-    "main signals 1h accuracy XAG 59.5%, BTC 54.6%, ETH 54.8%"
+    {"signal": "news_event", "recent_accuracy": 66.5, "all_time": 51.0, "note": "Massive recent improvement, SELL-heavy (101/157 SELL correct). Now our 3rd best recent performer."},
+    {"signal": "rsi", "recent_accuracy": 56.3, "all_time": 52.3, "note": "Improved +4pp recently. 341 samples, solid."},
+    {"signal": "cot_positioning", "recent_accuracy": 100.0, "all_time": 84.6, "note": "3/3 recent SELL calls correct. But tiny sample size."},
+    {"signal": "drift_regime_gate", "all_time_accuracy": 58.2, "note": "Stable performer. 1862 samples, consistent."},
+    {"signal": "fear_greed", "all_time_accuracy": 58.6, "note": "Consistently strong BUY signal (contrarian). 10232 samples."}
   ],
   "signals_that_were_wrong": [
-    "qwen3: 59.7% all-time -> 31.8% recent (-28pp SEVERE)",
-    "crypto_macro: 53.0% all-time -> 30.1% recent (-23pp SEVERE)",
-    "econ_calendar: 55.4% all-time -> 35.2% recent (-20pp SEVERE)",
-    "bb: 54.7% all-time -> 45.1% recent (-9.6pp)",
-    "mean_reversion: 52.5% -> 44.6% recent (-7.9pp)",
-    "momentum: 52.8% -> 47.3% recent (-5.5pp)",
-    "drift_regime_gate: 57.0% -> 51.6% recent (-5.4pp)",
-    "statistical_jump_regime: 53.6% -> 49.2% recent (-4.4pp)"
-  ],
-  "disabled_signals_performing_well_recently": [
-    "adx_regime_switch: 67.0% (182 sam)",
-    "amihud_illiquidity_regime: 68.0% (225 sam)",
-    "choppiness_regime_gate: 67.7% (158 sam)",
-    "volume: 62.3% recent (151 sam)",
-    "vol_ratio_regime: 57.2% recent (586 sam)",
-    "oscillators: 56.2% recent (486 sam)",
-    "intraday_seasonality: 56.1% recent (173 sam)"
+    {"signal": "qwen3", "recent_accuracy": 28.2, "all_time": 59.6, "note": "CATASTROPHIC regression â€” 11/39 correct recently. Was 2nd best signal. BUY accuracy 33.2% all-time is weak side."},
+    {"signal": "crypto_macro", "recent_accuracy": 25.2, "all_time": 53.0, "note": "Only 60/238 correct recently. BUY-only signal misfiring in bearish market."},
+    {"signal": "econ_calendar", "recent_accuracy": 39.1, "all_time": 55.6, "note": "698 recent samples, dropped -16pp. BUY-only signal misfiring."},
+    {"signal": "vol_ratio_regime", "all_time_accuracy": 49.6, "note": "Near coin-flip at 2301 samples. Borderline useful."},
+    {"signal": "mean_reversion", "recent_accuracy": 49.6, "all_time": 52.6, "note": "Dropped to coin-flip recently. 514 samples."},
+    {"signal": "momentum", "recent_accuracy": 48.8, "all_time": 52.7, "note": "Below 50% recently. 508 samples."}
   ],
   "accuracy_changes": {
-    "severe_degradation": [
-      "qwen3 -28pp",
-      "crypto_macro -23pp",
-      "econ_calendar -20pp"
+    "biggest_improvers": [
+      {"signal": "news_event", "delta": "+15.5pp", "from": 51.0, "to": 66.5},
+      {"signal": "rsi", "delta": "+4.0pp", "from": 52.3, "to": 56.3}
     ],
-    "moderate_degradation": [
-      "bb -9.6pp",
-      "mean_reversion -7.9pp"
-    ],
-    "stable_or_improving": [
-      "news_event 71.7%",
-      "fear_greed 58.6%",
-      "rsi 50.9%"
-    ],
-    "disabled_but_strong": [
-      "adx_regime_switch 67%",
-      "amihud 68%",
-      "choppiness 67.7%"
+    "biggest_decliners": [
+      {"signal": "qwen3", "delta": "-31.4pp", "from": 59.6, "to": 28.2},
+      {"signal": "crypto_macro", "delta": "-27.8pp", "from": 53.0, "to": 25.2},
+      {"signal": "econ_calendar", "delta": "-16.5pp", "from": 55.6, "to": 39.1},
+      {"signal": "momentum", "delta": "-3.9pp", "from": 52.7, "to": 48.8},
+      {"signal": "mean_reversion", "delta": "-3.0pp", "from": 52.6, "to": 49.6}
     ]
   },
   "system_errors": [
-    {
-      "category": "avanza_session_expired",
-      "count": 7,
-      "since": "2026-05-22",
-      "fix": "Manual BankID login required"
-    },
-    {
-      "category": "accuracy_degradation",
-      "count": 12,
-      "detail": "12 signals dropped >15pp (repeated critical error entries)"
-    },
-    {
-      "category": "layer2_contract_violation",
-      "count": 18,
-      "detail": "Triggers fired but no journal entry written — agent failing silently",
-      "today_count": 3
-    }
+    {"category": "avanza_account_mismatch", "count": 6, "since": "2026-05-24", "description": "Avanza session expired since May 23. Needs BankID re-login."},
+    {"category": "contract_violation", "count": 21, "since": "2026-05-26", "description": "Layer 2 triggers fire but no journal entry written. Agent failing silently."},
+    {"category": "accuracy_degradation", "count": 6, "since": "2026-05-24", "description": "12 signals dropped >15pp. Qwen3, crypto_macro, econ_calendar worst."}
   ],
   "key_observations": [
-    "Patient portfolio trim: sold 50% XAG at 3.46 after ATR stop breach",
-    "Bold still DORMANT — no structural breakout candidates",
-    "System health OK: 87 cycles, 0 signal failures, 14.5h uptime",
-    "CRITICAL: 3 enabled signals collapsed recently (qwen3, crypto_macro, econ_calendar) — need urgent accuracy gate intervention",
-    "OPPORTUNITY: 3 disabled signals (adx_regime_switch, amihud, choppiness) showing 67-68% accuracy — candidates for enabling",
-    "Layer 2 agent failing silently on ~50% of triggers — needs investigation",
-    "XAG at 3.46 — correcting from highs but 20 prophecy intact (4/5 checkpoints triggered)",
-    "BTC at 3.3K — 5K breakout checkpoint already triggered but price slipping back, next checkpoint 5K pending",
-    "ETH at 989 — all checkpoints pending, .5K still distant",
-    "Per-ticker consensus accuracy: BTC 52.7%, XAG 49.4%, XAU 50.4% — near coin-flip territory"
+    "Only 1 journal entry today (08:23 session-open). 21 contract violations this week = Layer 2 agent timing out or crashing on most invocations.",
+    "Qwen3 accuracy collapsed from 59.6% to 28.2% â€” was our 2nd best signal. Root cause investigation needed.",
+    "BTC ranging $72-75K all week. Patient HOLD and Bold DORMANT correct â€” no breakout formed.",
+    "XAG Patient position (+1.02%) healthy but stagnant. Silver $120 prophecy 0.8 conviction, 4/5 checkpoints, 62.9% to target.",
+    "News_event improved +15pp to 66.5% â€” investigate sustainability.",
+    "3 BUY-only signals chronically wrong in bearish/ranging: crypto_macro (25.2%), econ_calendar (39.1%). Add directional BUY bias to consensus.",
+    "System health good: 0 errors, 22 cycles, all signals passing. Problem is Layer 2 agent invocation, not Layer 1."
   ]
 }

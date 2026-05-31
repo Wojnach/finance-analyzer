@@ -1,27 +1,32 @@
 {
-  "date": "2026-05-28",
-  "market_summary": "S&P 500 +0.58% to 7563, Nasdaq +0.91%, Dow +0.05%. Markets recovered from morning dip after PCE inflation data came in largely in line. AI/software stocks led (MSFT/ORCL/PLTR +3-4%), financials lagged (V/BLK -2%). Snowflake +30% on strong outlook. US-Iran 60-day ceasefire MOU reportedly agreed, easing oil premium. Bond yields eased. PCE inflation rose to 3-year high but market shrugged it off.",
-  "key_events_tomorrow": [
-    "May 29 (Friday): No major US economic releases scheduled",
-    "Month-end rebalancing flows expected (last trading day of May)",
-    "Memorial Day weekend approaching - lower liquidity expected",
-    "Watch for US-Iran ceasefire deal developments"
+  "date": "2026-05-30",
+  "market_summary": "US equities at record highs — S&P 500 7,580 (+0.22%), Dow first close above 51K, Nasdaq 26,973. 9th consecutive winning week for S&P driven by AI/semiconductor rally. Oil -17% for May on US-Iran ceasefire hopes. Gold $4,539 (+0.97%). BTC $73.1K, weakening into $7.5B options expiry with 6-day ETF outflow streak ($2.54B).",
+  "key_events_next_week": [
+    {"event": "ISM Manufacturing PMI", "time": "Mon Jun 1 10:00 ET", "expected_impact": "HIGH"},
+    {"event": "JOLTS Job Openings", "time": "Tue Jun 3 10:00 ET", "expected_impact": "MEDIUM"},
+    {"event": "ISM Services PMI", "time": "Wed Jun 3 10:00 ET", "expected_impact": "HIGH"},
+    {"event": "ADP Employment", "time": "Thu Jun 4 08:15 ET", "expected_impact": "MEDIUM"},
+    {"event": "Nonfarm Payrolls + Unemployment", "time": "Fri Jun 5 08:30 ET", "expected_impact": "VERY HIGH — key FOMC input"},
+    {"event": "OPEC+ Ministerial Meeting", "time": "Sat Jun 7", "expected_impact": "HIGH — 188K bpd increase already decided, risk of accelerated cut unwinding"}
   ],
   "overnight_risks": [
-    "Iran ceasefire deal could collapse - oil spike risk",
-    "PCE inflation at 3-year high may shift Fed rhetoric",
-    "Month-end portfolio rebalancing could cause unusual moves",
-    "BTC ETF outflows 6 consecutive days (.26B) - could accelerate",
-    "Lower Friday liquidity amplifies moves"
+    "US-Iran ceasefire deal unsigned — 'decision soon'. Oil gap risk Monday: down on deal, spike on collapse.",
+    "Suspected mine found in Strait of Hormuz — any shipping incident = instant oil spike + gold bid.",
+    "BoJ rate hike expectations (two more 25bp priced to ~1.1%) — JPY strength could trigger carry trade unwind.",
+    "China PMI data due Monday — weak print drags Asian equities and commodities.",
+    "BTC $7.5B options expiry settlement may affect weekend/Monday spot. Max pain at $75K vs spot $73.1K.",
+    "PCE inflation at 3-year high — hawkish repricing risk if Fed speakers comment Monday."
   ],
   "instrument_news": {
-    "XAG-USD": "Silver correcting from highs. BofA target 35-09 year-end (bullish), UBS cut to 0 (cautious). 5th consecutive year supply deficit. Industrial demand (solar/EV/AI) accelerating. COT longs high but not extreme. Gold-silver ratio compressing as expected.",
-    "XAU-USD": "Gold +1.04% to 528. Institutional forecasters still see 000. Central bank buying structural, not cyclical. Iran ceasefire would reduce safe-haven bid. FOMC Jun 16 key catalyst.",
-    "BTC-USD": "Trading ~3K, down from 7K range. MVRV Z-Score 0.41 (fair value). ETF outflows .26B over 6 days. Short-term bearish (52% of 23 signals). Support 3-75K. MSTR holds 843,738 BTC (4% of total supply).",
-    "ETH-USD": "Trading ~989, down 53% from ATH. Whale accumulation 140K ETH (22M in 96h). DeFi TVL 5.74B (68% dominance). Glamsterdam upgrade June 2026 could triple L1 throughput. 37M ETH staked (30% supply). Structurally bullish but near-term weak.",
-    "MSTR": "At 54.70, BTC treasury 843,738 BTC worth ~9.1B (128% of market cap). Recent purchase 535 BTC on May 11. Stock tracks BTC with leverage - bearish while BTC weak."
+    "XAG-USD": "Silver $76, +3% for May. G/S ratio compressing toward 60:1. Solar demand robust (125 Moz forecast). BUT Longi announced copper substitution in back-contact solar cells — structural headwind. June seasonally weakest month. COT: specs reducing longs.",
+    "XAU-USD": "Gold $4,539 (+0.97%). Central banks bought ~190t in Q1 2026. US gold ETFs $0.83B inflows in April. Iran deal binary risk dominates: deal = dip, no deal = bid. JPM expects 250t ETF inflows for 2026.",
+    "BTC-USD": "BTC $73.1K. Spot ETFs 6 consecutive days outflows ($2.54B in 2 weeks). YTD ETF inflows just $536M. CFTC approved first US BTC perpetual futures May 29 (bullish long-term). Put/call 0.84 slightly bullish.",
+    "ETH-USD": "ETH $2,004. Below max pain $2,200. Underperforming BTC. Hegota upgrade (Verkle Trees) scheduled H2 2026. $563M liquidations on May 18 selloff. Funding rates neutral-to-negative.",
+    "MSTR": "MSTR $159.26 (+5%). Transferred 411 BTC to Coinbase Prime — sell speculation. 15 analysts avg Strong Buy, target $380.79 (+139%). Premium to NAV elevated but BTC-sensitive.",
+    "OIL": "WTI $87.36 (-1.73%). Brent $91.37 (-1.43%). -17% for May on Iran ceasefire hopes. OPEC+ 188K bpd increase for June. 3.24M bpd cuts still in place. Suspected Hormuz mine = reversal risk."
   },
-  "metals_outlook": "Bullish medium-term. Gold at 528 with institutional targets to 000. Silver supply deficit structural. Central bank buying persistent. Iran ceasefire MOU could temporarily reduce safe-haven premium but structural drivers intact. FOMC Jun 16 key: hawkish hold expected given PCE, but 8-4 dissent suggests eventual cuts. Watch gold-silver ratio for compression continuation.",
-  "oil_outlook": "Brent ~3, WTI ~1. US-Iran 60-day ceasefire MOU reported - would gradually reopen Strait of Hormuz and normalize energy exports. If deal holds, downward pressure on oil (0-70 target per JPM). If deal collapses, 20+ spike risk. UAE exit from OPEC+ adds supply uncertainty. Net: bearish bias with geopolitical tail risk.",
-  "sentiment_shift": "Risk-on tilt. Equity markets at new records. PCE inflation elevated but market looking through it. Iran ceasefire reduces tail risk. AI trade dominating (MSFT/ORCL/PLTR). Crypto weak near-term but fair-value per on-chain. Month-end rebalancing may cause temporary dislocations."
+  "metals_outlook": "Gold at $4,539 with structural central bank bid (~190t/quarter). Iran deal outcome is dominant binary risk: deal = $4,400, collapse = $4,600+. Silver enters June seasonal weakness, COT specs reducing longs, but industrial demand (solar/EV) and G/S ratio compression provide medium-term support.",
+  "oil_outlook": "WTI at $87 after brutal 17% May decline. June 7 OPEC+ meeting: 188K bpd locked in, signal of accelerated unwinding = $80. Iran deal collapse or Hormuz mine incident = snap to $95+. Market pricing peace.",
+  "crypto_outlook": "BTC/ETH structurally fragile: $7.5B options expiry, 6-day ETF outflow streak, PCE inflation at 3-year high. NFP June 5 is the catalyst — strong jobs = hawkish repricing = more pressure; weak = bounce. BTC needs $75K reclaim to stabilize.",
+  "sentiment_shift": "Risk-on in equities (9th S&P winning week, AI euphoria) but risk-off in crypto (ETF outflows) and commodities (oil crash) — divergence typically resolves within 2-3 weeks."
 }

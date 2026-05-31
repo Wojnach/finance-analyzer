@@ -1,47 +1,46 @@
 # Session Progress
 
-## 2026-05-31 Auto-improvement session (autonomous)
+## 2026-05-30 After-Hours Research Session (22:28 CEST)
 
 ### What was done
-- **Exploration**: 5 parallel agents covered core loop, signal engine, portfolio/risk,
-  dashboard/reporting, metals/bots. Cross-referenced with FGL 2026-05-30 synthesis.
-- **Plan**: `docs/IMPROVEMENT_PLAN.md` — 20 bugs found, 15 fixed in 4 batches.
+1. **Phase 0 — Daily Review**: System healthy (0 errors, 22 cycles). Only 1 L2 journal
+   entry today (Saturday, correctly skipped off-hours). Patient holding 53.84oz XAG @ $74.68
+   avg (+1.02%). Bold DORMANT.
 
-**Batch 1 — 5 fixes** (P0 + critical P1):
-  - warrant_portfolio: knockout floor clamp (`max(0.0, ...)`) prevents negative warrant values
-  - agent_invocation: failed journal stub (mirrors incomplete path), _extract_ticker returns None
-  - loop_contract: add "failed" to _KNOWN_FAILURE_STATUSES
-  - main: IC cache refresh modulo 60→6 (was 10h at 600s cadence, now ~60min)
+2. **Phase 1 — Market Research**: S&P 7,580 (9th weekly gain, ATH). Oil -17% May on
+   Iran ceasefire hopes. BTC $73.1K with 6-day ETF outflow streak ($2.54B). Key next
+   week: ISM Mon, NFP Fri Jun 5, OPEC+ Sat Jun 7. FOMC Jun 16.
 
-**Batch 2 — 5 fixes** (P1 data/safety):
-  - data_collector: yfinance lock in fetch_vix, ValueError bypasses alpaca circuit breaker
-  - market_timing: Swedish holiday check in _is_agent_window()
-  - dashboard: fix copy-paste "mstr endpoint error" log
-  - risk_management: lazy-init CORRELATED_PAIRS, fix annualization 252→365 for crypto/metals
-  - journal: load_recent uses load_jsonl_tail
+3. **Phase 2 — Quant Research**: 11 findings from ArXiv + GitHub. Top: AlphaCrafter IC
+   decay (ArXiv 2605.05580), friction Kelly for gold (ArXiv 2511.08571), Berry Phase
+   Rate regime detection (ArXiv 2605.17117), 5-signal BTC on-chain convergence (Glassnode).
 
-**Batch 3 — 4 fixes** (P1 accuracy + P2 perf):
-  - accuracy_stats: directional accuracy uses sample-weighted blend (was picking higher-N)
-  - equity_curve: deque.popleft() replaces list.pop(0) in round-trip matching
-  - trade_guards: C4 wiring check suppressed when _wiring_confirmed=True
-  - price_source: yfinance fallback DataFrame gets _source/_primary_failed attrs
+4. **Phase 3 — Signal Audit**: Qwen3 accuracy collapse root-caused to calibration map
+   (commit 82bac99a). 21 contract violation false positives root-caused to journal timestamp
+   comparison bug. Momentum_cluster (7 signals, 100% agreement) at 0.10x follower penalty.
 
-**Batch 4 — 2 fixes** (signal quality + digest):
-  - signal_engine: add 12h to _CROSS_HORIZON_PAIRS for dynamic horizon weights
-  - digest: increase tail limit 500→2000 for high-activity periods
+5. **Implementation (3 commits)**:
+   - Reverted Qwen3/Ministral calibration map (nulled p_correct values) — restores both
+     LLM signals from 28.2%/23.5% back to raw confidence passthrough
+   - Fixed check_layer2_journal_activity false positives — suppresses when invocation
+     succeeded with journal_written=true
+   - Added 2 regression tests for the contract fix
+   - Updated IMPROVEMENT_BACKLOG with 7 new research-derived items (QUANT-1 through QUANT-6, INFRA-1)
 
-### Not in scope (deferred)
-- P0-1/P0-2 Avanza session/stop-loss (real-money path, needs BankID re-auth)
-- Theme B1 cross-process atomic-RMW (architectural)
-- Theme B4 EOD-flat reconcile (complex metals logic)
-- Theme B5 reconstructed history methodology
-- REGIME_GATE_ONLY_SIGNALS (dormant, not broken)
-- _confluence_score (used for debugging, not dead code)
+### Deliverables written
+- `data/daily_research_review.json` — system state, accuracy changes, errors
+- `data/daily_research_macro.json` — market events, calendar, instrument news
+- `data/daily_research_quant.json` — quant findings, recommended improvements
+- `data/daily_research_ticker_deep_dive.json` — BTC-USD + XAG-USD deep dives
+- `data/daily_research_signal_audit.json` — signal accuracy, correlation clusters
+- `data/morning_briefing.json` — synthesized morning briefing
 
 ### What's next
-- Push and merge
-- Avanza BankID session still expired — `python scripts/avanza_login.py`
-- Contract-window fix (72% of violations are success-lag, not the bugs fixed here)
+- Monitor Qwen3 accuracy recovery after calibration revert (expect return to ~59.6%)
+- NFP June 5 — strong catalyst for BTC and metals direction
+- FOMC June 16 — XAG/XAU mean-reversion setup 4-7 days prior
+- Consider ETF flow momentum signal (QUANT-1) — strongest near-term improvement
+- IC-based weighting (QUANT-6 prerequisite: walk-forward validation gate)
 
 ---
 

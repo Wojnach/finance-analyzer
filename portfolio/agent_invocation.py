@@ -316,7 +316,7 @@ def _extract_ticker(reasons):
     """Extract the primary ticker from trigger reasons.
 
     Looks for common ticker patterns like 'XAG-USD', 'BTC-USD', 'NVDA'.
-    Falls back to 'XAG-USD' if no ticker found.
+    Returns None if no ticker found.
     """
     import re
     for r in reasons:

@@ -1,61 +1,59 @@
 {
-  "date": "2026-05-29",
-  "generated_at": "2026-05-28T20:45:00Z",
+  "date": "2026-05-31",
+  "generated_at": "2026-05-30T21:00:00+00:00",
   "market_outlook": "neutral",
   "confidence": 0.55,
+  "summary": "Saturday session. Markets closed Friday at all-time highs (S&P 7,580, 9th consecutive winning week). US-Iran ceasefire unsigned — binary risk for Monday open. BTC weak ($73.1K) with 6-day ETF outflow streak. XAG Patient position healthy at +1.02%. FOMC June 16 is next major event.",
   "key_levels": {
-    "XAG-USD": {"support": 72.0, "resistance": 75.5, "current": 73.46},
-    "XAU-USD": {"support": 4350, "resistance": 4530, "current": 4528},
-    "BTC-USD": {"support": 70000, "resistance": 76000, "current": 73256},
-    "ETH-USD": {"support": 1900, "resistance": 2100, "current": 1989},
-    "MSTR": {"support": 145, "resistance": 165, "current": 154.7}
+    "XAG-USD": {"support": 73.5, "resistance": 77.5, "current": 75.44, "note": "June seasonal weakness. Patient holds 53.84oz @ $74.68 avg."},
+    "XAU-USD": {"support": 4400, "resistance": 4600, "current": 4539, "note": "Iran deal binary: deal=$4400, collapse=$4600+. Central bank bid 190t/quarter."},
+    "BTC-USD": {"support": 70000, "resistance": 75000, "current": 73106, "note": "Below max pain $75K. ETF outflows $2.54B in 2 weeks. NFP June 5 is catalyst."},
+    "ETH-USD": {"support": 1900, "resistance": 2200, "current": 2004, "note": "Below max pain $2,200. Underperforming BTC. Funding rates neutral-to-negative."},
+    "MSTR": {"support": 145, "resistance": 165, "current": 159.26, "note": "+5% Friday. 411 BTC transferred to Coinbase — sell speculation."}
   },
   "trade_ideas": [
     {
       "instrument": "XAG-USD",
-      "direction": "LONG (patience)",
-      "rationale": "Silver correcting from $121 ATH to $73. Supply deficit structural for 5th year. COT longs light (5472 contracts). BofA $135-$309 target. Gold-silver ratio compressing. Wait for $72 support test with RSI oversold + volume expansion before re-entering.",
-      "entry_zone": "72.0-73.0 on RSI <30 with volume expansion",
-      "target": "80.0 (near-term), 120.0 (prophecy)",
-      "stop": "70.0 (-4.1% from entry)",
+      "direction": "HOLD",
+      "rationale": "Patient position 53.84oz at $74.68 avg (+1.02%). June seasonal weakness argues against adding. Wait for 12h TF BUY alignment or breakout above $77.50. ATR stop ~$74.81 provides cushion.",
+      "entry_zone": "N/A (existing position)",
+      "target": "$77.50 breakout, then $82",
+      "stop": "$73.50 (below recent support)",
       "confidence": 0.55
     },
     {
-      "instrument": "XAU-USD",
-      "direction": "LONG (watch)",
-      "rationale": "Gold at $4528, institutional targets $5000. Central bank buying structural. Iran ceasefire MOU may reduce safe-haven premium near-term. FOMC Jun 16 key catalyst. 4B/1S voters but weighted HOLD.",
-      "entry_zone": "4350-4400 on pullback",
-      "target": "4700-5000",
-      "stop": "4250 (-3.4%)",
-      "confidence": 0.45
-    },
-    {
       "instrument": "BTC-USD",
-      "direction": "NEUTRAL (wait)",
-      "rationale": "BTC at $73K in fair-value zone (MVRV Z 0.41). ETF outflows 6 days ($1.26B). Short-term bearish (52% signals). Post-halving peak window active but no catalyst. Wait for sustained break above $75K with volume.",
-      "entry_zone": "Above 75000 with RVOL > 1.5x",
-      "target": "85000-100000",
-      "stop": "70000 (-6.7%)",
-      "confidence": 0.40
+      "direction": "WAIT",
+      "rationale": "Ranging $72-75K for 2+ weeks. ETF outflows severe. Need $75K reclaim with volume + 12h BUY alignment before entry. NFP June 5 could be catalyst for directional move.",
+      "entry_zone": "$75,000+ with volume confirmation",
+      "target": "$80,000",
+      "stop": "$70,000",
+      "confidence": 0.30
     }
   ],
+  "system_improvements_completed": [
+    "Reverted Qwen3/Ministral confidence calibration map — was causing 28.2% accuracy collapse (was 59.6%). Both LLM signals restored to raw confidence passthrough.",
+    "Fixed contract violation false positives — 21 false violations/week suppressed by checking invocation success+journal_written status.",
+    "Added 2 regression tests for the contract fix."
+  ],
   "system_improvements_proposed": [
-    "Enable 3 high-accuracy disabled signals (adx_regime_switch 67%, amihud 68%, choppiness 67.7%)",
-    "Verify accuracy gate is catching collapsed signals (qwen3 31.8%, crypto_macro 30.1%)",
-    "Investigate Layer 2 contract violations (18 triggers with no journal entry)",
-    "Walk-forward accuracy-based signal reweighting (priority for next session)"
+    {"title": "ETF flow momentum signal", "priority": "P2", "description": "Track BTC spot ETF net flows as new signal module. Currently strongest single predictor for BTC."},
+    {"title": "VIX-Rank continuous vol scaling", "priority": "P2", "description": "Replace discrete regime multipliers (0.75/0.80) with continuous (1-vol_rank) scaling. GVZ already fetched for metals."},
+    {"title": "Walk-forward validation for IC weighting", "priority": "P1", "description": "ArXiv 2601.05716 shows adaptive in-sample weights fail OOS. Any IC-weighting must use strict walk-forward validation."},
+    {"title": "Gold-silver pair trade with Kalman filter", "priority": "P2", "description": "Add cointegration-based dynamic hedge ratio to coordinate XAU/XAG warrant entries."},
+    {"title": "Berry Phase Rate regime detector", "priority": "P3", "description": "Geometric regime detection orthogonal to existing 6 regime signals. Novel but complex implementation."}
   ],
   "risk_warnings": [
-    "Iran ceasefire deal fragile - collapse would spike oil, boost metals, uncertain for crypto",
-    "PCE inflation at 3-year high - Fed may turn more hawkish",
-    "BTC ETF outflows accelerating - 6 consecutive days",
-    "Friday low liquidity + month-end rebalancing = amplified moves",
-    "Multiple enabled signals with severe accuracy degradation - consensus quality compromised"
+    "US-Iran ceasefire deal unsigned — Monday gap risk across all instruments. Oil could drop 5%+ on deal or spike 10%+ on collapse.",
+    "BTC spot ETF outflows accelerating — YTD net inflows at just $536M, risk of going negative. If institutional sentiment turns, $70K support may not hold.",
+    "FOMC June 16 — NFP on June 5 will set expectations. Strong jobs = hawkish repricing = crypto and metals pressure.",
+    "Qwen3 signal restored from calibration revert but underlying BUY-side accuracy (33.2%) remains structurally weak. Monitor for regression.",
+    "June seasonal weakness for silver historically -2.1% average monthly return."
   ],
   "research_highlights": [
-    "Regime-adaptive signal routing (Sharpe 2.276 in competition) - high priority for implementation",
-    "Gold is #1 cross-asset predictor of BTC (TFT research) - not currently used",
-    "Silver COT positioning light at 5472 contracts (vs multiples at $121 high) - potential bullish setup",
-    "Walk-forward signal reweighting is easy/high-impact - implement ASAP"
+    "AlphaCrafter (ArXiv 2605.05580): Multi-agent framework with IC decay monitoring + regime-conditioned ensemble selection. Directly applicable to planned IC weighting upgrade.",
+    "Friction-adjusted Kelly for gold futures (ArXiv 2511.08571): Sharpe 2.88 walk-forward. Position sizing formula adaptable to XAU warrant trading.",
+    "5-signal BTC on-chain convergence (Glassnode): MVRV 1.2, aSOPR <1.0, hashrate -22%, exchange reserves 7yr low. Has preceded 300%+ rallies 3/3 times historically.",
+    "STH Realized P/L normalized by Realized Cap — higher-resolution NUPL for new capital flow detection. Could improve on-chain signal."
   ]
 }

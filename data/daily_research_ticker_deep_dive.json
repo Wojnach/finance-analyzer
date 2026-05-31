@@ -1,116 +1,92 @@
 {
-  "date": "2026-05-28",
-  "tickers_analyzed": ["XAG-USD", "BTC-USD"],
+  "date": "2026-05-30",
+  "tickers_analyzed": ["BTC-USD", "XAG-USD"],
   "deep_dives": [
     {
-      "ticker": "XAG-USD",
+      "ticker": "BTC-USD",
+      "current_price": 73106,
       "key_predictive_features": [
-        "Gold-silver ratio velocity",
-        "COT managed money positioning",
-        "ETF inflows rate-of-change",
-        "Real yield inverse",
-        "DXY inverse",
-        "Industrial demand proxies (copper, solar, EV)",
-        "Geopolitical risk premium",
-        "Central bank gold buying (indirect silver support)"
+        "Spot ETF flow direction (6-day outflow streak = $2.54B — strongest bearish signal)",
+        "Options max pain vs spot ($75K vs $73.1K — $1.9K gap = gravitational pull upward after expiry)",
+        "Fear & Greed Index (23 = Extreme Fear — historically contrarian BUY at 0.585 accuracy)",
+        "MVRV Z-Score (1.37 = mid-cycle, not overheated)",
+        "SOPR (0.98 = slight selling, holders realizing small losses)",
+        "NUPL (0.27 = 'Optimism' zone — not panic, not euphoria)",
+        "Funding rates (neutral-to-negative = shorts paying, cautious positioning)",
+        "CFTC perpetual futures approval (structural positive, no near-term price impact)"
       ],
-      "fundamental_drivers": {
-        "supply_deficit": "5th consecutive year of supply deficit. Mine output declining as silver is 70%+ byproduct of base metal mining.",
-        "industrial_demand": "Solar PV, EV, and AI data center demand accelerating. Structural demand growth outpacing supply additions.",
-        "central_bank_diversification": "Central bank gold buying supports metals complex broadly, creating indirect tailwind for silver.",
-        "mine_output": "Primary silver mine output declining. New project pipeline thin. Supply response to price is slow due to byproduct economics."
-      },
+      "fundamental_drivers": [
+        "PCE inflation at 3-year high — Fed repricing risk",
+        "NFP June 5 — strong = hawkish = BTC down, weak = dovish = BTC up",
+        "FOMC June 16-17 — no cut expected, guidance is the signal",
+        "Institutional flows: spot ETF turning net negative for first time YTD risk",
+        "MSTR 411 BTC transfer to Coinbase Prime — if Saylor selling, narrative shift"
+      ],
       "cross_asset_correlations": {
-        "XAU": "0.85+ (strong positive, gold-silver ratio is key relative value metric)",
-        "DXY": "-0.7 (strong inverse, dollar strength = silver weakness)",
-        "US10Y_real": "-0.6 (moderate inverse, higher real yields = precious metals headwind)",
-        "copper": "0.5 (moderate positive, shared industrial demand driver)",
-        "oil": "0.3 (weak positive, energy cost input to mining)"
+        "SPX_correlation": "Decorrelated — equities at ATH, BTC ranging. Historically reconverges.",
+        "DXY_correlation": "Moderate inverse — USD strength on hawkish Fed = BTC headwind",
+        "Gold_correlation": "Low — gold up on geopolitics while BTC flat on ETF outflows",
+        "VIX_correlation": "VIX 15.25 (low) = risk-on environment, but BTC not participating"
       },
-      "seasonal_patterns": {
-        "strong_months": "January-March (historically strong, post-year-end rebalancing + industrial restocking)",
-        "weak_months": "August-September (summer doldrums, reduced industrial activity)",
-        "recovery_months": "October-November (Q4 recovery, year-end positioning)",
-        "current_position": "Late May — entering historically mixed summer period"
-      },
-      "recommended_new_signals": [
-        {
-          "signal": "silver_etf_flow_momentum",
-          "description": "Track rolling 5-day net ETF flow momentum for silver ETFs (SLV, PSLV). Contrarian BUY on extreme outflows, momentum SELL on euphoric inflows.",
-          "expected_accuracy": "55-60% on 5d horizon"
-        },
-        {
-          "signal": "cot_managed_money_change",
-          "description": "Week-over-week change in Managed Money net positioning. Large increases in net long signal trend continuation, large decreases signal potential reversal.",
-          "expected_accuracy": "55-60% on 5d horizon"
-        },
-        {
-          "signal": "gold_silver_ratio_zscore",
-          "description": "Z-score of gold-silver ratio vs 60-day rolling mean. Extreme readings (>2 or <-2) signal mean-reversion in relative value.",
-          "expected_accuracy": "60-65% on 10d horizon"
-        },
-        {
-          "signal": "industrial_demand_composite",
-          "description": "Composite of copper price, solar ETF performance, and EV sales data as proxy for silver industrial demand trajectory.",
-          "expected_accuracy": "55-60% on 10d horizon"
-        }
+      "seasonal_patterns": [
+        "June historically weak for BTC (avg -1.2% monthly return)",
+        "Post-halving year 2 historically bullish but delayed (2017: H2 rally, 2021: H2 rally)",
+        "Options expiry gravitational pull typically resolves within 48-72 hours"
       ],
-      "implementation_notes": "XAG accuracy at 49.4% is near random. Primary issue is regime-blind signal application — mean-reversion signals fire during trends and trend signals fire during ranges. Silver currently at $73 correcting from $121 ATH. Adding regime-conditional routing and silver-specific features (COT, ETF flows, gold-silver ratio z-score) is highest priority for improving XAG hit rate."
+      "recommended_new_signals": [
+        {"signal": "ETF flow momentum", "description": "Track 5-day rolling net ETF flows. >$500M weekly outflow = SELL, >$500M inflow = BUY. Currently strongest single predictor.", "difficulty": "medium"},
+        {"signal": "Options max pain delta", "description": "Track distance between spot and max pain. >5% gap historically predicts reversion within 72h.", "difficulty": "easy"},
+        {"signal": "Funding rate regime", "description": "Track funding rate sign changes. Persistent negative = bottom forming. Persistent positive = top forming.", "difficulty": "easy"}
+      ],
+      "our_signal_performance": {
+        "best": "ADX regime switch (79.3% BTC-specific, per journal entries). This is our edge on BTC.",
+        "worst": "Qwen3 BUY accuracy (33.2% all-time BTC). Effectively random on BUY side.",
+        "observation": "BTC signal oscillation this week (8+ flips per day) confirms ranging market. Our system correctly held DORMANT/HOLD throughout."
+      }
     },
     {
-      "ticker": "BTC-USD",
+      "ticker": "XAG-USD",
+      "current_price": 75.44,
+      "position": "Patient holds 53.84 oz at avg $74.68 (+1.02%)",
       "key_predictive_features": [
-        "Gold price (#1 cross-asset predictor per TFT analysis)",
-        "DXY (strong inverse relationship)",
-        "MVRV Z-Score: 0.41 (fair value zone)",
-        "ETF flows: 6-day outflow streak",
-        "Fed policy expectations (rate cut timing)",
-        "On-chain SOPR and NUPL: 0.28",
-        "Funding rates (derivatives positioning)",
-        "Exchange netflow (reserves at multi-year lows)"
+        "Gold-silver ratio (currently ~60:1, compressing from 80:1 — bullish for silver)",
+        "Solar panel demand (125 Moz forecast 2026, +15% YoY — structural)",
+        "Central bank gold buying (190t Q1 2026 — silver follows gold with leverage)",
+        "COT speculative positioning (reducing longs = contrarian setup forming)",
+        "DXY strength (inverse correlation, USD weakness = silver bid)",
+        "ATR% (0.52% = very low volatility, compression often precedes breakout)",
+        "Copper substitution risk (Longi back-contact cells — medium-term headwind)"
       ],
-      "fundamental_drivers": {
-        "halving_cycle": "Post-halving cycle dynamics. Historically 12-18 months post-halving is strongest period. Currently 25 months post-April 2024 halving.",
-        "etf_demand": "ETF demand floor with +4500 BTC net YTD despite recent outflow streak. BlackRock IBIT holds $62B. Institutional anchor for price.",
-        "mstr_accumulation": "MicroStrategy holds 843K BTC. Continued weekly purchases via ATM program creating consistent bid.",
-        "fed_policy": "Potential Fed rate cuts in H2 2026 would be tailwind for risk assets including BTC. CPI at 3.8% is headwind until cuts materialize."
-      },
+      "fundamental_drivers": [
+        "Silver supply deficit: mine output declining, demand rising (solar + EV + AI data centers)",
+        "Iran deal binary risk: deal = risk-on = silver dip, no deal = safe haven bid",
+        "June seasonal weakness (historically worst month for silver)",
+        "NFP June 5 impact: strong = USD up = silver down, weak = USD down = silver up",
+        "Gold prophecy $120 at 0.8 conviction — 4/5 checkpoints triggered, 62.9% to target"
+      ],
       "cross_asset_correlations": {
-        "XAU": "0.4-0.6 (moderate positive, both 'hard money' assets, correlation regime shifts are predictive)",
-        "DXY": "-0.5 (moderate inverse, strong dollar = BTC headwind)",
-        "SPX": "0.5 (moderate positive, BTC increasingly trades as risk asset)",
-        "VIX": "-0.4 (moderate inverse, risk-off = BTC weakness)",
-        "US10Y": "-0.3 (weak inverse, higher yields compress risk asset valuations)"
+        "XAU_correlation": "Very high (0.85+). Gold leads, silver follows with 1.5-2x beta.",
+        "DXY_correlation": "Strong inverse (-0.6 to -0.7). Key macro driver.",
+        "Copper_correlation": "Moderate positive (0.4). Industrial demand proxy.",
+        "Oil_correlation": "Low-moderate. Iran deal affects both via geopolitical channel.",
+        "SPY_correlation": "Low. Silver more macro/commodity than equity-linked."
       },
-      "seasonal_patterns": {
-        "strongest_quarter": "Q4 (October-December historically strongest for BTC)",
-        "weak_months": "May (historically weak, 'sell in May' effect applies to BTC)",
-        "post_halving": "12-18 months post-halving historically produces cycle peak. April 2024 halving implies peak window April 2025-October 2025 already passed, but cycle may be extended.",
-        "current_position": "Late May — entering historically mixed summer. Q3 breakout potential based on prior cycles (2021, 2023, 2024 all had significant Q3 rallies)."
-      },
-      "recommended_new_signals": [
-        {
-          "signal": "gold_btc_correlation_regime",
-          "description": "Track rolling 30-day correlation between gold and BTC. Regime shifts in correlation (from positive to negative or vice versa) are predictive of BTC direction changes.",
-          "expected_accuracy": "55-60% on 5d horizon"
-        },
-        {
-          "signal": "etf_flow_momentum_zscore",
-          "description": "Z-score of rolling 5-day net ETF flows. Extreme outflows (z < -2) are contrarian BUY signal. Extreme inflows (z > 2) signal overheating.",
-          "expected_accuracy": "55-60% on 5d horizon"
-        },
-        {
-          "signal": "dxy_trend_direction",
-          "description": "DXY 20-day EMA direction as BTC regime signal. Rising DXY = headwind for BTC (reduce BUY confidence), falling DXY = tailwind (boost BUY confidence).",
-          "expected_accuracy": "55-60% on 5d horizon"
-        },
-        {
-          "signal": "mvrv_zscore_regime_zones",
-          "description": "Partition MVRV Z-Score into actionable zones: <0 (deep value BUY), 0-1 (fair value HOLD), 1-3 (heated reduce), >3 (euphoria SELL). Currently at 0.41 = fair value HOLD.",
-          "expected_accuracy": "65-70% on 10d+ horizon"
-        }
+      "seasonal_patterns": [
+        "June historically weakest month for silver (avg -2.1% return)",
+        "July-August seasonal bounce typical (monsoon/festival demand in India)",
+        "Q4 strong: jewelry demand + year-end portfolio rebalancing",
+        "FOMC volatility: silver typically sells off 3-5 days pre-FOMC, recovers post"
       ],
-      "implementation_notes": "BTC consensus accuracy at 52.7%. Key issues: on-chain signal has only 45 samples (unreliable), no gold-BTC correlation signal exists despite gold being #1 predictor, ETF flows not tracked as a signal. BTC at $73K is fair-value per MVRV Z-Score 0.41. Adding MVRV zone-based regime signal and gold-BTC correlation tracking would address the two largest gaps in BTC signal coverage."
+      "recommended_new_signals": [
+        {"signal": "Gold-silver ratio velocity", "description": "Track rate of G/S ratio change. Rapid compression historically = silver outperformance continuation. Already partially in metals_cross_asset but could be standalone.", "difficulty": "easy"},
+        {"signal": "Silver ETF flow tracker", "description": "SLV/SIVR inflows/outflows as sentiment indicator. Contrarian at extremes.", "difficulty": "medium"},
+        {"signal": "FOMC proximity seasonal", "description": "Track distance to next FOMC. -3 to -5 days = SELL (vol expansion), post-event = BUY (vol collapse). Already in econ_calendar but silver-specific tuning needed.", "difficulty": "easy"}
+      ],
+      "our_signal_performance": {
+        "best": "Williams VIX Fix (60.9% XAG-specific, 92 sam). Only active for XAG per-ticker override.",
+        "worst": "Credit spread risk (disabled for XAG). EMA (14.7% at 1d, 34 sam — correctly disabled).",
+        "observation": "XAG signal heatmap: mostly HOLD in ranging. 12h TF BUY has been the Patient add-trigger — correctly not met this week. Position is safe."
+      }
     }
   ]
 }

@@ -1,92 +1,114 @@
 {
-  "date": "2026-05-28",
+  "date": "2026-05-30",
   "research_topics": [
-    "Adaptive signal weighting",
-    "Regime-adaptive signal selection",
-    "Multi-agent LLM trading architectures",
-    "Signal redundancy/correlation pruning",
-    "ATR-based position sizing",
-    "Cross-asset BTC prediction",
-    "Silver predictive model features"
+    "Signal calibration and accuracy regression",
+    "BUY-only signal bias in ranging markets",
+    "Correlation cluster management",
+    "Regime-adaptive signal weighting",
+    "ETF flow as predictive signal",
+    "Contract violation false positives"
   ],
   "findings": [
     {
-      "topic": "Regime-Adaptive Signal Routing",
-      "finding": "IIT KGP competition winner uses Kurtosis + Kaufman Efficiency Ratio (KER) to detect regime, then routes to mean-reversion vs trend-following signal sets. Achieved Sharpe 2.276 on out-of-sample.",
-      "relevance_to_us": "HIGH - Our signal engine applies all signals uniformly regardless of regime. Regime-blind application is likely why XAG accuracy is near random (49.4%). Routing signals by regime could dramatically improve hit rate.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "IIT KGP quantitative competition paper, regime-adaptive routing via kurtosis/KER classification"
-    },
-    {
-      "topic": "Walk-Forward Signal Reweighting",
-      "finding": "Rolling 7-day accuracy used to dynamically weight signal contributions in ensemble. Signals that have been accurate recently get higher weight, degraded signals get suppressed automatically without manual disable/enable.",
-      "relevance_to_us": "HIGH - We currently use static equal weighting with manual disable list. Walk-forward reweighting would auto-suppress degraded signals like qwen3 (45.2%) and boost strong performers like drift_regime_gate (68.1% recent).",
+      "topic": "Signal calibration",
+      "finding": "Qwen3 accuracy collapse (59.6% -> 28.2%) caused by confidence calibration map (commit 82bac99a, 2026-05-29) fitted on only 304 samples. The 0.6-0.8 confidence bin was mapped to 28.86%, effectively muting the signal to 97.6% HOLD.",
+      "relevance_to_us": "CRITICAL — our 2nd best signal is effectively disabled. Fix by reverting or relaxing calibration map.",
       "implementation_difficulty": "easy",
       "expected_impact": "high",
-      "source": "Ensemble signal weighting literature, rolling accuracy-based reweighting"
+      "source": "Internal investigation of portfolio/llm_confidence_calibration.py and data/llm_confidence_calibration.json"
     },
     {
-      "topic": "ATR-Based Position Sizing",
-      "finding": "Position size = Risk Budget / (ATR * multiplier). Normalizes position sizes by current volatility. Standard approach: 1-2% risk per trade, ATR(14) with 2x multiplier for stop distance.",
-      "relevance_to_us": "HIGH - We use fixed position sizes regardless of volatility. ATR-based sizing would reduce exposure during high-vol regimes and increase during calm periods. Already have ATR computed in signal pipeline.",
+      "topic": "BUY-only signal bias",
+      "finding": "Three signals (crypto_macro 93% BUY, econ_calendar BUY-only, calendar 100% BUY) dilute SELL consensus in ranging/bearish markets. crypto_macro at 25.2% recent accuracy, econ_calendar at 39.1%. Bias penalty (0.2x) partially mitigates but insufficient.",
+      "relevance_to_us": "Our consensus is biased bullish in non-bullish regimes. This causes delayed recognition of bearish signals.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "Standard quantitative risk management, ATR position sizing methodology"
+      "source": "Internal correlation analysis of portfolio/signal_engine.py lines 569-592, 1283-1412"
     },
     {
-      "topic": "BTC Cross-Asset Prediction",
-      "finding": "Temporal Fusion Transformer (TFT) analysis shows gold price is the #1 cross-asset predictor of BTC, followed by DXY. Correlation regime between gold-BTC shifts between 0.4-0.6 and is itself predictive of BTC direction.",
-      "relevance_to_us": "MEDIUM - We track gold and BTC independently but don't use gold as a BTC predictor. Adding gold-BTC correlation regime signal could improve BTC consensus. DXY already tracked via credit_spread_risk.",
+      "topic": "Correlation cluster management",
+      "finding": "Momentum cluster (7 signals, 88-100% agreement) has effective weight of 1.70x despite being highly correlated. Dynamic correlation computation falls back to static groups when <30 samples in 30 days.",
+      "relevance_to_us": "When momentum cluster is wrong, 7 signals vote wrong together. Single-point-of-failure risk. Reduce follower penalty from 0.10x to 0.05x.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "TFT cross-asset feature importance analysis for BTC prediction"
+      "source": "Internal analysis of signal_engine.py lines 1838-1910, 2499-2564"
     },
     {
-      "topic": "Signal Correlation Pruning",
-      "finding": "mRMR (minimum Redundancy Maximum Relevance) feature selection identifies signals that are highly predictive but minimally correlated with each other. Removes redundant signals that dilute consensus without adding information.",
-      "relevance_to_us": "HIGH - We have 16 active signals, some likely correlated (e.g., RSI and mean_reversion both use RSI variants). Pruning redundant signals would sharpen consensus and reduce HOLD dilution.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "mRMR feature selection methodology for signal ensemble optimization"
+      "topic": "Regime-adaptive signal selection",
+      "finding": "In current ranging regime: news_event (66.5%), RSI (56.3%), drift_regime_gate (58.2%) are our best performers. Momentum/mean_reversion dropped to coin-flip. System doesn't dynamically reweight based on regime.",
+      "relevance_to_us": "Regime-conditioned signal weights could improve consensus quality by 5-10pp in ranging markets. Currently on quant_research_priorities backlog.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "high",
+      "source": "Memory: quant_research_priorities.md — IC-based weighting plan ready, regime-conditioned weights 2nd priority"
     },
     {
-      "topic": "Silver COT/ETF Predictive Features",
-      "finding": "CFTC COT data shows Managed Money net long 5472 contracts in silver. ETF inflows rate-of-change and COT positioning changes are leading indicators for silver price moves. Industrial demand proxies (copper, solar ETF) add predictive power.",
-      "relevance_to_us": "HIGH - Our COT signal has only 5 samples and 100% accuracy (unreliable small sample). Silver ETF flows not tracked at all. Adding COT change momentum and ETF flow signals could materially improve XAG accuracy from 49.4%.",
+      "topic": "ETF flow as signal",
+      "finding": "BTC spot ETF flows are the strongest single predictor right now: 6-day outflow streak ($2.54B) correlates with BTC weakness. No existing signal tracks this. Could be high-impact addition.",
+      "relevance_to_us": "New signal module opportunity. ETF flow data available via CoinGlass or similar APIs. 5-day rolling flow momentum as BUY/SELL signal.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "CFTC COT reports, silver ETF flow analysis, industrial demand correlation studies"
+      "source": "Market research — ETF flow data from Bloomberg, CoinGlass"
+    },
+    {
+      "topic": "Contract violation false positives",
+      "finding": "check_layer2_journal_activity fires false positives because journal entry timestamps precede trigger timestamps (the agent writes with signal snapshot time, not completion time). 21 violations this week are likely false positives.",
+      "relevance_to_us": "Creates noise in critical_errors.jsonl. Fix: compare with invocation completion timestamp, not trigger timestamp. Or accept invocations.jsonl journal_written=true as authoritative.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "low",
+      "source": "Internal investigation of portfolio/loop_contract.py:277 and invocations.jsonl"
+    },
+    {
+      "topic": "Options max pain as signal",
+      "finding": "BTC max pain at $75K vs spot $73.1K. Historically, price gravitates toward max pain within 72h post-expiry. A simple max pain delta signal could capture this reversion.",
+      "relevance_to_us": "New signal opportunity for crypto. Track weekly max pain from Deribit/options data. >5% gap = directional signal.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "Market research — options data from Deribit, Coinglass"
+    },
+    {
+      "topic": "Silver seasonal model",
+      "finding": "June historically weakest month for silver (avg -2.1%), July-August bounce typical. FOMC proximity (3-5 days before) correlates with silver sell-off. Our econ_calendar signal partially captures this but isn't silver-tuned.",
+      "relevance_to_us": "XAG is our primary position. A silver-specific seasonal/FOMC proximity signal could improve timing of adds/trims. Already have seasonality_profiles.json.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "Market research — seasonal analysis of XAG historical data"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Walk-forward accuracy signal reweighting",
+      "title": "Revert or relax Qwen3 confidence calibration",
+      "description": "Commit 82bac99a broke Qwen3 by mapping 0.6-0.8 confidence to 28.86%. Either revert the calibration, increase the min bin sample threshold (>1000), or use out-of-sample validation.",
       "priority": 1,
-      "estimated_effort_days": 0.5,
-      "target_file": "signal_engine.py",
-      "description": "Replace static equal weighting with rolling 7-day accuracy-based weights. Signals with higher recent accuracy get proportionally more influence in consensus."
+      "effort_days": 0.5,
+      "files_affected": ["data/llm_confidence_calibration.json", "portfolio/llm_confidence_calibration.py"]
     },
     {
-      "title": "Disable degraded signals qwen3/crypto_macro/econ_calendar",
+      "title": "Regime-gate econ_calendar in ranging market",
+      "description": "econ_calendar at 39.1% recent accuracy. Add to REGIME_GATED_SIGNALS for 'range-bound' regime like crypto_macro already is.",
       "priority": 2,
-      "estimated_effort_days": 0.5,
-      "target_file": "signal_engine.py",
-      "description": "Qwen3 at 45.2%, crypto_macro and econ_calendar underperforming. Disable globally, re-enable only for tickers where per-ticker accuracy exceeds threshold."
+      "effort_days": 0.5,
+      "files_affected": ["portfolio/signal_engine.py"]
     },
     {
-      "title": "Enable high-accuracy disabled signals adx/amihud/choppiness",
+      "title": "Tighten momentum_cluster follower penalty",
+      "description": "Reduce momentum_cluster follower_weight from 0.10 to 0.05 to reduce correlated error amplification.",
       "priority": 3,
-      "estimated_effort_days": 1.0,
-      "target_file": "signal_engine.py",
-      "description": "Several disabled signals show strong backtested accuracy. ADX trend filter, Amihud illiquidity, and choppiness index could improve regime detection without adding noise."
+      "effort_days": 0.5,
+      "files_affected": ["portfolio/signal_engine.py"]
     },
     {
-      "title": "Regime-conditional signal routing",
+      "title": "Fix contract violation false positives",
+      "description": "Update check_layer2_journal_activity to use invocation completion timestamp instead of trigger timestamp, or accept journal_written=true from invocations.jsonl as authoritative.",
       "priority": 4,
-      "estimated_effort_days": 2.0,
-      "target_file": "signal_engine.py",
-      "description": "Implement KER/kurtosis regime detection to route mean-reversion signals in ranging markets and trend signals in trending markets. Based on IIT KGP competition winner approach."
+      "effort_days": 1,
+      "files_affected": ["portfolio/loop_contract.py"]
+    },
+    {
+      "title": "Add ETF flow momentum signal",
+      "description": "New signal module tracking BTC spot ETF net flows. 5-day rolling sum: >$500M outflow = SELL, >$500M inflow = BUY. Data from CoinGlass API.",
+      "priority": 5,
+      "effort_days": 2,
+      "files_affected": ["portfolio/signals/etf_flow.py", "portfolio/signal_registry.py"]
     }
   ]
 }
