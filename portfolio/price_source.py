@@ -249,9 +249,12 @@ def fetch_klines(
                 source, ticker, exc,
             )
             try:
-                return _fetch_yfinance(
+                df = _fetch_yfinance(
                     _to_yfinance_symbol(ticker), interval, period=period, limit=limit
                 )
+                df.attrs["_source"] = "yfinance_fallback"
+                df.attrs["_primary_failed"] = source
+                return df
             except Exception as exc2:
                 raise SourceUnavailableError(
                     f"All sources failed for {ticker}: primary={source} "

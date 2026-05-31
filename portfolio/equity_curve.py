@@ -7,7 +7,7 @@ metrics useful for charting and strategy comparison.
 import datetime
 import math
 import pathlib
-from collections import defaultdict
+from collections import defaultdict, deque
 
 from portfolio.file_utils import load_jsonl
 
@@ -330,7 +330,7 @@ def _pair_round_trips(transactions):
     """
 
     # Group BUYs by ticker — maintain FIFO order
-    buy_queues = defaultdict(list)
+    buy_queues = defaultdict(deque)
     for tx in transactions:
         if tx.get("action") == "BUY":
             ticker = tx.get("ticker", "")
@@ -416,7 +416,7 @@ def _pair_round_trips(transactions):
             shares_to_match -= matched
 
             if buy["remaining_shares"] <= 1e-10:
-                buy_queues[ticker].pop(0)
+                buy_queues[ticker].popleft()
 
     return round_trips
 

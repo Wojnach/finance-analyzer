@@ -378,7 +378,7 @@ def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
     # still empty — that's the real signal the wiring is broken.
     with _state_lock:
         state = _load_state()
-    if not state.get("ticker_trades") and all_warnings == [] and _portfolios_have_transactions():
+    if not _wiring_confirmed and not state.get("ticker_trades") and all_warnings == [] and _portfolios_have_transactions():
         logger.warning(
             "C4: portfolios have transactions but trade_guard_state.json "
             "has no recorded trades — record_trade() wiring appears broken. "

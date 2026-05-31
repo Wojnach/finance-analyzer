@@ -964,7 +964,12 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
                     side_total = "total_buy" if key == "buy_accuracy" else "total_sell"
                     at_side = at.get(side_total, 0) or 0
                     rc_side = rc.get(side_total, 0) or 0
-                    result[key] = at[key] if at_side >= rc_side else rc[key]
+                    if at_side + rc_side > 0:
+                        result[key] = (
+                            at[key] * at_side + rc[key] * rc_side
+                        ) / (at_side + rc_side)
+                    else:
+                        result[key] = at[key] if at_side >= rc_side else rc[key]
                 elif key in at:
                     result[key] = at[key]
                 elif key in rc:

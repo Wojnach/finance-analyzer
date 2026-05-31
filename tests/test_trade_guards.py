@@ -414,6 +414,7 @@ class TestC4Warning:
         self, clean_state, caplog, tmp_path, monkeypatch,
     ):
         import logging
+        monkeypatch.setattr("portfolio.trade_guards._wiring_confirmed", False)
         monkeypatch.setattr("portfolio.trade_guards.DATA_DIR", tmp_path)
         (tmp_path / "portfolio_state.json").write_text(
             json.dumps({"transactions": [{"ticker": "BTC-USD", "action": "BUY"}]}),
@@ -432,6 +433,7 @@ class TestC4Warning:
         portfolio was excluded, leaving C4 silent if warrants was the only
         trading strategy."""
         import logging
+        monkeypatch.setattr("portfolio.trade_guards._wiring_confirmed", False)
         monkeypatch.setattr("portfolio.trade_guards.DATA_DIR", tmp_path)
         (tmp_path / "portfolio_state_warrants.json").write_text(
             json.dumps({"transactions": [{"ticker": "XBT-TRACKER", "action": "BUY"}]}),
