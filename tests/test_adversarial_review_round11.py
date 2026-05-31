@@ -124,8 +124,9 @@ class TestBlendDirectionalFollowsSampleFloor:
         result = blend_accuracy_data(alltime, recent)
         # Overall uses alltime (recent below threshold).
         assert result["sig"]["accuracy"] == 0.60
-        # Directional also from alltime since at_samples > 0.
-        assert result["sig"]["buy_accuracy"] == 0.55
+        # Directional blended via sample-weighted average.
+        expected_buy = (0.55 * 100 + 0.90 * 10) / (100 + 10)
+        assert abs(result["sig"]["buy_accuracy"] - expected_buy) < 1e-6
 
 
 class TestReplayRegimeExcludesErrorRows:

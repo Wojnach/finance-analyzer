@@ -128,7 +128,7 @@ class TestBlendAccuracyDataDirectionalMerge:
         assert result["new_sig"]["sell_accuracy"] == 0.52
         assert result["new_sig"]["total_sell"] == 250
 
-    def test_directional_merged_from_larger_sample_side(self):
+    def test_directional_merged_via_sample_weighted_blend(self):
         alltime = {
             "rsi": {
                 "accuracy": 0.55, "total": 1000,
@@ -144,8 +144,10 @@ class TestBlendAccuracyDataDirectionalMerge:
             },
         }
         result = blend_accuracy_data(alltime, recent)
-        assert result["rsi"]["buy_accuracy"] == 0.45
-        assert result["rsi"]["sell_accuracy"] == 0.65
+        expected_buy = (0.45 * 600 + 0.30 * 20) / (600 + 20)
+        expected_sell = (0.65 * 400 + 0.70 * 80) / (400 + 80)
+        assert abs(result["rsi"]["buy_accuracy"] - expected_buy) < 1e-6
+        assert abs(result["rsi"]["sell_accuracy"] - expected_sell) < 1e-6
 
     def test_directional_from_alltime_only(self):
         alltime = {
