@@ -1,114 +1,110 @@
 {
-  "date": "2026-05-30",
+  "date": "2026-05-31",
+  "generated_at": "2026-05-31T20:40:41.336840+00:00",
   "research_topics": [
-    "Signal calibration and accuracy regression",
-    "BUY-only signal bias in ranging markets",
-    "Correlation cluster management",
-    "Regime-adaptive signal weighting",
-    "ETF flow as predictive signal",
-    "Contract violation false positives"
+    "Adaptive signal weighting",
+    "Regime-adaptive signal selection",
+    "Signal correlation analysis",
+    "Walk-forward optimization",
+    "Shadow signal tracking fix",
+    "Layer 2 telegram detection fix"
   ],
   "findings": [
     {
-      "topic": "Signal calibration",
-      "finding": "Qwen3 accuracy collapse (59.6% -> 28.2%) caused by confidence calibration map (commit 82bac99a, 2026-05-29) fitted on only 304 samples. The 0.6-0.8 confidence bin was mapped to 28.86%, effectively muting the signal to 97.6% HOLD.",
-      "relevance_to_us": "CRITICAL — our 2nd best signal is effectively disabled. Fix by reverting or relaxing calibration map.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "Internal investigation of portfolio/llm_confidence_calibration.py and data/llm_confidence_calibration.json"
-    },
-    {
-      "topic": "BUY-only signal bias",
-      "finding": "Three signals (crypto_macro 93% BUY, econ_calendar BUY-only, calendar 100% BUY) dilute SELL consensus in ranging/bearish markets. crypto_macro at 25.2% recent accuracy, econ_calendar at 39.1%. Bias penalty (0.2x) partially mitigates but insufficient.",
-      "relevance_to_us": "Our consensus is biased bullish in non-bullish regimes. This causes delayed recognition of bearish signals.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "Internal correlation analysis of portfolio/signal_engine.py lines 569-592, 1283-1412"
-    },
-    {
-      "topic": "Correlation cluster management",
-      "finding": "Momentum cluster (7 signals, 88-100% agreement) has effective weight of 1.70x despite being highly correlated. Dynamic correlation computation falls back to static groups when <30 samples in 30 days.",
-      "relevance_to_us": "When momentum cluster is wrong, 7 signals vote wrong together. Single-point-of-failure risk. Reduce follower penalty from 0.10x to 0.05x.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "Internal analysis of signal_engine.py lines 1838-1910, 2499-2564"
-    },
-    {
-      "topic": "Regime-adaptive signal selection",
-      "finding": "In current ranging regime: news_event (66.5%), RSI (56.3%), drift_regime_gate (58.2%) are our best performers. Momentum/mean_reversion dropped to coin-flip. System doesn't dynamically reweight based on regime.",
-      "relevance_to_us": "Regime-conditioned signal weights could improve consensus quality by 5-10pp in ranging markets. Currently on quant_research_priorities backlog.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "Memory: quant_research_priorities.md — IC-based weighting plan ready, regime-conditioned weights 2nd priority"
-    },
-    {
-      "topic": "ETF flow as signal",
-      "finding": "BTC spot ETF flows are the strongest single predictor right now: 6-day outflow streak ($2.54B) correlates with BTC weakness. No existing signal tracks this. Could be high-impact addition.",
-      "relevance_to_us": "New signal module opportunity. ETF flow data available via CoinGlass or similar APIs. 5-day rolling flow momentum as BUY/SELL signal.",
+      "topic": "Shadow signal tracking",
+      "finding": "24 signals compute every cycle (290K+ calls) but produce zero accuracy samples because outcome_tracker skips HOLD votes. Shadow tracking was designed to solve this but fails because disabled signals vote HOLD, and HOLD votes are skipped.",
+      "relevance_to_us": "Cannot validate or promote any of 24 shadow signals without fixing this",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "Market research — ETF flow data from Bloomberg, CoinGlass"
+      "source": "Internal analysis of accuracy_cache.json + signal_engine.py"
     },
     {
-      "topic": "Contract violation false positives",
-      "finding": "check_layer2_journal_activity fires false positives because journal entry timestamps precede trigger timestamps (the agent writes with signal snapshot time, not completion time). 21 violations this week are likely false positives.",
-      "relevance_to_us": "Creates noise in critical_errors.jsonl. Fix: compare with invocation completion timestamp, not trigger timestamp. Or accept invocations.jsonl journal_written=true as authoritative.",
+      "topic": "Layer 2 telegram detection",
+      "finding": "The _detect_append() function uses count-delta heuristic that breaks at the 5000-line prune cap. telegram_messages.jsonl at cap causes false telegram_sent=false, triggering 22 false contract violations. Agents actually working correctly.",
+      "relevance_to_us": "Eliminates 22 false critical error alerts, reduces noise in monitoring",
       "implementation_difficulty": "easy",
-      "expected_impact": "low",
-      "source": "Internal investigation of portfolio/loop_contract.py:277 and invocations.jsonl"
+      "expected_impact": "high",
+      "source": "Root cause analysis of agent_invocation.py lines 640-662"
     },
     {
-      "topic": "Options max pain as signal",
-      "finding": "BTC max pain at $75K vs spot $73.1K. Historically, price gravitates toward max pain within 72h post-expiry. A simple max pain delta signal could capture this reversion.",
-      "relevance_to_us": "New signal opportunity for crypto. Track weekly max pain from Deribit/options data. >5% gap = directional signal.",
+      "topic": "Accuracy-based signal rescue",
+      "finding": "news_event signal surging from 51% to 75.8% (1d) and 70% (3h) with substantial samples. Currently disabled. Several other disabled signals showing recent improvement: trend (61.6% 3h), volatility_sig (60.2% 3h), smart_money (63.2% 3h).",
+      "relevance_to_us": "Potential accuracy improvement by enabling hot signals",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "accuracy_cache.json analysis"
+    },
+    {
+      "topic": "williams_vix_fix per-ticker harm",
+      "finding": "williams_vix_fix has 30.5% recent accuracy (131 samples) but is rescued for XAU and XAG per-ticker. This is actively harmful - worse than random.",
+      "relevance_to_us": "Directly harming metals consensus (primary trading instruments)",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "accuracy_cache.json + signal_engine.py PER_TICKER_RESCUE"
+    },
+    {
+      "topic": "Horizon-specific signal performance",
+      "finding": "Strong divergence between horizons: ministral 58% 1d but 37.5% 3d. fear_greed 58.6% 1d and 68.7% 3d. econ_calendar 55.5% 1d_all but 32.7% 1d_recent. Signals should be weighted per-horizon, not uniformly.",
+      "relevance_to_us": "Horizon-specific weighting could improve consensus by 3-5pp",
       "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "Market research — options data from Deribit, Coinglass"
+      "source": "accuracy_cache.json multi-horizon analysis"
     },
     {
-      "topic": "Silver seasonal model",
-      "finding": "June historically weakest month for silver (avg -2.1%), July-August bounce typical. FOMC proximity (3-5 days before) correlates with silver sell-off. Our econ_calendar signal partially captures this but isn't silver-tuned.",
-      "relevance_to_us": "XAG is our primary position. A silver-specific seasonal/FOMC proximity signal could improve timing of adds/trims. Already have seasonality_profiles.json.",
-      "implementation_difficulty": "easy",
+      "topic": "Permanent BUY bias signals",
+      "finding": "econ_calendar votes BUY 99% of time across all tickers. fear_greed votes 100% BUY (0 SELL ever). gold_overnight_bias BUY 77%. hash_ribbons BUY permanently. These create systematic BUY bias in consensus even when gated.",
+      "relevance_to_us": "Systematic BUY bias can leak through gate relaxation circuit breaker",
+      "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "Market research — seasonal analysis of XAG historical data"
+      "source": "signal_log.jsonl voting pattern analysis"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Revert or relax Qwen3 confidence calibration",
-      "description": "Commit 82bac99a broke Qwen3 by mapping 0.6-0.8 confidence to 28.86%. Either revert the calibration, increase the min bin sample threshold (>1000), or use out-of-sample validation.",
+      "title": "Fix _detect_append() for pruned files",
+      "description": "Replace count-delta with timestamp-based detection or baseline after prune",
       "priority": 1,
-      "effort_days": 0.5,
-      "files_affected": ["data/llm_confidence_calibration.json", "portfolio/llm_confidence_calibration.py"]
+      "effort_hours": 2,
+      "files_affected": [
+        "portfolio/agent_invocation.py"
+      ]
     },
     {
-      "title": "Regime-gate econ_calendar in ranging market",
-      "description": "econ_calendar at 39.1% recent accuracy. Add to REGIME_GATED_SIGNALS for 'range-bound' regime like crypto_macro already is.",
+      "title": "Remove williams_vix_fix from PER_TICKER_RESCUE for XAU/XAG",
+      "description": "30.5% recent accuracy is actively harmful. Remove from rescue set.",
       "priority": 2,
-      "effort_days": 0.5,
-      "files_affected": ["portfolio/signal_engine.py"]
+      "effort_hours": 0.5,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
     },
     {
-      "title": "Tighten momentum_cluster follower penalty",
-      "description": "Reduce momentum_cluster follower_weight from 0.10 to 0.05 to reduce correlated error amplification.",
+      "title": "Add ministral to per-horizon blacklist for 3d/5d/10d",
+      "description": "37.5% at 3d, should only vote at 1d and shorter horizons",
       "priority": 3,
-      "effort_days": 0.5,
-      "files_affected": ["portfolio/signal_engine.py"]
+      "effort_hours": 0.5,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
     },
     {
-      "title": "Fix contract violation false positives",
-      "description": "Update check_layer2_journal_activity to use invocation completion timestamp instead of trigger timestamp, or accept journal_written=true from invocations.jsonl as authoritative.",
+      "title": "Fix shadow signal outcome tracking",
+      "description": "Track directional output of shadow signals even when vote is gated to HOLD",
       "priority": 4,
-      "effort_days": 1,
-      "files_affected": ["portfolio/loop_contract.py"]
+      "effort_hours": 4,
+      "files_affected": [
+        "portfolio/outcome_tracker.py",
+        "portfolio/signal_engine.py"
+      ]
     },
     {
-      "title": "Add ETF flow momentum signal",
-      "description": "New signal module tracking BTC spot ETF net flows. 5-day rolling sum: >$500M outflow = SELL, >$500M inflow = BUY. Data from CoinGlass API.",
+      "title": "Resolve false critical error alerts from L2 detection",
+      "description": "Resolve the 22 false contract_violation entries in critical_errors.jsonl",
       "priority": 5,
-      "effort_days": 2,
-      "files_affected": ["portfolio/signals/etf_flow.py", "portfolio/signal_registry.py"]
+      "effort_hours": 0.5,
+      "files_affected": [
+        "data/critical_errors.jsonl"
+      ]
     }
   ]
 }
