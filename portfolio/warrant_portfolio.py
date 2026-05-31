@@ -97,7 +97,7 @@ def warrant_pnl(holding, current_underlying_usd, fx_rate):
     implied_pnl_pct_rounded = round(implied_pnl_pct * 100, 2)
 
     # Current implied value
-    current_implied_sek = entry_price_sek * (1 + implied_pnl_pct)
+    current_implied_sek = max(0.0, entry_price_sek * (1 + implied_pnl_pct))
     total_value_sek = current_implied_sek * units
     entry_value_sek = entry_price_sek * units
     pnl_sek = round(total_value_sek - entry_value_sek, 2)
@@ -109,6 +109,7 @@ def warrant_pnl(holding, current_underlying_usd, fx_rate):
         "total_value_sek": round(total_value_sek, 2),
         "entry_value_sek": round(entry_value_sek, 2),
         "underlying_change_pct": underlying_change_pct,
+        "knocked_out": current_implied_sek == 0.0,
         "source": "implied",
     }
 

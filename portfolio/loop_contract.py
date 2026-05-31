@@ -371,6 +371,7 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     })
     _KNOWN_FAILURE_STATUSES = frozenset({
         "incomplete",
+        "failed",
         "auth_error",
         "autonomous_failed",
     })

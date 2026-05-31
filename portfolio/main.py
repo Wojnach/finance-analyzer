@@ -1091,11 +1091,11 @@ def run(force_report=False, active_symbols=None):
         except Exception as e:
             logger.warning("safeguard checks failed: %s", e)
 
-    # Proactive IC cache refresh (every 60 cycles ≈ 60 min).
+    # Proactive IC cache refresh (every 6 cycles ≈ 60 min at 600s cadence).
     # IC data is used by Layer 2 for signal weighting. Without proactive
     # refresh, the cache goes stale until a Layer 2 invocation triggers
     # recomputation — stealing ~25s from the L2 time budget.
-    if _ss._run_cycle_id % 60 == 30 and _ss._run_cycle_id > 0:
+    if _ss._run_cycle_id % 6 == 3 and _ss._run_cycle_id > 0:
         try:
             from portfolio.ic_computation import compute_and_cache_ic
             for _ic_h in ("3h", "1d"):

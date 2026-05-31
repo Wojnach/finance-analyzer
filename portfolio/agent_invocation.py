@@ -328,7 +328,7 @@ def _extract_ticker(reasons):
         m = re.search(r'\b([A-Z]{2,5})\b(?:\s+flipped|\s+crossed|\s+broke)', r)
         if m:
             return m.group(1)
-    return "XAG-USD"  # default to silver
+    return None
 
 
 def _extract_triggered_tickers(reasons):
@@ -1067,8 +1067,11 @@ def invoke_agent(reasons, tier=3):
             )
             # Extract primary ticker from reasons
             ticker = _extract_ticker(reasons)
-            logger.info("Multi-agent T%d: launching 3 specialists for %s", tier, ticker)
-            procs = launch_specialists(ticker, reasons)
+            if not ticker:
+                logger.warning("Multi-agent T%d: no ticker extracted from reasons, falling back to single-agent", tier)
+            else:
+                logger.info("Multi-agent T%d: launching 3 specialists for %s", tier, ticker)
+            procs = launch_specialists(ticker, reasons) if ticker else {}
             if procs:
                 # C3/NEW-1: timeout reduced from 150s to 30s (configurable via
                 # layer2.specialist_timeout_s) to avoid blocking the main loop.
@@ -1126,7 +1129,10 @@ def invoke_agent(reasons, tier=3):
     # calibrate (e.g., "I said SELL at $73 — price is now $75, was I wrong?").
     try:
         feedback_ticker = _extract_ticker(reasons)
-        _feedback = _build_decision_feedback(feedback_ticker)
+        if not feedback_ticker:
+            _feedback = ""
+        else:
+            _feedback = _build_decision_feedback(feedback_ticker)
         if _feedback:
             prompt += "\n\n" + _feedback
     except Exception as e:
@@ -1629,6 +1635,23 @@ def _check_agent_completion_locked():
             )
         except Exception as e:
             logger.warning("Agent failure alert failed: %s", e)
+        if not journal_written:
+            try:
+                stub_entry = {
+                    "ts": completed_at,
+                    "trigger": "; ".join(_agent_reasons or []),
+                    "status": "failed",
+                    "tier": _agent_tier,
+                    "duration_s": duration_s,
+                    "exit_code": exit_code,
+                    "decisions": {"patient": {"action": "NO_DECISION", "reasoning": f"Agent failed (exit code {exit_code})"},
+                                  "bold": {"action": "NO_DECISION", "reasoning": f"Agent failed (exit code {exit_code})"}},
+                    "tickers": {},
+                }
+                atomic_append_jsonl(JOURNAL_FILE, stub_entry)
+                logger.info("Wrote stub journal entry for failed T%d run (exit=%d)", _agent_tier, exit_code)
+            except Exception as e:
+                logger.warning("Failed to write stub journal entry: %s", e)
     elif status == "incomplete":
         try:
             config = _load_config()
