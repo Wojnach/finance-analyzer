@@ -1519,6 +1519,7 @@ _DYNAMIC_HORIZON_DEADBAND = 0.1     # ignore multipliers within ±10% of 1.0
 _CROSS_HORIZON_PAIRS = {
     "3h": ["1d"],
     "4h": ["1d"],
+    "12h": ["1d", "3h"],
     "1d": ["3h"],
 }
 

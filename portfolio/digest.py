@@ -63,7 +63,7 @@ def _build_digest_message():
 
     # --- Invocations (Layer 1 trigger → Layer 2) ---
     # BUG-190: Use tail read for efficiency (invocations.jsonl grows unbounded)
-    entries = load_jsonl_tail(INVOCATIONS_FILE, max_entries=500)
+    entries = load_jsonl_tail(INVOCATIONS_FILE, max_entries=2000)
     recent = []
     for e in entries:
         ts_str = e.get("ts", "")
@@ -97,7 +97,7 @@ def _build_digest_message():
                 reason_counts["other"] += 1
 
     # --- Layer 2 decisions from journal ---
-    journal = load_jsonl_tail(JOURNAL_FILE, max_entries=500)
+    journal = load_jsonl_tail(JOURNAL_FILE, max_entries=2000)
     recent_journal = []
     for e in journal:
         ts_str = e.get("ts", "")
@@ -119,7 +119,7 @@ def _build_digest_message():
 
     # --- Signal consensus breakdown from signal_log ---
     # BUG-109: Use tail read for signal_log (68MB+) instead of reading entire file
-    signal_entries = load_jsonl_tail(SIGNAL_LOG_FILE, max_entries=500)
+    signal_entries = load_jsonl_tail(SIGNAL_LOG_FILE, max_entries=2000)
     recent_signals = []
     for e in signal_entries:
         ts_str = e.get("ts", "")
