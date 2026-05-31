@@ -390,6 +390,11 @@ def _register_defaults():
                       "compute_btc_gold_correlation_regime_signal",
                       requires_context=True,
                       max_confidence=0.7)
+    register_enhanced("gold_btc_vol_spillover",
+                      "portfolio.signals.gold_btc_vol_spillover",
+                      "compute_gold_btc_vol_spillover_signal",
+                      requires_context=True,
+                      max_confidence=0.7)
     register_enhanced("kalman_trend_momentum",
                       "portfolio.signals.kalman_trend_momentum",
                       "compute_kalman_trend_momentum_signal",

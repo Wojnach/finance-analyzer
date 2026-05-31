@@ -275,6 +275,11 @@ DISABLED_SIGNALS = {
                         # 3 sub-signals: ROC z-score, ratio vs SMA50, ROC acceleration.
                         # Score 7.85/10. Source: Bybit, TechJuice, after-hours research.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "gold_btc_vol_spillover",  # 2026-05-31: NEW. Gold-to-BTC volatility spillover.
+                        # One-way vol transmission from gold to BTC (academic finding).
+                        # Gold vol spike >2sigma -> BTC vol expansion 1-3 days later.
+                        # Score 7.5/10. Source: ScienceDirect volatility spillover (2025).
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -460,4 +465,5 @@ SIGNAL_NAMES = [
     "gs_kalman_zscore_regime",
     "crypto_derivatives_composite",
     "eth_btc_ratio_roc_zscore",
+    "gold_btc_vol_spillover",
 ]
