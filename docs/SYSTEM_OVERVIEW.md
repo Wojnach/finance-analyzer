@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-27
-Branch: improve/auto-session-2026-05-27
+Updated: 2026-05-31
+Branch: improve/auto-session-2026-05-31
 
 ## 1) Architecture Summary
 

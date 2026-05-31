@@ -1,5 +1,50 @@
 # Session Progress
 
+## 2026-05-31 Auto-improvement session (autonomous)
+
+### What was done
+- **Exploration**: 5 parallel agents covered core loop, signal engine, portfolio/risk,
+  dashboard/reporting, metals/bots. Cross-referenced with FGL 2026-05-30 synthesis.
+- **Plan**: `docs/IMPROVEMENT_PLAN.md` — 20 bugs found, 15 fixed in 4 batches.
+
+**Batch 1 — 5 fixes** (P0 + critical P1):
+  - warrant_portfolio: knockout floor clamp (`max(0.0, ...)`) prevents negative warrant values
+  - agent_invocation: failed journal stub (mirrors incomplete path), _extract_ticker returns None
+  - loop_contract: add "failed" to _KNOWN_FAILURE_STATUSES
+  - main: IC cache refresh modulo 60→6 (was 10h at 600s cadence, now ~60min)
+
+**Batch 2 — 5 fixes** (P1 data/safety):
+  - data_collector: yfinance lock in fetch_vix, ValueError bypasses alpaca circuit breaker
+  - market_timing: Swedish holiday check in _is_agent_window()
+  - dashboard: fix copy-paste "mstr endpoint error" log
+  - risk_management: lazy-init CORRELATED_PAIRS, fix annualization 252→365 for crypto/metals
+  - journal: load_recent uses load_jsonl_tail
+
+**Batch 3 — 4 fixes** (P1 accuracy + P2 perf):
+  - accuracy_stats: directional accuracy uses sample-weighted blend (was picking higher-N)
+  - equity_curve: deque.popleft() replaces list.pop(0) in round-trip matching
+  - trade_guards: C4 wiring check suppressed when _wiring_confirmed=True
+  - price_source: yfinance fallback DataFrame gets _source/_primary_failed attrs
+
+**Batch 4 — 2 fixes** (signal quality + digest):
+  - signal_engine: add 12h to _CROSS_HORIZON_PAIRS for dynamic horizon weights
+  - digest: increase tail limit 500→2000 for high-activity periods
+
+### Not in scope (deferred)
+- P0-1/P0-2 Avanza session/stop-loss (real-money path, needs BankID re-auth)
+- Theme B1 cross-process atomic-RMW (architectural)
+- Theme B4 EOD-flat reconcile (complex metals logic)
+- Theme B5 reconstructed history methodology
+- REGIME_GATE_ONLY_SIGNALS (dormant, not broken)
+- _confluence_score (used for debugging, not dead code)
+
+### What's next
+- Push and merge
+- Avanza BankID session still expired — `python scripts/avanza_login.py`
+- Contract-window fix (72% of violations are success-lag, not the bugs fixed here)
+
+---
+
 ## 2026-05-30 FGL Full-Codebase Adversarial Review (docs-only)
 
 Ran the `/fgl` protocol as a **review**, not an implementation: partitioned ~120K

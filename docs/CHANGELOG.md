@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-05-31 (Auto-improvement: 15 bug fixes)
+
+P0/P1/P2 fixes across orchestration, signal engine, data collection, risk,
+and dashboard. Found via 5 parallel deep-exploration agents cross-referenced
+with FGL adversarial review synthesis (2026-05-30).
+
+**P0 — Safety (3 fixes):**
+- Warrant knockout floor: `max(0.0, ...)` clamp on implied warrant value
+  prevents negative values from corrupting drawdown/VaR/circuit breaker.
+- Failed journal stub: `status="failed"` now writes a journal stub (mirrors
+  the incomplete path) so Layer 2 crashes are visible to loop_contract.
+- Known failure status: `"failed"` added to `_KNOWN_FAILURE_STATUSES` in
+  loop_contract to suppress redundant contract violations for known failures.
+
+**P1 — Reliability (8 fixes):**
+- IC cache refresh: modulo corrected from 60→6 for 600s cadence (was running
+  every 10h instead of the documented 60min).
+- Thread safety: `fetch_vix` now acquires `_yfinance_lock` before yfinance
+  calls (was racing with ThreadPoolExecutor ticker workers).
+- Alpaca circuit breaker: `ValueError` (empty data on weekends) no longer
+  trips the circuit breaker — only real API failures count.
+- Swedish holidays: `_is_agent_window()` blocks Layer 2 on Swedish holidays
+  (Epiphany, Easter Monday, Midsummer Eve, etc.) to prevent failed Avanza orders.
+- Dashboard log: fixed copy-paste "mstr endpoint error" in market-health handler.
+- Annualization: `compute_probabilistic_stops` uses 365 for crypto/metals
+  instead of 252 (stocks-only constant).
+- Lazy CORRELATED_PAIRS: module-level import moved to lazy getter to prevent
+  crash if correlation_priors fails to import.
+- Accuracy blending: directional accuracy now uses sample-weighted average
+  instead of picking the source with more samples (was masking recent degradation).
+
+**P2 — Quality (4 fixes):**
+- `_extract_ticker` returns `None` instead of hardcoded `"XAG-USD"` fallback.
+- Round-trip matching uses `deque.popleft()` instead of `list.pop(0)` — O(1).
+- C4 wiring check suppressed when `_wiring_confirmed=True` (no log spam).
+- 12h added to `_CROSS_HORIZON_PAIRS` so dynamic horizon weights fire for 12h.
+- Digest tail limit increased from 500→2000 entries.
+- `price_source` yfinance fallback gets `_source`/`_primary_failed` attrs.
+- `journal.load_recent` uses `load_jsonl_tail` instead of full-file scan.
+
 ## 2026-05-23 (Auto-improvement: 11 bug fixes)
 
 Signal accuracy, agent reliability, data integrity fixes.
