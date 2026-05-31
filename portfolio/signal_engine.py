@@ -724,11 +724,9 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
     # ml on ETH-USD: 55.1% at 3h (1206 samples). Globally disabled at 41.7%
     # because BTC-USD pulls it down to 26.4%. ETH-USD has genuine edge.
     ("ml", "ETH-USD"),
-    # 2026-05-25 after-hours audit: per-ticker accuracy from signal_log.db
-    # williams_vix_fix: globally 51.0% (disabled) but XAU 76.5% (68 sam),
-    # XAG 60.9% (92 sam). Strong metals-specific edge.
-    ("williams_vix_fix", "XAU-USD"),
-    ("williams_vix_fix", "XAG-USD"),
+    # williams_vix_fix: REMOVED 2026-05-31. Was 76.5% XAU (68 sam), 60.9%
+    # XAG (92 sam) when added 2026-05-25, but recent accuracy collapsed to
+    # 30.5% (131 sam). Actively harmful for metals consensus.
     # realized_skewness: globally 51.6% (disabled) but XAU 60.3% (572 sam).
     # Bad for XAG (42.9%) — only re-enable for gold.
     ("realized_skewness", "XAU-USD"),
@@ -1000,16 +998,17 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         # 2026-05-10: signals with <45% accuracy at 5d horizon.
         # funding 32.1% (728), news_event 42.2% (8251), ema 42.3% (15596),
         # credit_spread_risk 43.1% (1455), heikin_ashi 44.1% (24761).
+        # 2026-05-31: ministral 37.5% at 3d (6373 sam), extrapolates worse at 5d.
         "BTC-USD": frozenset({"funding", "news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi"}),
+                              "credit_spread_risk", "heikin_ashi", "ministral"}),
         "ETH-USD": frozenset({"funding", "news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi"}),
+                              "credit_spread_risk", "heikin_ashi", "ministral"}),
         "XAG-USD": frozenset({"news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi"}),
+                              "credit_spread_risk", "heikin_ashi", "ministral"}),
         "XAU-USD": frozenset({"news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi"}),
+                              "credit_spread_risk", "heikin_ashi", "ministral"}),
         "MSTR": frozenset({"news_event", "ema",
-                           "credit_spread_risk", "heikin_ashi"}),
+                           "credit_spread_risk", "heikin_ashi", "ministral"}),
     },
     "10d": {},
 }
@@ -1478,12 +1477,12 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "drift_regime_gate": 1.4,   # 68.1% at 1d_recent (626 sam) — STAR performer, 2026-05-25 audit
         "bb": 1.3,              # 60.5% at 1d_recent (428 sam) — confirmed 2026-05-25
         "rsi": 1.1,             # 57.5% at 1d_recent (496 sam) — updated 2026-05-25
-        "credit_spread_risk": 1.1,  # 56.4% at 1d_recent (140 sam), SELL 77.9% — NEW 2026-04-27
+        "credit_spread_risk": 0.3,  # 0.0% at 1d_recent (33 sam) — collapsed from 56.4%, 2026-05-31
         "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — NEW 2026-04-27
         "macd": 1.1,            # 52.2% at 1d_recent (205 sam) — updated 2026-05-25
         "mean_reversion": 1.1,  # 56.7% at 1d_recent (727 sam) — updated 2026-05-25
-        "news_event": 1.4,      # 51.5% at 1d_recent (264 sam) — dropped from 70%, reassess
-        "williams_vix_fix": 1.3,    # 61.5% at 1d_recent (205 sam) — re-enabled for metals, 2026-05-25
+        "news_event": 1.6,      # 75.8% at 1d_recent (149 sam), 70.0% at 3h_recent (1762 sam) — surging 2026-05-31
+        "williams_vix_fix": 0.5,    # 30.5% at 1d_recent (131 sam) — collapsed, removed from per-ticker rescue 2026-05-31
         "claude_fundamental": 0.5,  # 40.5% at 1d_recent (1178 sam) — NEW 2026-04-27 penalty
         "sentiment": 0.4,       # 45.9% at 1d_recent (296 sam) — updated 2026-05-25
         "fear_greed": 0.4,      # 25.9% at 1d — still terrible
