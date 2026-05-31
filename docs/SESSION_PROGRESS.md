@@ -6403,3 +6403,40 @@ data/metals_warrant_catalog.json
 data/seasonality_profiles.json
 data/signal_weights.json
 data/system_lessons.json
+
+### 2026-05-31 ~17:30 WEDT | main — FGL adversarial codebase review (docs-only)
+Ran an 8-subsystem adversarial review per /fgl. Mechanism: isolated worktree
+`Q:/fa-rev-0531` + empty-baseline branch `review/baseline-empty`; 8 fresh review
+subagents (5× pr-review-toolkit:code-reviewer, 3× caveman:cavecrew-reviewer) in
+background, plus an independent main-thread pass on the 3 riskiest subsystems and
+a cross-critique step.
+
+**Output docs** (committed to main): `docs/reviews/00..08-*.md` +
+`2026-05-31-PLAN.md` + `2026-05-31-SYNTHESIS.md`.
+
+**Top findings (no code shipped — review only):**
+- P0 outcome_tracker forward-shift: exit price measured up to ~1h after the
+  horizon target (entry is exact) → short-horizon (1h/3h) accuracy+IC+Mode-B
+  probs measured against a longer-than-labeled window. VERIFIED. Fix: 1m bar open.
+- P0 cross-process lost-update on money state (warrant_portfolio, portfolio_mgr):
+  in-process threading.Lock only, but 3+ OS processes write the same files.
+- P0 grid_fisher reconciles across ALL Avanza accounts (get_positions no account
+  filter) → pension holding of same orderbook id → phantom inventory → real SELL
+  of unheld units + EOD short-sell. Violates feedback_isk_only.
+- P0 orchestration: auth_error writes no journal stub; auth-detection regex-scans
+  a rotation-fragile log slice (can reopen the 3-week-outage class).
+- SYSTEMIC #1: all three seeded critical-error categories are false-positive /
+  mislabeled (contract_violation=timestamp race [already fixed 2026-05-30, zero
+  fires since 2026-05-29; backlog is stale]; accuracy_degradation=regime shift;
+  avanza_account_mismatch=session expiry). Noise drowns real alerts + trips the
+  fix-agent dispatcher.
+
+**Cross-critique caught:** signals-modules agent under-delivered (1 finding for 58
+files) and its lone finding (crypto_macro OPTIONS_TTL NameError) is REFUTED.
+
+**Next session backlog:**
+1. Resolve stale `contract_violation` critical-errors backlog + auto-resolve logic.
+2. outcome_tracker forward-shift fix (highest correctness value).
+3. Cross-process lock on money-state read-modify-write + grid_fisher account filter.
+4. Verify-then-fix: drawdown breaker enforcement; kelly_metals live-sizing wiring.
+5. Dedicated signals-modules re-review.
