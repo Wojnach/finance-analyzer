@@ -462,7 +462,8 @@ def compute_probabilistic_stops(holdings: dict, agent_summary: dict) -> dict:
 
         # Estimate volatility from ATR
         import math
-        vol = max(atr_pct / 100.0 * math.sqrt(252.0 / 14), 0.05)
+        trading_days = 365.0 if inst_type in ("crypto", "metals") else 252.0
+        vol = max(atr_pct / 100.0 * math.sqrt(trading_days / 14), 0.05)
 
         # ATR stop level
         stop_price = entry_price * (1 - 2 * atr_pct / 100)
@@ -724,9 +725,18 @@ def transaction_cost_analysis(portfolio: dict) -> dict:
 # Risk Audit Flags — pre-trade risk checks for Layer 2
 # ---------------------------------------------------------------------------
 
-from portfolio.correlation_priors import get_correlated_pairs
+_CORRELATED_PAIRS = None
 
-CORRELATED_PAIRS = get_correlated_pairs()
+
+def _get_correlated_pairs():
+    global _CORRELATED_PAIRS
+    if _CORRELATED_PAIRS is None:
+        try:
+            from portfolio.correlation_priors import get_correlated_pairs
+            _CORRELATED_PAIRS = get_correlated_pairs()
+        except Exception:
+            _CORRELATED_PAIRS = []
+    return _CORRELATED_PAIRS
 
 
 def check_concentration_risk(ticker, action, portfolio, agent_summary, strategy="patient"):
@@ -842,7 +852,7 @@ def check_correlation_risk(ticker, action, portfolio, strategy="patient"):
     if action != "BUY":
         return None
 
-    correlated = CORRELATED_PAIRS.get(ticker, [])
+    correlated = _get_correlated_pairs().get(ticker, [])
     if not correlated:
         return None
 

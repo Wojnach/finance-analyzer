@@ -2,7 +2,7 @@
 
 
 from portfolio.risk_management import (
-    CORRELATED_PAIRS,
+    _get_correlated_pairs,
     check_atr_stop_proximity,
     check_concentration_risk,
     check_correlation_risk,
@@ -191,10 +191,10 @@ class TestCorrelationRisk:
 
     def test_correlated_pairs_symmetric(self):
         """Verify key relationships are defined bidirectionally."""
-        assert "BTC-USD" in CORRELATED_PAIRS.get("ETH-USD", [])
-        assert "ETH-USD" in CORRELATED_PAIRS.get("BTC-USD", [])
-        assert "XAU-USD" in CORRELATED_PAIRS.get("XAG-USD", [])
-        assert "XAG-USD" in CORRELATED_PAIRS.get("XAU-USD", [])
+        assert "BTC-USD" in _get_correlated_pairs().get("ETH-USD", [])
+        assert "ETH-USD" in _get_correlated_pairs().get("BTC-USD", [])
+        assert "XAU-USD" in _get_correlated_pairs().get("XAG-USD", [])
+        assert "XAG-USD" in _get_correlated_pairs().get("XAU-USD", [])
 
 
 # --- ATR stop proximity ---

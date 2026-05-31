@@ -255,6 +255,8 @@ def _is_agent_window(now=None):
         return False
     if is_us_market_holiday(now):
         return False
+    if is_swedish_market_holiday(now):
+        return False
     eu_open = _eu_market_open_hour_utc(now)
     close_hour = _market_close_hour_utc(now)
     return eu_open <= now.hour < close_hour

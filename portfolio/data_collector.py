@@ -157,6 +157,8 @@ def alpaca_klines(ticker, interval="1d", limit=100):
         df["time"] = pd.to_datetime(df["time"])
         alpaca_cb.record_success()
         return df.tail(limit)
+    except ValueError:
+        raise
     except Exception:
         alpaca_cb.record_failure()
         raise
@@ -170,8 +172,9 @@ def fetch_vix():
     try:
         import yfinance as yf
 
-        vix = yf.Ticker("^VIX")
-        hist = vix.history(period="5d")
+        with _yfinance_lock:
+            vix = yf.Ticker("^VIX")
+            hist = vix.history(period="5d")
         if hist is None or hist.empty:
             return None
         # Flatten MultiIndex columns if present

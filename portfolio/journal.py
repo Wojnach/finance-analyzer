@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.journal")
 
-from portfolio.file_utils import atomic_write_text, load_json
+from portfolio.file_utils import atomic_write_text, load_json, load_jsonl_tail
 from portfolio.tickers import ALL_TICKERS
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -24,19 +24,15 @@ def load_recent(max_entries=10, max_age_hours=8):
     if not JOURNAL_FILE.exists():
         return []
     cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
+    tail = load_jsonl_tail(JOURNAL_FILE, max_entries=max(max_entries * 3, 50))
     entries = []
-    with open(JOURNAL_FILE, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-                ts = datetime.fromisoformat(entry["ts"])
-                if ts >= cutoff:
-                    entries.append(entry)
-            except (json.JSONDecodeError, KeyError, ValueError):
-                continue
+    for entry in tail:
+        try:
+            ts = datetime.fromisoformat(entry["ts"])
+            if ts >= cutoff:
+                entries.append(entry)
+        except (KeyError, ValueError):
+            continue
     return entries[-max_entries:]
 
 

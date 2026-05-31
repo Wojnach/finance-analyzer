@@ -1895,7 +1895,7 @@ def api_market_health():
 
         return jsonify(result)
     except Exception:
-        logger.exception("mstr endpoint error")
+        logger.exception("market-health endpoint error")
         return jsonify({"error": "Internal server error"}), 500
 
 

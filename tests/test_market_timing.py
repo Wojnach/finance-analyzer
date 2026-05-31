@@ -711,7 +711,8 @@ class TestAgentWindowDstBoundary:
 
     def test_est_2030_inside(self):
         # 20:30 in winter (EST): inside (window ends 21:00)
-        now = datetime(2026, 1, 6, 20, 30, tzinfo=UTC)  # Tuesday
+        # Jan 6 is Epiphany (Swedish holiday) — use Jan 13 instead
+        now = datetime(2026, 1, 13, 20, 30, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
 
@@ -1048,9 +1049,10 @@ class TestHolidayAgentWindow:
         assert _is_agent_window(now) is False
 
     def test_monday_after_easter(self):
-        """Easter Monday is NOT a US holiday — agent window should be True."""
+        """Easter Monday is NOT a US holiday but IS a Swedish holiday —
+        agent window should be False (Swedish market closed)."""
         now = datetime(2026, 4, 6, 14, 0, tzinfo=UTC)
-        assert _is_agent_window(now) is True
+        assert _is_agent_window(now) is False
 
 
 class TestHolidayMarketState:
