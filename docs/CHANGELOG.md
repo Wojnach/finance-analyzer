@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-06-01 (Error-investigation fixes: state resilience + alert noise)
+
+Three defensive fixes from investigating the dashboard's unresolved-error list.
+The triggering data corruption (a hand-edited `portfolio_state.json`) and 8
+stale journal entries were already repaired; this work prevents recurrence and
+removes the noise at its source. Premortem-hardened (8 failure narratives,
+0 review findings). See `docs/PLAN.md`.
+
+**P0 — Silent portfolio-wipe guard (`portfolio/portfolio_mgr.py`):**
+- `_load_state_from` used to return fresh defaults when a state file was corrupt
+  AND no `.bak` recovered it — with only a `logger.critical` line, so the next
+  `save_state` would silently overwrite the portfolio (there were no `.bak`
+  files on disk during the incident: the wipe was one trade-trigger away). Now
+  captures the corrupt bytes at detection (race-safe vs lockless `load_state`),
+  preserves them content-addressed (`<name>.corrupt-<sha8>`, idempotent across
+  60s cycles), and appends a `portfolio_state_corrupt` critical_errors entry
+  before returning defaults. No Telegram in the read path (lock-stall + config
+  symlink concerns).
+
+**P1 — Accurate corruption diagnostics (`portfolio/loop_contract.py`):**
+- `portfolio_arithmetic` reported a bare "is not a dict" (because `load_json`
+  swallows `JSONDecodeError`→None). Now re-reads the raw bytes once and reports
+  the real error with line/col; if the re-read parses cleanly as a dict the
+  file healed mid-write and no violation is emitted (race guard).
+
+**P2 — Avanza session-expiry de-escalation (`portfolio/avanza_account_check.py`):**
+- A routine ~24h BankID session expiry was logged `critical` daily, cluttering
+  the unresolved list and spawning a Read/Edit/Bash fix agent that cannot fix
+  it. Now logged `warning`/`avanza_session_expired`; generic DNS/5xx/auth errors
+  stay critical; a persistent expiry (≥2 unresolved priors spanning >24h)
+  re-escalates to critical so a genuinely-dead session can't hide. A successful
+  verify auto-resolves prior unresolved avanza alerts (7-day, account-scoped,
+  idempotent).
+
 ## 2026-05-31 (Auto-improvement: 15 bug fixes)
 
 P0/P1/P2 fixes across orchestration, signal engine, data collection, risk,

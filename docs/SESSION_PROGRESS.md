@@ -1,30 +1,28 @@
 # Session Progress
 
-## 2026-06-01 Auto-Improvement Session (10:00 CEST)
+## 2026-05-31 After-Hours Research (22:30 CEST)
 
-### What was done
-1. **Phase 1 — Deep exploration**: 5 parallel agents explored Layer 1 data loop, signal system,
-   dashboard + portfolio mgmt, metals + infrastructure. Cross-referenced May 21 (419 findings)
-   and May 31 (81 findings) adversarial review syntheses.
+### Shipped
+- Removed williams_vix_fix from per-ticker rescue XAU/XAG (30.5% recent → harmful)
+- Added ministral to 5d horizon blacklist (37.5% at 3d)
+- Updated recency weights: credit_spread_risk 0.3x, williams_vix_fix 0.5x, news_event 1.6x
+- Resolved 253 false/acknowledged critical error alerts
+- 6 research deliverables written (macro, quant, signal audit, ticker dives, morning briefing)
+- Telegram morning briefing sent
 
-2. **Phase 2 — P0 verification**: Independent agent verified 6 P0 findings from reviews.
-   5 confirmed, 1 refuted (P0-E drawdown enforcement IS present at 50% threshold).
+### Key Findings
+- news_event surging 51%→75.8% 1d, 70% 3h — strongest recent performer
+- L2 "silent failures" = false positives from _detect_append bug at prune cap (already fixed)
+- 24 shadow signals waste 290K compute calls with 0 accuracy samples
+- BTC ETF 6-day outflow $1.55B, gold descending triangle at $4,500
+- Hedge algorithm identified for adaptive signal weighting (30 lines, replaces static gate)
 
-3. **Phase 3 — Implementation** (2 batches, 8 bugs fixed):
-   - Batch 1 (5 P0 fixes): outcome_tracker 1h→1m+open, auth_error journal stub,
-     cross-ticker cache key (ticker,horizon), fx_rates sanity-check, metals SILVER_ALERT_LEVELS
-   - Batch 2 (3 P1 fixes): correlation pairs sentinel+retry, dynamic heatmap signals,
-     auto-resolve stale critical errors
-
-4. **Phase 4 — Documentation**: Updated CLAUDE.md route count (33→55), SYSTEM_OVERVIEW.md
-   known issues and fix history.
-
-### What's next
-- P0-B (unfixed): grid_fisher account-blind `get_positions()` — needs `account_id` filter.
-  Deferred: higher blast radius, touches metals loop + grid_fisher + avanza_session.
-- P1: 3d/5d/10d horizon accuracy collapse to 1d (existing TODO, needs data migration)
-- P1: claude_gate JSONL full scan (perf degradation) — switch to load_jsonl_tail
-- Signals-modules dedicated re-review (Tier 4 from May 31 synthesis — LOW confidence area)
+### Next
+- P0: Fix shadow signal outcome tracking
+- P1: Implement Hedge algorithm for adaptive weighting
+- P1: Regime-routing meta-layer using 6 existing regime detectors
+- P2: GSR contrarian signal for XAG, ETF flow data for BTC
+- Manual: Avanza BankID re-login (expired May 23)
 
 ---
 

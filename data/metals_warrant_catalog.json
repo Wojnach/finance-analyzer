@@ -1,35 +1,7 @@
 {
-  "refreshed_ts": "2026-05-31T06:01:52.919187+00:00",
+  "refreshed_ts": "2026-06-01T06:01:46.450559+00:00",
   "ttl_hours": 6,
   "warrants": {
-    "MINI_L_SILVER_AVA_331": {
-      "ob_id": "2379768",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 6.59,
-      "barrier": 65.9,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 331",
-      "isAza": true,
-      "spread_pct": 0.188,
-      "barrier_dist_pct": 12.47,
-      "last_probe": "2026-05-31T06:01:42.307755+00:00"
-    },
-    "MINI_L_SILVER_AVA_71": {
-      "ob_id": "1070502",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 1.34,
-      "barrier": 19.68,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 71",
-      "isAza": true,
-      "spread_pct": 0.038,
-      "barrier_dist_pct": 73.86,
-      "last_probe": "2026-05-31T06:01:41.190857+00:00"
-    },
     "MINI_L_SILVER_AVA_73": {
       "ob_id": "1072554",
       "api_type": "warrant",
@@ -41,8 +13,8 @@
       "name": "MINI L SILVER AVA 73",
       "isAza": true,
       "spread_pct": 0.04,
-      "barrier_dist_pct": 70.66,
-      "last_probe": "2026-05-31T06:01:41.202545+00:00"
+      "barrier_dist_pct": 70.83,
+      "last_probe": "2026-06-01T06:01:37.300350+00:00"
     },
     "MINI_L_SILVER_AVA_79": {
       "ob_id": "1078198",
@@ -55,8 +27,8 @@
       "name": "MINI L SILVER AVA 79",
       "isAza": true,
       "spread_pct": 0.043,
-      "barrier_dist_pct": 65.89,
-      "last_probe": "2026-05-31T06:01:41.211317+00:00"
+      "barrier_dist_pct": 66.09,
+      "last_probe": "2026-06-01T06:01:37.324352+00:00"
     },
     "MINI_L_SILVER_AVA_81": {
       "ob_id": "1091365",
@@ -69,8 +41,8 @@
       "name": "MINI L SILVER AVA 81",
       "isAza": true,
       "spread_pct": 0.043,
-      "barrier_dist_pct": 65.39,
-      "last_probe": "2026-05-31T06:01:41.371348+00:00"
+      "barrier_dist_pct": 65.59,
+      "last_probe": "2026-06-01T06:01:38.457671+00:00"
     },
     "MINI_L_SILVER_AVA_77": {
       "ob_id": "1073707",
@@ -83,8 +55,8 @@
       "name": "MINI L SILVER AVA 77",
       "isAza": true,
       "spread_pct": 0.04,
-      "barrier_dist_pct": 71.47,
-      "last_probe": "2026-05-31T06:01:41.227198+00:00"
+      "barrier_dist_pct": 71.64,
+      "last_probe": "2026-06-01T06:01:38.344297+00:00"
     },
     "MINI_L_SILVER_AVA_75": {
       "ob_id": "1073700",
@@ -97,8 +69,8 @@
       "name": "MINI L SILVER AVA 75",
       "isAza": true,
       "spread_pct": 0.041,
-      "barrier_dist_pct": 69.07,
-      "last_probe": "2026-05-31T06:01:41.259521+00:00"
+      "barrier_dist_pct": 69.25,
+      "last_probe": "2026-06-01T06:01:38.359934+00:00"
     },
     "MINI_L_SILVER_AVA_78": {
       "ob_id": "1074164",
@@ -111,8 +83,8 @@
       "name": "MINI L SILVER AVA 78",
       "isAza": true,
       "spread_pct": 0.042,
-      "barrier_dist_pct": 67.47,
-      "last_probe": "2026-05-31T06:01:41.274104+00:00"
+      "barrier_dist_pct": 67.66,
+      "last_probe": "2026-06-01T06:01:38.375599+00:00"
     },
     "MINI_L_SILVER_AVA_199": {
       "ob_id": "2026836",
@@ -125,8 +97,8 @@
       "name": "MINI L SILVER AVA 199",
       "isAza": true,
       "spread_pct": 0.049,
-      "barrier_dist_pct": 57.43,
-      "last_probe": "2026-05-31T06:01:37.576482+00:00"
+      "barrier_dist_pct": 57.67,
+      "last_probe": "2026-06-01T06:01:37.531849+00:00"
     },
     "MINI_L_SILVER_AVA_171": {
       "ob_id": "1736211",
@@ -139,22 +111,8 @@
       "name": "MINI L SILVER AVA 171",
       "isAza": true,
       "spread_pct": 0.047,
-      "barrier_dist_pct": 59.37,
-      "last_probe": "2026-05-31T06:01:37.592427+00:00"
-    },
-    "MINI_L_SILVER_AVA_170": {
-      "ob_id": "1728483",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 1.61,
-      "barrier": 29.54,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 170",
-      "isAza": true,
-      "spread_pct": 0.046,
-      "barrier_dist_pct": 60.77,
-      "last_probe": "2026-05-31T06:01:37.608076+00:00"
+      "barrier_dist_pct": 59.6,
+      "last_probe": "2026-06-01T06:01:37.550309+00:00"
     },
     "MINI_L_SILVER_AVA_163": {
       "ob_id": "1651103",
@@ -167,22 +125,8 @@
       "name": "MINI L SILVER AVA 163",
       "isAza": true,
       "spread_pct": 0.045,
-      "barrier_dist_pct": 62.43,
-      "last_probe": "2026-05-31T06:01:37.639391+00:00"
-    },
-    "MINI_L_SILVER_AVA_140": {
-      "ob_id": "1465024",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 1.52,
-      "barrier": 26.39,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 140",
-      "isAza": true,
-      "spread_pct": 0.043,
-      "barrier_dist_pct": 64.95,
-      "last_probe": "2026-05-31T06:01:37.655025+00:00"
+      "barrier_dist_pct": 62.64,
+      "last_probe": "2026-06-01T06:01:37.584544+00:00"
     },
     "MINI_L_SILVER_AVA_142": {
       "ob_id": "1474634",
@@ -195,22 +139,8 @@
       "name": "MINI L SILVER AVA 142",
       "isAza": true,
       "spread_pct": 0.044,
-      "barrier_dist_pct": 64.24,
-      "last_probe": "2026-05-31T06:01:37.671150+00:00"
-    },
-    "MINI_L_SILVER_AVA_137": {
-      "ob_id": "1450832",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 1.45,
-      "barrier": 24.19,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 137",
-      "isAza": true,
-      "spread_pct": 0.042,
-      "barrier_dist_pct": 67.87,
-      "last_probe": "2026-05-31T06:01:37.702882+00:00"
+      "barrier_dist_pct": 64.45,
+      "last_probe": "2026-06-01T06:01:37.624376+00:00"
     },
     "MINI_L_SILVER_AVA_141": {
       "ob_id": "1469079",
@@ -223,8 +153,8 @@
       "name": "MINI L SILVER AVA 141",
       "isAza": true,
       "spread_pct": 0.041,
-      "barrier_dist_pct": 68.68,
-      "last_probe": "2026-05-31T06:01:37.718567+00:00"
+      "barrier_dist_pct": 68.86,
+      "last_probe": "2026-06-01T06:01:37.657844+00:00"
     },
     "MINI_L_SILVER_AVA_146": {
       "ob_id": "1487606",
@@ -237,106 +167,8 @@
       "name": "MINI L SILVER AVA 146",
       "isAza": true,
       "spread_pct": 0.044,
-      "barrier_dist_pct": 63.55,
-      "last_probe": "2026-05-31T06:01:37.739030+00:00"
-    },
-    "MINI_L_SILVER_AVA_235": {
-      "ob_id": "2246990",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 4.4,
-      "barrier": 60.0,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 235",
-      "isAza": true,
-      "spread_pct": 0.126,
-      "barrier_dist_pct": 20.31,
-      "last_probe": "2026-05-31T06:01:37.805607+00:00"
-    },
-    "MINI_L_SILVER_AVA_233": {
-      "ob_id": "2246985",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 3.94,
-      "barrier": 57.97,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 233",
-      "isAza": true,
-      "spread_pct": 0.113,
-      "barrier_dist_pct": 23.0,
-      "last_probe": "2026-05-31T06:01:37.824436+00:00"
-    },
-    "MINI_L_SILVER_AVA_234": {
-      "ob_id": "2246982",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 4.15,
-      "barrier": 58.98,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 234",
-      "isAza": true,
-      "spread_pct": 0.119,
-      "barrier_dist_pct": 21.66,
-      "last_probe": "2026-05-31T06:01:37.845070+00:00"
-    },
-    "MINI_L_SILVER_AVA_224": {
-      "ob_id": "2227366",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 2.8,
-      "barrier": 49.95,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 224",
-      "isAza": true,
-      "spread_pct": 0.08,
-      "barrier_dist_pct": 33.66,
-      "last_probe": "2026-05-31T06:01:37.865913+00:00"
-    },
-    "MINI_L_SILVER_AVA_212": {
-      "ob_id": "2163469",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 2.23,
-      "barrier": 42.75,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 212",
-      "isAza": true,
-      "spread_pct": 0.064,
-      "barrier_dist_pct": 43.22,
-      "last_probe": "2026-05-31T06:01:37.877550+00:00"
-    },
-    "MINI_L_SILVER_AVA_231": {
-      "ob_id": "2237043",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 3.58,
-      "barrier": 55.98,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 231",
-      "isAza": true,
-      "spread_pct": 0.102,
-      "barrier_dist_pct": 25.65,
-      "last_probe": "2026-05-31T06:01:37.892835+00:00"
-    },
-    "MINI_L_SILVER_AVA_217": {
-      "ob_id": "2176619",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 2.6,
-      "barrier": 47.78,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 217",
-      "isAza": true,
-      "spread_pct": 0.074,
-      "barrier_dist_pct": 36.54,
-      "last_probe": "2026-05-31T06:01:37.924138+00:00"
+      "barrier_dist_pct": 63.76,
+      "last_probe": "2026-06-01T06:01:37.679813+00:00"
     },
     "MINI_L_SILVER_AVA_232": {
       "ob_id": "2237796",
@@ -349,78 +181,8 @@
       "name": "MINI L SILVER AVA 232",
       "isAza": true,
       "spread_pct": 0.107,
-      "barrier_dist_pct": 24.31,
-      "last_probe": "2026-05-31T06:01:37.944501+00:00"
-    },
-    "MINI_L_SILVER_AVA_237": {
-      "ob_id": "2249746",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 4.97,
-      "barrier": 62.01,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 237",
-      "isAza": true,
-      "spread_pct": 0.142,
-      "barrier_dist_pct": 17.64,
-      "last_probe": "2026-05-31T06:01:37.957779+00:00"
-    },
-    "MINI_L_SILVER_AVA_211": {
-      "ob_id": "2150159",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 2.16,
-      "barrier": 41.76,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 211",
-      "isAza": true,
-      "spread_pct": 0.062,
-      "barrier_dist_pct": 44.53,
-      "last_probe": "2026-05-31T06:01:37.983997+00:00"
-    },
-    "MINI_L_SILVER_AVA_328": {
-      "ob_id": "2379738",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 5.27,
-      "barrier": 62.89,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 328",
-      "isAza": true,
-      "spread_pct": 0.151,
-      "barrier_dist_pct": 16.47,
-      "last_probe": "2026-05-31T06:01:42.200497+00:00"
-    },
-    "MINI_L_SILVER_AVA_332": {
-      "ob_id": "2379730",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 7.22,
-      "barrier": 66.91,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 332",
-      "isAza": true,
-      "spread_pct": 0.206,
-      "barrier_dist_pct": 11.13,
-      "last_probe": "2026-05-31T06:01:42.357811+00:00"
-    },
-    "MINI_L_SILVER_AVA_329": {
-      "ob_id": "2379760",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "LONG",
-      "leverage": 5.64,
-      "barrier": 63.89,
-      "parity": 10,
-      "name": "MINI L SILVER AVA 329",
-      "isAza": true,
-      "spread_pct": 0.161,
-      "barrier_dist_pct": 15.14,
-      "last_probe": "2026-05-31T06:01:42.208569+00:00"
+      "barrier_dist_pct": 24.74,
+      "last_probe": "2026-06-01T06:01:37.854301+00:00"
     },
     "MINI_L_SILVER_AVA_330": {
       "ob_id": "2379778",
@@ -433,8 +195,8 @@
       "name": "MINI L SILVER AVA 330",
       "isAza": true,
       "spread_pct": 0.174,
-      "barrier_dist_pct": 13.8,
-      "last_probe": "2026-05-31T06:01:42.382097+00:00"
+      "barrier_dist_pct": 14.3,
+      "last_probe": "2026-06-01T06:01:38.107695+00:00"
     },
     "MINI_L_SILVER_AVA_72": {
       "ob_id": "1071965",
@@ -447,8 +209,8 @@
       "name": "MINI L SILVER AVA 72",
       "isAza": true,
       "spread_pct": 0.039,
-      "barrier_dist_pct": 72.27,
-      "last_probe": "2026-05-31T06:01:41.290725+00:00"
+      "barrier_dist_pct": 72.43,
+      "last_probe": "2026-06-01T06:01:38.391232+00:00"
     },
     "MINI_L_SILVER_AVA_74": {
       "ob_id": "1072560",
@@ -461,8 +223,8 @@
       "name": "MINI L SILVER AVA 74",
       "isAza": true,
       "spread_pct": 0.04,
-      "barrier_dist_pct": 69.86,
-      "last_probe": "2026-05-31T06:01:41.306172+00:00"
+      "barrier_dist_pct": 70.04,
+      "last_probe": "2026-06-01T06:01:38.406875+00:00"
     },
     "MINI_L_SILVER_AVA_80": {
       "ob_id": "1078214",
@@ -475,22 +237,22 @@
       "name": "MINI L SILVER AVA 80",
       "isAza": true,
       "spread_pct": 0.042,
-      "barrier_dist_pct": 66.69,
-      "last_probe": "2026-05-31T06:01:41.385604+00:00"
+      "barrier_dist_pct": 66.88,
+      "last_probe": "2026-06-01T06:01:38.474462+00:00"
     },
-    "MINI_S_SILVER_AVA_432": {
-      "ob_id": "2470829",
+    "MINI_L_SILVER_AVA_332": {
+      "ob_id": "2379730",
       "api_type": "warrant",
       "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 6.16,
-      "barrier": 85.95,
+      "direction": "LONG",
+      "leverage": 7.22,
+      "barrier": 66.91,
       "parity": 10,
-      "name": "MINI S SILVER AVA 432",
+      "name": "MINI L SILVER AVA 332",
       "isAza": true,
-      "spread_pct": 0.176,
-      "barrier_dist_pct": 14.16,
-      "last_probe": "2026-05-31T06:01:47.790850+00:00"
+      "spread_pct": 0.206,
+      "barrier_dist_pct": 11.65,
+      "last_probe": "2026-06-01T06:01:38.848952+00:00"
     },
     "MINI_S_SILVER_AVA_394": {
       "ob_id": "2345694",
@@ -503,22 +265,8 @@
       "name": "MINI S SILVER AVA 394",
       "isAza": true,
       "spread_pct": 0.111,
-      "barrier_dist_pct": 23.44,
-      "last_probe": "2026-05-31T06:01:47.603381+00:00"
-    },
-    "MINI_S_SILVER_AVA_434": {
-      "ob_id": "2470744",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 7.42,
-      "barrier": 83.95,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 434",
-      "isAza": true,
-      "spread_pct": 0.212,
-      "barrier_dist_pct": 11.5,
-      "last_probe": "2026-05-31T06:01:47.835685+00:00"
+      "barrier_dist_pct": 22.74,
+      "last_probe": "2026-06-01T06:01:39.443741+00:00"
     },
     "MINI_S_SILVER_AVA_361": {
       "ob_id": "2312404",
@@ -531,22 +279,8 @@
       "name": "MINI S SILVER AVA 361",
       "isAza": true,
       "spread_pct": 0.087,
-      "barrier_dist_pct": 30.51,
-      "last_probe": "2026-05-31T06:01:47.624384+00:00"
-    },
-    "MINI_S_SILVER_AVA_393": {
-      "ob_id": "2345675",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 3.71,
-      "barrier": 93.93,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 393",
-      "isAza": true,
-      "spread_pct": 0.106,
-      "barrier_dist_pct": 24.76,
-      "last_probe": "2026-05-31T06:01:47.648544+00:00"
+      "barrier_dist_pct": 29.73,
+      "last_probe": "2026-06-01T06:01:40.143257+00:00"
     },
     "MINI_S_SILVER_AVA_391": {
       "ob_id": "2345689",
@@ -559,22 +293,8 @@
       "name": "MINI S SILVER AVA 391",
       "isAza": true,
       "spread_pct": 0.096,
-      "barrier_dist_pct": 27.4,
-      "last_probe": "2026-05-31T06:01:47.662218+00:00"
-    },
-    "MINI_S_SILVER_AVA_396": {
-      "ob_id": "2345703",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 4.36,
-      "barrier": 90.95,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 396",
-      "isAza": true,
-      "spread_pct": 0.124,
-      "barrier_dist_pct": 20.8,
-      "last_probe": "2026-05-31T06:01:47.693658+00:00"
+      "barrier_dist_pct": 26.64,
+      "last_probe": "2026-06-01T06:01:40.183784+00:00"
     },
     "MINI_S_SILVER_AVA_357": {
       "ob_id": "2312483",
@@ -587,8 +307,8 @@
       "name": "MINI S SILVER AVA 357",
       "isAza": true,
       "spread_pct": 0.075,
-      "barrier_dist_pct": 35.78,
-      "last_probe": "2026-05-31T06:01:48.777804+00:00"
+      "barrier_dist_pct": 34.97,
+      "last_probe": "2026-06-01T06:01:40.227408+00:00"
     },
     "MINI_S_SILVER_AVA_433": {
       "ob_id": "2470806",
@@ -601,8 +321,8 @@
       "name": "MINI S SILVER AVA 433",
       "isAza": true,
       "spread_pct": 0.192,
-      "barrier_dist_pct": 12.83,
-      "last_probe": "2026-05-31T06:01:47.874282+00:00"
+      "barrier_dist_pct": 12.16,
+      "last_probe": "2026-06-01T06:01:40.370159+00:00"
     },
     "MINI_S_SILVER_AVA_431": {
       "ob_id": "2470755",
@@ -615,36 +335,22 @@
       "name": "MINI S SILVER AVA 431",
       "isAza": true,
       "spread_pct": 0.163,
-      "barrier_dist_pct": 15.49,
-      "last_probe": "2026-05-31T06:01:47.907584+00:00"
-    },
-    "MINI_S_SILVER_AVA_401": {
-      "ob_id": "2361428",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 4.61,
-      "barrier": 90.03,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 401",
-      "isAza": true,
-      "spread_pct": 0.132,
-      "barrier_dist_pct": 19.58,
-      "last_probe": "2026-05-31T06:01:48.940786+00:00"
+      "barrier_dist_pct": 14.8,
+      "last_probe": "2026-06-01T06:01:40.419119+00:00"
     },
     "MINI_S_SILVER_AVA_430": {
       "ob_id": "2470811",
       "api_type": "warrant",
       "underlying": "XAG-USD",
       "direction": "SHORT",
-      "leverage": 5.29,
+      "leverage": 5.28,
       "barrier": 87.95,
       "parity": 10,
       "name": "MINI S SILVER AVA 430",
       "isAza": true,
       "spread_pct": 0.151,
-      "barrier_dist_pct": 16.81,
-      "last_probe": "2026-05-31T06:01:47.948301+00:00"
+      "barrier_dist_pct": 16.12,
+      "last_probe": "2026-06-01T06:01:40.454680+00:00"
     },
     "MINI_S_SILVER_AVA_354": {
       "ob_id": "2306580",
@@ -657,22 +363,8 @@
       "name": "MINI S SILVER AVA 354",
       "isAza": true,
       "spread_pct": 0.051,
-      "barrier_dist_pct": 52.84,
-      "last_probe": "2026-05-31T06:01:48.797957+00:00"
-    },
-    "MINI_S_SILVER_AVA_351": {
-      "ob_id": "2303286",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 1.45,
-      "barrier": 124.96,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 351",
-      "isAza": true,
-      "spread_pct": 0.041,
-      "barrier_dist_pct": 65.97,
-      "last_probe": "2026-05-31T06:01:48.813746+00:00"
+      "barrier_dist_pct": 51.93,
+      "last_probe": "2026-06-01T06:01:41.979846+00:00"
     },
     "MINI_S_SILVER_AVA_359": {
       "ob_id": "2312392",
@@ -685,8 +377,22 @@
       "name": "MINI S SILVER AVA 359",
       "isAza": true,
       "spread_pct": 0.08,
-      "barrier_dist_pct": 33.15,
-      "last_probe": "2026-05-31T06:01:48.829591+00:00"
+      "barrier_dist_pct": 32.36,
+      "last_probe": "2026-06-01T06:01:42.000794+00:00"
+    },
+    "MINI_S_SILVER_AVA_351": {
+      "ob_id": "2303286",
+      "api_type": "warrant",
+      "underlying": "XAG-USD",
+      "direction": "SHORT",
+      "leverage": 1.45,
+      "barrier": 124.96,
+      "parity": 10,
+      "name": "MINI S SILVER AVA 351",
+      "isAza": true,
+      "spread_pct": 0.041,
+      "barrier_dist_pct": 64.99,
+      "last_probe": "2026-06-01T06:01:42.020561+00:00"
     },
     "MINI_S_SILVER_AVA_358": {
       "ob_id": "2312517",
@@ -699,50 +405,78 @@
       "name": "MINI S SILVER AVA 358",
       "isAza": true,
       "spread_pct": 0.077,
-      "barrier_dist_pct": 34.47,
-      "last_probe": "2026-05-31T06:01:48.857595+00:00"
-    },
-    "MINI_S_SILVER_AVA_353": {
-      "ob_id": "2306561",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 1.61,
-      "barrier": 120.02,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 353",
-      "isAza": true,
-      "spread_pct": 0.046,
-      "barrier_dist_pct": 59.41,
-      "last_probe": "2026-05-31T06:01:48.877935+00:00"
-    },
-    "MINI_S_SILVER_AVA_352": {
-      "ob_id": "2304664",
-      "api_type": "warrant",
-      "underlying": "XAG-USD",
-      "direction": "SHORT",
-      "leverage": 1.32,
-      "barrier": 129.92,
-      "parity": 10,
-      "name": "MINI S SILVER AVA 352",
-      "isAza": true,
-      "spread_pct": 0.038,
-      "barrier_dist_pct": 72.56,
-      "last_probe": "2026-05-31T06:01:48.892597+00:00"
+      "barrier_dist_pct": 33.67,
+      "last_probe": "2026-06-01T06:01:42.103486+00:00"
     },
     "MINI_S_SILVER_AVA_429": {
       "ob_id": "2470827",
       "api_type": "warrant",
       "underlying": "XAG-USD",
       "direction": "SHORT",
-      "leverage": 4.94,
+      "leverage": 4.93,
       "barrier": 88.95,
       "parity": 10,
       "name": "MINI S SILVER AVA 429",
       "isAza": true,
       "spread_pct": 0.141,
-      "barrier_dist_pct": 18.14,
-      "last_probe": "2026-05-31T06:01:49.035183+00:00"
+      "barrier_dist_pct": 17.44,
+      "last_probe": "2026-06-01T06:01:42.259815+00:00"
+    },
+    "MINI_L_GULD_AVA_3": {
+      "ob_id": "566318",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "LONG",
+      "leverage": 1.58,
+      "barrier": 1710.93,
+      "parity": 100,
+      "name": "MINI L GULD AVA 3",
+      "isAza": true,
+      "spread_pct": 0.038,
+      "barrier_dist_pct": 62.1,
+      "last_probe": "2026-06-01T06:01:43.091301+00:00"
+    },
+    "MINI_L_GULD_AVA_7": {
+      "ob_id": "582408",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "LONG",
+      "leverage": 1.91,
+      "barrier": 2215.66,
+      "parity": 100,
+      "name": "MINI L GULD AVA 7",
+      "isAza": true,
+      "spread_pct": 0.045,
+      "barrier_dist_pct": 50.92,
+      "last_probe": "2026-06-01T06:01:43.583048+00:00"
+    },
+    "MINI_L_GULD_AVA_9": {
+      "ob_id": "582409",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "LONG",
+      "leverage": 1.86,
+      "barrier": 2154.22,
+      "parity": 100,
+      "name": "MINI L GULD AVA 9",
+      "isAza": true,
+      "spread_pct": 0.044,
+      "barrier_dist_pct": 52.29,
+      "last_probe": "2026-06-01T06:01:43.662859+00:00"
+    },
+    "MINI_L_GULD_AVA_4": {
+      "ob_id": "566323",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "LONG",
+      "leverage": 1.75,
+      "barrier": 1994.11,
+      "parity": 100,
+      "name": "MINI L GULD AVA 4",
+      "isAza": true,
+      "spread_pct": 0.042,
+      "barrier_dist_pct": 55.83,
+      "last_probe": "2026-06-01T06:01:43.233689+00:00"
     },
     "MINI_L_GULD_AVA_99": {
       "ob_id": "927764",
@@ -755,8 +489,8 @@
       "name": "MINI L GULD AVA 99",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 49.13,
-      "last_probe": "2026-05-31T06:01:50.478812+00:00"
+      "barrier_dist_pct": 48.83,
+      "last_probe": "2026-06-01T06:01:43.678991+00:00"
     },
     "MINI_L_GULD_AVA_94": {
       "ob_id": "869207",
@@ -769,8 +503,8 @@
       "name": "MINI L GULD AVA 94",
       "isAza": true,
       "spread_pct": 0.008,
-      "barrier_dist_pct": 57.75,
-      "last_probe": "2026-05-31T06:01:50.491089+00:00"
+      "barrier_dist_pct": 57.51,
+      "last_probe": "2026-06-01T06:01:43.694656+00:00"
     },
     "MINI_L_GULD_AVA_96": {
       "ob_id": "907716",
@@ -783,8 +517,8 @@
       "name": "MINI L GULD AVA 96",
       "isAza": true,
       "spread_pct": 0.008,
-      "barrier_dist_pct": 56.88,
-      "last_probe": "2026-05-31T06:01:50.507591+00:00"
+      "barrier_dist_pct": 56.63,
+      "last_probe": "2026-06-01T06:01:43.724338+00:00"
     },
     "MINI_L_GULD_AVA_97": {
       "ob_id": "909062",
@@ -797,8 +531,8 @@
       "name": "MINI L GULD AVA 97",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 50.15,
-      "last_probe": "2026-05-31T06:01:50.536259+00:00"
+      "barrier_dist_pct": 49.86,
+      "last_probe": "2026-06-01T06:01:43.742972+00:00"
     },
     "MINI_L_GULD_AVA_56": {
       "ob_id": "719002",
@@ -811,8 +545,8 @@
       "name": "MINI L GULD AVA 56",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 51.05,
-      "last_probe": "2026-05-31T06:01:50.251715+00:00"
+      "barrier_dist_pct": 50.77,
+      "last_probe": "2026-06-01T06:01:43.441131+00:00"
     },
     "MINI_L_GULD_AVA_54": {
       "ob_id": "716088",
@@ -825,8 +559,8 @@
       "name": "MINI L GULD AVA 54",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 53.94,
-      "last_probe": "2026-05-31T06:01:50.267346+00:00"
+      "barrier_dist_pct": 53.67,
+      "last_probe": "2026-06-01T06:01:43.457574+00:00"
     },
     "MINI_L_GULD_AVA_103": {
       "ob_id": "971780",
@@ -839,8 +573,8 @@
       "name": "MINI L GULD AVA 103",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 48.51,
-      "last_probe": "2026-05-31T06:01:49.407576+00:00"
+      "barrier_dist_pct": 48.21,
+      "last_probe": "2026-06-01T06:01:42.633803+00:00"
     },
     "MINI_L_GULD_AVA_145": {
       "ob_id": "1161241",
@@ -853,8 +587,8 @@
       "name": "MINI L GULD AVA 145",
       "isAza": true,
       "spread_pct": 0.01,
-      "barrier_dist_pct": 47.51,
-      "last_probe": "2026-05-31T06:01:49.424262+00:00"
+      "barrier_dist_pct": 47.2,
+      "last_probe": "2026-06-01T06:01:42.649458+00:00"
     },
     "MINI_L_GULD_AVA_102": {
       "ob_id": "934139",
@@ -867,8 +601,8 @@
       "name": "MINI L GULD AVA 102",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 50.56,
-      "last_probe": "2026-05-31T06:01:49.446011+00:00"
+      "barrier_dist_pct": 50.27,
+      "last_probe": "2026-06-01T06:01:42.674398+00:00"
     },
     "MINI_L_GULD_AVA_100": {
       "ob_id": "927772",
@@ -881,8 +615,8 @@
       "name": "MINI L GULD AVA 100",
       "isAza": true,
       "spread_pct": 0.008,
-      "barrier_dist_pct": 55.32,
-      "last_probe": "2026-05-31T06:01:49.461739+00:00"
+      "barrier_dist_pct": 55.06,
+      "last_probe": "2026-06-01T06:01:42.690985+00:00"
     },
     "MINI_L_GULD_AVA_193": {
       "ob_id": "1674837",
@@ -895,8 +629,8 @@
       "name": "MINI L GULD AVA 193",
       "isAza": true,
       "spread_pct": 0.01,
-      "barrier_dist_pct": 43.94,
-      "last_probe": "2026-05-31T06:01:49.478006+00:00"
+      "barrier_dist_pct": 43.61,
+      "last_probe": "2026-06-01T06:01:42.712403+00:00"
     },
     "MINI_L_GULD_AVA_146": {
       "ob_id": "1162114",
@@ -909,22 +643,8 @@
       "name": "MINI L GULD AVA 146",
       "isAza": true,
       "spread_pct": 0.01,
-      "barrier_dist_pct": 48.18,
-      "last_probe": "2026-05-31T06:01:49.494061+00:00"
-    },
-    "MINI_L_GULD_AVA_195": {
-      "ob_id": "1687956",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 1.99,
-      "barrier": 2326.72,
-      "parity": 100,
-      "name": "MINI L GULD AVA 195",
-      "isAza": true,
-      "spread_pct": 0.009,
-      "barrier_dist_pct": 48.76,
-      "last_probe": "2026-05-31T06:01:49.525669+00:00"
+      "barrier_dist_pct": 47.87,
+      "last_probe": "2026-06-01T06:01:42.728045+00:00"
     },
     "MINI_L_GULD_AVA_192": {
       "ob_id": "1659846",
@@ -937,8 +657,8 @@
       "name": "MINI L GULD AVA 192",
       "isAza": true,
       "spread_pct": 0.01,
-      "barrier_dist_pct": 44.51,
-      "last_probe": "2026-05-31T06:01:49.541726+00:00"
+      "barrier_dist_pct": 44.19,
+      "last_probe": "2026-06-01T06:01:42.772454+00:00"
     },
     "MINI_L_GULD_AVA_106": {
       "ob_id": "980310",
@@ -951,8 +671,8 @@
       "name": "MINI L GULD AVA 106",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 49.63,
-      "last_probe": "2026-05-31T06:01:49.557560+00:00"
+      "barrier_dist_pct": 49.34,
+      "last_probe": "2026-06-01T06:01:42.790972+00:00"
     },
     "MINI_L_GULD_AVA_112": {
       "ob_id": "1024771",
@@ -965,120 +685,22 @@
       "name": "MINI L GULD AVA 112",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 53.57,
-      "last_probe": "2026-05-31T06:01:49.589431+00:00"
-    },
-    "MINI_L_GULD_AVA_292": {
-      "ob_id": "2186282",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 7.58,
-      "barrier": 4070.3,
-      "parity": 100,
-      "name": "MINI L GULD AVA 292",
-      "isAza": true,
-      "spread_pct": 0.036,
-      "barrier_dist_pct": 10.37,
-      "last_probe": "2026-05-31T06:01:49.653250+00:00"
-    },
-    "MINI_L_GULD_AVA_247": {
-      "ob_id": "2039813",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 3.62,
-      "barrier": 3391.26,
-      "parity": 100,
-      "name": "MINI L GULD AVA 247",
-      "isAza": true,
-      "spread_pct": 0.017,
-      "barrier_dist_pct": 25.32,
-      "last_probe": "2026-05-31T06:01:49.668910+00:00"
-    },
-    "MINI_L_GULD_AVA_282": {
-      "ob_id": "2171134",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 5.4,
-      "barrier": 3820.16,
-      "parity": 100,
-      "name": "MINI L GULD AVA 282",
-      "isAza": true,
-      "spread_pct": 0.026,
-      "barrier_dist_pct": 15.88,
-      "last_probe": "2026-05-31T06:01:49.691426+00:00"
-    },
-    "MINI_L_GULD_AVA_288": {
-      "ob_id": "2176626",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 6.53,
-      "barrier": 3970.64,
-      "parity": 100,
-      "name": "MINI L GULD AVA 288",
-      "isAza": true,
-      "spread_pct": 0.031,
-      "barrier_dist_pct": 12.56,
-      "last_probe": "2026-05-31T06:01:49.707408+00:00"
-    },
-    "MINI_L_GULD_AVA_279": {
-      "ob_id": "2168097",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 5.11,
-      "barrier": 3770.96,
-      "parity": 100,
-      "name": "MINI L GULD AVA 279",
-      "isAza": true,
-      "spread_pct": 0.024,
-      "barrier_dist_pct": 16.96,
-      "last_probe": "2026-05-31T06:01:49.724203+00:00"
-    },
-    "MINI_L_GULD_AVA_290": {
-      "ob_id": "2185515",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 7.01,
-      "barrier": 4019.68,
-      "parity": 100,
-      "name": "MINI L GULD AVA 290",
-      "isAza": true,
-      "spread_pct": 0.033,
-      "barrier_dist_pct": 11.48,
-      "last_probe": "2026-05-31T06:01:49.740911+00:00"
-    },
-    "MINI_L_GULD_AVA_231": {
-      "ob_id": "1958306",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 2.96,
-      "barrier": 3101.35,
-      "parity": 100,
-      "name": "MINI L GULD AVA 231",
-      "isAza": true,
-      "spread_pct": 0.014,
-      "barrier_dist_pct": 31.7,
-      "last_probe": "2026-05-31T06:01:49.763430+00:00"
+      "barrier_dist_pct": 53.3,
+      "last_probe": "2026-06-01T06:01:42.822464+00:00"
     },
     "MINI_L_GULD_AVA_277": {
       "ob_id": "2159481",
       "api_type": "warrant",
       "underlying": "XAU-USD",
       "direction": "LONG",
-      "leverage": 4.86,
+      "leverage": 4.85,
       "barrier": 3722.61,
       "parity": 100,
       "name": "MINI L GULD AVA 277",
       "isAza": true,
       "spread_pct": 0.023,
-      "barrier_dist_pct": 18.02,
-      "last_probe": "2026-05-31T06:01:49.794112+00:00"
+      "barrier_dist_pct": 17.55,
+      "last_probe": "2026-06-01T06:01:43.011916+00:00"
     },
     "MINI_L_GULD_AVA_284": {
       "ob_id": "2171176",
@@ -1091,8 +713,8 @@
       "name": "MINI L GULD AVA 284",
       "isAza": true,
       "spread_pct": 0.027,
-      "barrier_dist_pct": 14.75,
-      "last_probe": "2026-05-31T06:01:49.809789+00:00"
+      "barrier_dist_pct": 14.26,
+      "last_probe": "2026-06-01T06:01:43.027674+00:00"
     },
     "MINI_L_GULD_AVA_303": {
       "ob_id": "2203021",
@@ -1105,8 +727,8 @@
       "name": "MINI L GULD AVA 303",
       "isAza": true,
       "spread_pct": 0.023,
-      "barrier_dist_pct": 18.33,
-      "last_probe": "2026-05-31T06:01:50.657351+00:00"
+      "barrier_dist_pct": 17.85,
+      "last_probe": "2026-06-01T06:01:43.857639+00:00"
     },
     "MINI_L_GULD_AVA_319": {
       "ob_id": "2267094",
@@ -1119,22 +741,8 @@
       "name": "MINI L GULD AVA 319",
       "isAza": true,
       "spread_pct": 0.029,
-      "barrier_dist_pct": 13.45,
-      "last_probe": "2026-05-31T06:01:50.707555+00:00"
-    },
-    "MINI_L_GULD_AVA_401": {
-      "ob_id": "2376844",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "LONG",
-      "leverage": 7.73,
-      "barrier": 4081.64,
-      "parity": 100,
-      "name": "MINI L GULD AVA 401",
-      "isAza": true,
-      "spread_pct": 0.037,
-      "barrier_dist_pct": 10.12,
-      "last_probe": "2026-05-31T06:01:50.898642+00:00"
+      "barrier_dist_pct": 12.95,
+      "last_probe": "2026-06-01T06:01:43.917604+00:00"
     },
     "MINI_L_GULD_AVA_63": {
       "ob_id": "719947",
@@ -1147,8 +755,8 @@
       "name": "MINI L GULD AVA 63",
       "isAza": true,
       "spread_pct": 0.008,
-      "barrier_dist_pct": 54.73,
-      "last_probe": "2026-05-31T06:01:50.324232+00:00"
+      "barrier_dist_pct": 54.47,
+      "last_probe": "2026-06-01T06:01:43.521873+00:00"
     },
     "MINI_L_GULD_AVA_98": {
       "ob_id": "927763",
@@ -1161,36 +769,8 @@
       "name": "MINI L GULD AVA 98",
       "isAza": true,
       "spread_pct": 0.009,
-      "barrier_dist_pct": 52.57,
-      "last_probe": "2026-05-31T06:01:50.552230+00:00"
-    },
-    "MINI_S_GULD_AVA_491": {
-      "ob_id": "2352471",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 4.86,
-      "barrier": 5386.98,
-      "parity": 100,
-      "name": "MINI S GULD AVA 491",
-      "isAza": true,
-      "spread_pct": 0.023,
-      "barrier_dist_pct": 18.63,
-      "last_probe": "2026-05-31T06:01:52.534186+00:00"
-    },
-    "MINI_S_GULD_AVA_503": {
-      "ob_id": "2374788",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 7.26,
-      "barrier": 5082.43,
-      "parity": 100,
-      "name": "MINI S GULD AVA 503",
-      "isAza": true,
-      "spread_pct": 0.034,
-      "barrier_dist_pct": 11.92,
-      "last_probe": "2026-05-31T06:01:52.784282+00:00"
+      "barrier_dist_pct": 52.29,
+      "last_probe": "2026-06-01T06:01:43.758945+00:00"
     },
     "MINI_S_GULD_AVA_439": {
       "ob_id": "2303483",
@@ -1203,22 +783,8 @@
       "name": "MINI S GULD AVA 439",
       "isAza": true,
       "spread_pct": 0.018,
-      "barrier_dist_pct": 24.81,
-      "last_probe": "2026-05-31T06:01:51.553163+00:00"
-    },
-    "MINI_S_GULD_AVA_495": {
-      "ob_id": "2368904",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 5.49,
-      "barrier": 5280.51,
-      "parity": 100,
-      "name": "MINI S GULD AVA 495",
-      "isAza": true,
-      "spread_pct": 0.026,
-      "barrier_dist_pct": 16.28,
-      "last_probe": "2026-05-31T06:01:52.554249+00:00"
+      "barrier_dist_pct": 25.54,
+      "last_probe": "2026-06-01T06:01:44.888324+00:00"
     },
     "MINI_S_GULD_AVA_436": {
       "ob_id": "2303345",
@@ -1231,8 +797,8 @@
       "name": "MINI S GULD AVA 436",
       "isAza": true,
       "spread_pct": 0.017,
-      "barrier_dist_pct": 26.45,
-      "last_probe": "2026-05-31T06:01:51.583356+00:00"
+      "barrier_dist_pct": 27.18,
+      "last_probe": "2026-06-01T06:01:44.940950+00:00"
     },
     "MINI_S_GULD_AVA_438": {
       "ob_id": "2303379",
@@ -1245,8 +811,8 @@
       "name": "MINI S GULD AVA 438",
       "isAza": true,
       "spread_pct": 0.017,
-      "barrier_dist_pct": 25.36,
-      "last_probe": "2026-05-31T06:01:51.607559+00:00"
+      "barrier_dist_pct": 26.09,
+      "last_probe": "2026-06-01T06:01:44.983412+00:00"
     },
     "MINI_S_GULD_AVA_499": {
       "ob_id": "2374782",
@@ -1259,8 +825,8 @@
       "name": "MINI S GULD AVA 499",
       "isAza": true,
       "spread_pct": 0.03,
-      "barrier_dist_pct": 14.11,
-      "last_probe": "2026-05-31T06:01:52.574439+00:00"
+      "barrier_dist_pct": 14.77,
+      "last_probe": "2026-06-01T06:01:45.061561+00:00"
     },
     "MINI_S_GULD_AVA_425": {
       "ob_id": "2303378",
@@ -1273,8 +839,8 @@
       "name": "MINI S GULD AVA 425",
       "isAza": true,
       "spread_pct": 0.014,
-      "barrier_dist_pct": 32.45,
-      "last_probe": "2026-05-31T06:01:52.407596+00:00"
+      "barrier_dist_pct": 33.22,
+      "last_probe": "2026-06-01T06:01:45.082644+00:00"
     },
     "MINI_S_GULD_AVA_461": {
       "ob_id": "2306548",
@@ -1287,8 +853,8 @@
       "name": "MINI S GULD AVA 461",
       "isAza": true,
       "spread_pct": 0.021,
-      "barrier_dist_pct": 20.47,
-      "last_probe": "2026-05-31T06:01:51.657687+00:00"
+      "barrier_dist_pct": 21.17,
+      "last_probe": "2026-06-01T06:01:45.100684+00:00"
     },
     "MINI_S_GULD_AVA_443": {
       "ob_id": "2304618",
@@ -1301,8 +867,8 @@
       "name": "MINI S GULD AVA 443",
       "isAza": true,
       "spread_pct": 0.012,
-      "barrier_dist_pct": 38.46,
-      "last_probe": "2026-05-31T06:01:51.678988+00:00"
+      "barrier_dist_pct": 39.26,
+      "last_probe": "2026-06-01T06:01:45.120461+00:00"
     },
     "MINI_S_GULD_AVA_459": {
       "ob_id": "2306551",
@@ -1315,162 +881,8 @@
       "name": "MINI S GULD AVA 459",
       "isAza": true,
       "spread_pct": 0.02,
-      "barrier_dist_pct": 21.56,
-      "last_probe": "2026-05-31T06:01:51.693417+00:00"
-    },
-    "MINI_S_GULD_AVA_428": {
-      "ob_id": "2303471",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 3.04,
-      "barrier": 5940.22,
-      "parity": 100,
-      "name": "MINI S GULD AVA 428",
-      "isAza": true,
-      "spread_pct": 0.014,
-      "barrier_dist_pct": 30.81,
-      "last_probe": "2026-05-31T06:01:52.423977+00:00"
-    },
-    "MINI_S_GULD_AVA_429": {
-      "ob_id": "2303329",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 3.09,
-      "barrier": 5915.45,
-      "parity": 100,
-      "name": "MINI S GULD AVA 429",
-      "isAza": true,
-      "spread_pct": 0.015,
-      "barrier_dist_pct": 30.26,
-      "last_probe": "2026-05-31T06:01:52.446187+00:00"
-    },
-    "MINI_S_GULD_AVA_427": {
-      "ob_id": "2303423",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 2.99,
-      "barrier": 5964.98,
-      "parity": 100,
-      "name": "MINI S GULD AVA 427",
-      "isAza": true,
-      "spread_pct": 0.014,
-      "barrier_dist_pct": 31.36,
-      "last_probe": "2026-05-31T06:01:52.464181+00:00"
-    },
-    "MINI_S_GULD_AVA_426": {
-      "ob_id": "2303458",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 2.94,
-      "barrier": 5989.75,
-      "parity": 100,
-      "name": "MINI S GULD AVA 426",
-      "isAza": true,
-      "spread_pct": 0.014,
-      "barrier_dist_pct": 31.9,
-      "last_probe": "2026-05-31T06:01:52.481310+00:00"
-    },
-    "MINI_S_GULD_AVA_492": {
-      "ob_id": "2352511",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 4.99,
-      "barrier": 5362.13,
-      "parity": 100,
-      "name": "MINI S GULD AVA 492",
-      "isAza": true,
-      "spread_pct": 0.024,
-      "barrier_dist_pct": 18.08,
-      "last_probe": "2026-05-31T06:01:52.594269+00:00"
-    },
-    "MINI_S_GULD_AVA_494": {
-      "ob_id": "2368887",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 5.33,
-      "barrier": 5305.37,
-      "parity": 100,
-      "name": "MINI S GULD AVA 494",
-      "isAza": true,
-      "spread_pct": 0.025,
-      "barrier_dist_pct": 16.83,
-      "last_probe": "2026-05-31T06:01:52.604175+00:00"
-    },
-    "MINI_S_GULD_AVA_493": {
-      "ob_id": "2368863",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 5.18,
-      "barrier": 5330.24,
-      "parity": 100,
-      "name": "MINI S GULD AVA 493",
-      "isAza": true,
-      "spread_pct": 0.024,
-      "barrier_dist_pct": 17.38,
-      "last_probe": "2026-05-31T06:01:52.626428+00:00"
-    },
-    "MINI_S_GULD_AVA_496": {
-      "ob_id": "2374795",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 5.66,
-      "barrier": 5256.51,
-      "parity": 100,
-      "name": "MINI S GULD AVA 496",
-      "isAza": true,
-      "spread_pct": 0.027,
-      "barrier_dist_pct": 15.75,
-      "last_probe": "2026-05-31T06:01:52.644054+00:00"
-    },
-    "MINI_S_GULD_AVA_497": {
-      "ob_id": "2374748",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 5.84,
-      "barrier": 5231.64,
-      "parity": 100,
-      "name": "MINI S GULD AVA 497",
-      "isAza": true,
-      "spread_pct": 0.028,
-      "barrier_dist_pct": 15.21,
-      "last_probe": "2026-05-31T06:01:52.667118+00:00"
-    },
-    "MINI_S_GULD_AVA_490": {
-      "ob_id": "2348507",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 4.73,
-      "barrier": 5411.37,
-      "parity": 100,
-      "name": "MINI S GULD AVA 490",
-      "isAza": true,
-      "spread_pct": 0.022,
-      "barrier_dist_pct": 19.16,
-      "last_probe": "2026-05-31T06:01:52.684169+00:00"
-    },
-    "MINI_S_GULD_AVA_498": {
-      "ob_id": "2374779",
-      "api_type": "warrant",
-      "underlying": "XAU-USD",
-      "direction": "SHORT",
-      "leverage": 6.04,
-      "barrier": 5206.77,
-      "parity": 100,
-      "name": "MINI S GULD AVA 498",
-      "isAza": true,
-      "spread_pct": 0.029,
-      "barrier_dist_pct": 14.66,
-      "last_probe": "2026-05-31T06:01:52.698798+00:00"
+      "barrier_dist_pct": 22.26,
+      "last_probe": "2026-06-01T06:01:45.139085+00:00"
     },
     "MINI_S_GULD_AVA_500": {
       "ob_id": "2374799",
@@ -1483,8 +895,162 @@
       "name": "MINI S GULD AVA 500",
       "isAza": true,
       "spread_pct": 0.031,
-      "barrier_dist_pct": 13.56,
-      "last_probe": "2026-05-31T06:01:52.804162+00:00"
+      "barrier_dist_pct": 14.22,
+      "last_probe": "2026-06-01T06:01:46.328915+00:00"
+    },
+    "MINI_S_GULD_AVA_426": {
+      "ob_id": "2303458",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 2.94,
+      "barrier": 5989.75,
+      "parity": 100,
+      "name": "MINI S GULD AVA 426",
+      "isAza": true,
+      "spread_pct": 0.014,
+      "barrier_dist_pct": 32.67,
+      "last_probe": "2026-06-01T06:01:45.840841+00:00"
+    },
+    "MINI_S_GULD_AVA_429": {
+      "ob_id": "2303329",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 3.09,
+      "barrier": 5915.45,
+      "parity": 100,
+      "name": "MINI S GULD AVA 429",
+      "isAza": true,
+      "spread_pct": 0.015,
+      "barrier_dist_pct": 31.02,
+      "last_probe": "2026-06-01T06:01:45.860200+00:00"
+    },
+    "MINI_S_GULD_AVA_427": {
+      "ob_id": "2303423",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 2.98,
+      "barrier": 5964.98,
+      "parity": 100,
+      "name": "MINI S GULD AVA 427",
+      "isAza": true,
+      "spread_pct": 0.014,
+      "barrier_dist_pct": 32.11,
+      "last_probe": "2026-06-01T06:01:45.887070+00:00"
+    },
+    "MINI_S_GULD_AVA_428": {
+      "ob_id": "2303471",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 3.03,
+      "barrier": 5940.22,
+      "parity": 100,
+      "name": "MINI S GULD AVA 428",
+      "isAza": true,
+      "spread_pct": 0.014,
+      "barrier_dist_pct": 31.56,
+      "last_probe": "2026-06-01T06:01:45.907485+00:00"
+    },
+    "MINI_S_GULD_AVA_492": {
+      "ob_id": "2352511",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 4.99,
+      "barrier": 5362.13,
+      "parity": 100,
+      "name": "MINI S GULD AVA 492",
+      "isAza": true,
+      "spread_pct": 0.024,
+      "barrier_dist_pct": 18.76,
+      "last_probe": "2026-06-01T06:01:46.050132+00:00"
+    },
+    "MINI_S_GULD_AVA_490": {
+      "ob_id": "2348507",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 4.73,
+      "barrier": 5411.37,
+      "parity": 100,
+      "name": "MINI S GULD AVA 490",
+      "isAza": true,
+      "spread_pct": 0.022,
+      "barrier_dist_pct": 19.85,
+      "last_probe": "2026-06-01T06:01:46.085329+00:00"
+    },
+    "MINI_S_GULD_AVA_497": {
+      "ob_id": "2374748",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 5.84,
+      "barrier": 5231.64,
+      "parity": 100,
+      "name": "MINI S GULD AVA 497",
+      "isAza": true,
+      "spread_pct": 0.028,
+      "barrier_dist_pct": 15.87,
+      "last_probe": "2026-06-01T06:01:46.105615+00:00"
+    },
+    "MINI_S_GULD_AVA_494": {
+      "ob_id": "2368887",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 5.33,
+      "barrier": 5305.37,
+      "parity": 100,
+      "name": "MINI S GULD AVA 494",
+      "isAza": true,
+      "spread_pct": 0.025,
+      "barrier_dist_pct": 17.5,
+      "last_probe": "2026-06-01T06:01:46.160574+00:00"
+    },
+    "MINI_S_GULD_AVA_496": {
+      "ob_id": "2374795",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 5.66,
+      "barrier": 5256.51,
+      "parity": 100,
+      "name": "MINI S GULD AVA 496",
+      "isAza": true,
+      "spread_pct": 0.027,
+      "barrier_dist_pct": 16.42,
+      "last_probe": "2026-06-01T06:01:46.180242+00:00"
+    },
+    "MINI_S_GULD_AVA_493": {
+      "ob_id": "2368863",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 5.17,
+      "barrier": 5330.24,
+      "parity": 100,
+      "name": "MINI S GULD AVA 493",
+      "isAza": true,
+      "spread_pct": 0.024,
+      "barrier_dist_pct": 18.05,
+      "last_probe": "2026-06-01T06:01:46.195394+00:00"
+    },
+    "MINI_S_GULD_AVA_498": {
+      "ob_id": "2374779",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 6.04,
+      "barrier": 5206.77,
+      "parity": 100,
+      "name": "MINI S GULD AVA 498",
+      "isAza": true,
+      "spread_pct": 0.029,
+      "barrier_dist_pct": 15.32,
+      "last_probe": "2026-06-01T06:01:46.220198+00:00"
     },
     "MINI_S_GULD_AVA_505": {
       "ob_id": "2374793",
@@ -1497,8 +1063,8 @@
       "name": "MINI S GULD AVA 505",
       "isAza": true,
       "spread_pct": 0.037,
-      "barrier_dist_pct": 10.83,
-      "last_probe": "2026-05-31T06:01:52.824213+00:00"
+      "barrier_dist_pct": 11.46,
+      "last_probe": "2026-06-01T06:01:46.350562+00:00"
     },
     "MINI_S_GULD_AVA_504": {
       "ob_id": "2374774",
@@ -1511,50 +1077,64 @@
       "name": "MINI S GULD AVA 504",
       "isAza": true,
       "spread_pct": 0.036,
-      "barrier_dist_pct": 11.37,
-      "last_probe": "2026-05-31T06:01:52.844260+00:00"
+      "barrier_dist_pct": 12.01,
+      "last_probe": "2026-06-01T06:01:46.374223+00:00"
+    },
+    "MINI_S_GULD_AVA_507": {
+      "ob_id": "2374806",
+      "api_type": "warrant",
+      "underlying": "XAU-USD",
+      "direction": "SHORT",
+      "leverage": 8.65,
+      "barrier": 4982.95,
+      "parity": 100,
+      "name": "MINI S GULD AVA 507",
+      "isAza": true,
+      "spread_pct": 0.041,
+      "barrier_dist_pct": 10.36,
+      "last_probe": "2026-06-01T06:01:46.392659+00:00"
     },
     "MINI_S_GULD_AVA_501": {
       "ob_id": "2374786",
       "api_type": "warrant",
       "underlying": "XAU-USD",
       "direction": "SHORT",
-      "leverage": 6.72,
+      "leverage": 6.71,
       "barrier": 5132.17,
       "parity": 100,
       "name": "MINI S GULD AVA 501",
       "isAza": true,
       "spread_pct": 0.032,
-      "barrier_dist_pct": 13.02,
-      "last_probe": "2026-05-31T06:01:52.864286+00:00"
+      "barrier_dist_pct": 13.67,
+      "last_probe": "2026-06-01T06:01:46.410259+00:00"
     },
     "MINI_S_GULD_AVA_506": {
       "ob_id": "2374776",
       "api_type": "warrant",
       "underlying": "XAU-USD",
       "direction": "SHORT",
-      "leverage": 8.26,
+      "leverage": 8.25,
       "barrier": 5007.82,
       "parity": 100,
       "name": "MINI S GULD AVA 506",
       "isAza": true,
       "spread_pct": 0.039,
-      "barrier_dist_pct": 10.28,
-      "last_probe": "2026-05-31T06:01:52.874243+00:00"
+      "barrier_dist_pct": 10.91,
+      "last_probe": "2026-06-01T06:01:46.430389+00:00"
     },
     "MINI_S_GULD_AVA_502": {
       "ob_id": "2374773",
       "api_type": "warrant",
       "underlying": "XAU-USD",
       "direction": "SHORT",
-      "leverage": 6.98,
+      "leverage": 6.97,
       "barrier": 5107.3,
       "parity": 100,
       "name": "MINI S GULD AVA 502",
       "isAza": true,
       "spread_pct": 0.033,
-      "barrier_dist_pct": 12.47,
-      "last_probe": "2026-05-31T06:01:52.894139+00:00"
+      "barrier_dist_pct": 13.12,
+      "last_probe": "2026-06-01T06:01:46.450559+00:00"
     }
   }
 }
