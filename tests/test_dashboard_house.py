@@ -76,6 +76,7 @@ def fake_house_root(tmp_path: Path) -> Path:
         "price": 6_995_000, "sqm": 70, "fee": 3210, "construction_year": 1929,
         "composite_score": {"composite": 66},
         "weighted_cagr": {"composite": 2.6},
+        "booli_estimate": 7_100_000,                 # Booli värdering column
         "bid_advisor": {"fair_value": 7_300_000},   # price < fair → -4% (cheap)
         "premium_structured": {"tier": 1},
         "premium_llm": {"tier": 2},
@@ -247,6 +248,9 @@ def test_index_renders_hub(client):
     # --- Est. value column (bid_advisor.fair_value = 7.30M for slug_a) ---
     assert "Est." in body
     assert "7.30M" in body
+    # --- Booli est. column (booli_estimate = 7.10M for slug_a) ---
+    assert "Booli" in body
+    assert "7.10M" in body
 
     # --- sortable tables: the sort script + the K10 link are present ---
     assert "data-sort" in body          # from _SORT_JS

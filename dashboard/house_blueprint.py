@@ -342,6 +342,7 @@ def _candidate_row(run_id: str, slug: str, data: dict) -> dict:
         "prem_s": _nested_num(data, "premium_structured", "tier"),
         "prem_l": _nested_num(data, "premium_llm", "tier"),
         "est_value": fair,   # our calculated estimated value (bid_advisor.fair_value)
+        "booli_est": _num_or_none(data.get("booli_estimate")),  # Booli värdering
         "fair_delta": (price / fair - 1.0) if price and fair else None,
     }
 
@@ -411,7 +412,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
         return "<p>No candidates in this run.</p>"
     head = (
         "<tr><th>#</th><th>Score</th><th>Address</th><th>Price</th>"
-        "<th>Est.<br>value</th>"
+        "<th>Est.<br>value</th><th>Booli<br>est.</th>"
         "<th>kr/m²</th><th>m²</th><th>Fee</th><th>Built</th>"
         "<th>Prem<br>S/L</th><th>CAGR%</th><th>vs<br>fair</th><th></th></tr>"
     )
@@ -449,6 +450,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
             f"<td>{addr_cell}</td>"
             f"<td class=\"num\">{_fmt_price(r['price'])}</td>"
             f"<td class=\"num\">{_fmt_price(r['est_value'])}</td>"
+            f"<td class=\"num\">{_fmt_price(r['booli_est'])}</td>"
             f"<td class=\"num\">{_fmt_sint(r['kr_m2'])}</td>"
             f"<td class=\"num\">{_opt(r['sqm'])}</td>"
             f"<td class=\"num\">{_fmt_sint(r['fee'])}</td>"
