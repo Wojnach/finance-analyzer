@@ -1,175 +1,86 @@
-# PLAN — Error-investigation fixes (2026-06-01)
+# PLAN — Full Adversarial Codebase Review (2026-06-01)
 
-Branch: `fix/state-resilience-20260601`
+> Supersedes the prior `fix/state-resilience-20260601` plan (merged today as
+> `57de1814` / `c5ba4ae0` / `e0617a90`). **That fix recurred:** `portfolio_state_corrupt`
+> fired again 15:11–15:19 today with "no backup recovered". The quarantine/fail-loud
+> half works (those journal entries ARE the new code firing), but the **backup-creation
+> path evidently never produced a `.bak`**, so each cycle still falls through to fresh
+> defaults until a human restores. That unfinished half is a primary review target.
 
-## Context
+## Goal
+Adversarial review of the finance-analyzer production code, partitioned into 8
+subsystems, each reviewed independently by a fresh Claude Code review subagent in
+parallel, plus an independent author (this session) review pass, then
+cross-critiqued and synthesized. **Read-only review — no production code is
+modified this session.** Deliverable is review docs committed to `main`.
 
-Investigation of the dashboard "Unresolved (12 err)" list surfaced three error
-categories. Data-level fixes already applied on `main` (the malformed
-`portfolio_state.json` was repaired and the 8 stale journal entries resolved).
-This branch ships the **code-level** fixes that prevent recurrence and remove
-the noise at its source.
+## Why this shape
+- **Empty-baseline worktrees:** each subsystem's curated hot-path files are
+  committed onto a branch (`fgl/<sub>`) whose parent is an empty tree, so
+  `git diff fgl/baseline-empty HEAD` presents the whole subsystem as a clean
+  "PR" the reviewer can audit. Full repo remains at `Q:/finance-analyzer` for
+  cross-file context reads.
+- **Curated scope, not exhaustive:** ~153K LOC across 421 prod files. No reviewer
+  can digest that. Each subsystem is scoped to the code that runs the live loops
+  and touches money, state, or auth. One-off scripts, backtests, dead modules excluded.
+- **Two reviewer types:** `caveman:cavecrew-reviewer` (tight, one-line findings),
+  `pr-review-toolkit:code-reviewer` (broad/deep).
 
-### Root causes found
+## Subsystem partition (curated)
+| Subsystem | Reviewer | Files / LOC | Key adversarial focus |
+|---|---|---|---|
+| signals-core | pr-toolkit | 8 / 9.7K | vote aggregation, accuracy gate inversion, lookahead in backfill |
+| orchestration | pr-toolkit | 8 / 10K | L2 subprocess silent-fail (exit 0 but failed), loop crash recovery |
+| portfolio-risk | pr-toolkit | 7 / 3.9K | **LIVE corruption bug** state I/O + missing-backup; ATR/DD math |
+| metals-core | pr-toolkit | 6 / 15.6K | live order/stop-loss, MINI barrier proximity, EOD-flat |
+| avanza-api | caveman | 6 / 3.5K | stop-loss API (Mar 3 incident), BankID session, account filter |
+| signals-modules | pr-toolkit | 12 / 5.8K | per-signal lookahead, NaN, vote inversion, confidence range |
+| data-external | caveman | 9 / 2.3K | live-prices-first, stale-cache-as-live, retry/timeout |
+| infrastructure | pr-toolkit | 10 / 5.2K | **file_utils atomic I/O** (corruption root cause), auth bypass |
 
-1. **`portfolio_arithmetic` (CRITICAL, real):** the 13:53 session hand-edited
-   `data/portfolio_state.json` to append a 12:40 XAG SELL, inserting the new
-   object *after* the `]` that closes the `transactions` array → invalid JSON
-   (`Expecting property name … line 518`). Violated Critical Rule #4 (atomic
-   I/O only). `loop_contract` detected it but reported only "not a dict",
-   which is misleading (the file is unparseable, not a non-dict).
-
-2. **`avanza_account_mismatch` ×5 (noise):** `verify_default_account()` logs a
-   **`level: critical`** `critical_errors.jsonl` entry on every `fetch_failed`,
-   including the routine case where the Avanza BankID session has expired
-   (~24 h lifetime). Session expiry is an *operational* state only a human
-   relogin can fix — yet it (a) clutters the unresolved-critical list daily and
-   (b) triggers `PF-FixAgentDispatcher` to spawn a fix agent (`Read,Edit,Bash`,
-   no commit/login powers) that **cannot** resolve it → wasted tokens + backoff.
-
-3. **`accuracy_degradation` ×3 (benign):** real signal decay
-   (`statistical_jump_regime` family 62→44 %, `XAG-USD::momentum_factors`
-   63→35 %, `MSTR::econ_calendar` 55→33 %). All sit < `ACCURACY_GATE_THRESHOLD`
-   (0.47) recent-window → already auto force-HOLD, no live-trade harm. Alert
-   re-fires hourly against the 13.3-day-old baseline high-water mark and
-   self-clears once the baseline rolls forward. **ACCEPT — no code change**
-   (signal weights/thresholds are off-limits per protocol; the gate already
-   neutralises these signals).
-
-### Latent danger uncovered (the reason this is worth a branch)
-
-`portfolio_mgr._load_state_from()` recovers a corrupt state file from `.bak`
-backups, but if the file is corrupt **and** all backups are missing/corrupt it
-silently returns `_DEFAULT_STATE` (fresh 500 K, no holdings). The next
-`save_state()` then overwrites the corrupt file with those defaults — the entire
-portfolio track record is **lost with only a `logger.critical` line** (no
-journal entry, no Telegram). There are currently **no `.bak` files on disk**, so
-during today's corruption window a single trade trigger would have wiped the
-Patient portfolio silently. This is the highest-value fix.
-
-## What this branch changes
-
-### Fix 1 — `portfolio/portfolio_mgr.py`: no silent portfolio wipe (P0)
-In `_load_state_from`, the fall-through that returns fresh defaults after a
-corrupt file with no usable backup currently only calls `logger.critical`.
-Change it to **fail loud and preserve evidence** before returning defaults
-(loop must keep running, so we still return defaults):
-
-- Quarantine the corrupt file: copy `path` → `path` + `.corrupt-<utc-stamp>` so
-  the unparseable content (often hand-recoverable, as today's was) is not lost
-  when the next save overwrites it.
-- Append a `critical_errors.jsonl` entry (`category: "portfolio_state_corrupt"`)
-  via `atomic_append_jsonl` so it reaches the canonical surfacing path.
-- Best-effort Telegram alert (lazy import, swallow failures — same pattern as
-  `avanza_account_check._send_telegram`).
-- Only THEN return defaults.
-
-Guard the quarantine+alert so it never raises (a failure here must not crash the
-read path). Idempotency: only quarantine when `path.exists()` and we are on the
-all-backups-failed branch. Quarantine copy uses raw bytes (file is unparseable),
-not load_json.
-
-### Fix 2 — `portfolio/loop_contract.py`: accurate corruption diagnostics (P1)
-In `_check_portfolio_arithmetic`, when `load_json` returns a non-dict for an
-existing file, re-read the raw bytes and attempt `json.loads` to capture the
-real `JSONDecodeError` (msg + line/col). Put that in the violation message
-instead of the bare "not a dict", e.g.:
-`"… invalid JSON: Expecting property name enclosed in double quotes (line 518 col 5)"`.
-Read-only, additive; falls back to the existing message if the re-read also
-can't explain it (e.g. genuinely a JSON list/number at top level, or the file
-vanished between reads).
-
-### Fix 3 — `portfolio/avanza_account_check.py`: de-escalate session expiry (P2)
-- Add `_is_session_expiry(reason)` → True when the reason contains
-  `"session expired"` (case-insensitive).
-- In the `fetch_failed` branch, when it's a session expiry, write the journal
-  entry with **`level: "warning"`** and `category: "avanza_session_expired"`
-  (operational), NOT `level: "critical"`. Genuine fetch failures (DNS/5xx/auth
-  blip) keep `level: "critical"` + `category: "avanza_account_mismatch"`.
-- On a successful verify (`ok=True`), best-effort **auto-resolve** any still-
-  unresolved `avanza_account_mismatch` / `avanza_session_expired` originals by
-  appending resolution lines (so the relogin closes the loop). Guarded; never
-  raises into the verify path. Only targets entries whose `level` is
-  critical/warning and `category != "resolution"` — never resolves a resolution.
-
-The dashboard tile and `check_critical_errors.py` both key on
-`level == "critical"`, so the downgrade removes the daily clutter and stops the
-useless fix-agent dispatch while keeping full visibility (the warning is still
-journaled).
-
-## Files
-
-| File | Change |
-|------|--------|
-| `portfolio/portfolio_mgr.py` | quarantine + journal + telegram on corrupt-no-backup |
-| `portfolio/loop_contract.py` | real JSON error in portfolio_arithmetic message |
-| `portfolio/avanza_account_check.py` | session-expiry → warning + auto-resolve on success |
-| `tests/test_portfolio_mgr_corrupt_quarantine.py` | NEW — wipe-prevention tests |
-| `tests/test_loop_contract.py` | extend — diagnostic message asserts real JSON error |
-| `tests/test_avanza_account_check.py` | extend — expiry-downgrade + auto-resolve |
+## Live context driving focus (startup checks)
+- 12 unresolved critical errors today. Recurring `portfolio_state_corrupt` →
+  portfolio-risk + infrastructure pointed at it (audit the **backup creation**
+  path, not just recovery — why is there no `.bak`?).
+- 6–12 signals dropped >15pp below 50% (`accuracy_degradation`) → signals-core
+  checks the detector for false positives + baseline staleness.
 
 ## Execution order
+1. ✅ Inventory + partition (`data/_fgl_inventory.json`, `data/_fgl_manifest.json`)
+2. ✅ Empty-baseline branch + 8 worktrees
+3. Commit this plan
+4. Spawn 8 background review subagents (concurrent)
+5. Independent adversarial pass (this session) on highest-risk files while
+   subagents run: `portfolio_mgr.py`, `file_utils.py`, `metals_loop` stop-loss,
+   `signal_engine` voting, `agent_invocation` subprocess
+6. Collect subagent results → `docs/fgl-review/<sub>.md`
+7. Cross-critique (dedup, confirm/refute against real lines, severity reconcile)
+8. Synthesis `docs/fgl-review/SYNTHESIS.md`
+9. Commit docs to main, push via Windows git, clean up worktrees
 
-1. Batch 1 — Fix 1 (portfolio_mgr) + tests. Test targeted.
-2. Batch 2 — Fix 2 (loop_contract) + tests. Test targeted.
-3. Batch 3 — Fix 3 (avanza_account_check) + tests. Test targeted.
-4. Adversarial review (cavecrew-reviewer) on diff; fix P1/P2.
-5. Full suite `pytest -n auto`; merge; push (Windows git); cleanup worktree.
+## Premortem (review-validity failure modes)
 
-## What could break (pre-premortem seed)
-- Quarantine writes inside the locked read path → I/O failure must not crash load.
-- `loop_contract` re-read races a concurrent atomic write → tolerate, fall back.
-- Auto-resolve appends could loop (resolution entry re-read as needing resolve) —
-  must only target `level critical/warning` originals, never `category resolution`.
-- Telegram import at module load could slow read path — keep lazy.
+This is a **read-only, docs-only** task: no production code, config, or state is
+touched, so classic /fgl incident vectors (loop crash, bad trade, data corruption,
+auth outage) are **ACCEPT — unreachable by this plan**. The real failure mode is a
+review that gives *false confidence* or *misleads* a future session. A dedicated
+premortem agent is not spawned — the 8 independent reviews + cross-critique already
+supply adversarial multi-perspective pressure. Failure modes considered:
 
-## Premortem (fresh-agent, 8 narratives — design hardened in response)
-
-1. **Quarantine races the next save → still wipes (lockless `load_state`).**
-   `load_state()` calls `_load_state_from` with NO lock; a parallel `update_state`
-   can `os.replace` defaults onto the path before the copy reads it → quarantine
-   captures defaults, not corrupt content.
-   → **Adopted:** capture `path.read_bytes()` ONCE the instant `load_json`
-   returns None, before the backup loop. Quarantine that in-memory buffer.
-
-2/3. **Pile-up / repeat side-effects (corrupt branch runs every 60 s cycle).**
-   One `.corrupt-<stamp>`/critical-append per cycle → ~1440/day + re-arms the
-   FixAgentDispatcher endlessly for a data problem a Read/Edit/Bash agent can't fix.
-   → **Adopted:** content-addressed quarantine name `<path>.corrupt-<sha8>`;
-   the ENTIRE side-effect block (copy + journal append) is gated on
-   `not qpath.exists()` → exactly once per unique corruption content. No telegram.
-
-4. **`loop_contract` double disk-read races a concurrent write** → reports a
-   corruption that no longer exists, or a misleading line number from a mid-replace.
-   → **Adopted:** read raw bytes ONCE, `json.loads` that same buffer. If it now
-   parses → emit no/transient finding (file healed); if `JSONDecodeError` → use
-   its line/col; if file vanished → skip.
-
-5. **De-escalation hides a REAL auth outage (the documented 3-week class).**
-   Substring `"session expired"` can match a persistent failure (revoked BankID,
-   account lock, Playwright redirect-to-login); downgraded to warning → drops off
-   the critical tile, nobody paged.
-   → **Adopted:** narrow match AND re-escalate — if ≥3 unresolved
-   `avanza_session_expired` warnings exist spanning >24 h (relogin never cleared
-   them), this one is written `level:critical` `avanza_account_mismatch`
-   `reason=persistent_session_expiry`.
-
-6/7. **Auto-resolve storm / wrong scope / post-merge backlog.** Runs once per
-   process (metals/golddigger/grid) × every restart; could re-append duplicate
-   resolutions or close a still-broken mismatch on a different account.
-   → **Adopted:** only resolve originals with matching `account_id`, only from
-   the last 7 days (mirrors `check_critical_errors` window), and SKIP any original
-   whose `ts` already has a `resolves_ts` resolution line → idempotent + bounded.
-   Tests patch `CRITICAL_ERRORS_LOG` to tmp_path.
-
-8. **Slow side-effects inside the per-path lock stall the loop** (copy +
-   contended jsonl_sidecar_lock + synchronous telegram).
-   → **Adopted:** dropped telegram from this path entirely (durable signal is the
-   journal entry); copy is small in-memory bytes, append is sub-ms. No network in
-   the read path, no `config.json` dependency (also fixes the worktree-symlink
-   test/prod gap from #7).
-
-**Residue-check cross-check:** `loop_contract._check_atomic_write_residue` only
-flags names with a `.tmp` segment (line 1223); `.corrupt-<sha8>` is not matched —
-no spurious `atomic_write_residue` violation. Quarantine writes bytes directly
-(no `.tmp` intermediate).
+1. **False-clean on the live corruption bug.** Reviewers bless `portfolio_mgr`'s
+   try/except recovery and miss that the recovery path *is* the bug (silent
+   default-wipe; no working `.bak`). → Manifest names today's incident explicitly;
+   my own pass independently audits the same path; both portfolio-risk and
+   infrastructure get it.
+2. **Curation blind spot.** A real bug lives in an excluded file. → Reviewers told
+   full repo is readable for context; synthesis lists OUT-of-scope explicitly so the
+   gap is visible. ACCEPT residual (can't review 153K LOC).
+3. **Hallucinated findings / wrong line numbers.** → Cross-critique spot-checks each
+   P0/P1 against the actual file before synthesis; unverifiable → demoted/flagged.
+4. **Severity inflation.** Style nits tagged P1. → Synthesis re-grades on a
+   money/state/auth/silent-failure rubric, ignoring subagent self-severity.
+5. **Subagent stall / empty return** (the reason /fgl left Codex). → Agents are
+   observable; empty return → that subsystem falls back to my pass + synthesis note.
+   No silent gap.
+6. **Worktree leakage into main.** Leftover `fgl/*` branches / `.worktrees/fgl/`. →
+   Explicit cleanup + post-merge verification of `git worktree list` / `git branch`.
