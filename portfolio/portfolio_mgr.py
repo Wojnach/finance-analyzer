@@ -1,5 +1,6 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
+import hashlib
 import logging
 import math
 import shutil
@@ -9,6 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.portfolio_mgr")
 
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
 from portfolio.file_utils import load_json
 
@@ -16,6 +18,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "portfolio_state.json"
 BOLD_STATE_FILE = DATA_DIR / "portfolio_state_bold.json"
+# Canonical surfacing path for failures the loop can't self-heal. Kept as a
+# module constant (not hard-coded at the call site) so tests can patch it to
+# tmp_path under xdist without touching the live journal.
+CRITICAL_ERRORS_LOG = DATA_DIR / "critical_errors.jsonl"
 INITIAL_CASH_SEK = 500_000
 
 _DEFAULT_STATE = {
@@ -75,11 +81,70 @@ def _validated_state(loaded):
     return result
 
 
+def _quarantine_corrupt_state(path: Path, corrupt_bytes: bytes) -> None:
+    """Preserve a corrupt state file + surface it before fresh defaults overwrite it.
+
+    Added 2026-06-01 after a hand-edit left ``portfolio_state.json`` unparseable
+    with NO ``.bak`` on disk: ``_load_state_from`` would have returned fresh
+    defaults and the next ``save_state`` would have silently wiped the entire
+    portfolio (only a ``logger.critical`` line, no journal entry, no alert). This
+    makes that path loud + recoverable.
+
+    Design (see docs/PLAN.md premortem):
+    - ``corrupt_bytes`` is captured by the caller the instant corruption is
+      detected, BEFORE the backup-recovery loop, so a concurrent lockless
+      ``load_state`` reader racing an ``update_state`` writer can't substitute
+      fresh-default bytes (premortem #1).
+    - Quarantine filename is content-addressed (``<name>.corrupt-<sha8>``) and the
+      whole side-effect block is gated on it not already existing, so the corrupt
+      branch firing every 60 s cycle quarantines + journals EXACTLY ONCE per
+      unique corruption instead of ~1440×/day (premortem #2/#3).
+    - No Telegram here: the journal entry is the durable surface and a synchronous
+      network send inside the (sometimes lock-held) read path is a stall vector
+      and pulls in the worktree-absent config.json symlink (premortem #8).
+    - Never raises — a failure to preserve evidence must not crash the read path.
+    """
+    try:
+        if not corrupt_bytes:
+            return
+        digest = hashlib.sha256(corrupt_bytes).hexdigest()[:8]
+        qpath = path.with_name(f"{path.name}.corrupt-{digest}")
+        if qpath.exists():
+            return  # this exact corruption already preserved + journaled — idempotent
+        qpath.write_bytes(corrupt_bytes)
+        atomic_append_jsonl(str(CRITICAL_ERRORS_LOG), {
+            "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "level": "critical",
+            "category": "portfolio_state_corrupt",
+            "caller": "portfolio.portfolio_mgr",
+            "message": (
+                f"{path.name} is unparseable and no backup recovered. Preserved "
+                f"to {qpath.name} and returned fresh defaults so the loop keeps "
+                f"running — RESTORE from {qpath.name} or a .bak before the next "
+                f"save overwrites state."
+            ),
+            "context": {
+                "path": str(path),
+                "quarantine": str(qpath),
+                "sha8": digest,
+                "bytes": len(corrupt_bytes),
+            },
+        })
+        logger.critical(
+            "Quarantined corrupt %s -> %s (returned fresh defaults)",
+            path.name, qpath.name,
+        )
+    except Exception:  # noqa: BLE001 — evidence-preservation is best-effort
+        logger.exception("quarantine of corrupt %s failed", path.name)
+
+
 def _load_state_from(path: Path):
     """Load portfolio state from a specific file.
 
     C7: On corruption, logs CRITICAL and attempts recovery from backups.
-    Returns validated defaults only if file AND all backups are missing/corrupt.
+    Returns validated defaults only if file AND all backups are missing/corrupt —
+    and in that case quarantines the corrupt bytes + journals a critical first so
+    the wipe-to-defaults is never silent (2026-06-01).
     """
     loaded = load_json(str(path), default=None)
     if loaded is not None:
@@ -87,6 +152,13 @@ def _load_state_from(path: Path):
 
     # File is missing or corrupt — check if the file exists (corruption vs missing)
     if path.exists():
+        # Capture the corrupt bytes NOW, before the recovery loop and before any
+        # concurrent writer can os.replace fresh defaults onto the path (a
+        # lockless load_state() reader can race a lock-held update_state writer).
+        try:
+            corrupt_bytes = path.read_bytes()
+        except OSError:
+            corrupt_bytes = b""
         logger.critical(
             "CORRUPT portfolio state file: %s — attempting backup recovery", path.name
         )
@@ -98,6 +170,9 @@ def _load_state_from(path: Path):
                 if loaded is not None:
                     logger.warning("Recovered %s from backup %s", path.name, bak.name)
                     return _validated_state(loaded)
+        # All backups failed — preserve evidence + surface LOUDLY before the
+        # caller's next save silently overwrites the corrupt file with defaults.
+        _quarantine_corrupt_state(path, corrupt_bytes)
         logger.critical(
             "ALL backups corrupt/missing for %s — returning fresh defaults", path.name
         )
