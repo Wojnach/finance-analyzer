@@ -201,6 +201,55 @@ class TestLoadJsonl:
         path.write_text('{"a": 1}\n', encoding="utf-8")
         assert load_jsonl(str(path)) == [{"a": 1}]
 
+    # ── concatenated-object recovery (2026-06-01) ──────────────────────
+    # Legacy append-race left some critical_errors.jsonl rows with two JSON
+    # objects on one physical line; the old reader dropped the whole line and
+    # silently lost resolution rows (dashboard over-counted unresolved errors).
+
+    def test_recovers_two_objects_on_one_line_no_separator(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a": 1}{"b": 2}\n', encoding="utf-8")
+        assert load_jsonl(path) == [{"a": 1}, {"b": 2}]
+
+    @pytest.mark.parametrize("sep", ["", " ", "\t"])
+    def test_recovers_with_various_separators(self, tmp_path, sep):
+        path = tmp_path / "data.jsonl"
+        path.write_text(f'{{"a": 1}}{sep}{{"b": 2}}\n', encoding="utf-8")
+        assert load_jsonl(path) == [{"a": 1}, {"b": 2}]
+
+    def test_concatenated_line_among_normal_lines(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a": 1}\n{"b": 2}{"c": 3}\n{"d": 4}\n', encoding="utf-8")
+        assert load_jsonl(path) == [{"a": 1}, {"b": 2}, {"c": 3}, {"d": 4}]
+
+    def test_keeps_valid_prefix_when_tail_is_garbage(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a": 1}garbagetail\n', encoding="utf-8")
+        assert load_jsonl(path) == [{"a": 1}]
+
+    def test_fully_garbage_line_still_dropped(self, tmp_path):
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a": 1}\ntotally not json\n{"b": 2}\n', encoding="utf-8")
+        assert load_jsonl(path) == [{"a": 1}, {"b": 2}]
+
+    def test_limit_counts_recovered_objects(self, tmp_path):
+        # A concatenated line yields 2 objects — the deque limit must count
+        # both, not the single physical line.
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"i": 1}{"i": 2}\n{"i": 3}\n', encoding="utf-8")
+        result = load_jsonl(path, limit=2)
+        assert result == [{"i": 2}, {"i": 3}]
+
+
+class TestLoadJsonlTailRecovery:
+    """load_jsonl_tail shares the same concatenated-object recovery path."""
+
+    def test_tail_recovers_concatenated_objects(self, tmp_path):
+        from portfolio.file_utils import load_jsonl_tail
+        path = tmp_path / "data.jsonl"
+        path.write_text('{"a": 1}\n{"b": 2}{"c": 3}\n', encoding="utf-8")
+        assert load_jsonl_tail(path) == [{"a": 1}, {"b": 2}, {"c": 3}]
+
 
 class TestAtomicAppendJsonl:
     """Tests for atomic_append_jsonl."""
