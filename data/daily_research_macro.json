@@ -1,54 +1,32 @@
 {
-  "date": "2026-05-31",
-  "generated_at": "2026-05-31T20:38:49.062755+00:00",
-  "market_summary": "Risk-off week. BTC held $73-74K range amid $1.55B ETF outflow streak (6 days). ETH testing $2K support, ETH/BTC ratio at 0.027 multi-year low. Gold at $4,536 forming descending triangle at critical $4,500 support. Silver consolidating $71-88 range. Oil crashed 19% in May (Brent $92.56) on US-Iran ceasefire hopes. MSTR mNAV compressed below 1.0x.",
-  "key_events_tomorrow": [
-    {
-      "date": "2026-06-01",
-      "event": "ISM Manufacturing PMI",
-      "impact": "high",
-      "note": "Manufacturing sector health check"
-    },
-    {
-      "date": "2026-06-03",
-      "event": "ISM Services PMI",
-      "impact": "high",
-      "note": "Services dominates GDP"
-    },
-    {
-      "date": "2026-06-06",
-      "event": "NFP Nonfarm Payrolls",
-      "impact": "very_high",
-      "note": "Prior was 115K (soft). Another weak number shifts rate cut expectations"
-    },
-    {
-      "date": "2026-06-07",
-      "event": "OPEC+ Full Ministerial Meeting (41st)",
-      "impact": "very_high",
-      "note": "Following May 188K bbl/day increase. Production decision critical"
-    },
-    {
-      "date": "2026-06-16",
-      "event": "FOMC Meeting (first under Chair Warsh)",
-      "impact": "very_high",
-      "note": "New chair, new dot plot. Powell term ended May 15"
-    }
+  "date": "2026-06-01",
+  "generated_at": "2026-06-01T21:30:00+02:00",
+  "market_summary": "S&P 500 at record 7,599.96, ninth consecutive weekly gain driven by AI boom (Dell +33%). Crypto diverged — BTC $72,145 amid record $2.97B ETF outflow streak. US-Iran ceasefire framework uncertain, Brent $92-108/bbl.",
+  "key_events_this_week": [
+    "Mon Jun 2: ISM Manufacturing PMI (May)",
+    "Tue Jun 3: JOLTS Job Openings (April)",
+    "Wed Jun 4: ADP Employment, ISM Services PMI, Fed Beige Book",
+    "Thu Jun 5: Weekly jobless claims",
+    "Fri Jun 6: Nonfarm Payrolls (May) — marquee event",
+    "Jun 10: CPI inflation report",
+    "Jun 16-17: FOMC meeting (97%+ odds hold at 3.50-3.75%)"
   ],
   "overnight_risks": [
-    "US-Iran 60-day ceasefire MOU not yet signed - binary risk for oil/risk assets",
-    "Strait of Hormuz partially blocked since Feb 28 - any weekend escalation spikes oil",
-    "BTC ETF 6-day outflow streak ($1.55B) - institutional de-risking",
-    "Gold descending triangle at $4,500 - breakdown risk",
-    "Asia markets cautious on US-Iran uncertainty"
+    "KOSPI +3.68% record — Samsung +10% on HBM4E AI chip shipments",
+    "US-Iran ceasefire fragile: Iran reimposed Hormuz restrictions",
+    "BTC $72K support — breakdown targets $68-70K",
+    "MicroStrategy first-ever BTC sale rattled sentiment",
+    "China PMI weak, real estate still cratering"
   ],
   "instrument_news": {
-    "BTC-USD": "BlackRock IBIT lost $528M on May 28 (2nd largest outflow ever). YTD net ETF inflows shrunk to $536M. $73-74K range holding. 401(k) crypto allocation DoL guidance expected H1 2026 - major catalyst.",
-    "ETH-USD": "ETH/BTC at 0.027 multi-year low. 10+ day ETF outflow streak. Down 32% YTD. Glamsterdam upgrade (H1 2026) and Hegota (H2 2026) upcoming. Pectra already priced in.",
-    "XAU-USD": "Descending triangle at $4,500 critical support. Central bank buying 244t Q1 2026 (+3% YoY) provides floor. UBS targets $5,900 despite sell-off. Down 18.8% from Jan ATH $5,598.",
-    "XAG-USD": "Consolidating at $75 pivot. UBS revised supply deficit down to 60-70M oz (from 300M). Key: $71 support, $79-80 resistance. Gold-silver ratio ~60.1.",
-    "MSTR": "mNAV compressed below 1.0x (~0.94x). Holds 843,738 BTC (4.018% total supply) at avg $75,700. Market pricing in dilution/execution risk."
+    "XAG-USD": "Silver $75.64 (+0.53%). BofA raised 2026 avg to $85.93. Sixth consecutive supply deficit year. June range $72-$88.",
+    "XAU-USD": "Gold $4,455-4,535. Central banks buying 755t. Goldman $5,400, JPM $5,500, UBS $6,000+ targets. COT unextended.",
+    "BTC-USD": "BTC $72,145. Record $2.43B May ETF outflows. MSTR sold 32 BTC. Support $72K, breakdown $68-70K.",
+    "ETH-USD": "ETH $1,950-$2,430 range. Hidden bullish divergence + whale accumulation. Needs $2,500 then $3,100.",
+    "MSTR": "MSTR $150 (-6%). First standalone BTC sale. GF Value $118.67 = 25.6% overvalued. Holds ~815-840K BTC."
   },
-  "metals_outlook": "Gold pivoting on $4,500 - descending triangle bearish if broken. Central bank buying (244t/Q1) provides structural floor but insufficient for new highs. Silver supply deficit revised down by UBS (60-70M oz vs 300M prior) - bearish fundamental shift. Gold-silver ratio at 60.1, compressed from 90. Industrial demand narrative intact but questioned.",
-  "oil_outlook": "Brent crashed to $92.56, down 19% in May (worst since COVID). US-Iran ceasefire MOU close but unsigned - BINARY: success pushes Brent to $85-88, failure spikes above $100-110. OPEC+ meeting June 7 following 188K bbl/day increase. Strait of Hormuz partially blocked since Feb 28. UAE departed OPEC+.",
-  "sentiment_shift": "Institutional risk-off across crypto and metals. ETF outflows dominating. Oil volatility extreme. Market waiting for macro clarity: NFP (Jun 6), OPEC+ (Jun 7), FOMC (Jun 16-17). First Warsh-led FOMC meeting will set tone for H2 2026."
+  "metals_outlook": "Structurally bullish. Central bank buying 755t, silver sixth consecutive deficit year. COT unextended. Binary: FOMC Jun 16-17 could pressure; Hormuz resolution removes safe-haven bid. Goldman/JPM/UBS target $5-6K gold.",
+  "oil_outlook": "Brent $92-108, elevated from Hormuz closure since Feb 28. 60-day ceasefire uncertain. Key transmission: elevated oil keeping inflation up, preventing Fed cuts. Resolution = deflationary risk-on.",
+  "crypto_outlook": "Challenging June. Record ETF outflows, oil-inflation preventing Fed easing, MSTR narrative damage. S&P at records while BTC at 2026 lows. Recovery catalysts: Hormuz reopening, NFP miss, ETF flow reversal.",
+  "sentiment_shift": "Split: extreme risk-on equities (AI boom) but risk-off crypto (record outflows) and cautious commodities. Iran/Hormuz = dominant binary."
 }

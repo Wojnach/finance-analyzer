@@ -1,110 +1,34 @@
 {
-  "date": "2026-05-31",
-  "generated_at": "2026-05-31T20:40:41.336840+00:00",
+  "date": "2026-06-01",
+  "generated_at": "2026-06-01T21:35:00+02:00",
   "research_topics": [
-    "Adaptive signal weighting",
-    "Regime-adaptive signal selection",
-    "Signal correlation analysis",
-    "Walk-forward optimization",
-    "Shadow signal tracking fix",
-    "Layer 2 telegram detection fix"
+    "Adaptive signal weighting (PPO/exponential-decay/Thompson sampling)",
+    "Regime detection (NHMM, geometric observables, soft regime assignments)",
+    "Signal combination and multi-resolution ensembles",
+    "Walk-forward validation with purged/embargoed CV",
+    "Multi-agent LLM trading frameworks (TradingAgents v0.2.5)",
+    "Gold/silver ratio and metals prediction models",
+    "Bitcoin on-chain prediction (CNN-LSTM, feature selection)",
+    "Adaptive stop-loss with regime-conditional ATR",
+    "Inverse-volatility position sizing",
+    "IC-based dynamic weighting with Spearman rank IC"
   ],
   "findings": [
-    {
-      "topic": "Shadow signal tracking",
-      "finding": "24 signals compute every cycle (290K+ calls) but produce zero accuracy samples because outcome_tracker skips HOLD votes. Shadow tracking was designed to solve this but fails because disabled signals vote HOLD, and HOLD votes are skipped.",
-      "relevance_to_us": "Cannot validate or promote any of 24 shadow signals without fixing this",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "Internal analysis of accuracy_cache.json + signal_engine.py"
-    },
-    {
-      "topic": "Layer 2 telegram detection",
-      "finding": "The _detect_append() function uses count-delta heuristic that breaks at the 5000-line prune cap. telegram_messages.jsonl at cap causes false telegram_sent=false, triggering 22 false contract violations. Agents actually working correctly.",
-      "relevance_to_us": "Eliminates 22 false critical error alerts, reduces noise in monitoring",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "Root cause analysis of agent_invocation.py lines 640-662"
-    },
-    {
-      "topic": "Accuracy-based signal rescue",
-      "finding": "news_event signal surging from 51% to 75.8% (1d) and 70% (3h) with substantial samples. Currently disabled. Several other disabled signals showing recent improvement: trend (61.6% 3h), volatility_sig (60.2% 3h), smart_money (63.2% 3h).",
-      "relevance_to_us": "Potential accuracy improvement by enabling hot signals",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "accuracy_cache.json analysis"
-    },
-    {
-      "topic": "williams_vix_fix per-ticker harm",
-      "finding": "williams_vix_fix has 30.5% recent accuracy (131 samples) but is rescued for XAU and XAG per-ticker. This is actively harmful - worse than random.",
-      "relevance_to_us": "Directly harming metals consensus (primary trading instruments)",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "accuracy_cache.json + signal_engine.py PER_TICKER_RESCUE"
-    },
-    {
-      "topic": "Horizon-specific signal performance",
-      "finding": "Strong divergence between horizons: ministral 58% 1d but 37.5% 3d. fear_greed 58.6% 1d and 68.7% 3d. econ_calendar 55.5% 1d_all but 32.7% 1d_recent. Signals should be weighted per-horizon, not uniformly.",
-      "relevance_to_us": "Horizon-specific weighting could improve consensus by 3-5pp",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "accuracy_cache.json multi-horizon analysis"
-    },
-    {
-      "topic": "Permanent BUY bias signals",
-      "finding": "econ_calendar votes BUY 99% of time across all tickers. fear_greed votes 100% BUY (0 SELL ever). gold_overnight_bias BUY 77%. hash_ribbons BUY permanently. These create systematic BUY bias in consensus even when gated.",
-      "relevance_to_us": "Systematic BUY bias can leak through gate relaxation circuit breaker",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "signal_log.jsonl voting pattern analysis"
-    }
+    {"topic": "Exponential Weights Online Learning", "finding": "Foundational online learning: weight_i = exp(-eta * cumulative_loss). Sublinear regret, no stationarity assumptions.", "relevance_to_us": "Much simpler than PPO. Convert existing 70/30 blend to exp-decay. Would auto-downweight econ_calendar 55%->33% within 1-2 weeks.", "implementation_difficulty": "easy", "expected_impact": "high", "source": "arxiv 1802.07543"},
+    {"topic": "PPO Signal Weight Optimization", "finding": "Arxiv 2509.01393: PPO reweights 50 LLM alpha signals. Higher Sharpe, smaller drawdowns.", "relevance_to_us": "Directly addresses degraded signal problem but requires training infrastructure.", "implementation_difficulty": "hard", "expected_impact": "high", "source": "arxiv 2509.01393"},
+    {"topic": "Thompson Sampling Signal Selection", "finding": "Beta posterior per signal, updated by hit/miss. Probabilistic exploration/exploitation.", "relevance_to_us": "Could replace accuracy gate cascade with cleaner probabilistic logic.", "implementation_difficulty": "medium", "expected_impact": "high", "source": "arxiv 1911.05309"},
+    {"topic": "Soft Regime Assignments", "finding": "Sigmoid smoothing around regime thresholds eliminates hard flip-flopping.", "relevance_to_us": "ADX/BOCPD near coin-flip partly due to hard thresholds. Soft assignments reduce whiplash.", "implementation_difficulty": "medium", "expected_impact": "high", "source": "arxiv 2510.03236"},
+    {"topic": "3-State NHMM for BTC", "finding": "3 states (bull/bear/consolidation) outperform 2-state for BTC. Consolidation = where BUY signals fail.", "relevance_to_us": "Our BUY bias failure is specifically during consolidation. 3-state model provides missing label.", "implementation_difficulty": "hard", "expected_impact": "medium", "source": "preprints.org 202603.0831"},
+    {"topic": "Geometric Observables", "finding": "Berry Phase Rate achieves Cohen d=0.72 with 67% fewer false alarms than Random Forest.", "relevance_to_us": "Fundamentally different from our regime signals. Largely uncorrelated = captures distinct risk factors.", "implementation_difficulty": "hard", "expected_impact": "medium", "source": "arxiv 2605.17117"},
+    {"topic": "TradingAgents Multi-Agent", "finding": "TauricResearch v0.2.5, 60K+ GitHub stars. Bull/bear/risk debate. Supports Claude.", "relevance_to_us": "L2 could use structured debate instead of monolithic analysis. Start with prompt engineering.", "implementation_difficulty": "medium", "expected_impact": "medium", "source": "github.com/tauricresearch/tradingagents"},
+    {"topic": "Inverse-Volatility Position Sizing", "finding": "Sharpe 0.99->1.54, max drawdown -30.8% to -13.8% in backtests.", "relevance_to_us": "BTC vol ~60% vs XAU ~15%. Vol-targeting gives consistent risk per instrument.", "implementation_difficulty": "easy", "expected_impact": "medium", "source": "concretumgroup.com"},
+    {"topic": "Regime-Conditional ATR Stops", "finding": "2026 best practice: ADX filters modify ATR multiplier — 1.0x range, 2.0x trending.", "relevance_to_us": "Static stops get hit too often in ranging. Regime-conditional improves.", "implementation_difficulty": "easy", "expected_impact": "medium", "source": "alphaexcapital.com"}
   ],
   "recommended_improvements": [
-    {
-      "title": "Fix _detect_append() for pruned files",
-      "description": "Replace count-delta with timestamp-based detection or baseline after prune",
-      "priority": 1,
-      "effort_hours": 2,
-      "files_affected": [
-        "portfolio/agent_invocation.py"
-      ]
-    },
-    {
-      "title": "Remove williams_vix_fix from PER_TICKER_RESCUE for XAU/XAG",
-      "description": "30.5% recent accuracy is actively harmful. Remove from rescue set.",
-      "priority": 2,
-      "effort_hours": 0.5,
-      "files_affected": [
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "Add ministral to per-horizon blacklist for 3d/5d/10d",
-      "description": "37.5% at 3d, should only vote at 1d and shorter horizons",
-      "priority": 3,
-      "effort_hours": 0.5,
-      "files_affected": [
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "Fix shadow signal outcome tracking",
-      "description": "Track directional output of shadow signals even when vote is gated to HOLD",
-      "priority": 4,
-      "effort_hours": 4,
-      "files_affected": [
-        "portfolio/outcome_tracker.py",
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "Resolve false critical error alerts from L2 detection",
-      "description": "Resolve the 22 false contract_violation entries in critical_errors.jsonl",
-      "priority": 5,
-      "effort_hours": 0.5,
-      "files_affected": [
-        "data/critical_errors.jsonl"
-      ]
-    }
+    {"title": "Exponential-decay signal weighting", "priority": 1, "effort_days": 2, "rationale": "Auto-downweight degraded signals. Sublinear regret. Minimal code change."},
+    {"title": "Soft regime assignments (sigmoid thresholds)", "priority": 2, "effort_days": 3, "rationale": "Eliminates hard regime flip-flopping. ADX/BOCPD coin-flip partly from hard boundaries."},
+    {"title": "Rolling Spearman IC recomputation (14d window, daily)", "priority": 3, "effort_days": 2, "rationale": "IC is leading indicator of accuracy decay. Catches degradation 1-2 weeks earlier."},
+    {"title": "Regime-conditional ATR stop multipliers", "priority": 4, "effort_days": 2, "rationale": "Static stops fail in ranging markets. Uses existing regime output."},
+    {"title": "Inverse-volatility position sizing", "priority": 5, "effort_days": 2, "rationale": "Consistent risk per instrument. BTC 4x more volatile than XAU."}
   ]
 }
