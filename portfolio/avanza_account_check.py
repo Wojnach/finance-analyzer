@@ -32,9 +32,25 @@ import os
 import threading
 from typing import Optional
 
-from portfolio.file_utils import atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, load_jsonl_tail
 
 logger = logging.getLogger("portfolio.avanza_account_check")
+
+# Session-expiry de-escalation (2026-06-01). An Avanza BankID session lasts
+# ~24 h and only a human relogin (`python scripts/avanza_login.py`) can renew
+# it. Logging that expected, operational state as a loop-critical error every
+# day (a) clutters the unresolved-critical list and (b) spawns a
+# PF-FixAgentDispatcher fix agent (Read/Edit/Bash only) that cannot possibly fix
+# it. So a plain session expiry is journaled at level "warning" / category
+# "avanza_session_expired" instead. BUT a session that stays dead — the exact
+# 3-week silent-outage class CLAUDE.md warns about — must NOT hide: if >=N
+# unresolved expiries span >H hours with no successful relogin in between, the
+# next one re-escalates to a real critical (premortem #5).
+SESSION_EXPIRED_CATEGORY = "avanza_session_expired"
+_PERSISTENT_EXPIRY_MIN_PRIORS = 2     # this expiry + 2 unresolved priors = 3rd
+_PERSISTENT_EXPIRY_MIN_AGE_H = 24.0   # ...and the oldest is >24 h old
+_AUTO_RESOLVE_WINDOW_DAYS = 7         # match check_critical_errors' 7-day window
+_AVANZA_ALERT_CATEGORIES = ("avanza_account_mismatch", SESSION_EXPIRED_CATEGORY)
 
 # Category strings that disqualify an account from leveraged-warrant
 # trading. Empty by default — 2026-05-11 user confirmation made it
@@ -116,11 +132,25 @@ def _category_disallowed(label: str) -> bool:
     return any(fragment in norm for fragment in DISALLOWED_CATEGORY_FRAGMENTS)
 
 
-def _record_critical_error(account_id: str, label: str, reason: str) -> None:
+def _record_critical_error(
+    account_id: str,
+    label: str,
+    reason: str,
+    *,
+    level: str = "critical",
+    category: str = "avanza_account_mismatch",
+) -> None:
+    """Append an avanza account-check alert to the critical-errors journal.
+
+    Defaults preserve the historical behaviour (critical /
+    avanza_account_mismatch) for account_not_found and disallowed_category. The
+    fetch_failed branch overrides level/category to de-escalate a routine
+    session expiry (see SESSION_EXPIRED_CATEGORY notes above).
+    """
     entry = {
         "ts": _now_iso(),
-        "level": "critical",
-        "category": "avanza_account_mismatch",
+        "level": level,
+        "category": category,
         "caller": "portfolio.avanza_account_check",
         "message": (
             f"DEFAULT_ACCOUNT_ID={account_id} category={label!r} "
@@ -136,6 +166,123 @@ def _record_critical_error(account_id: str, label: str, reason: str) -> None:
         atomic_append_jsonl(CRITICAL_ERRORS_LOG, entry)
     except Exception:  # noqa: BLE001
         logger.exception("failed to append critical_errors entry")
+
+
+def _is_session_expiry(reason: str) -> bool:
+    """True only for the routine BankID-session-expired fetch failure.
+
+    Narrow on purpose (premortem #5): a generic Playwright/DNS/5xx error must
+    NOT be mistaken for an expiry and silently downgraded out of the critical
+    list. Requires the fetch_failed prefix AND the explicit expiry phrase the
+    avanza_session layer emits.
+    """
+    r = (reason or "").lower()
+    return r.startswith("fetch_failed:") and "session expired" in r
+
+
+def _parse_ts(ts: str) -> Optional[_dt.datetime]:
+    """Tolerant ISO-8601 parse → aware UTC datetime, or None. Handles both the
+    '…Z' and '…+00:00' shapes that appear in critical_errors.jsonl."""
+    if not ts:
+        return None
+    try:
+        dt = _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt
+
+
+def _recent_journal() -> list[dict]:
+    """Bounded tail of the critical-errors journal (best-effort, never raises)."""
+    try:
+        return load_jsonl_tail(CRITICAL_ERRORS_LOG, max_entries=4000) or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _resolved_ts_set(entries: list[dict]) -> set[str]:
+    """Original timestamps already closed by a follow-up resolution line."""
+    return {e["resolves_ts"] for e in entries if e.get("resolves_ts")}
+
+
+def _is_persistent_expiry(account_id: str, now: _dt.datetime) -> bool:
+    """A session expiry is 'persistent' when prior unresolved expiry warnings
+    for this account already span > _PERSISTENT_EXPIRY_MIN_AGE_H hours. A real
+    relogin produces an ok=True verify which auto-resolves them, so surviving
+    unresolved expiries mean the session never came back — re-escalate."""
+    entries = _recent_journal()
+    resolved = _resolved_ts_set(entries)
+    ages_h: list[float] = []
+    for e in entries:
+        if e.get("category") != SESSION_EXPIRED_CATEGORY:
+            continue
+        if (e.get("context") or {}).get("account_id") != account_id:
+            continue
+        ts = e.get("ts")
+        if not ts or ts in resolved:
+            continue
+        dt = _parse_ts(ts)
+        if dt is None:
+            continue
+        ages_h.append((now - dt).total_seconds() / 3600.0)
+    if len(ages_h) < _PERSISTENT_EXPIRY_MIN_PRIORS:
+        return False
+    return max(ages_h) >= _PERSISTENT_EXPIRY_MIN_AGE_H
+
+
+def _auto_resolve_prior_alerts(account_id: str, category_label: str) -> None:
+    """On a successful verify, close prior unresolved avanza alerts for THIS
+    account so a relogin clears the backlog instead of leaving it to pile up.
+
+    Bounded + idempotent (premortem #6/#7): only entries from the last 7 days,
+    only matching account_id, and only those without an existing resolution —
+    so re-running across multiple loop processes appends nothing the second
+    time. Never raises into the verify path."""
+    try:
+        entries = _recent_journal()
+        if not entries:
+            return
+        resolved = _resolved_ts_set(entries)
+        now = _dt.datetime.now(_dt.timezone.utc)
+        cutoff = now - _dt.timedelta(days=_AUTO_RESOLVE_WINDOW_DAYS)
+        targets: list[str] = []
+        for e in entries:
+            if e.get("category") not in _AVANZA_ALERT_CATEGORIES:
+                continue
+            if e.get("level") not in ("critical", "warning"):
+                continue
+            if (e.get("context") or {}).get("account_id") != account_id:
+                continue
+            ts = e.get("ts")
+            if not ts or ts in resolved or ts in targets:
+                continue
+            dt = _parse_ts(ts)
+            if dt is None or dt < cutoff:
+                continue
+            targets.append(ts)
+        for ts in targets:
+            atomic_append_jsonl(CRITICAL_ERRORS_LOG, {
+                "ts": _now_iso(),
+                "level": "info",
+                "category": "resolution",
+                "caller": "portfolio.avanza_account_check",
+                "resolution": (
+                    f"Avanza account {account_id} re-verified OK "
+                    f"(category={category_label!r}) — session re-authenticated."
+                ),
+                "resolves_ts": ts,
+                "message": "Auto-resolved avanza alert on successful verify",
+                "context": {"account_id": account_id},
+            })
+        if targets:
+            logger.info(
+                "auto-resolved %d prior avanza alert(s) for account %s",
+                len(targets), account_id,
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("avanza auto-resolve skipped", exc_info=True)
 
 
 def _send_telegram(message: str) -> None:
@@ -234,18 +381,50 @@ def verify_default_account(
         # order placement; if Avanza is genuinely unreachable, the
         # actual order placement will fail too and the order-side
         # guards still apply.
+        reason = f"fetch_failed:{exc!s}"
         result = {
             "ok": False,
             "account_id": account_id,
             "category": "",
-            "reason": f"fetch_failed:{exc!s}",
+            "reason": reason,
         }
+        if _is_session_expiry(reason):
+            now = _dt.datetime.now(_dt.timezone.utc)
+            if _is_persistent_expiry(account_id, now):
+                # Session has stayed dead > 24 h across multiple checks — a
+                # relogin would have cleared the priors. Re-escalate so it can't
+                # hide as routine noise (the 3-week silent-outage class).
+                logger.error(
+                    "verify_default_account: account=%s session expired and NOT "
+                    "recovering (>24h, multiple attempts) — escalating to CRITICAL",
+                    account_id,
+                )
+                _record_critical_error(
+                    account_id, "", f"persistent_session_expiry:{exc!s}",
+                    level="critical", category="avanza_account_mismatch",
+                )
+            else:
+                # Routine ~24 h expiry — operational, needs a human BankID
+                # relogin. Journal as a warning so it stays visible but does not
+                # trip check_critical_errors / the fix-agent dispatcher.
+                logger.warning(
+                    "verify_default_account: account=%s BankID session expired "
+                    "(operational — run scripts/avanza_login.py) — logged as warning",
+                    account_id,
+                )
+                _record_critical_error(
+                    account_id, "", reason,
+                    level="warning", category=SESSION_EXPIRED_CATEGORY,
+                )
+            return result
+        # Genuine transient outage (DNS flap, 5xx, auth blip) — keep CRITICAL so
+        # the operator sees a real connectivity problem.
         logger.warning(
             "verify_default_account: fetch failed account=%s err=%r — "
-            "downgraded to warning, NOT raising (transient outage path)",
+            "NOT raising (transient outage path), logged critical",
             account_id, exc,
         )
-        _record_critical_error(account_id, "", result["reason"])
+        _record_critical_error(account_id, "", reason)
         return result
 
     found_label: Optional[str] = None
@@ -315,6 +494,10 @@ def verify_default_account(
         "verify_default_account: %s category=%s OK",
         account_id, found_label or "<empty>",
     )
+    # A successful verify means the BankID session is alive again — close any
+    # prior unresolved avanza alerts for this account so a relogin clears the
+    # backlog. Best-effort, idempotent, bounded to the last 7 days.
+    _auto_resolve_prior_alerts(account_id, found_label or "<empty>")
     with _cache_lock:
         _cache_result = dict(result)
     return result

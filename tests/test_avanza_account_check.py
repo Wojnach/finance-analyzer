@@ -324,3 +324,167 @@ class TestShapeHandling:
                           return_value=response):
             result = ac.verify_default_account("555")
         assert result["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Session-expiry de-escalation + auto-resolve (2026-06-01)
+# ---------------------------------------------------------------------------
+
+import datetime as _dt  # noqa: E402
+
+
+def _entries(path):
+    if not path.exists():
+        return []
+    return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines()
+            if ln.strip()]
+
+
+def _seed(path, entries):
+    with path.open("a", encoding="utf-8") as fh:
+        for e in entries:
+            fh.write(json.dumps(e) + "\n")
+
+
+def _expiry_entry(account_id, age_hours):
+    ts = (_dt.datetime.now(_dt.timezone.utc)
+          - _dt.timedelta(hours=age_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "ts": ts, "level": "warning", "category": ac.SESSION_EXPIRED_CATEGORY,
+        "caller": "portfolio.avanza_account_check",
+        "message": f"DEFAULT_ACCOUNT_ID={account_id} ... reason=fetch_failed:Session expired",
+        "context": {"account_id": account_id, "category_label": "",
+                    "reason": "fetch_failed:Session expired at ..."},
+    }
+
+
+class TestSessionExpiryHelper:
+    @pytest.mark.parametrize("reason,expected", [
+        ("fetch_failed:Session expired at 2026-05-30T13:50:00", True),
+        ("fetch_failed:SESSION EXPIRED", True),
+        ("fetch_failed:dns down", False),
+        ("fetch_failed:TimeoutError navigating to login", False),
+        ("account_not_found", False),
+        ("", False),
+    ])
+    def test_is_session_expiry(self, reason, expected):
+        assert ac._is_session_expiry(reason) is expected
+
+
+class TestSessionExpiryDeescalation:
+    def test_expiry_logged_as_warning_not_critical(self, critical_errors_path):
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          side_effect=RuntimeError("Session expired at 2026-05-30T13:50:00")):
+            with patch.object(ac, "_send_telegram"):
+                result = ac.verify_default_account("1625505")
+        assert result["ok"] is False
+        entries = _entries(critical_errors_path)
+        assert len(entries) == 1
+        assert entries[0]["level"] == "warning"
+        assert entries[0]["category"] == ac.SESSION_EXPIRED_CATEGORY
+
+    def test_generic_fetch_failure_stays_critical(self, critical_errors_path):
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          side_effect=RuntimeError("dns down")):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+        entries = _entries(critical_errors_path)
+        assert len(entries) == 1
+        assert entries[0]["level"] == "critical"
+        assert entries[0]["category"] == "avanza_account_mismatch"
+
+    def test_persistent_expiry_reescalates_to_critical(self, critical_errors_path):
+        # Two prior unresolved expiries, oldest > 24h → the 3rd escalates.
+        _seed(critical_errors_path, [
+            _expiry_entry("1625505", age_hours=50),
+            _expiry_entry("1625505", age_hours=26),
+        ])
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          side_effect=RuntimeError("Session expired at 2026-05-30T13:50:00")):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+        latest = _entries(critical_errors_path)[-1]
+        assert latest["level"] == "critical"
+        assert latest["category"] == "avanza_account_mismatch"
+        assert "persistent_session_expiry" in latest["context"]["reason"]
+
+    def test_recent_priors_below_age_threshold_stay_warning(self, critical_errors_path):
+        # Two priors but both < 24h (e.g. process restarts) → still operational.
+        _seed(critical_errors_path, [
+            _expiry_entry("1625505", age_hours=3),
+            _expiry_entry("1625505", age_hours=1),
+        ])
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          side_effect=RuntimeError("Session expired at 2026-05-30T13:50:00")):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+        latest = _entries(critical_errors_path)[-1]
+        assert latest["level"] == "warning"
+
+    def test_resolved_priors_do_not_count_toward_persistence(self, critical_errors_path):
+        old = _expiry_entry("1625505", age_hours=50)
+        _seed(critical_errors_path, [
+            old,
+            {"ts": ac._now_iso(), "level": "info", "category": "resolution",
+             "caller": "x", "resolves_ts": old["ts"], "message": "r", "context": {}},
+            _expiry_entry("1625505", age_hours=26),
+        ])
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          side_effect=RuntimeError("Session expired at 2026-05-30T13:50:00")):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+        # Only 1 unresolved prior (the 26h one) < MIN_PRIORS=2 → stays warning.
+        assert _entries(critical_errors_path)[-1]["level"] == "warning"
+
+
+class TestAutoResolveOnSuccess:
+    def test_success_resolves_prior_unresolved_alerts(self, critical_errors_path):
+        _seed(critical_errors_path, [
+            _expiry_entry("1625505", age_hours=10),
+            {"ts": (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=5))
+                .strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "level": "critical", "category": "avanza_account_mismatch",
+             "caller": "portfolio.avanza_account_check", "message": "m",
+             "context": {"account_id": "1625505", "category_label": "", "reason": "x"}},
+        ])
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          return_value={"accounts": [{"id": "1625505", "type": "Aktiedepå"}]}):
+            with patch.object(ac, "_send_telegram"):
+                result = ac.verify_default_account("1625505")
+        assert result["ok"] is True
+        resolutions = [e for e in _entries(critical_errors_path)
+                       if e.get("category") == "resolution"]
+        assert len(resolutions) == 2
+        assert {r["resolves_ts"] for r in resolutions}
+
+    def test_auto_resolve_is_idempotent(self, critical_errors_path):
+        _seed(critical_errors_path, [_expiry_entry("1625505", age_hours=10)])
+        resp = {"accounts": [{"id": "1625505", "type": "Aktiedepå"}]}
+        with patch.object(ac, "_api_get_categorized_accounts", return_value=resp):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+                ac.reset_cache()  # force the body to run again
+                ac.verify_default_account("1625505")
+        resolutions = [e for e in _entries(critical_errors_path)
+                       if e.get("category") == "resolution"]
+        assert len(resolutions) == 1  # second pass adds nothing
+
+    def test_auto_resolve_scoped_to_account(self, critical_errors_path):
+        _seed(critical_errors_path, [_expiry_entry("9999999", age_hours=10)])
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          return_value={"accounts": [{"id": "1625505", "type": "Aktiedepå"}]}):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+        resolutions = [e for e in _entries(critical_errors_path)
+                       if e.get("category") == "resolution"]
+        assert resolutions == []  # other account's alert untouched
+
+    def test_auto_resolve_skips_entries_older_than_window(self, critical_errors_path):
+        _seed(critical_errors_path, [_expiry_entry("1625505", age_hours=24 * 9)])
+        with patch.object(ac, "_api_get_categorized_accounts",
+                          return_value={"accounts": [{"id": "1625505", "type": "Aktiedepå"}]}):
+            with patch.object(ac, "_send_telegram"):
+                ac.verify_default_account("1625505")
+        resolutions = [e for e in _entries(critical_errors_path)
+                       if e.get("category") == "resolution"]
+        assert resolutions == []  # >7d old, outside auto-resolve window
