@@ -1547,7 +1547,7 @@ class TestMSTRBTCProxy:
     def test_btc_proxy_injected_when_cache_populated(self):
         """btc_proxy should appear in MSTR votes when BTC-USD consensus is cached."""
         from portfolio.signal_engine import _cross_ticker_consensus
-        _cross_ticker_consensus["BTC-USD"] = {"action": "BUY", "confidence": 0.65}
+        _cross_ticker_consensus[("BTC-USD", None)] = {"action": "BUY", "confidence": 0.65}
         try:
             from portfolio.signal_engine import generate_signal
             ind = _make_neutral_indicators()
@@ -1556,12 +1556,12 @@ class TestMSTRBTCProxy:
             assert extra.get("btc_proxy_source") == "cross_ticker_cache"
             assert "btc_proxy" in extra.get("_votes", {})
         finally:
-            _cross_ticker_consensus.pop("BTC-USD", None)
+            _cross_ticker_consensus.pop(("BTC-USD", None), None)
 
     def test_btc_proxy_not_injected_for_btc(self):
         """btc_proxy should NOT appear for BTC-USD itself."""
         from portfolio.signal_engine import _cross_ticker_consensus
-        _cross_ticker_consensus["BTC-USD"] = {"action": "BUY", "confidence": 0.65}
+        _cross_ticker_consensus[("BTC-USD", None)] = {"action": "BUY", "confidence": 0.65}
         try:
             from portfolio.signal_engine import generate_signal
             ind = _make_neutral_indicators()
@@ -1569,12 +1569,12 @@ class TestMSTRBTCProxy:
             assert "btc_proxy_action" not in extra
             assert "btc_proxy" not in extra.get("_votes", {})
         finally:
-            _cross_ticker_consensus.pop("BTC-USD", None)
+            _cross_ticker_consensus.pop(("BTC-USD", None), None)
 
     def test_btc_proxy_not_injected_when_cache_empty(self):
         """btc_proxy should NOT appear when BTC-USD consensus is not cached."""
         from portfolio.signal_engine import _cross_ticker_consensus
-        _cross_ticker_consensus.pop("BTC-USD", None)
+        _cross_ticker_consensus.pop(("BTC-USD", None), None)
         from portfolio.signal_engine import generate_signal
         ind = _make_neutral_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
@@ -1583,36 +1583,36 @@ class TestMSTRBTCProxy:
     def test_btc_proxy_sell_propagates(self):
         """SELL consensus from BTC should propagate as btc_proxy=SELL."""
         from portfolio.signal_engine import _cross_ticker_consensus
-        _cross_ticker_consensus["BTC-USD"] = {"action": "SELL", "confidence": 0.70}
+        _cross_ticker_consensus[("BTC-USD", None)] = {"action": "SELL", "confidence": 0.70}
         try:
             from portfolio.signal_engine import generate_signal
             ind = _make_neutral_indicators()
             _, _, extra = generate_signal(ind, ticker="MSTR")
             assert extra.get("btc_proxy_action") == "SELL"
         finally:
-            _cross_ticker_consensus.pop("BTC-USD", None)
+            _cross_ticker_consensus.pop(("BTC-USD", None), None)
 
     def test_btc_proxy_hold_propagates(self):
         """HOLD consensus from BTC should still inject (neutral vote)."""
         from portfolio.signal_engine import _cross_ticker_consensus
-        _cross_ticker_consensus["BTC-USD"] = {"action": "HOLD", "confidence": 0.0}
+        _cross_ticker_consensus[("BTC-USD", None)] = {"action": "HOLD", "confidence": 0.0}
         try:
             from portfolio.signal_engine import generate_signal
             ind = _make_neutral_indicators()
             _, _, extra = generate_signal(ind, ticker="MSTR")
             assert extra.get("btc_proxy_action") == "HOLD"
         finally:
-            _cross_ticker_consensus.pop("BTC-USD", None)
+            _cross_ticker_consensus.pop(("BTC-USD", None), None)
 
     def test_consensus_cache_updated_after_generate(self):
         """generate_signal should update _cross_ticker_consensus for the ticker."""
         from portfolio.signal_engine import _cross_ticker_consensus, generate_signal
-        _cross_ticker_consensus.pop("ETH-USD", None)
+        _cross_ticker_consensus.pop(("ETH-USD", None), None)
         ind = _make_neutral_indicators()
         action, conf, _ = generate_signal(ind, ticker="ETH-USD")
-        assert "ETH-USD" in _cross_ticker_consensus
-        assert _cross_ticker_consensus["ETH-USD"]["action"] == action
-        assert _cross_ticker_consensus["ETH-USD"]["confidence"] == conf
+        assert ("ETH-USD", None) in _cross_ticker_consensus
+        assert _cross_ticker_consensus[("ETH-USD", None)]["action"] == action
+        assert _cross_ticker_consensus[("ETH-USD", None)]["confidence"] == conf
 
 
 def _make_neutral_indicators():

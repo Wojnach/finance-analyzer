@@ -45,7 +45,14 @@ def fetch_usd_sek():
         # BUG-117: Sanity check — SEK/USD should be in 7-15 range historically.
         # If outside this range, the API may be returning bad data.
         if not (FX_RATE_MIN <= rate <= FX_RATE_MAX):
-            logger.error("FX rate %.4f SEK/USD outside sane bounds (7-15) — ignoring", rate)
+            logger.error("FX rate %.4f SEK/USD outside sane bounds (7-15) — using cached/fallback", rate)
+            with _fx_lock:
+                cached_rate = _fx_cache["rate"]
+            if cached_rate:
+                logger.warning("FX sanity-check failed: serving cached rate %.4f instead of live %.4f", cached_rate, rate)
+                return cached_rate
+            logger.error("FX sanity-check failed AND no cached rate — using fallback %.2f", FX_RATE_FALLBACK)
+            return FX_RATE_FALLBACK
         else:
             with _fx_lock:
                 _fx_cache["rate"] = rate
