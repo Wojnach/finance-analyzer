@@ -155,6 +155,17 @@ class TestAutoResolveStaleCategories:
         unresolved = cce.find_unresolved(entries, days=7, now=now)
         assert len(unresolved) == 1
 
+    def test_fix_predating_critical_does_not_auto_resolve(self):
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        entries = [
+            {"ts": _iso(now - timedelta(days=6)), "level": "info",
+             "category": "test_cat", "resolution": "fixed"},
+            {"ts": _iso(now - timedelta(days=4)), "level": "critical",
+             "category": "test_cat", "resolution": None},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        assert len(unresolved) == 1
+
     def test_mixed_categories(self):
         now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
         entries = [

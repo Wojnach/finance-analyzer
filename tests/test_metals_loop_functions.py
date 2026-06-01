@@ -310,3 +310,17 @@ class TestTradeQueue:
         assert len(calls) == 1
         assert calls[0][0] == mod.TRADE_QUEUE_FILE
         assert calls[0][3] is False
+
+
+class TestSilverAlertLevelsFormat:
+    """SILVER_ALERT_LEVELS iteration must not crash (2026-06-01 fix)."""
+
+    def test_alert_level_format_string(self):
+        import metals_loop as mod
+        levels = mod.SILVER_ALERT_LEVELS
+        assert len(levels) > 0
+        for threshold, name in levels:
+            assert isinstance(threshold, (int, float))
+            assert isinstance(name, str)
+            formatted = f"{threshold}%"
+            assert "%" in formatted

@@ -73,7 +73,7 @@ def _auto_resolve_stale_categories(
     stale_cutoff = now - timedelta(days=stale_days)
 
     last_critical_by_cat: dict[str, datetime] = {}
-    has_post_fix_by_cat: dict[str, bool] = {}
+    latest_fix_by_cat: dict[str, datetime] = {}
 
     for e in entries:
         cat = e.get("category", "")
@@ -87,11 +87,14 @@ def _auto_resolve_stale_categories(
             if existing is None or parsed > existing:
                 last_critical_by_cat[cat] = parsed
         if e.get("resolution") is not None or e.get("level") == "info":
-            has_post_fix_by_cat[cat] = True
+            existing_fix = latest_fix_by_cat.get(cat)
+            if existing_fix is None or parsed > existing_fix:
+                latest_fix_by_cat[cat] = parsed
 
     stale_cats = set()
     for cat, last_ts in last_critical_by_cat.items():
-        if last_ts < stale_cutoff and has_post_fix_by_cat.get(cat, False):
+        fix_ts = latest_fix_by_cat.get(cat)
+        if last_ts < stale_cutoff and fix_ts is not None and fix_ts > last_ts:
             stale_cats.add(cat)
     return stale_cats
 
