@@ -123,5 +123,53 @@ journaled).
   must only target `level critical/warning` originals, never `category resolution`.
 - Telegram import at module load could slow read path — keep lazy.
 
-## Premortem
-_(filled in after the premortem agent returns)_
+## Premortem (fresh-agent, 8 narratives — design hardened in response)
+
+1. **Quarantine races the next save → still wipes (lockless `load_state`).**
+   `load_state()` calls `_load_state_from` with NO lock; a parallel `update_state`
+   can `os.replace` defaults onto the path before the copy reads it → quarantine
+   captures defaults, not corrupt content.
+   → **Adopted:** capture `path.read_bytes()` ONCE the instant `load_json`
+   returns None, before the backup loop. Quarantine that in-memory buffer.
+
+2/3. **Pile-up / repeat side-effects (corrupt branch runs every 60 s cycle).**
+   One `.corrupt-<stamp>`/critical-append per cycle → ~1440/day + re-arms the
+   FixAgentDispatcher endlessly for a data problem a Read/Edit/Bash agent can't fix.
+   → **Adopted:** content-addressed quarantine name `<path>.corrupt-<sha8>`;
+   the ENTIRE side-effect block (copy + journal append) is gated on
+   `not qpath.exists()` → exactly once per unique corruption content. No telegram.
+
+4. **`loop_contract` double disk-read races a concurrent write** → reports a
+   corruption that no longer exists, or a misleading line number from a mid-replace.
+   → **Adopted:** read raw bytes ONCE, `json.loads` that same buffer. If it now
+   parses → emit no/transient finding (file healed); if `JSONDecodeError` → use
+   its line/col; if file vanished → skip.
+
+5. **De-escalation hides a REAL auth outage (the documented 3-week class).**
+   Substring `"session expired"` can match a persistent failure (revoked BankID,
+   account lock, Playwright redirect-to-login); downgraded to warning → drops off
+   the critical tile, nobody paged.
+   → **Adopted:** narrow match AND re-escalate — if ≥3 unresolved
+   `avanza_session_expired` warnings exist spanning >24 h (relogin never cleared
+   them), this one is written `level:critical` `avanza_account_mismatch`
+   `reason=persistent_session_expiry`.
+
+6/7. **Auto-resolve storm / wrong scope / post-merge backlog.** Runs once per
+   process (metals/golddigger/grid) × every restart; could re-append duplicate
+   resolutions or close a still-broken mismatch on a different account.
+   → **Adopted:** only resolve originals with matching `account_id`, only from
+   the last 7 days (mirrors `check_critical_errors` window), and SKIP any original
+   whose `ts` already has a `resolves_ts` resolution line → idempotent + bounded.
+   Tests patch `CRITICAL_ERRORS_LOG` to tmp_path.
+
+8. **Slow side-effects inside the per-path lock stall the loop** (copy +
+   contended jsonl_sidecar_lock + synchronous telegram).
+   → **Adopted:** dropped telegram from this path entirely (durable signal is the
+   journal entry); copy is small in-memory bytes, append is sub-ms. No network in
+   the read path, no `config.json` dependency (also fixes the worktree-symlink
+   test/prod gap from #7).
+
+**Residue-check cross-check:** `loop_contract._check_atomic_write_residue` only
+flags names with a `.tmp` segment (line 1223); `.corrupt-<sha8>` is not matched —
+no spurious `atomic_write_residue` violation. Quarantine writes bytes directly
+(no `.tmp` intermediate).
