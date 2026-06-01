@@ -39,30 +39,37 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-import requests  # noqa: E402
-
 LIVE_MODEL = "amazon/chronos-2"
 BOLT_PATH_WIN = r"Q:\models\chronos-bolt-small"
 BOLT_PATH_NIX = "/mnt/q/models/chronos-bolt-small"
 
-# Binance klines: crypto spot. Metals (XAU/XAG) are out of scope for this
-# first pass — the model-vs-model ranking on liquid crypto transfers, and
-# adding FAPI/metals symbols here would couple the benchmark to
-# portfolio.price_source. Tracked as a follow-up in the report output.
-_BINANCE = "https://api.binance.com/api/v3/klines"
-_SYMBOL = {"BTC": "BTCUSDT", "ETH": "ETHUSDT"}
+# 2026-06-01 (firm-up pass): crypto via Binance spot, metals via Binance FAPI.
+# Routed through the project's own collectors (binance_klines / binance_fapi_klines)
+# so the benchmark uses the SAME candle source the live forecast path uses
+# (forecast_signal._load_candles), not a parallel hand-rolled fetch. MSTR (Alpaca)
+# is out of scope — equities have gaps/half-days that distort a continuous
+# walk-forward; crypto+metals 24/7 series are the clean test for this model swap.
+_SPOT = {"BTC": "BTCUSDT", "ETH": "ETHUSDT"}
+_FAPI = {"XAU": "XAUUSDT", "XAG": "XAGUSDT"}
 
 FLAT_BAND = 0.001  # |move| < 0.1% counts as flat -> excluded from directional score
 
 
 def fetch_hourly_closes(ticker: str, days: int) -> list[float]:
-    sym = _SYMBOL.get(ticker.upper())
-    if not sym:
-        raise ValueError(f"no Binance symbol for {ticker}")
-    limit = min(1000, days * 24 + 50)
-    r = requests.get(_BINANCE, params={"symbol": sym, "interval": "1h", "limit": limit}, timeout=20)
-    r.raise_for_status()
-    return [float(k[4]) for k in r.json()]  # close price
+    """1h closes via the project collectors. limit honors Binance's 1500 cap."""
+    limit = min(1500, days * 24 + 50)
+    key = ticker.upper()
+    if key in _SPOT:
+        from portfolio.data_collector import binance_klines
+        df = binance_klines(_SPOT[key], interval="1h", limit=limit)
+    elif key in _FAPI:
+        from portfolio.data_collector import binance_fapi_klines
+        df = binance_fapi_klines(_FAPI[key], interval="1h", limit=limit)
+    else:
+        raise ValueError(f"no spot/fapi symbol for {ticker}")
+    if df is None or len(df) < 60:
+        raise ValueError(f"insufficient candles for {ticker}: {0 if df is None else len(df)}")
+    return [float(x) for x in df["close"].values.tolist()]
 
 
 def _load_chronos2():
@@ -118,7 +125,7 @@ def benchmark(tickers: list[str], days: int, windows: int, ctx_len: int, horizon
 
     out: dict = {"live_model": LIVE_MODEL, "challenger": "chronos-bolt-small",
                  "ctx_len": ctx_len, "horizons": horizons, "flat_band": FLAT_BAND,
-                 "tickers": {}, "note_metals": "XAU/XAG out of scope this pass — crypto ranking transfers"}
+                 "tickers": {}, "scope": "crypto (spot) + metals (FAPI); MSTR/equities excluded (gappy series)"}
 
     series = {t: fetch_hourly_closes(t, days) for t in tickers}
     for t, c in series.items():
@@ -184,9 +191,9 @@ def print_report(out: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--tickers", default="BTC,ETH")
+    ap.add_argument("--tickers", default="BTC,ETH,XAU,XAG")
     ap.add_argument("--days", type=int, default=40)
-    ap.add_argument("--windows", type=int, default=150, help="max walk-forward windows per ticker (0=all)")
+    ap.add_argument("--windows", type=int, default=300, help="max walk-forward windows per ticker (0=all)")
     ap.add_argument("--ctx-len", type=int, default=168, help="context hours fed to the model (default 168=7d)")
     ap.add_argument("--horizons", default="1,3", help="comma hours")
     ap.add_argument("--json", default=None)

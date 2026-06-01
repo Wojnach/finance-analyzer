@@ -1,0 +1,117 @@
+{
+  "live_model": "amazon/chronos-2",
+  "challenger": "chronos-bolt-small",
+  "ctx_len": 168,
+  "horizons": [
+    1,
+    3
+  ],
+  "flat_band": 0.001,
+  "tickers": {
+    "BTC": {
+      "1h": {
+        "chronos2": {
+          "correct": 27,
+          "scored": 46,
+          "accuracy": 58.7
+        },
+        "bolt": {
+          "correct": 21,
+          "scored": 43,
+          "accuracy": 48.8
+        }
+      },
+      "3h": {
+        "chronos2": {
+          "correct": 48,
+          "scored": 93,
+          "accuracy": 51.6
+        },
+        "bolt": {
+          "correct": 42,
+          "scored": 89,
+          "accuracy": 47.2
+        }
+      }
+    },
+    "ETH": {
+      "1h": {
+        "chronos2": {
+          "correct": 38,
+          "scored": 73,
+          "accuracy": 52.1
+        },
+        "bolt": {
+          "correct": 52,
+          "scored": 97,
+          "accuracy": 53.6
+        }
+      },
+      "3h": {
+        "chronos2": {
+          "correct": 63,
+          "scored": 128,
+          "accuracy": 49.2
+        },
+        "bolt": {
+          "correct": 66,
+          "scored": 119,
+          "accuracy": 55.5
+        }
+      }
+    },
+    "XAU": {
+      "1h": {
+        "chronos2": {
+          "correct": 16,
+          "scored": 28,
+          "accuracy": 57.1
+        },
+        "bolt": {
+          "correct": 11,
+          "scored": 23,
+          "accuracy": 47.8
+        }
+      },
+      "3h": {
+        "chronos2": {
+          "correct": 24,
+          "scored": 43,
+          "accuracy": 55.8
+        },
+        "bolt": {
+          "correct": 21,
+          "scored": 46,
+          "accuracy": 45.7
+        }
+      }
+    },
+    "XAG": {
+      "1h": {
+        "chronos2": {
+          "correct": 48,
+          "scored": 98,
+          "accuracy": 49.0
+        },
+        "bolt": {
+          "correct": 55,
+          "scored": 106,
+          "accuracy": 51.9
+        }
+      },
+      "3h": {
+        "chronos2": {
+          "correct": 61,
+          "scored": 131,
+          "accuracy": 46.6
+        },
+        "bolt": {
+          "correct": 65,
+          "scored": 142,
+          "accuracy": 45.8
+        }
+      }
+    }
+  },
+  "scope": "crypto (spot) + metals (FAPI); MSTR/equities excluded (gappy series)"
+}
