@@ -1,55 +1,45 @@
-# After-Hours Research Plan — 2026-05-27
+# After-Hours Research Plan — 2026-06-01
 
-## Findings Summary
+## Status: IMPLEMENTING
 
-### Phase 0: System State
-- System healthy: 0 loop errors, 87 cycles, all 55 signal modules green
-- XAG bought at $74.39 (RSI 21), oscillated to $74.84 by EOD
-- All L2 decisions HOLD/DORMANT (correct — range-bound regime)
-- 3 enabled signals badly degraded: qwen3 36%, econ_calendar 41.5%, crypto_macro 38.2%
-  - All auto-gated by accuracy gate (blended < 47%) — not actively harmful
-- news_event surged to 69.6% recent — star performer
+## Key Findings
 
-### Phase 1: Market Events
-- Iran 14-point peace deal draft — geopolitical premium unwinding in metals
-- Tomorrow MASSIVE: GDP 2nd estimate, Core PCE, jobless claims (14:30 CET)
-- BTC whale accumulation 270K BTC in 30 days vs 8-day ETF outflow ($2B+)
-- Central bank gold buying +35% QoQ (243t Q1 2026)
-- Silver in 5th year supply deficit, solar demand 230M oz projected
+### Systemic BUY Accuracy Collapse
+Nearly all signals show collapsed BUY accuracy (15-33%) while SELL accuracy
+remains strong (56-87%). Bearish regime signature. Per-ticker consensus at
+1d horizon: ETH 49.9%, MSTR 46.2%, XAG 49.4% — all below coin-flip.
 
-### Phase 2: Quant Research
-- TrustTrade selective consensus — weight by inter-signal agreement + temporal stability
-- Fractional Kelly + vol-targeting — 75% growth of full Kelly, <50% max drawdown
-- Adaptive ATR trailing stops — 1.5x ATR low-vol, 3.0x ATR high-vol
+### 4 Regime Signals Degraded (Small-Sample Illusion)
+adx_regime_switch, bocpd_regime_switch, vol_ratio_regime, choppiness_regime_gate
+were re-enabled 2026-05-28 with 58-67% accuracy on 158-586 samples. By
+2026-06-01 (410-519 samples), all degraded to 49-52% — coin-flip.
 
-### Phase 3: Signal Audit
-- Accuracy gate correctly handling degraded signals
-- 17 shadow signals at 0 samples — outcome tracking gap
-- Several disabled signals with strong recent accuracy worth investigation
+### Market Context
+S&P at record 7,599 (AI boom). BTC $72,145 with record $2.97B ETF outflows.
+Hormuz crisis keeping oil $92-108 and inflation elevated. FOMC June 16-17
+all but priced as hold. NFP Friday June 6 is marquee event.
 
-## Implementation Plan
+## Implemented Changes
 
-### Batch 1: Signal temporal consistency filter (HIGH IMPACT)
-Discard signals that flip direction within 2 checks — known noise pattern.
+### Batch 1: Disabled 4 Redundant Regime Signals
+- `adx_regime_switch` (49.0% all-time, 492 sam)
+- `bocpd_regime_switch` (51.1%, 519 sam)
+- `vol_ratio_regime` (48.8%, 2427 sam)
+- `choppiness_regime_gate` (51.7%, 410 sam)
+Kept: `drift_regime_gate` (58.9%) and `amihud_illiquidity_regime` (58.6%).
 
-Files:
-- `portfolio/signal_engine.py` — add temporal consistency check
-- `tests/test_signal_consistency.py` — new test file
+### Batch 2: Raised Directional Gate 43% → 44%
+Catches marginal BUY noise in bearish regime. Stays below assertion floor (0.45).
 
-### Batch 2: Updated morning briefing + Telegram
-Tomorrow has 11 macro events. User needs morning briefing.
+### Batch 3: Resolved Critical Errors
+Two accuracy_degradation entries resolved with description of fixes applied.
 
-Files:
-- `scripts/write_morning_briefing.py` — rewrite for today
-- `data/morning_briefing.json` — output
-
-### Batch 3: Research deliverables + signal audit
-Files:
-- `data/daily_research_signal_audit.json`
-- `data/daily_research_ticker_deep_dive.json`
-
-### Deferred to backlog:
-- Walk-forward weight loop (2d)
-- Fractional Kelly sizing (3d)
-- BTC on-chain disaggregation (3d)
-- Bull/bear adversarial sub-agents for L2 (4d)
+## Deferred to Backlog
+1. Exponential-decay signal weighting (high impact, 2 days)
+2. Soft regime assignments with sigmoid thresholds (3 days)
+3. Rolling Spearman IC recomputation (2 days)
+4. Regime-conditional ATR stop multipliers (2 days)
+5. Inverse-volatility position sizing (2 days)
+6. Thompson sampling signal selection (4 days)
+7. Multi-agent debate for Layer 2 (3 days)
+8. 3-state NHMM for BTC/ETH (5 days)

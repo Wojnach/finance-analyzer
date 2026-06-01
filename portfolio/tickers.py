@@ -99,8 +99,11 @@ DISABLED_SIGNALS = {
     # "drift_regime_gate" RE-ENABLED 2026-05-22: 58.4% 1d all-time (1231 sam),
     # 66.5% 1d_recent (651 sam). Strongest regime filter. Accuracy gate
     # auto-disables if performance degrades below 47%.
-    # "vol_ratio_regime" RE-ENABLED 2026-05-28: 57.2% accuracy (586 sam).
-                        # Highest sample count among regime signals. Well above 47% gate.
+    "vol_ratio_regime",  # 2026-06-01: RE-DISABLED. 48.8% 1d all-time (2427 sam),
+                        # 54.2% recent — but BUY acc 35.2% (recent), SELL 71.6%.
+                        # Correlated with 5 other regime signals (adx, bocpd, chop,
+                        # drift, amihud). Drift (58.9%) and amihud (58.6%) are better.
+                        # Was 57.2% on 586 sam at re-enable — small-sample illusion.
     "residual_pair_reversion",  # pending live validation (added 2026-04-30)
     "williams_vix_fix",  # pending live validation (added 2026-05-01)
     "treasury_risk_rotation",  # pending live validation (added 2026-05-07)
@@ -224,19 +227,20 @@ DISABLED_SIGNALS = {
                         # signals fail in ranging markets. 49.9% at 3h (marginal).
     "connors_rsi2",     # 2026-05-19: NEW. RSI(2) ultra-short MR for BTC/ETH only.
                         # Shadow mode — accumulate accuracy data before enabling.
-    # "adx_regime_switch" RE-ENABLED 2026-05-28: 67.0% accuracy (182 sam).
-                        # Strongest regime signal in the system. ADX dual regime meta-signal.
-                        # Accuracy gate auto-disables if performance degrades below 47%.
-    # "choppiness_regime_gate" RE-ENABLED 2026-05-28: 67.7% accuracy (158 sam).
-                        # CHOP regime gate — suppresses directional signals in choppy markets.
-                        # Accuracy gate auto-disables if performance degrades below 47%.
+    "adx_regime_switch",  # 2026-06-01: RE-DISABLED. 49.0% 1d (492 sam), BUY 32.9%,
+                        # SELL 61.3%. Was 67.0% on 182 sam at re-enable — classic
+                        # small-sample illusion. Correlated with drift/amihud/bocpd/
+                        # chop/vol_ratio. Drift (58.9%) and amihud (58.6%) retained.
+    "choppiness_regime_gate",  # 2026-06-01: RE-DISABLED. 51.7% 1d (410 sam), BUY 37.1%,
+                        # SELL 66.3%. Was 67.7% on 158 sam — small-sample illusion.
+                        # In same correlated regime cluster. Drift+amihud sufficient.
     "autotune_adaptive_cycle",  # 2026-05-23: NEW. Ehlers AutoTune adaptive cycle
                         # detection via autocorrelation periodogram + bandpass filter.
                         # Cross-asset, OHLCV-only. Score 8.1/10.
                         # Shadow mode — accumulate accuracy data before enabling.
-    # "bocpd_regime_switch" RE-ENABLED 2026-05-28: 58.5% accuracy (207 sam).
-                        # BOCPD regime switch (trend-MR). Bayesian Online Changepoint Detection.
-                        # Accuracy gate auto-disables if performance degrades below 47%.
+    "bocpd_regime_switch",  # 2026-06-01: RE-DISABLED. 51.1% 1d (519 sam), BUY 36.7%,
+                        # SELL 66.7%. Was 58.5% on 207 sam — degraded with more data.
+                        # In same correlated regime cluster. Drift+amihud retained.
     "btc_gold_correlation_regime",  # 2026-05-25: NEW. BTC-Gold correlation z-score.
                         # Intermarket cross-asset (BTC+XAU). Score 8.05/10.
                         # Shadow mode — accumulate accuracy data before enabling.

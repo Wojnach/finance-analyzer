@@ -827,3 +827,79 @@ validation on holdout set, (c) outcome backfill complete before fitting,
 **Effort:** 2 days. **Files:** `scripts/fit_llm_confidence_calibration.py`,
 `portfolio/llm_confidence_calibration.py`, `data/llm_confidence_calibration.json`.
 **Priority:** P2.
+
+---
+
+## SIGNAL-WEIGHT-1 — Exponential-decay signal weighting
+
+**Discovered:** 2026-06-01 after-hours research session.
+**Source:** arxiv 1802.07543 (Exponential Weights online learning).
+
+Replace static accuracy-based weighting with exponential-decay:
+`weight_i = exp(-eta * cumulative_loss_i)` where loss = `(1 - recent_accuracy)`.
+Signals that degrade auto-downweight within 1-2 weeks without manual
+DISABLED_SIGNALS entries. Floor at 0.05x to prevent permanent kill.
+
+**Why deferred:** Needs careful backtesting on signal_log.db to validate
+that exp-decay doesn't over-react to short transient accuracy dips.
+**Effort:** 2 days. **Files:** `portfolio/signal_engine.py` (_weighted_consensus).
+**Priority:** P1.
+
+---
+
+## REGIME-SOFT-1 — Soft regime assignments (sigmoid thresholds)
+
+**Discovered:** 2026-06-01 after-hours research (arxiv 2510.03236).
+
+Replace hard regime thresholds with sigmoid smoothing:
+`p_trending = sigmoid((ADX - 25) / 5)`. Regime multipliers become continuous
+instead of discrete (0.75 + 0.25 * p_trending). Eliminates flip-flopping at
+boundaries that causes near-coinflip accuracy in regime signals.
+
+**Why deferred:** Touches multiple signal modules + signal_engine regime logic.
+Need coordinated change across 6 regime signals.
+**Effort:** 3 days. **Files:** `portfolio/signals/adx_regime_switch.py`,
+`bocpd_regime_switch.py`, `choppiness_regime_gate.py`, `drift_regime_gate.py`,
+`amihud_illiquidity_regime.py`, `vol_ratio_regime.py`, `signal_engine.py`.
+**Priority:** P1.
+
+---
+
+## IC-ROLLING-1 — Rolling Spearman IC recomputation (14d window)
+
+**Discovered:** 2026-06-01 after-hours research.
+
+Increase IC recomputation to daily with 14d rolling Spearman rank IC.
+IC is a leading indicator of accuracy decay — catches degradation 1-2 weeks
+before accuracy stats. Track IC trend: 7+ consecutive decline days → 0.5x
+dampening.
+
+**Why deferred:** Needs ic_computation.py refactoring and careful TTL tuning.
+**Effort:** 2 days. **Files:** `portfolio/ic_computation.py`, `signal_engine.py`.
+**Priority:** P2.
+
+---
+
+## RISK-ATR-1 — Regime-conditional ATR stop multipliers
+
+**Discovered:** 2026-06-01 (2026 quant consensus).
+
+Replace static ATR multipliers with regime-dependent: trending 2.0x, ranging
+1.2x, high-vol 1.5x. For silver warrants: `max(3% of bid, regime_mult * ATR)`.
+Add trailing stop activation at +1.5x ATR in profit.
+
+**Effort:** 2 days. **Files:** `portfolio/risk_management.py`.
+**Priority:** P2.
+
+---
+
+## SIZING-VOL-1 — Inverse-volatility position sizing
+
+**Discovered:** 2026-06-01 (Concretum Group research).
+
+Target_exposure = (target_vol / realized_vol) * base_position. Use 20d rolling
+realized vol. Target portfolio 15% annualized. Naturally sizes down BTC (~60% vol)
+and up XAU (~15% vol). Sharpe improved 0.99→1.54 in backtests.
+
+**Effort:** 2 days. **Files:** `portfolio/risk_management.py`, `portfolio_mgr.py`.
+**Priority:** P2.

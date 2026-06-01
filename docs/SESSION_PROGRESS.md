@@ -1,5 +1,32 @@
 # Session Progress
 
+## 2026-06-01 After-Hours Research Session (21:07–22:00+ CEST)
+
+### Completed
+- **Phase 0 Daily Review:** System healthy (0 errors), XAG 50% trim at $75.65 was correct.
+  Patient: 26.92oz XAG @ $74.68, $74.00 stop. Bold: DORMANT.
+- **Phase 1 Market Research:** S&P at record, BTC $72K with record ETF outflows,
+  Hormuz crisis driving oil/inflation. NFP Friday, FOMC June 16-17.
+  BofA raised silver target to $85.93. Goldman gold $5,400 year-end.
+- **Phase 2 Quant Research:** 11 topics researched. Top recommendations:
+  exponential-decay signal weighting, soft regime assignments, rolling IC.
+  TradingAgents v0.2.5 multi-agent architecture noted for Layer 2 improvement.
+- **Phase 3 Signal Audit:** CRITICAL — systemic BUY_ACCURACY_COLLAPSE.
+  BUY accuracy 15-33% vs SELL 56-87% across most signals. 4 regime signals
+  degraded from 58-67% (small sample) to 49-52% (larger sample).
+- **Implementation:** Disabled 4 redundant regime signals (adx, bocpd, vol_ratio,
+  choppiness). Raised directional gate 43% → 44%. Resolved 2 critical errors.
+- **Deliverables:** daily_research_review.json, daily_research_macro.json,
+  daily_research_quant.json, daily_research_signal_audit.json,
+  daily_research_ticker_deep_dive.json, morning_briefing.json, RESEARCH_PLAN.md
+
+### Next
+- Run full test suite, merge to main, push
+- Send Telegram morning briefing
+- Backlog: exponential-decay weighting, soft regime assignments, rolling IC
+
+---
+
 ## 2026-06-01 FGL Adversarial Codebase Review (17:00–18:00 CEST)
 
 ### What ran
