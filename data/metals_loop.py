@@ -6983,7 +6983,7 @@ def main():
             skey, spos = _get_active_silver()
             log(f"Silver fast-tick: ACTIVE (10s ticks, ref=${_silver_underlying_ref or '?'})")
             log(f"  Position: {skey} | {spos.get('units',0)} units @ {spos.get('entry',0)} SEK")
-            log(f"  Alerts: {', '.join(f'{t[0]}%' for t, _ in SILVER_ALERT_LEVELS)}")
+            log(f"  Alerts: {', '.join(f'{t}%' for t, _ in SILVER_ALERT_LEVELS)}")
         elif SILVER_FAST_TICK_ENABLED:
             log("Silver fast-tick: STANDBY (no active silver position)")
         else:

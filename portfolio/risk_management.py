@@ -725,17 +725,19 @@ def transaction_cost_analysis(portfolio: dict) -> dict:
 # Risk Audit Flags — pre-trade risk checks for Layer 2
 # ---------------------------------------------------------------------------
 
-_CORRELATED_PAIRS = None
+_CORRELATED_PAIRS_NOT_LOADED = object()
+_CORRELATED_PAIRS = _CORRELATED_PAIRS_NOT_LOADED
 
 
 def _get_correlated_pairs():
     global _CORRELATED_PAIRS
-    if _CORRELATED_PAIRS is None:
+    if _CORRELATED_PAIRS is _CORRELATED_PAIRS_NOT_LOADED:
         try:
             from portfolio.correlation_priors import get_correlated_pairs
             _CORRELATED_PAIRS = get_correlated_pairs()
         except Exception:
-            _CORRELATED_PAIRS = []
+            logger.warning("correlation_priors import failed — will retry next call")
+            return []
     return _CORRELATED_PAIRS
 
 

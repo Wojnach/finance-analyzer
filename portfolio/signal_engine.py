@@ -647,7 +647,7 @@ def _persistence_cycles_for(ticker: str | None) -> int:
 # ticker so synthetic cross-asset signals can reference other tickers' results.
 # Stale reads (MSTR processing before BTC in the same cycle) are acceptable —
 # the 60s loop ensures data is at most one cycle old.
-_cross_ticker_consensus: dict[str, dict] = {}  # {ticker: {"action": str, "confidence": float}}
+_cross_ticker_consensus: dict[tuple, dict] = {}  # {(ticker, horizon): {"action": str, "confidence": float}}
 _cross_ticker_lock = threading.Lock()
 
 
@@ -3905,7 +3905,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # The vote goes through all normal gates (accuracy, regime, persistence).
     if ticker == "MSTR":
         with _cross_ticker_lock:
-            btc_cons = _cross_ticker_consensus.get("BTC-USD")
+            btc_cons = _cross_ticker_consensus.get(("BTC-USD", horizon))
         if btc_cons is not None:
             btc_action = btc_cons.get("action", "HOLD")
             if btc_action in ("BUY", "SELL", "HOLD"):
@@ -4579,6 +4579,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Update cross-ticker consensus cache for synthetic cross-asset signals
     if ticker:
         with _cross_ticker_lock:
-            _cross_ticker_consensus[ticker] = {"action": action, "confidence": conf}
+            _cross_ticker_consensus[(ticker, horizon)] = {"action": action, "confidence": conf}
 
     return action, conf, extra_info

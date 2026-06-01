@@ -1095,15 +1095,16 @@ def api_equity_curve():
 
 
 # ---------------------------------------------------------------------------
-# New: Signal heatmap (30 signals x all tickers)
+# Signal heatmap (all signals x all tickers)
 # ---------------------------------------------------------------------------
 
 @app.route("/api/signal-heatmap")
 @require_auth
 def api_signal_heatmap():
-    """Return the full 30-signal x all-tickers grid.
+    """Return the full signal x tickers grid.
 
-    Each cell is BUY/SELL/HOLD. Built from agent_summary.json signals + enhanced_signals.
+    Each cell is BUY/SELL/HOLD. Built from agent_summary.json _votes.
+    Signal list derived dynamically from the data + canonical SIGNAL_NAMES.
     """
     summary = _read_json(DATA_DIR / "agent_summary.json")
     if not summary:
@@ -1111,20 +1112,19 @@ def api_signal_heatmap():
 
     signals_data = summary.get("signals", {})
 
-    # Core signal names (11 total: 8 active + 3 disabled)
-    core_signals = [
-        "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "ministral", "volume", "ml", "funding", "custom_lora"
-    ]
-    # Enhanced composite signal names (19 modules, signals #12-#30)
-    enhanced_signals = [
-        "trend", "momentum", "volume_flow", "volatility_sig",
-        "candlestick", "structure", "fibonacci", "smart_money",
-        "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-        "macro_regime", "momentum_factors", "news_event", "econ_calendar",
-        "forecast", "claude_fundamental", "futures_flow"
-    ]
-    all_signals = core_signals + enhanced_signals
+    try:
+        from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS
+    except ImportError:
+        SIGNAL_NAMES = []
+        DISABLED_SIGNALS = set()
+
+    all_vote_keys = set()
+    for ticker_data in signals_data.values():
+        all_vote_keys.update(ticker_data.get("extra", {}).get("_votes", {}).keys())
+
+    all_signals = list(SIGNAL_NAMES) if SIGNAL_NAMES else sorted(all_vote_keys)
+    for k in sorted(all_vote_keys - set(all_signals)):
+        all_signals.append(k)
 
     heatmap = {}
     tickers = list(signals_data.keys())
@@ -1134,7 +1134,6 @@ def api_signal_heatmap():
         extra = sig.get("extra", {})
         votes = extra.get("_votes", {})
 
-        # _votes contains all 30 signal keys (core + enhanced)
         row = {}
         for s in all_signals:
             row[s] = (votes.get(s, "HOLD") or "HOLD").upper()
@@ -1174,19 +1173,10 @@ def api_signal_heatmap():
             if row_since:
                 since[ticker] = row_since
 
-    # 2026-05-05: ship the disabled set so the heatmap can render
-    # disabled cells with the muted style + tap-to-show reason. The
-    # frontend already reads `data.disabled_signals` (signals.js:137).
-    try:
-        from portfolio.tickers import DISABLED_SIGNALS
-        disabled = sorted(DISABLED_SIGNALS)
-    except Exception:
-        disabled = []
+    disabled = sorted(DISABLED_SIGNALS) if DISABLED_SIGNALS else []
     return jsonify({
         "tickers": tickers,
         "signals": all_signals,
-        "core_signals": core_signals,
-        "enhanced_signals": enhanced_signals,
         "heatmap": heatmap,
         "since": since,
         "disabled_signals": disabled,

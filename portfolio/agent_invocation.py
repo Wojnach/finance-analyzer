@@ -1652,6 +1652,32 @@ def _check_agent_completion_locked():
                 logger.info("Wrote stub journal entry for failed T%d run (exit=%d)", _agent_tier, exit_code)
             except Exception as e:
                 logger.warning("Failed to write stub journal entry: %s", e)
+    elif status == "auth_error":
+        try:
+            config = _load_config()
+            send_or_store(
+                f"*L2 AUTH_ERROR* T{_agent_tier} exit={exit_code} "
+                f"({duration_s:.0f}s) — CLI auth failure detected",
+                config, category="error",
+            )
+        except Exception as e:
+            logger.warning("Agent auth_error alert failed: %s", e)
+        if not journal_written:
+            try:
+                stub_entry = {
+                    "ts": completed_at,
+                    "trigger": "; ".join(_agent_reasons or []),
+                    "status": "auth_error",
+                    "tier": _agent_tier,
+                    "duration_s": duration_s,
+                    "decisions": {"patient": {"action": "NO_DECISION", "reasoning": "CLI auth failure — not logged in"},
+                                  "bold": {"action": "NO_DECISION", "reasoning": "CLI auth failure — not logged in"}},
+                    "tickers": {},
+                }
+                atomic_append_jsonl(JOURNAL_FILE, stub_entry)
+                logger.info("Wrote stub journal entry for auth_error T%d run", _agent_tier)
+            except Exception as e:
+                logger.warning("Failed to write stub journal entry: %s", e)
     elif status == "incomplete":
         try:
             config = _load_config()

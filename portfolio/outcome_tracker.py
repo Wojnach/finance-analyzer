@@ -216,7 +216,7 @@ def _fetch_historical_price(ticker, target_ts):
             f"{BINANCE_FAPI_BASE}/klines",
             params={
                 "symbol": symbol,
-                "interval": "1h",
+                "interval": "1m",
                 "startTime": start_ms,
                 "limit": 1,
             },
@@ -228,7 +228,7 @@ def _fetch_historical_price(ticker, target_ts):
         data = r.json()
         if not data:
             return None
-        return float(data[0][4])
+        return float(data[0][1])
 
     if ticker in BINANCE_SPOT_MAP:
         symbol = BINANCE_SPOT_MAP[ticker]
@@ -237,7 +237,7 @@ def _fetch_historical_price(ticker, target_ts):
             f"{BINANCE_BASE}/klines",
             params={
                 "symbol": symbol,
-                "interval": "1h",
+                "interval": "1m",
                 "startTime": start_ms,
                 "limit": 1,
             },
@@ -249,7 +249,7 @@ def _fetch_historical_price(ticker, target_ts):
         data = r.json()
         if not data:
             return None
-        return float(data[0][4])
+        return float(data[0][1])
 
     if ticker in YF_MAP:
         # 2026-04-14: historical price-at-timestamp needs a date window

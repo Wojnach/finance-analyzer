@@ -119,3 +119,63 @@ def test_malformed_line_is_skipped(tmp_path):
     }) + "\n", encoding="utf-8")
     # Malformed line is silently skipped; real entry still surfaces.
     assert cce.main(["--journal", str(journal)]) == 1
+
+
+class TestAutoResolveStaleCategories:
+    """Auto-resolve categories that haven't fired in 3+ days with a post-fix."""
+
+    def test_stale_category_auto_resolved(self):
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        entries = [
+            {"ts": _iso(now - timedelta(days=5)), "level": "critical",
+             "category": "contract_violation", "resolution": None},
+            {"ts": _iso(now - timedelta(days=4)), "level": "info",
+             "category": "contract_violation", "resolution": "fixed"},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        assert len(unresolved) == 0
+
+    def test_recent_category_not_auto_resolved(self):
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        entries = [
+            {"ts": _iso(now - timedelta(hours=12)), "level": "critical",
+             "category": "contract_violation", "resolution": None},
+            {"ts": _iso(now - timedelta(days=4)), "level": "info",
+             "category": "contract_violation", "resolution": "fixed"},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        assert len(unresolved) == 1
+
+    def test_stale_category_without_fix_not_auto_resolved(self):
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        entries = [
+            {"ts": _iso(now - timedelta(days=5)), "level": "critical",
+             "category": "unknown_bug", "resolution": None},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        assert len(unresolved) == 1
+
+    def test_fix_predating_critical_does_not_auto_resolve(self):
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        entries = [
+            {"ts": _iso(now - timedelta(days=6)), "level": "info",
+             "category": "test_cat", "resolution": "fixed"},
+            {"ts": _iso(now - timedelta(days=4)), "level": "critical",
+             "category": "test_cat", "resolution": None},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        assert len(unresolved) == 1
+
+    def test_mixed_categories(self):
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        entries = [
+            {"ts": _iso(now - timedelta(days=5)), "level": "critical",
+             "category": "contract_violation", "resolution": None},
+            {"ts": _iso(now - timedelta(days=4)), "level": "info",
+             "category": "contract_violation", "resolution": "fixed"},
+            {"ts": _iso(now - timedelta(hours=6)), "level": "critical",
+             "category": "accuracy_degradation", "resolution": None},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        assert len(unresolved) == 1
+        assert unresolved[0]["category"] == "accuracy_degradation"

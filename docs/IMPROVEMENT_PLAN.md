@@ -1,83 +1,97 @@
-# Improvement Plan — 2026-05-31 Auto Session
+# Improvement Plan — 2026-06-01 Auto Session
 
-**Branch:** `improve/auto-session-2026-05-31`
-**Sources:** FGL synthesis (2026-05-30, 60 findings) cross-referenced with 5 deep-exploration
-agents on current main HEAD (`db2967be`). Verified against live code — no findings carried
-from prior plans without source re-confirmation.
+**Branch:** `improve/auto-session-2026-06-01`
+**Sources:** 5 parallel exploration agents + P0 verification agent + cross-reference
+with May 21 (419 findings) and May 31 (81 findings) adversarial review syntheses.
+All P0 findings independently verified against current code at `f10c63ce`.
 
 ---
 
-## 1. Verified Bugs (ordered by severity)
+## 1. Bugs & Problems Found
 
-| ID | File | Line | Bug | Severity |
-|----|------|------|-----|----------|
-| B01 | warrant_portfolio.py | 100 | No knockout floor: 5× warrant past −20% underlying yields negative per-unit value → corrupts drawdown + VaR + circuit breaker | P0 |
-| B02 | agent_invocation.py | 1622 | `status="failed"` sends Telegram but writes NO journal stub (unlike `incomplete` which does) → invisible to loop_contract | P0 |
-| B03 | loop_contract.py | 372 | `"failed"` not in `_KNOWN_FAILURE_STATUSES` → double-invisible: no stub AND contract checker doesn't suppress | P0 |
-| B04 | main.py | 1098 | IC cache refresh: `_run_cycle_id % 60 == 30` with 600s cadence = 10h, not "≈60 min" as comment says. Was correct at old 60s cadence | P1 |
-| B05 | data_collector.py | ~168 | `fetch_vix` calls `yf.Ticker("^VIX")` without `_yfinance_lock` — thread-unsafe concurrent access with ticker workers | P1 |
-| B06 | data_collector.py | ~160 | `alpaca_klines` records circuit-breaker failure on empty data (weekends) → false OPEN after 5 empty weekends | P1 |
-| B07 | agent_invocation.py | 331 | `_extract_ticker` hardcoded fallback to "XAG-USD" for non-matching triggers → wrong ticker for BTC/MSTR decision feedback | P1 |
-| B08 | market_timing.py | 244 | `_is_agent_window()` skips Swedish holidays → L2 invoked, Avanza orders fail silently on Midsummer Eve etc | P1 |
-| B09 | dashboard/app.py | 1897 | `/api/market-health` handler logs "mstr endpoint error" (copy-paste from `api_mstr()`) | P1 |
-| B10 | accuracy_stats.py | 962-976 | `blend_accuracy_data` directional: picks higher sample count instead of blending → masks recent directional degradation | P1 |
-| B11 | risk_management.py | 465 | `compute_probabilistic_stops` uses 252 annualization for crypto/metals (should be 365) → understated stop probability | P1 |
-| B12 | risk_management.py | 729 | Module-level `CORRELATED_PAIRS = get_correlated_pairs()` crashes entire import if correlation_priors fails | P1 |
-| B13 | equity_curve.py | 419 | `_pair_round_trips` uses `list.pop(0)` — O(n²) on many partial fills. Should use deque | P2 |
-| B14 | journal.py | 23-40 | `load_recent` reads entire JSONL with no tail optimization — O(n) on months of data | P2 |
-| B15 | signal_engine.py | 1094 | `REGIME_GATE_ONLY_SIGNALS` is empty frozenset — feature is dead code | P2 |
-| B16 | signal_engine.py | 1519 | `_CROSS_HORIZON_PAIRS` missing 12h entry → dynamic weights never fire for 12h timeframe | P2 |
-| B17 | signal_engine.py | ~2829 | `_confluence_score()` return value unused — dead code | P2 |
-| B18 | digest.py | 58 | Tail-500 limit can undercount in high-activity periods (~600 invocations/4h) | P2 |
-| B19 | trade_guards.py | 381 | C4 wiring check fires every cycle on quiet days → log spam | P2 |
-| B20 | price_source.py | 240 | yfinance fallback has no staleness metadata on returned DataFrame → consumers can't detect stale data | P2 |
+### P0 — Fix immediately
 
-## 2. Not In Scope (too risky, architectural, or deferred)
+| # | File | Bug | Impact | Fix |
+|---|------|-----|--------|-----|
+| B1 | `portfolio/outcome_tracker.py:218-252` | `_fetch_historical_price` uses `interval="1h"` and returns close (`data[0][4]`). Target price can be up to 59 min late. | All short-horizon accuracy stats biased — 33% error at 3h, up to 100% at 1h. Every accuracy-gated decision, IC weight, and Mode-B probability affected. **#1 correctness bug.** | Change to `interval="1m"`, return `data[0][1]` (open price). |
+| B2 | `portfolio/agent_invocation.py:~1628-1680` | `auth_error` status writes no journal stub — `failed` and `incomplete` do but `auth_error` falls through. | Auth outages leave zero journal record. Contract violations fire. Outage invisible to journal consumers. | Add `elif status == "auth_error"` branch mirroring `failed`. |
+| B3 | `portfolio/signal_engine.py:650,3908,4582` | `_cross_ticker_consensus` keyed by `ticker` only — all 7 horizons overwrite the same entry. | MSTR btc_proxy reads whichever BTC horizon finished last. Can flip vote direction. | Key by `(ticker, horizon)`, lookup by `(ticker, horizon)`. |
+| B4 | `portfolio/fx_rates.py:47-53` | Sanity-check failure falls through to stale-cache block silently — serves old rate when live API returns bad data. | FX rate could be days stale with no distinct warning. Portfolio valuations drift. | Explicit early return after sanity-check failure with logged distinction. |
+| B5 | `data/metals_loop.py:~6986` | `for t, _ in SILVER_ALERT_LEVELS` then `t[0]` — `t` is a float, `TypeError`. | Startup crash when silver positions active. | Fix unpack to use float directly: `f'{t}%'`. |
 
-- P0-1/P0-2 Avanza session/stop-loss: requires Avanza BankID re-auth + real-money path testing
-- Theme B1 cross-process atomic-RMW: architectural, needs dedicated session
-- Theme B4 EOD-flat reconcile: complex metals logic, high blast radius
-- Theme B5 reconstructed history: mstr_mnav_discount/stablecoin_supply_ratio methodology
-- Avanza dashboard worker watchdog: complex threading, risk of making things worse
-- trade_guards disk reads optimization: beneficial but not urgent, no functional bug
+### P1 — Fix this session
 
-## 3. Batch Execution Order
+| # | File | Bug | Impact | Fix |
+|---|------|-----|--------|-----|
+| B6 | `portfolio/risk_management.py:728-739` | `_CORRELATED_PAIRS = []` on transient import failure permanently disables correlation risk. | Correlation risk gate dead for entire process lifetime. | Use `_NOT_LOADED` sentinel; retry on next call. |
+| B7 | `dashboard/app.py:1115-1126` | Signal heatmap hardcodes 30 signals from outdated layout. Missing active signals, includes removed. | Heatmap shows phantom HOLDs, missing real signals. | Generate dynamically from `tickers.SIGNAL_NAMES` + signal registry. |
+| B8 | `scripts/check_critical_errors.py` | No auto-resolve: stale `contract_violation` entries (fixed May 30) and mislabeled `avanza_account_mismatch` stay unresolved forever. | Fix-agent budget burn. 31 phantom unresolved entries. Operator can't triage. | Add auto-resolve: resolve when category hasn't fired in 3+ days and a post-dated resolution exists. |
 
-### Batch 1 — P0 fixes + critical P1 (4 files, 5 bugs)
+### P2 — Document and defer
 
-1. **warrant_portfolio.py** (B01): Add `max(0.0, ...)` clamp on `current_implied_sek`
-2. **agent_invocation.py** (B02, B07): Write `failed` journal stub mirroring `incomplete` path; fix `_extract_ticker` to return `None` on no match and handle upstream
-3. **loop_contract.py** (B03): Add `"failed"` to `_KNOWN_FAILURE_STATUSES`
-4. **main.py** (B04): Fix IC cache refresh modulo (`% 6 == 3` for ~60min at 600s cadence)
+| # | File | Bug | Note |
+|---|------|-----|------|
+| B9 | `signal_engine.py:4175` | 3d/5d/10d horizons collapse to 1d accuracy | Acknowledged TODO. Complex fix, needs data migration. |
+| B10 | `claude_gate.py:343` | `_count_today_invocations()` full JSONL scan on every call | Perf degradation. Switch to `load_jsonl_tail`. |
+| B11 | `metals_loop.py:1692` | `_underlying_prices` dict race (fast-tick vs LLM read) | Structurally racy but GIL-protected for single-key ops. |
 
-**Impact:** warrant drawdown accuracy, Layer 2 failure visibility, IC cache freshness.
-**Risk:** Low. All changes are additive guards or constant corrections.
+---
 
-### Batch 2 — P1 data/safety fixes (5 files, 5 bugs)
+## 2. Documentation Fixes
 
-5. **data_collector.py** (B05, B06): Acquire `_yfinance_lock` in `fetch_vix`; don't circuit-break on empty Alpaca data
-6. **market_timing.py** (B08): Add `is_swedish_market_holiday()` check to `_is_agent_window()`
-7. **dashboard/app.py** (B09): Fix copy-paste log message in `/api/market-health`
-8. **risk_management.py** (B11, B12): Fix annualization constant; lazy-init CORRELATED_PAIRS
-9. **journal.py** (B14): Use `load_jsonl_tail` in `load_recent` with sensible limit
+| # | What | Where | Fix |
+|---|------|-------|-----|
+| D1 | Route count stale | `CLAUDE.md` | Update "33 endpoints" → actual count (~55 including house blueprint). |
+| D2 | Signal counts | `docs/SYSTEM_OVERVIEW.md` | Sync module/signal counts with current state. |
+| D3 | Known issues | `docs/SYSTEM_OVERVIEW.md` | Update "Known Issues" section with what's fixed vs open. |
 
-**Impact:** Thread safety, data-source resilience, Swedish holiday guard, dashboard logging.
-**Risk:** Low-medium. `_yfinance_lock` change needs careful review of all yfinance call paths.
+---
 
-### Batch 3 — P1 accuracy + P2 performance (4 files, 3 bugs)
+## 3. Batch Plan
 
-10. **accuracy_stats.py** (B10): Fix `blend_accuracy_data` to blend directional accuracy like overall
-11. **equity_curve.py** (B13): Replace `list` with `collections.deque` in `_pair_round_trips`
-12. **price_source.py** (B20): Add `_source` and `_stale` columns to yfinance-fallback DataFrame
-13. **trade_guards.py** (B19): Guard C4 wiring check with `_wiring_confirmed` flag
+### Batch 1: Critical correctness (5 files, 5 P0 fixes)
 
-**Impact:** Accuracy gate correctness, round-trip perf, data provenance, log noise.
-**Risk:** Low. Accuracy blending change needs test verification.
+**Files:** `portfolio/outcome_tracker.py`, `portfolio/agent_invocation.py`,
+`portfolio/signal_engine.py`, `portfolio/fx_rates.py`, `data/metals_loop.py`
 
-### Batch 4 — Dead code + signal quality (2 files, 4 bugs)
+| Change | Risk | Test needed |
+|--------|------|-------------|
+| B1: 1h→1m + open price | LOW | Update existing `test_outcome_tracker.py` |
+| B2: auth_error journal stub | LOW | Add test for auth_error stub write |
+| B3: cache key (ticker,horizon) | MED | Update `test_cross_ticker_consensus` |
+| B4: fx_rates explicit return | LOW | Add test for sanity-check failure path |
+| B5: SILVER_ALERT_LEVELS unpack | LOW | Add test for alert level formatting |
 
-14. **signal_engine.py** (B15, B16, B17): Remove `REGIME_GATE_ONLY_SIGNALS` dead set; add 12h to `_CROSS_HORIZON_PAIRS`; remove `_confluence_score`
-15. **digest.py** (B18): Increase tail limit from 500 to 2000
+### Batch 2: P1 reliability (3 files)
 
-**Impact:** Code cleanliness, 12h dynamic weights, digest accuracy.
-**Risk:** Very low. Pure cleanup + constant change.
+**Files:** `portfolio/risk_management.py`, `dashboard/app.py`,
+`scripts/check_critical_errors.py`
+
+| Change | Risk | Test needed |
+|--------|------|-------------|
+| B6: sentinel + retry | LOW | Test import failure → retry succeeds |
+| B7: dynamic signal heatmap | LOW | Test signal list matches registry |
+| B8: auto-resolve stale criticals | MED | Test auto-resolve logic with fixtures |
+
+### Batch 3: Documentation (2 files)
+
+**Files:** `CLAUDE.md`, `docs/SYSTEM_OVERVIEW.md`
+
+No code risk. Update counts and known issues.
+
+---
+
+## 4. Dependencies
+
+All Batch 1 fixes are independent. Batch 2 has no Batch 1 deps.
+Batch 3 depends on Batch 1+2 (docs reflect final state).
+
+## 5. Impact Assessment
+
+- B1 changes outcome backfill precision but does NOT retroactively fix existing entries.
+  A re-backfill of short-horizon outcomes would be needed to fully correct accuracy stats.
+- B3 changes cache key format — no persistence, pure in-memory. No migration needed.
+- B7 changes the heatmap API response shape (signal list). Dashboard frontend
+  should handle this gracefully since it iterates the returned list.
+- B8 adds new logic to a startup script — if buggy, worst case is stale errors
+  persist (same as today). Fail-safe.
