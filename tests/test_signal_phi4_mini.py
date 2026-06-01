@@ -318,3 +318,30 @@ def test_parse_prose_confidence_from_conclusion():
     action, _reason, confidence = _parse_phi4_response(raw)
     assert action == "BUY"
     assert confidence == pytest.approx(0.87)
+
+
+# ---------------------------------------------------------------------------
+# (d) FGL-review regression: prose-confidence fallback must NOT scrape a
+#     year / price / RSI value as a fabricated confidence on a real vote.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "<think>x</think>\ndecision: BUY\nGiven the 2026 outlook I have confidence, the year 2026 matters.",
+    "<think>x</think>\ndecision: SELL\nI have confidence the price 98000 holds.",
+    "<think>x</think>\ndecision: BUY\nconfidence in the RSI 72 reading is moderate.",
+])
+def test_prose_confidence_rejects_non_confidence_numbers(text):
+    """Year/price/RSI near 'confidence' must NOT become the confidence."""
+    action, _r, confidence = _parse_phi4_response(text)
+    assert action in ("BUY", "SELL")
+    # No structured/anchored confidence -> None (caller defaults 0.50), NOT a
+    # fabricated 1.0 (2026/98000 clamped) or 0.72 (RSI).
+    assert confidence is None
+
+
+def test_prose_confidence_accepts_anchored_value():
+    """Genuine anchored prose confidence is still recovered."""
+    raw = "<think>x</think>\nThe **BUY** call. Confidence score is **87** here."
+    action, _r, confidence = _parse_phi4_response(raw)
+    assert action == "BUY"
+    assert confidence == pytest.approx(0.87)

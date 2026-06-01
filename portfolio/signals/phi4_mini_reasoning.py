@@ -8,9 +8,27 @@ confidence from the structured decision line.
 
 Added 2026-06-01 as a shadow challenger to the existing 8B LLM voters
 (ministral3, qwen3). Phi-4-mini has a smaller VRAM footprint (~2.5 GB
-Q4_K_M) which may allow concurrent residency with other models during
-metals-loop cycles. Registered in ``data/shadow_registry.json`` with
-``cycle_modulo=3`` to bound loop budget.
+Q4_K_M). Registered in ``data/shadow_registry.json`` with ``cycle_modulo=10``.
+
+.. warning::
+   INERT UNDER CURRENT DISPATCH (FGL review 2026-06-01). This signal is in
+   ``tickers.DISABLED_SIGNALS`` but NOT in ``signal_engine._SHADOW_SAFE_SIGNALS``.
+   In ``signal_engine.generate_signal`` the DISABLED branch only *computes* a
+   signal when it is in ``_SHADOW_SAFE_SIGNALS`` (which is pure-math/OHLCV-only,
+   no network); every other DISABLED signal is force-HOLD and ``continue``-d
+   before the compute path. So ``compute_phi4_mini_signal`` is NEVER CALLED in
+   the live loop today and logs ZERO accuracy rows — same as the other LLM
+   shadows (finance_llama / meta_trader / cryptotrader_lm), whose recent
+   ``llm_probability_log`` rows are all historical. Making it actually collect
+   data requires a throttled expensive-shadow dispatch path (add to a shadow
+   set AND gate the compute through ``should_run_this_cycle`` + a single-ticker
+   limit + ``model_load_safe``), because the existing ``cycle_modulo`` throttle
+   at signal_engine.py:3792 is UNREACHABLE for DISABLED signals. That is a
+   separate, blast-radius-y dispatch change (affects all LLM shadows) and needs
+   its own plan + premortem + live GPU-budget validation — NOT done here. The
+   wiring + verified inference path + tests are staged so that change is a small
+   follow-up, not a from-scratch effort. The signal is SAFE (never runs, never
+   votes, zero trade/cycle risk); it is simply not yet collecting data.
 
 Prompt format
 -------------
@@ -200,22 +218,37 @@ def _parse_phi4_response(text: str):
         am = re.search(r"\b(BUY|SELL|HOLD)\b", post_think.upper())
         action = am.group(1) if am else "HOLD"
 
-    # 2. Confidence: structured line first, then a prose fallback.
+    # 2. Confidence: structured line first, then a TIGHT prose fallback.
     # LIVE-PROBE 2 (2026-06-01): Phi-4-mini-reasoning ignores the structured
     # "confidence: N" format and writes prose like "confidence score is **87**".
-    # So after the strict "confidence: N" match, fall back to the first number
-    # within ~25 chars after the word "confidence" (handles markdown ** wrap).
+    # FGL-REVIEW (2026-06-01): the original loose fallback
+    # `confidence[^0-9]{0,25}(\d+)` scraped ANY number within 25 chars — it
+    # grabbed years ("confidence given the 2026 outlook" -> 1.0), prices
+    # ("confidence the price 98000" -> 1.0), and RSI values ("confidence in the
+    # RSI 72" -> 0.72) as fabricated confidences on a real directional vote,
+    # corrupting the very Brier/accuracy data the shadow exists to measure.
+    # Tightened: the number must directly follow "confidence [score|level]
+    # [is|of|:|=]" with only markdown ** between, and be a 1-3 digit pct (or 0.x).
+    # Anything else -> confidence stays None -> caller's 0.50 fallback (an honest
+    # "unknown", not a fabricated 1.0). Reject >100 outright.
     confidence = None
     cm = re.search(r"confidence\s*:\s*([0-9]+(?:\.[0-9]+)?)", post_think, re.IGNORECASE)
     if not cm:
-        cm = re.search(r"confidence[^0-9]{0,25}([0-9]+(?:\.[0-9]+)?)", post_think, re.IGNORECASE)
+        cm = re.search(
+            r"confidence(?:\s+(?:score|level))?\s*(?:is|of|[:=])?\s*\*{0,2}"
+            r"([0-9]{1,3}(?:\.[0-9]+)?)\*{0,2}(?!\d)",
+            post_think,
+            re.IGNORECASE,
+        )
     if cm:
         try:
             raw = float(cm.group(1))
-            # Normalise 0-100 → 0-1; preserve already-normalised 0-1 values.
-            if raw > 1.0:
-                raw = raw / 100.0
-            confidence = max(0.0, min(1.0, raw))
+            if raw > 100:
+                raw = None  # not a confidence (price/year/etc.) — don't fabricate
+            else:
+                if raw > 1.0:
+                    raw = raw / 100.0  # 0-100 -> 0-1
+                confidence = max(0.0, min(1.0, raw))
         except (ValueError, TypeError):
             pass
 
@@ -298,7 +331,9 @@ def compute_phi4_mini_signal(df, context=None):
     try:
         # 2026-06-01: llama_server.query_llama_server uses n_predict (not
         # max_tokens) — matches the llama-server /completion API parameter name.
-        # 512 tokens gives the <think> block enough room without blowing cycle time.
+        # n_predict=_MAX_TOKENS (4096) — the live probe found 512/2048 truncate
+        # mid-<think>; 4096 lets the reasoning block close + a decision follow
+        # (~22s resident). See _MAX_TOKENS comment for the cost tradeoff.
         text = query_llama_server(
             "phi4_mini",
             prompt,

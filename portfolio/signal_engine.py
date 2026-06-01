@@ -760,9 +760,11 @@ _KNOWN_SHADOW_LLMS = frozenset({
     "finance_llama",
     "cryptotrader_lm",
     "meta_trader",
-    # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=3 in
-    # shadow_registry.json — must be listed here so the throttle-fails-closed
-    # guard prevents unbounded inference if the registry file is unavailable.
+    # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=10 in
+    # shadow_registry.json — listed here so the throttle-fails-closed guard
+    # would prevent unbounded inference IF it ran. (FGL 2026-06-01: currently
+    # inert — not in _SHADOW_SAFE_SIGNALS so the DISABLED branch force-HOLDs it
+    # before the throttle path is reached. See phi4_mini_reasoning docstring.)
     "phi4_mini",
 })
 

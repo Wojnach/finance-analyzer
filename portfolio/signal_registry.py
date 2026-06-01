@@ -416,9 +416,12 @@ def _register_defaults():
     # Phi-4-mini-reasoning shadow signal. Added 2026-06-01.
     # Microsoft Phi-4-mini-reasoning 3.8B Q4_K_M — reasoning model with
     # <think>…</think> chain-of-thought. Shadow challenger to ministral3/qwen3.
-    # Force-HOLD via DISABLED_SIGNALS; votes logged to llm_probability_log.jsonl
-    # for accuracy tracking. cycle_modulo=3 in shadow_registry bounds loop cost.
+    # Force-HOLD via DISABLED_SIGNALS. cycle_modulo=10 in shadow_registry.
     # max_confidence=0.7 matches the established cap on all LLM voters.
+    # NOTE (FGL 2026-06-01): currently INERT — DISABLED + not in
+    # signal_engine._SHADOW_SAFE_SIGNALS, so generate_signal force-HOLDs it
+    # before compute. Logs ZERO rows until a throttled shadow-dispatch path
+    # is added. See phi4_mini_reasoning.py module docstring for the full note.
     register_enhanced("phi4_mini",
                       "portfolio.signals.phi4_mini_reasoning",
                       "compute_phi4_mini_signal",
