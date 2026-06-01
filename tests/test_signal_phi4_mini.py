@@ -276,3 +276,45 @@ def test_slot_name_and_stop_tokens_forwarded(monkeypatch):
     assert captured["n_predict"] is not None and captured["n_predict"] >= 256, (
         "reasoning models need token headroom for <think> block"
     )
+
+
+# ---------------------------------------------------------------------------
+# (c) Regression: truncated <think> must abstain, not fabricate a vote
+#     Found by the 2026-06-01 live probe — n_predict=512 truncated mid-think
+#     and the bare-word regex grabbed a spurious "BUY" from the reasoning prose.
+# ---------------------------------------------------------------------------
+
+def test_strip_think_block_unclosed_returns_empty():
+    """Open <think> with no </think> (truncated generation) -> empty string."""
+    raw = "<think>\nOkay, let's figure out whether to BUY, SELL, or HOLD. First,"
+    assert _strip_think_block(raw) == ""
+
+
+def test_parse_truncated_think_yields_no_action():
+    """Truncated think must not regex-grab BUY/SELL from the reasoning text."""
+    raw = "<think>\nShould I BUY here? RSI oversold suggests BUY but momentum"
+    action, _reason, confidence = _parse_phi4_response(raw)
+    assert action is None
+    assert confidence is None
+
+
+def test_compute_abstains_on_truncated_think(monkeypatch):
+    """End-to-end: truncated-think response -> clean HOLD/conf=0 abstain."""
+    truncated = "<think>\nLet me reason: BUY signals are RSI=28 oversold, but"
+    monkeypatch.setattr(_llama_server, "model_load_safe", lambda *a, **kw: True)
+    monkeypatch.setattr(_llama_server, "query_llama_server", lambda *a, **kw: truncated)
+    r = compute_phi4_mini_signal(_df(), context=_ctx())
+    assert r["action"] == "HOLD"
+    assert r["confidence"] == 0.0
+    assert r["indicators"]["reason"] == "think_truncated"
+
+
+def test_parse_prose_confidence_from_conclusion():
+    """LIVE-PROBE 2: model writes prose ('confidence score is **87**'), not
+    the structured 'confidence: N'. Parser must still recover action+conf."""
+    raw = ("<think>\nlong reasoning here about RSI and MACD...\n</think>\n"
+           "**Conclusion:** strong oversold confluence points to a **BUY** "
+           "signal. The confidence score is **87** due to alignment.")
+    action, _reason, confidence = _parse_phi4_response(raw)
+    assert action == "BUY"
+    assert confidence == pytest.approx(0.87)

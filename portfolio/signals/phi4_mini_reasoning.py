@@ -92,9 +92,17 @@ _PROMPT_TEMPLATE = (
 )
 
 # 2026-06-01: reasoning models need room for the <think> block.
-# 512 tokens: ~400 for think trace + ~50 for the decision line. Cap keeps
-# cycle budget bounded — we only need the final decision, not a full essay.
-_MAX_TOKENS = 512
+# LIVE-PROBE FINDING (2026-06-01): 512 was FAR too small. Phi-4-mini-reasoning's
+# <think> chain-of-thought alone exceeds 512 tokens, so generation truncated
+# *inside* the think block and never emitted the decision line — the parser
+# then regex-grabbed a spurious "BUY" out of the reasoning prose at conf=0.50.
+# LIVE-PROBE 2 (2026-06-01): 2048 STILL truncated — model used all 2048 tokens
+# (~9K chars) and was still mid-<think>. At 4096 it closes the think block and
+# emits a conclusion in ~22s resident (13.9K chars). So 4096 is the floor for a
+# parseable answer. Cost ~22-30s/call resident; cycle_modulo=10 in shadow_registry
+# keeps loop impact bounded. The -reasoning variant's verbose CoT is the cost;
+# phi4-mini-INSTRUCT (no <think>) is the faster swap if this proves not worth it.
+_MAX_TOKENS = 4096
 
 # Stop tokens: <|end|> is Phi-4's turn terminator; double-newline cuts
 # runaway generation if the model ignores the template terminator.
@@ -148,6 +156,16 @@ def _strip_think_block(text: str) -> str:
     """
     # 2026-06-01: DOTALL so the think block can span multiple lines.
     stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # LIVE-PROBE FINDING (2026-06-01): if generation was truncated mid-think
+    # (n_predict hit before </think>), there is an OPEN <think> with no close.
+    # Returning the raw reasoning prose here lets the bare-word regex grab a
+    # spurious BUY/SELL out of "...whether to BUY, SELL, or HOLD...". Detect the
+    # unclosed think and return "" so the parser yields no action -> clean abstain
+    # (excluded from the accuracy denominator) rather than a fabricated vote.
+    if re.search(r"<think>", stripped, re.IGNORECASE) and not re.search(
+        r"</think>", text, re.IGNORECASE
+    ):
+        return ""
     return stripped.strip()
 
 
@@ -165,6 +183,12 @@ def _parse_phi4_response(text: str):
     """
     post_think = _strip_think_block(text)
 
+    # 2026-06-01: empty post_think means the response was all-think (truncated
+    # mid-reasoning) or otherwise carried no answer. Return action=None so the
+    # caller abstains (conf=0, excluded from accuracy) instead of inventing HOLD.
+    if not post_think:
+        return None, "think_truncated", None
+
     # 1a. Structured decision line: "decision: BUY" (case-insensitive)
     action = None
     dm = re.search(r"decision\s*:\s*(BUY|SELL|HOLD)", post_think, re.IGNORECASE)
@@ -176,9 +200,15 @@ def _parse_phi4_response(text: str):
         am = re.search(r"\b(BUY|SELL|HOLD)\b", post_think.upper())
         action = am.group(1) if am else "HOLD"
 
-    # 2. Confidence: structured line first, then regex fallback
+    # 2. Confidence: structured line first, then a prose fallback.
+    # LIVE-PROBE 2 (2026-06-01): Phi-4-mini-reasoning ignores the structured
+    # "confidence: N" format and writes prose like "confidence score is **87**".
+    # So after the strict "confidence: N" match, fall back to the first number
+    # within ~25 chars after the word "confidence" (handles markdown ** wrap).
     confidence = None
     cm = re.search(r"confidence\s*:\s*([0-9]+(?:\.[0-9]+)?)", post_think, re.IGNORECASE)
+    if not cm:
+        cm = re.search(r"confidence[^0-9]{0,25}([0-9]+(?:\.[0-9]+)?)", post_think, re.IGNORECASE)
     if cm:
         try:
             raw = float(cm.group(1))
@@ -283,6 +313,12 @@ def compute_phi4_mini_signal(df, context=None):
         return _abstain("server_unavailable")
 
     action, reasoning, confidence = _parse_phi4_response(text)
+
+    # 2026-06-01: action=None means the response was truncated mid-<think> or
+    # carried no parseable decision. Abstain (conf=0) so the shadow logs an
+    # abstention, not a fabricated vote — keeps the accuracy denominator clean.
+    if action is None:
+        return _abstain("think_truncated", {"raw_text_len": len(text)})
 
     if confidence is None:
         # Parser found action but no numeric confidence. Default to 0.50 so
