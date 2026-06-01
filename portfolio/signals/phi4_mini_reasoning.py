@@ -10,25 +10,21 @@ Added 2026-06-01 as a shadow challenger to the existing 8B LLM voters
 (ministral3, qwen3). Phi-4-mini has a smaller VRAM footprint (~2.5 GB
 Q4_K_M). Registered in ``data/shadow_registry.json`` with ``cycle_modulo=10``.
 
-.. warning::
-   INERT UNDER CURRENT DISPATCH (FGL review 2026-06-01). This signal is in
-   ``tickers.DISABLED_SIGNALS`` but NOT in ``signal_engine._SHADOW_SAFE_SIGNALS``.
-   In ``signal_engine.generate_signal`` the DISABLED branch only *computes* a
-   signal when it is in ``_SHADOW_SAFE_SIGNALS`` (which is pure-math/OHLCV-only,
-   no network); every other DISABLED signal is force-HOLD and ``continue``-d
-   before the compute path. So ``compute_phi4_mini_signal`` is NEVER CALLED in
-   the live loop today and logs ZERO accuracy rows — same as the other LLM
-   shadows (finance_llama / meta_trader / cryptotrader_lm), whose recent
-   ``llm_probability_log`` rows are all historical. Making it actually collect
-   data requires a throttled expensive-shadow dispatch path (add to a shadow
-   set AND gate the compute through ``should_run_this_cycle`` + a single-ticker
-   limit + ``model_load_safe``), because the existing ``cycle_modulo`` throttle
-   at signal_engine.py:3792 is UNREACHABLE for DISABLED signals. That is a
-   separate, blast-radius-y dispatch change (affects all LLM shadows) and needs
-   its own plan + premortem + live GPU-budget validation — NOT done here. The
-   wiring + verified inference path + tests are staged so that change is a small
-   follow-up, not a from-scratch effort. The signal is SAFE (never runs, never
-   votes, zero trade/cycle risk); it is simply not yet collecting data.
+Dispatch (FGL follow-up 2026-06-01)
+-----------------------------------
+phi4_mini is in ``tickers.DISABLED_SIGNALS`` (force-HOLD in consensus — never
+drives a trade) AND in ``signal_engine._SHADOW_LLM_SIGNALS``. In
+``generate_signal``'s DISABLED branch it is computed through the *throttled
+expensive-LLM-shadow* path: ``_shadow_llm_runs_now`` gates it to ONE rotating
+ticker per ``cycle_modulo`` throttle-tick, so the ~22s GPU call runs at most
+once per cycle (not once per ticker — that 5×22s every-cycle blowout is exactly
+why it is NOT in the every-cycle ``_SHADOW_SAFE_SIGNALS`` math set). The real
+action is recorded to ``shadow_votes`` → ``raw_votes`` → outcome_tracker →
+accuracy_cache for directional-accuracy measurement, while the consensus vote
+stays force-HOLD. The gate is fail-closed (any registry error → skip the call).
+Over a full rotation (5 × cycle_modulo minutes) every Tier-1 instrument is
+sampled once. finance_llama / meta_trader / cryptotrader_lm remain inert
+(not in _SHADOW_LLM_SIGNALS) pending their own validation.
 
 Prompt format
 -------------

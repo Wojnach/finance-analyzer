@@ -418,10 +418,9 @@ def _register_defaults():
     # <think>…</think> chain-of-thought. Shadow challenger to ministral3/qwen3.
     # Force-HOLD via DISABLED_SIGNALS. cycle_modulo=10 in shadow_registry.
     # max_confidence=0.7 matches the established cap on all LLM voters.
-    # NOTE (FGL 2026-06-01): currently INERT — DISABLED + not in
-    # signal_engine._SHADOW_SAFE_SIGNALS, so generate_signal force-HOLDs it
-    # before compute. Logs ZERO rows until a throttled shadow-dispatch path
-    # is added. See phi4_mini_reasoning.py module docstring for the full note.
+    # Computed via the throttled expensive-shadow path (signal_engine
+    # _SHADOW_LLM_SIGNALS + _shadow_llm_runs_now): one rotating ticker per
+    # throttle-tick, force-HOLD in consensus, real action -> outcome_tracker.
     register_enhanced("phi4_mini",
                       "portfolio.signals.phi4_mini_reasoning",
                       "compute_phi4_mini_signal",

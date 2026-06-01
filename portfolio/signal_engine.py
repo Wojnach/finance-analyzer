@@ -760,11 +760,10 @@ _KNOWN_SHADOW_LLMS = frozenset({
     "finance_llama",
     "cryptotrader_lm",
     "meta_trader",
-    # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=10 in
-    # shadow_registry.json — listed here so the throttle-fails-closed guard
-    # would prevent unbounded inference IF it ran. (FGL 2026-06-01: currently
-    # inert — not in _SHADOW_SAFE_SIGNALS so the DISABLED branch force-HOLDs it
-    # before the throttle path is reached. See phi4_mini_reasoning docstring.)
+    # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=10.
+    # Computed via the throttled _SHADOW_LLM_SIGNALS path (one rotating ticker
+    # per throttle-tick); listed here so the throttle-fails-closed guard covers
+    # the import/load-failure case.
     "phi4_mini",
 })
 
@@ -810,6 +809,55 @@ _SHADOW_SAFE_SIGNALS = frozenset({
     "momentum_factors",
     "btc_proxy",
 })
+
+# 2026-06-01 (FGL follow-up): EXPENSIVE LLM shadows that need to compute for
+# accuracy tracking but cost ~22s/call (GGUF GPU inference), unlike the pure-
+# math _SHADOW_SAFE_SIGNALS above. They CANNOT join _SHADOW_SAFE_SIGNALS as-is:
+# that path computes every cycle for every ticker (5 × 22s = cycle blowout, the
+# premortem P0). Instead the DISABLED branch routes these through a throttled,
+# single-rotating-ticker path: at most ONE ~22s call per throttle-tick, rotating
+# across _SHADOW_LLM_ROTATION so every instrument is sampled over time. Result
+# still goes to shadow_votes (force-HOLD in consensus; real action only to
+# outcome_tracker via raw_votes). Only phi4_mini for now — finance_llama /
+# meta_trader / cryptotrader_lm stay inert pending their own validation.
+_SHADOW_LLM_SIGNALS = frozenset({"phi4_mini"})
+
+# Fixed Tier-1 order for round-robin sampling of expensive LLM shadows. One
+# ticker per throttle-tick keeps the per-cycle cost at a single inference.
+_SHADOW_LLM_ROTATION = ("BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD", "MSTR")
+
+
+def _shadow_llm_runs_now(sig_name: str, ticker: str | None, cyc: int) -> bool:
+    """True iff this expensive LLM shadow should compute for THIS ticker now.
+
+    Three gates, ALL fail-closed (any error/uncertainty -> False, skip the
+    expensive call — opposite of should_run_this_cycle's over-run default,
+    because here a wrong True costs ~22s of GPU + lock-hold on the live loop):
+      1. registry status == "shadow" (not promoted/retired),
+      2. cycle_modulo throttle (should_run_this_cycle),
+      3. round-robin: this ticker is the chosen one for this throttle-tick,
+         tick index = cyc // cycle_modulo so consecutive runs rotate tickers
+         (raw cyc % n is constant when n divides modulo — the rotation bug).
+    """
+    if not ticker:
+        return False
+    try:
+        from portfolio.shadow_registry import (
+            get_cycle_modulo,
+            get_status,
+            should_run_this_cycle,
+        )
+        if get_status(sig_name) != "shadow":
+            return False
+        if not should_run_this_cycle(sig_name, cyc):
+            return False
+        modulo = max(1, get_cycle_modulo(sig_name))
+        chosen = _SHADOW_LLM_ROTATION[(cyc // modulo) % len(_SHADOW_LLM_ROTATION)]
+        return ticker == chosen
+    except Exception:
+        logger.debug("shadow-LLM run-gate failed for %s/%s", sig_name, ticker, exc_info=True)
+        return False
+
 
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
 # tickers where the system's overall consensus is historically harmful.
@@ -3766,6 +3814,43 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                             shadow_votes[sig_name] = validated["action"]
                     except Exception as e:
                         logger.info("Shadow signal %s failed: %s", sig_name, e, exc_info=True)
+                # 2026-06-01 (FGL follow-up): expensive LLM shadows. Same
+                # shadow_votes recording as the math shadows above, but gated to
+                # ONE rotating ticker per throttle-tick so the ~22s GPU call runs
+                # at most once per cycle (not 5×). force-HOLD in consensus is
+                # unchanged below; only outcome_tracker (via raw_votes) sees the
+                # real action. _shadow_llm_runs_now is fail-closed.
+                elif sig_name in _SHADOW_LLM_SIGNALS:
+                    try:
+                        from portfolio.shadow_registry import cycle_count_now
+                        _cyc = cycle_count_now()
+                    except Exception:
+                        _cyc = -1
+                    if _cyc >= 0 and _shadow_llm_runs_now(sig_name, ticker, _cyc):
+                        try:
+                            _sig_t0 = time.monotonic()
+                            compute_fn = load_signal_func(entry)
+                            if compute_fn is not None:
+                                if ticker:
+                                    _set_last_signal(ticker, f"shadow:{sig_name}")
+                                # LLM shadows are all requires_context=True.
+                                result = compute_fn(df, context=context_data)
+                                _sig_dt = time.monotonic() - _sig_t0
+                                # Always log latency for LLM shadows (not just
+                                # >1s) — this is the premortem's lock-hold/cycle-
+                                # blowout detection hook. A 22s line here every
+                                # ~10 min is expected; a climbing count is not.
+                                logger.info("[SHADOW-LLM] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
+                                max_conf = entry.get("max_confidence", 1.0)
+                                validated = _validate_signal_result(result, sig_name=sig_name, max_confidence=max_conf)
+                                extra_info[f"{sig_name}_action"] = validated["action"]
+                                extra_info[f"{sig_name}_confidence"] = validated["confidence"]
+                                if validated["indicators"]:
+                                    extra_info[f"{sig_name}_indicators"] = validated["indicators"]
+                                extra_info[f"shadow_{sig_name}"] = True
+                                shadow_votes[sig_name] = validated["action"]
+                        except Exception as e:
+                            logger.info("Shadow LLM %s failed: %s", sig_name, e, exc_info=True)
                 votes[sig_name] = "HOLD"
                 continue
             if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
