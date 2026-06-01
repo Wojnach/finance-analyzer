@@ -61,9 +61,16 @@ def add_cors_headers(response):
     if request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # Block framing everywhere EXCEPT the heatmap, which the /house hub embeds in
+    # a same-origin <iframe>. Same-origin only (frame-ancestors 'self'), auth-gated,
+    # read-only map — safe to frame; every other route keeps DENY.
+    if request.path == "/house/heatmap":
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
     return response
 
 @app.errorhandler(500)

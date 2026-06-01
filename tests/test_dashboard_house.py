@@ -409,6 +409,18 @@ def test_heatmap_returns_html(client):
     assert b"FAKE HEATMAP" in resp.get_data()
 
 
+def test_heatmap_is_same_origin_framable_others_denied(client):
+    """The hub embeds /house/heatmap in a same-origin iframe, so that one route
+    allows SAMEORIGIN framing; every other route stays DENY (anti-clickjacking)."""
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+    hm = client.get("/house/heatmap")
+    assert hm.headers.get("X-Frame-Options") == "SAMEORIGIN"
+    assert "frame-ancestors 'self'" in hm.headers.get("Content-Security-Policy", "")
+    other = client.get("/house/")
+    assert other.headers.get("X-Frame-Options") == "DENY"
+    assert "frame-ancestors 'none'" in other.headers.get("Content-Security-Policy", "")
+
+
 def test_api_runs_returns_json(client):
     client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
     resp = client.get("/house/api/runs")
