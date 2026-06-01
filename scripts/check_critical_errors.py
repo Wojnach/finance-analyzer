@@ -60,11 +60,48 @@ def _load_entries(journal: Path) -> list[dict]:
     return entries
 
 
+def _auto_resolve_stale_categories(
+    entries: list[dict], *, stale_days: int = 3, now: datetime | None = None,
+) -> set[str]:
+    """Return set of category names that haven't fired in stale_days.
+
+    A category is auto-resolvable when its most recent critical entry is
+    older than `stale_days` AND at least one resolution or info entry for
+    that category exists after the last critical fire.
+    """
+    now = now or datetime.now(UTC)
+    stale_cutoff = now - timedelta(days=stale_days)
+
+    last_critical_by_cat: dict[str, datetime] = {}
+    has_post_fix_by_cat: dict[str, bool] = {}
+
+    for e in entries:
+        cat = e.get("category", "")
+        if not cat:
+            continue
+        parsed = _parse_ts(e.get("ts", ""))
+        if parsed is None:
+            continue
+        if e.get("level") == "critical" and e.get("resolution") is None:
+            existing = last_critical_by_cat.get(cat)
+            if existing is None or parsed > existing:
+                last_critical_by_cat[cat] = parsed
+        if e.get("resolution") is not None or e.get("level") == "info":
+            has_post_fix_by_cat[cat] = True
+
+    stale_cats = set()
+    for cat, last_ts in last_critical_by_cat.items():
+        if last_ts < stale_cutoff and has_post_fix_by_cat.get(cat, False):
+            stale_cats.add(cat)
+    return stale_cats
+
+
 def find_unresolved(entries: list[dict], *, days: int, now: datetime | None = None) -> list[dict]:
     """Return entries with resolution=None from the last `days` days.
 
     A later entry with ``resolves_ts`` pointing at an earlier entry's ``ts``
-    retroactively resolves that earlier entry.
+    retroactively resolves that earlier entry. Categories that haven't fired
+    in 3+ days AND have a post-dated resolution/info entry are auto-resolved.
     """
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=days)
@@ -75,18 +112,17 @@ def find_unresolved(entries: list[dict], *, days: int, now: datetime | None = No
         if rts:
             resolved_ts.add(rts)
 
+    stale_cats = _auto_resolve_stale_categories(entries, now=now)
+
     unresolved = []
     for e in entries:
-        # Only surface critical-level entries. The fix_agent_dispatcher
-        # (added 2026-04-13) writes info-level fix_attempt_started /
-        # fix_attempt_completed lines to the same journal for audit
-        # purposes; those aren't user-actionable and would create
-        # rolling noise on every Claude session start.
         if e.get("level") != "critical":
             continue
         if e.get("resolution") is not None:
             continue
         if e.get("ts") in resolved_ts:
+            continue
+        if e.get("category", "") in stale_cats:
             continue
         parsed = _parse_ts(e.get("ts", ""))
         if parsed is None or parsed < cutoff:

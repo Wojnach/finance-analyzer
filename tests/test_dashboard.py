@@ -607,7 +607,7 @@ class TestApiSignalHeatmap:
         assert data["heatmap"]["BTC-USD"]["rsi"] == "BUY"
         assert data["heatmap"]["BTC-USD"]["macd"] == "SELL"
         assert data["heatmap"]["BTC-USD"]["bb"] == "HOLD"  # None → "HOLD"
-        assert len(data["signals"]) == 30  # 11 core + 19 enhanced
+        assert len(data["signals"]) >= 30  # dynamic from SIGNAL_NAMES + _votes keys
 
     def test_404_when_no_summary(self, client, tmp_data):
         with _no_auth():
@@ -1751,7 +1751,7 @@ class TestApiGoldDigger:
 
 
 class TestSignalHeatmapUpdated:
-    def test_core_signals_includes_custom_lora(self, client, tmp_data):
+    def test_signals_include_votes_keys(self, client, tmp_data):
         summary = {
             "signals": {
                 "BTC-USD": {
@@ -1767,9 +1767,9 @@ class TestSignalHeatmapUpdated:
         with _no_auth():
             resp = client.get("/api/signal-heatmap")
         result = resp.get_json()
-        assert "custom_lora" in result["core_signals"]
-        assert len(result["core_signals"]) == 11
-        assert len(result["enhanced_signals"]) == 19
+        assert "rsi" in result["signals"]
+        assert "custom_lora" in result["signals"]
+        assert "trend" in result["signals"]
 
 
 # ---------------------------------------------------------------------------
