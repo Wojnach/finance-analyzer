@@ -205,6 +205,9 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cheap { color: #1a7f37; font-weight: 600; }
 .rich  { color: #c0392b; }
 .score { font-weight: 700; }
+details.sold { margin: 14px 0; }
+details.sold summary { cursor: pointer; color: #666; font-weight: 600; }
+details.sold ul { margin: 6px 0; }
 iframe.heatmap { width: 100%; height: 70vh; border: 1px solid #ccc;
                  border-radius: 6px; }
 @media (prefers-color-scheme: dark) {
@@ -463,6 +466,37 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
     )
 
 
+def _load_sold(run_id: str) -> list[dict]:
+    """Archived (sold/withdrawn) candidates for a run, from <run>/_sold.json.
+    Written by scripts/archive_sold_listings.py. Tolerant: missing/garbage → []."""
+    try:
+        data = json.loads((_runs_dir() / run_id / "_sold.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+
+def _render_sold_section(sold: list[dict]) -> str:
+    """Collapsed <details> 'Sold (N)' block: address (Hemnet-linked) + tag."""
+    if not sold:
+        return ""
+    items = []
+    for r in sold:
+        addr = escape(str(r.get("address") or r.get("slug") or "?"))
+        status = escape(str(r.get("status") or "sold"))
+        url = r.get("url")
+        link = (
+            f"<a href=\"{escape(url)}\" target=\"_blank\" rel=\"noopener\">{addr}</a>"
+            if isinstance(url, str) and url.startswith("http") else addr
+        )
+        # nosemgrep: python.flask.security.injection.raw-html-concat.raw-html-format
+        items.append(f"<li>{link} <span class=\"meta\">— {status}</span></li>")
+    return (
+        f"<details class=\"sold\"><summary>Sold ({len(sold)})</summary>"
+        f"<ul>{''.join(items)}</ul></details>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes — HTML
 # ---------------------------------------------------------------------------
@@ -502,6 +536,7 @@ def index():
         "(BRF Gladan), the apartment being sold →</a></p>"
         "<h2>Candidates</h2>"
         f"{_render_apartment_table(latest, rows)}"
+        f"{_render_sold_section(_load_sold(latest))}"
         "<h2>Innerstad appreciation heatmap</h2>"
         "<p><a href=\"/house/heatmap\">Open fullscreen ↗</a></p>"
         "<iframe class=\"heatmap\" src=\"/house/heatmap\" loading=\"lazy\" "
@@ -608,12 +643,19 @@ def run_detail(run_id: str):
     # (address links), and the ranked-table addresses now link straight to Hemnet.
     # Keep only a static heatmap link (no interpolation → nothing to escape).
     footer_links = '<p class="meta"><a href="/house/heatmap">heatmap</a></p>'
+    # Linkify addresses from active candidates AND archived (sold) ones, so the
+    # static summary table keeps working after a listing is archived out of the
+    # manifest. Archived listings also get a collapsed "Sold (N)" section.
+    sold = _load_sold(run_id)
+    addr_urls = _hemnet_urls_by_address(run_id)
+    for r in sold:
+        url = r.get("url")
+        if r.get("address") and isinstance(url, str) and url.startswith("http"):
+            addr_urls.setdefault(str(r["address"]), url)
     summary_html = _format_oneliners(
-        _linkify_addr_cells(
-            _render_markdown(text), _hemnet_urls_by_address(run_id)
-        )
+        _linkify_addr_cells(_render_markdown(text), addr_urls)
     )
-    body = summary_html + footer_links
+    body = summary_html + _render_sold_section(sold) + footer_links
     return _shell(
         f"House — {run_id}",
         body,

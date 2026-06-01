@@ -104,6 +104,14 @@ def fake_house_root(tmp_path: Path) -> Path:
         "# Current apartment brief — Kellgrensgatan 10\n\nBRF Gladan baseline.\n",
         encoding="utf-8",
     )
+
+    # _sold.json — one archived (sold) listing, NOT in the active manifest.
+    (runs / "_sold.json").write_text(json.dumps([{
+        "slug": "lagenhet-3rum-test-slug-sold-999",
+        "address": "Sold Addr 9",
+        "url": "https://www.hemnet.se/bostad/sold-999",
+        "status": "sold", "score": 55, "price": 5_000_000, "detected": "2026-06-01",
+    }]))
     return tmp_path
 
 
@@ -347,6 +355,31 @@ def test_format_oneliners_breaks_blob_into_list():
     assert '<ul class="oneliners">' in out
     assert out.count("<li>") == 3
     assert "<p><strong>#1</strong>" not in out   # original blob paragraph gone
+
+
+def test_hub_renders_sold_section(client):
+    """Hub shows a collapsed 'Sold (N)' block from _sold.json; the archived
+    listing is NOT in the active candidate table (manifest-driven)."""
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+    body = client.get("/house/").get_data(as_text=True)
+    assert "Sold (1)" in body
+    assert "Sold Addr 9" in body
+    assert "https://www.hemnet.se/bostad/sold-999" in body
+    # The archived slug never appears (we render its address, and it's not in
+    # the manifest so it's not an active row either).
+    assert "lagenhet-3rum-test-slug-sold-999" not in body
+
+
+def test_load_sold_tolerates_missing_and_garbage(tmp_path):
+    run = tmp_path / "data" / "findapartments" / "2026-05-01-0032"
+    run.mkdir(parents=True)
+    cfg = {"house_root": str(tmp_path)}
+    with patch("dashboard.house_blueprint._get_config", lambda: cfg):
+        assert house_blueprint._load_sold("2026-05-01-0032") == []   # missing file
+        (run / "_sold.json").write_text("{not a list}")
+        assert house_blueprint._load_sold("2026-05-01-0032") == []   # garbage
+        (run / "_sold.json").write_text(json.dumps({"not": "a list"}))
+        assert house_blueprint._load_sold("2026-05-01-0032") == []   # wrong type
 
 
 def test_candidate_raw_returns_data_json(client):
