@@ -151,6 +151,18 @@
       "status": "shadow",
       "cycle_modulo": 5,
       "cycle_phase": 2
+    },
+    "phi4_mini": {
+      "entered_shadow_ts": "2026-06-01T00:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Phi-4-mini-reasoning 3.8B (Microsoft), Q4_K_M GGUF. Smaller footprint than 8B models (~2.5 GB VRAM vs ~4-5 GB), reasoning model that emits <think>...</think> chain-of-thought before answer. Shadow challenger to ministral3/qwen3 added 2026-06-01. Wired through llama_server slot phi4_mini. Parser strips think block then applies same decision:/confidence: regex as finance_llama. Force-HOLD via DISABLED_SIGNALS — votes go to llm_probability_log.jsonl for accuracy tracking only. cycle_modulo=3 to bound loop cost (same as finance_llama/forecast).",
+      "last_reviewed_ts": "2026-06-01T00:00:00+00:00",
+      "status": "shadow",
+      "cycle_modulo": 3,
+      "cycle_phase": 1
     }
   }
 }

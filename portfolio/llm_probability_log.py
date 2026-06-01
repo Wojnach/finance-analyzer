@@ -81,6 +81,12 @@ _LLM_SIGNALS = frozenset(
         "finance_llama",
         "cryptotrader_lm",
         "meta_trader",
+        # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. Wired through
+        # llama_server slot "phi4_mini". Shadow-only (DISABLED_SIGNALS). Votes
+        # logged here so per-cycle accuracy/Brier can be measured independently
+        # of the existing 8B LLM cohort. Abstention rows (conf=0) are excluded
+        # from the accuracy denominator by is_directional_prediction filter.
+        "phi4_mini",
     }
 )
 

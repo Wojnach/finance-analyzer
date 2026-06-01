@@ -760,6 +760,10 @@ _KNOWN_SHADOW_LLMS = frozenset({
     "finance_llama",
     "cryptotrader_lm",
     "meta_trader",
+    # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=3 in
+    # shadow_registry.json — must be listed here so the throttle-fails-closed
+    # guard prevents unbounded inference if the registry file is unavailable.
+    "phi4_mini",
 })
 
 
