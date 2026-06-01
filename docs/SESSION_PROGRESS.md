@@ -1,5 +1,33 @@
 # Session Progress
 
+## 2026-06-01 Auto-Improvement Session (10:00 CEST)
+
+### What was done
+1. **Phase 1 — Deep exploration**: 5 parallel agents explored Layer 1 data loop, signal system,
+   dashboard + portfolio mgmt, metals + infrastructure. Cross-referenced May 21 (419 findings)
+   and May 31 (81 findings) adversarial review syntheses.
+
+2. **Phase 2 — P0 verification**: Independent agent verified 6 P0 findings from reviews.
+   5 confirmed, 1 refuted (P0-E drawdown enforcement IS present at 50% threshold).
+
+3. **Phase 3 — Implementation** (2 batches, 8 bugs fixed):
+   - Batch 1 (5 P0 fixes): outcome_tracker 1h→1m+open, auth_error journal stub,
+     cross-ticker cache key (ticker,horizon), fx_rates sanity-check, metals SILVER_ALERT_LEVELS
+   - Batch 2 (3 P1 fixes): correlation pairs sentinel+retry, dynamic heatmap signals,
+     auto-resolve stale critical errors
+
+4. **Phase 4 — Documentation**: Updated CLAUDE.md route count (33→55), SYSTEM_OVERVIEW.md
+   known issues and fix history.
+
+### What's next
+- P0-B (unfixed): grid_fisher account-blind `get_positions()` — needs `account_id` filter.
+  Deferred: higher blast radius, touches metals loop + grid_fisher + avanza_session.
+- P1: 3d/5d/10d horizon accuracy collapse to 1d (existing TODO, needs data migration)
+- P1: claude_gate JSONL full scan (perf degradation) — switch to load_jsonl_tail
+- Signals-modules dedicated re-review (Tier 4 from May 31 synthesis — LOW confidence area)
+
+---
+
 ## 2026-05-30 After-Hours Research Session (22:28 CEST)
 
 ### What was done

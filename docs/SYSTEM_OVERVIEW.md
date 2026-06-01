@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-05-31
-Branch: improve/auto-session-2026-05-31
+Updated: 2026-06-01
+Branch: improve/auto-session-2026-06-01
 
 ## 1) Architecture Summary
 
@@ -198,9 +198,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-05-30)
+## 9) Known Issues (as of 2026-06-01)
 
-**255+ bugs fixed** across 75+ sessions (BUG-15 through BUG-255).
+**263+ bugs fixed** across 80+ sessions (BUG-15 through BUG-263).
 Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 
 ### Open Issues
@@ -213,8 +213,23 @@ Full history: [docs/RESOLVED_BUGS.md](RESOLVED_BUGS.md).
 - BUG-149: meta_learner orphaned (predict() never called from production)
 - TEST-1: GPU gate (`gpu_gate.py`) has zero test coverage
 - TEST-3: 26+ pre-existing test failures (integration, config, state isolation)
+- P0-B (unfixed): grid_fisher reconciles against ALL Avanza accounts (no account_id filter)
+- P1: 3d/5d/10d horizons collapse to 1d accuracy in signal gating (TODO at signal_engine:4175)
+- P1: claude_gate._count_today_invocations full JSONL scan on every call (perf degradation)
 
-### 2026-05-30 Fixes (this session)
+### 2026-06-01 Fixes (auto-session)
+
+8 bugs fixed (5 P0 + 3 P1):
+- **P0-B1**: outcome_tracker._fetch_historical_price 1h→1m interval + open price (eliminates 59-min forward shift biasing all short-horizon accuracy)
+- **P0-B2**: agent_invocation auth_error journal stub (auth outages now leave journal record like failed/incomplete)
+- **P0-B3**: signal_engine cross-ticker consensus cache keyed by (ticker, horizon) not ticker alone (prevents MSTR btc_proxy horizon mismatch)
+- **P0-B4**: fx_rates sanity-check explicit early return (no more silent stale fallthrough)
+- **P0-B5**: metals_loop SILVER_ALERT_LEVELS TypeError (float subscript crash on active silver positions)
+- **P1-B6**: risk_management._CORRELATED_PAIRS sentinel + retry (transient import failure no longer permanently disables correlation risk)
+- **P1-B7**: dashboard signal heatmap now dynamic from SIGNAL_NAMES (was hardcoded stale 30-signal list)
+- **P1-B8**: check_critical_errors auto-resolve for stale categories (stops fix-agent budget burn on 31 phantom entries)
+
+### 2026-05-30 Fixes
 
 11 bugs fixed from FGL adversarial review (2026-05-29):
 - **Tier 0**: autonomous.py failure journal stub + loop_contract autonomous status handling — stops 22+ false CRITICALs/week

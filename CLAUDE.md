@@ -162,8 +162,8 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - Flask REST API on port 5055, dual-stack IPv4+IPv6 bind (token-cookie auth)
 - Auth: `?token=<dashboard_token>` once, then 1-year rolling cookie. Bearer
   header for CLI clients. Cloudflare Access header bypasses local auth.
-- 33 endpoints. Last reconciled with code 2026-05-11 — re-grep
-  `@app.route('/api/...` if this list looks stale.
+- 45 routes in app.py + 10 in house_blueprint.py (55 total). Last reconciled
+  2026-06-01 — re-grep `@app.route` / `@bp.route` if this list looks stale.
 
   **Health & ops:** `/api/health`, `/api/loop_health`, `/api/lora-status`,
   `/api/market-health`
