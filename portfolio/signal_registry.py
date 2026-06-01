@@ -413,6 +413,18 @@ def _register_defaults():
                       "portfolio.signals.mstr_mnav_discount",
                       "compute_mstr_mnav_discount_signal",
                       requires_context=True, max_confidence=0.7)
+    # Phi-4-mini-reasoning shadow signal. Added 2026-06-01.
+    # Microsoft Phi-4-mini-reasoning 3.8B Q4_K_M — reasoning model with
+    # <think>…</think> chain-of-thought. Shadow challenger to ministral3/qwen3.
+    # Force-HOLD via DISABLED_SIGNALS. cycle_modulo=10 in shadow_registry.
+    # max_confidence=0.7 matches the established cap on all LLM voters.
+    # Computed via the throttled expensive-shadow path (signal_engine
+    # _SHADOW_LLM_SIGNALS + _shadow_llm_runs_now): one rotating ticker per
+    # throttle-tick, force-HOLD in consensus, real action -> outcome_tracker.
+    register_enhanced("phi4_mini",
+                      "portfolio.signals.phi4_mini_reasoning",
+                      "compute_phi4_mini_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

@@ -66,6 +66,19 @@ _MODEL_CONFIGS = {
             else "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf",
         ],
     },
+    # phi4_mini: Phi-4-mini-reasoning (3.8B, Q4_K_M). Added 2026-06-01 as shadow
+    # challenger to ministral3/qwen3. Reasoning model — emits <think>…</think>
+    # before answer. Smaller footprint (~2.5 GB) vs 8B models (~4-5 GB) so it
+    # may share VRAM with Plex's NVENC context more gracefully. No LoRA.
+    # Path: Q:/models/phi4-mini-reasoning-gguf (confirmed on-disk 2026-06-01).
+    "phi4_mini": {
+        "model": (
+            r"Q:\models\phi4-mini-reasoning-gguf\microsoft_Phi-4-mini-reasoning-Q4_K_M.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/phi4-mini-reasoning-gguf/microsoft_Phi-4-mini-reasoning-Q4_K_M.gguf"
+        ),
+        "extra_args": [],
+    },
     # finance-llama-8b: sentiment shadow model. Added 2026-04-09 as part of the
     # fingpt → llm_batch rotation migration. Previously this GGUF was loaded by a
     # bespoke NDJSON daemon (scripts/fingpt_daemon.py), first on GPU all-layers

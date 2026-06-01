@@ -244,6 +244,27 @@ def should_run_this_cycle(
     return cycle_count % modulo == phase
 
 
+def get_cycle_modulo(signal: str, *, path: Path | str | None = None) -> int:
+    """Return the `cycle_modulo` for a shadow signal (default 1).
+
+    2026-06-01: added for the throttled expensive-LLM-shadow dispatch in
+    signal_engine. That path runs an LLM shadow on ONE rotating ticker per
+    throttle-tick; to rotate evenly it needs the run-index `cycle // modulo`,
+    which requires the modulo value (not just the should_run_this_cycle bool).
+    Returns 1 (run every cycle) for unknown/malformed entries — same
+    over-run-rather-than-silence default as should_run_this_cycle.
+    """
+    reg = load_registry(path=path)
+    entry = reg["shadows"].get(signal)
+    if not isinstance(entry, dict):
+        return 1
+    try:
+        modulo = int(entry.get("cycle_modulo", 1))
+    except (TypeError, ValueError):
+        return 1
+    return modulo if modulo > 0 else 1
+
+
 # 2026-05-16 (LLM shadow-enrollment Step 5): promotion override cache.
 # signal_engine.py calls is_promoted(name) on every dispatch loop, so we
 # keep the registry read cheap with a 60s TTL. Recomputing the frozenset

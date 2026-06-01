@@ -280,6 +280,11 @@ DISABLED_SIGNALS = {
                         # Gold vol spike >2sigma -> BTC vol expansion 1-3 days later.
                         # Score 7.5/10. Source: ScienceDirect volatility spillover (2025).
                         # Shadow mode — accumulate accuracy data before enabling.
+    "phi4_mini",        # 2026-06-01: NEW. Microsoft Phi-4-mini-reasoning 3.8B Q4_K_M.
+                        # Reasoning model (emits <think>…</think> before answer).
+                        # Shadow challenger to ministral3/qwen3. Smaller VRAM footprint
+                        # (~2.5 GB vs ~4-5 GB for 8B models). Force-HOLD — shadow only.
+                        # LLM shadow signal — managed by shadow_registry rotation.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
