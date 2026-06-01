@@ -818,13 +818,29 @@ _SHADOW_SAFE_SIGNALS = frozenset({
 # single-rotating-ticker path: at most ONE ~22s call per throttle-tick, rotating
 # across _SHADOW_LLM_ROTATION so every instrument is sampled over time. Result
 # still goes to shadow_votes (force-HOLD in consensus; real action only to
-# outcome_tracker via raw_votes). Only phi4_mini for now — finance_llama /
-# meta_trader / cryptotrader_lm stay inert pending their own validation.
-_SHADOW_LLM_SIGNALS = frozenset({"phi4_mini"})
+# outcome_tracker via raw_votes).
+#
+# 2026-06-01 enrollment (verified each wrapper first):
+#   - phi4_mini       : real inference, all tickers (~22s/call).
+#   - finance_llama   : _FEATURE_AVAILABLE=True, all tickers (~4s/call).
+#   - cryptotrader_lm : _FEATURE_AVAILABLE=True but CRYPTO-ONLY (refuses
+#                       metals/MSTR pre-inference) → scoped to BTC/ETH below.
+#   - meta_trader     : EXCLUDED — _FEATURE_AVAILABLE=False (scaffold, Qwen2-36L
+#                       not yet wired). Enrolling it would log abstains, no data.
+# Co-fire budget: cryptotrader_lm (cyc%3==0) and finance_llama (cyc%3==2) are
+# mutually exclusive (distinct phase mod 3); phi4 (cyc%10==1) co-fires with at
+# most ONE of them (~every 30 min, ~22s+4s). Never 3 heavy calls in one cycle.
+_SHADOW_LLM_SIGNALS = frozenset({"phi4_mini", "finance_llama", "cryptotrader_lm"})
 
 # Fixed Tier-1 order for round-robin sampling of expensive LLM shadows. One
 # ticker per throttle-tick keeps the per-cycle cost at a single inference.
 _SHADOW_LLM_ROTATION = ("BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD", "MSTR")
+
+# Per-signal ticker scope. A signal absent here rotates over the full Tier-1
+# set; a scoped signal rotates ONLY over its own tickers so it never burns a
+# throttle-tick on an instrument it would just abstain on (cryptotrader_lm's
+# LoRA was BTC/ETH-trained and refuses metals/MSTR).
+_SHADOW_LLM_TICKERS = {"cryptotrader_lm": ("BTC-USD", "ETH-USD")}
 
 
 def _shadow_llm_runs_now(sig_name: str, ticker: str | None, cyc: int) -> bool:
@@ -832,12 +848,13 @@ def _shadow_llm_runs_now(sig_name: str, ticker: str | None, cyc: int) -> bool:
 
     Three gates, ALL fail-closed (any error/uncertainty -> False, skip the
     expensive call — opposite of should_run_this_cycle's over-run default,
-    because here a wrong True costs ~22s of GPU + lock-hold on the live loop):
+    because here a wrong True costs ~4-22s of GPU + lock-hold on the live loop):
       1. registry status == "shadow" (not promoted/retired),
       2. cycle_modulo throttle (should_run_this_cycle),
-      3. round-robin: this ticker is the chosen one for this throttle-tick,
-         tick index = cyc // cycle_modulo so consecutive runs rotate tickers
-         (raw cyc % n is constant when n divides modulo — the rotation bug).
+      3. round-robin over the signal's ticker scope: this ticker is the chosen
+         one for this throttle-tick, tick index = cyc // cycle_modulo so
+         consecutive runs rotate tickers (raw cyc % n is constant when n divides
+         modulo — the rotation bug).
     """
     if not ticker:
         return False
@@ -851,8 +868,11 @@ def _shadow_llm_runs_now(sig_name: str, ticker: str | None, cyc: int) -> bool:
             return False
         if not should_run_this_cycle(sig_name, cyc):
             return False
+        rotation = _SHADOW_LLM_TICKERS.get(sig_name, _SHADOW_LLM_ROTATION)
+        if ticker not in rotation:
+            return False  # out of this signal's scope (e.g. cryptotrader on XAU)
         modulo = max(1, get_cycle_modulo(sig_name))
-        chosen = _SHADOW_LLM_ROTATION[(cyc // modulo) % len(_SHADOW_LLM_ROTATION)]
+        chosen = rotation[(cyc // modulo) % len(rotation)]
         return ticker == chosen
     except Exception:
         logger.debug("shadow-LLM run-gate failed for %s/%s", sig_name, ticker, exc_info=True)
