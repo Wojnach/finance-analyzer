@@ -474,9 +474,13 @@ Path roots come from `config.json[house_root]` (default `Q:\\househunting`).
 The blueprint is a pure file viewer — it never imports from the
 househunting project and the two repos stay decoupled.
 
+Short vanity aliases (top-level, `dashboard/app.py`, `@require_auth` so a
+`?token=` bootstrap is converted to a cookie before the token-less redirect):
+`GET /hh` → `/house/`, `GET /hhmap` → `/house/heatmap`.
+
 | Path | Returns |
 |------|---------|
-| `GET /house/` | 302 → most recent run |
+| `GET /house/` | **Hub**: ranked apartment table (built from each candidate's `_raw/<slug>/data.json` — score, price, kr/m², CAGR, fair-value delta, premium tiers; address links to the report only when one exists) + embedded heatmap + runs list. `?token=` is stripped. |
 | `GET /house/runs` | HTML list of all `data/findapartments/<run-id>/` |
 | `GET /house/runs/<run-id>` | HTML render of `_summary.thesis.md` (fallback `_summary.md`) + manifest links |
 | `GET /house/runs/<run-id>/<slug>` | HTML render of `<slug>.thesis.md` (fallback `<slug>.md`) |

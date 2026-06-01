@@ -37,7 +37,11 @@ def fake_house_root(tmp_path: Path) -> Path:
     # _manifest.json
     slug_a = "lagenhet-3rum-test-slug-a-123"
     slug_b = "lagenhet-3rum-test-slug-b-456"
-    (runs / "_manifest.json").write_text(json.dumps([slug_a, slug_b]))
+    # slug_c: data.json present but NO markdown report and NO address field —
+    # exercises (1) the hub gating the detail link off _resolve_md (no link to
+    # candidate_detail()'s 404) and (2) the address-fallback to the slug.
+    slug_c = "lagenhet-3rum-test-slug-c-789"
+    (runs / "_manifest.json").write_text(json.dumps([slug_a, slug_b, slug_c]))
 
     # _summary.thesis.md (preferred over .md). Explicit utf-8 encoding —
     # without it Windows writes cp1252 by default, which then fails the
@@ -46,7 +50,7 @@ def fake_house_root(tmp_path: Path) -> Path:
     (runs / "_summary.thesis.md").write_text(
         "# /findapartments — thesis-weighted ranking\n\n"
         "| Rank | Address | Tenure |\n|---|---|---|\n"
-        "| 1 | Test Address 1 | friköpt |\n",
+        "| 1 | Test 1 | friköpt |\n",   # matches slug_a's data.json address
         encoding="utf-8",
     )
 
@@ -62,11 +66,28 @@ def fake_house_root(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    # _raw/<slug>/data.json
+    # _raw/<slug>/data.json — slug_a carries the full structured shape so the
+    # table-cell rendering (Score, kr/m², CAGR%, vs-fair) is actually asserted.
     raw_a = runs / "_raw" / slug_a
     raw_a.mkdir(parents=True)
     (raw_a / "data.json").write_text(json.dumps({
-        "slug": slug_a, "address": "Test 1", "price": 6_995_000,
+        "slug": slug_a, "address": "Test 1",
+        "url": "https://www.hemnet.se/bostad/test-a-123",
+        "price": 6_995_000, "sqm": 70, "fee": 3210, "construction_year": 1929,
+        "composite_score": {"composite": 66},
+        "weighted_cagr": {"composite": 2.6},
+        "bid_advisor": {"fair_value": 7_300_000},   # price < fair → -4% (cheap)
+        "premium_structured": {"tier": 1},
+        "premium_llm": {"tier": 2},
+    }))
+    # slug_c has data.json (so the hub renders a row) but no `address` key and
+    # no markdown report — see slug_c comment above. Lower score so it sorts
+    # after slug_a; slug_b has no data.json so its score is None (sorts last).
+    raw_c = runs / "_raw" / slug_c
+    raw_c.mkdir(parents=True)
+    (raw_c / "data.json").write_text(json.dumps({
+        "slug": slug_c, "price": 4_500_000, "sqm": 60,
+        "composite_score": {"composite": 40},
     }))
 
     # output/heatmap.html
@@ -74,6 +95,14 @@ def fake_house_root(tmp_path: Path) -> Path:
     output.mkdir()
     (output / "heatmap.html").write_text(
         "<!doctype html><html><body>FAKE HEATMAP</body></html>"
+    )
+
+    # data/kellgrensgatan/CURRENT_APARTMENT_BRIEF.md — the /house/k10 page.
+    k10 = tmp_path / "data" / "kellgrensgatan"
+    k10.mkdir(parents=True)
+    (k10 / "CURRENT_APARTMENT_BRIEF.md").write_text(
+        "# Current apartment brief — Kellgrensgatan 10\n\nBRF Gladan baseline.\n",
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -119,6 +148,7 @@ _HOUSE_ROUTES_TO_PROBE = [
     "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123/raw",
     "/house/runs/2026-05-01-0032/_manifest.json",
     "/house/heatmap",
+    "/house/k10",
     "/house/api/runs",
     "/house/api/runs/2026-05-01-0032",
     "/house/api/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123",
@@ -173,11 +203,73 @@ def test_blueprint_url_map_covers_probe_list():
 # ---------------------------------------------------------------------------
 
 
-def test_index_redirects_to_most_recent_run(client):
+def test_index_renders_hub(client):
+    """The /house/ index is the hub: a ranked apartment table built from each
+    candidate's _raw/<slug>/data.json, plus the embedded heatmap."""
     client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
-    resp = client.get("/house/", follow_redirects=False)
+    resp = client.get("/house/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+
+    # --- table cells are load-bearing: each derives from slug_a's data.json ---
+    assert "Test 1" in body                        # address field
+    assert ">66</td>" in body                       # composite_score.composite
+    assert "99 929" in body                    # kr/m² = 6_995_000 / 70 (nbsp-grouped)
+    assert ">2.6</td>" in body                      # weighted_cagr.composite
+    assert "-4%" in body                            # price 6.995M vs fair 7.30M
+    assert "https://www.hemnet.se/bostad/test-a-123" in body   # Hemnet ↗
+
+    # --- row ordering: slug_a (66) sorts above slug_c (40) ---
+    assert body.index(">66</td>") < body.index(">40</td>")
+
+    # --- slug_a has a report → linked; slug_c has data.json but NO report →
+    # rendered but NOT linked (the high-sev fix: never link to a 404). ---
+    assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123" in body
+    assert "lagenhet-3rum-test-slug-c-789" in body
+    assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-c-789" not in body
+
+    # --- heatmap embedded + linked ---
+    assert "/house/heatmap" in body
+    assert "<iframe" in body
+
+    # --- build/revision marker in the footer (so we can tell which build is live) ---
+    assert "rev " in body
+    assert "<footer" in body
+
+    # --- Est. value column (bid_advisor.fair_value = 7.30M for slug_a) ---
+    assert "Est." in body
+    assert "7.30M" in body
+
+    # --- sortable tables: the sort script + the K10 link are present ---
+    assert "data-sort" in body          # from _SORT_JS
+    assert "/house/k10" in body          # current-home link (footer + hub card)
+
+
+def test_index_strips_token_query(client):
+    """?token= bootstrap on the hub redirects to a clean, token-free URL."""
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+    resp = client.get(f"/house/?token={_TOKEN}", follow_redirects=False)
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/house/runs/2026-05-01-0032")
+    loc = resp.headers["Location"]
+    assert loc.endswith("/house")
+    assert "token" not in loc          # the whole point — token must not leak
+    assert _TOKEN not in loc
+
+
+def test_index_empty_runs_shows_heatmap_link(tmp_path):
+    """No findapartments runs → empty-state hub still serves and links the
+    heatmap (the rewritten no-runs branch)."""
+    app.config["TESTING"] = True
+    cfg = {"dashboard_token": _TOKEN, "house_root": str(tmp_path)}
+    with patch("dashboard.auth._get_config", lambda: cfg), \
+         patch("dashboard.house_blueprint._get_config", lambda: cfg), \
+         app.test_client() as c:
+        c.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+        resp = c.get("/house/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "No findapartments runs yet" in body
+    assert "/house/heatmap" in body
 
 
 def test_runs_list_renders(client):
@@ -186,21 +278,31 @@ def test_runs_list_renders(client):
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "2026-05-01-0032" in body
-    assert "2 candidates" in body  # from manifest length
+    assert "3 candidates" in body  # from manifest length
 
 
-def test_run_detail_renders_summary_and_candidate_links(client):
+def test_run_detail_links_summary_addresses_to_hemnet(client):
+    """Each Addr cell in the ranked-comparison table links to the candidate's
+    Hemnet listing (url from data.json), matched by exact address."""
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+    body = client.get("/house/runs/2026-05-01-0032").get_data(as_text=True)
+    assert '<a href="https://www.hemnet.se/bostad/test-a-123"' in body
+    assert ">Test 1</a>" in body
+    # The plain (unlinked) cell must be gone.
+    assert "<td>Test 1</td>" not in body
+
+
+def test_run_detail_drops_slug_list(client):
+    """The raw 'All candidates' slug list is removed (redundant now that the
+    table addresses link to Hemnet); summary + heatmap footer link remain."""
     client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
     resp = client.get("/house/runs/2026-05-01-0032")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # Summary content
-    assert "thesis-weighted" in body
-    # Both candidate slugs link
-    assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123" in body
-    assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-b-456" in body
-    # Manifest link present
-    assert "_manifest.json" in body
+    assert "thesis-weighted" in body                 # summary still renders
+    assert "All candidates" not in body               # slug list gone
+    assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123" not in body
+    assert "/house/heatmap" in body                   # heatmap footer link kept
 
 
 def test_candidate_detail_renders_thesis_md(client):
@@ -221,6 +323,30 @@ def test_candidate_detail_falls_back_to_legacy_md(client):
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "Legacy report" in body
+
+
+def test_k10_renders_current_apartment_brief(client):
+    """/house/k10 renders data/kellgrensgatan/CURRENT_APARTMENT_BRIEF.md."""
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+    resp = client.get("/house/k10")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Kellgrensgatan 10" in body
+    assert "BRF Gladan baseline" in body
+
+
+def test_format_oneliners_breaks_blob_into_list():
+    """The run-together Top-5 paragraph becomes a bulleted list."""
+    html = (
+        "<h2>Top-5 one-liners</h2>"
+        "<p><strong>#1</strong> — A: score 61. "
+        "<strong>#2</strong> — B: score 57. "
+        "<strong>#3</strong> — C: score 52.</p>"
+    )
+    out = house_blueprint._format_oneliners(html)
+    assert '<ul class="oneliners">' in out
+    assert out.count("<li>") == 3
+    assert "<p><strong>#1</strong>" not in out   # original blob paragraph gone
 
 
 def test_candidate_raw_returns_data_json(client):
@@ -247,7 +373,7 @@ def test_api_runs_returns_json(client):
     assert resp.status_code == 200
     payload = resp.get_json()
     assert payload["runs"][0]["run_id"] == "2026-05-01-0032"
-    assert payload["runs"][0]["candidate_count"] == 2
+    assert payload["runs"][0]["candidate_count"] == 3
 
 
 def test_api_run_returns_candidate_list(client):
@@ -310,3 +436,60 @@ def test_missing_candidate_returns_404(client):
         "/house/runs/2026-05-01-0032/lagenhet-3rum-nonexistent-slug-999"
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Hub data loader — the tolerant branches that keep the landing page from 500ing
+# ---------------------------------------------------------------------------
+
+
+def test_load_candidates_tolerates_garbage(tmp_path):
+    """A non-dict data.json, corrupt bytes, and bad/non-string manifest entries
+    must NOT raise — good rows survive, junk slugs are dropped."""
+    run = tmp_path / "data" / "findapartments" / "2026-05-01-0032"
+    good = run / "_raw" / "good-slug-aaa-1"
+    good.mkdir(parents=True)
+    (good / "data.json").write_text(json.dumps(
+        {"address": "Good", "price": 1_000_000, "composite_score": {"composite": 50}}
+    ))
+    nondict = run / "_raw" / "listjson-slug-2"
+    nondict.mkdir(parents=True)
+    (nondict / "data.json").write_text("[1, 2, 3]")           # valid JSON, not a dict
+    corrupt = run / "_raw" / "corrupt-slug-3"
+    corrupt.mkdir(parents=True)
+    (corrupt / "data.json").write_bytes(b"\xff\xfe not json") # undecodable / invalid
+    (run / "_manifest.json").write_text(json.dumps([
+        "good-slug-aaa-1", "listjson-slug-2", "corrupt-slug-3",
+        "../etc/passwd", 123, "ab",   # bad slugs: traversal, non-str, too short
+    ]))
+
+    cfg = {"house_root": str(tmp_path)}
+    with patch("dashboard.house_blueprint._get_config", lambda: cfg):
+        rows = house_blueprint._load_candidates("2026-05-01-0032")
+
+    slugs = [r["slug"] for r in rows]
+    assert "good-slug-aaa-1" in slugs        # full row
+    assert "listjson-slug-2" in slugs        # non-dict tolerated → slug fallback
+    assert "corrupt-slug-3" in slugs         # corrupt bytes tolerated
+    assert "../etc/passwd" not in slugs      # dropped by _SLUG_RE (traversal)
+    assert 123 not in slugs                  # dropped (non-string)
+    assert "ab" not in slugs                 # dropped (too short for _SLUG_RE)
+    good_row = next(r for r in rows if r["slug"] == "good-slug-aaa-1")
+    assert good_row["address"] == "Good"
+    assert good_row["score"] == 50
+
+
+def test_load_candidates_missing_manifest_returns_empty(tmp_path):
+    (tmp_path / "data" / "findapartments" / "2026-05-01-0032").mkdir(parents=True)
+    cfg = {"house_root": str(tmp_path)}
+    with patch("dashboard.house_blueprint._get_config", lambda: cfg):
+        assert house_blueprint._load_candidates("2026-05-01-0032") == []
+
+
+def test_load_candidates_non_list_manifest_returns_empty(tmp_path):
+    run = tmp_path / "data" / "findapartments" / "2026-05-01-0032"
+    run.mkdir(parents=True)
+    (run / "_manifest.json").write_text(json.dumps({"not": "a list"}))
+    cfg = {"house_root": str(tmp_path)}
+    with patch("dashboard.house_blueprint._get_config", lambda: cfg):
+        assert house_blueprint._load_candidates("2026-05-01-0032") == []

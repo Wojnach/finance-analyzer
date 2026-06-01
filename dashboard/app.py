@@ -2311,6 +2311,24 @@ from dashboard.house_blueprint import bp as _house_bp  # noqa: E402
 app.register_blueprint(_house_bp)
 
 
+# Short vanity aliases for the househunting viewer. Gated by require_auth like
+# /legacy (NOT bare like /logout): a first-visit bootstrap via /hh?token=XXX
+# must reach require_auth so the token is converted to the pf_dashboard_token
+# cookie before we redirect — otherwise the bare redirect drops the query
+# string and the token-less /house/ 401s on a fresh device. The redirect
+# targets are token-less, keeping the address bar clean.
+@app.route("/hh")
+@require_auth
+def hh():
+    return redirect("/house/", code=302)
+
+
+@app.route("/hhmap")
+@require_auth
+def hhmap():
+    return redirect("/house/heatmap", code=302)
+
+
 def _serve_dual_stack(port: int = 5055) -> None:
     """Run the Flask app on a dual-stack IPv4+IPv6 socket.
 
