@@ -109,6 +109,50 @@ def require_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# Reused decoder for the concatenated-object recovery path below.
+_JSONL_DECODER = json.JSONDecoder()
+
+
+def _decode_jsonl_line(line):
+    """Decode one physical JSONL line into a list of objects.
+
+    Normal case: one object → ``[obj]`` (fast path, unchanged semantics).
+
+    Recovery case (2026-06-01): some historical rows in append-only journals
+    (e.g. ``critical_errors.jsonl`` lines 127/212) carry TWO JSON objects
+    concatenated on a single physical line with no separating newline — the
+    legacy append-race that predates the fsync+newline hardening in
+    ``atomic_append_jsonl``. The old readers did ``json.loads(line)``, hit
+    "Extra data", and dropped the WHOLE line — silently losing real data
+    (resolution rows pointing at criticals, so the dashboard over-reported
+    unresolved errors). This recovers every object on the line via successive
+    ``raw_decode`` instead. Strictly more permissive: a valid single-object
+    line still returns exactly one object through the fast path.
+
+    Returns ``[]`` when nothing decodes (genuinely garbage line). Whatever
+    prefix decodes before an unrecoverable point is kept.
+    """
+    try:
+        return [json.loads(line)]
+    except json.JSONDecodeError:
+        pass
+    objs = []
+    idx, n = 0, len(line)
+    while idx < n:
+        # Skip inter-object whitespace (covers "}{", "} {", "}\t{").
+        while idx < n and line[idx] in " \t\r\n":
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            obj, end = _JSONL_DECODER.raw_decode(line, idx)
+        except json.JSONDecodeError:
+            break  # keep the prefix we already recovered, drop the rest
+        objs.append(obj)
+        idx = end
+    return objs
+
+
 def load_jsonl(path, limit=None):
     """Load entries from a JSONL file.
 
@@ -133,11 +177,11 @@ def load_jsonl(path, limit=None):
             line = line.strip()
             if not line:
                 continue
-            try:
-                container.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                logger.debug("Skipping malformed JSONL line in %s: %s", path.name, str(e)[:100])
+            objs = _decode_jsonl_line(line)
+            if not objs:
+                logger.debug("Skipping malformed JSONL line in %s", path.name)
                 continue
+            container.extend(objs)
     return list(container)
 
 
@@ -193,10 +237,7 @@ def load_jsonl_tail(path, max_entries=500, tail_bytes=512_000):
             line = line.strip()
             if not line:
                 continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+            entries.extend(_decode_jsonl_line(line))
     except (OSError, UnicodeDecodeError) as e:
         logger.debug("load_jsonl_tail failed for %s: %s", path.name, e)
         return []
