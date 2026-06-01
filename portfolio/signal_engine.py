@@ -454,11 +454,11 @@ _ACCURACY_GATE_HIGH_SAMPLE_MIN = 7000
 # 2026-04-10: raised from 0.35 → 0.40 to catch macro_regime BUY (38.9%),
 # fibonacci SELL (35.9%), futures_flow both (36-37%).  Now with per-ticker
 # directional data, this gate also works per-instrument.
-# 2026-05-23: raised from 0.40 → 0.43. Signals at 41-42% directional
-# accuracy are still noise (p < 0.05 requires ~56% on 100 samples).
-# Constraint: must stay below (ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX)
-# = 0.47 - 0.02 = 0.45 (assertion at module load).
-_DIRECTIONAL_GATE_THRESHOLD = 0.43
+# 2026-05-23: raised from 0.40 → 0.43.
+# 2026-06-01: raised 0.43 → 0.44 — systemic BUY collapse (15-33% BUY vs
+# 56-87% SELL across most signals). 0.44 catches marginal BUY noise while
+# staying below relaxed gate floor (0.47 - 0.02 = 0.45).
+_DIRECTIONAL_GATE_THRESHOLD = 0.44
 _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
 # Directional rescue (2026-04-28): when a signal fails the overall accuracy

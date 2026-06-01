@@ -1,129 +1,59 @@
 {
-  "date": "2026-05-31",
-  "generated_at": "2026-05-31T20:33:45.534298+00:00",
+  "date": "2026-06-01",
+  "generated_at": "2026-06-01T21:10:00+02:00",
   "trades_today": [
     {
-      "type": "L2_decision",
-      "ts": "2026-05-31T08:05:00Z",
-      "trigger": "XAG-USD flipped HOLD->BUY (sustained)",
-      "patient": "HOLD (XAG green +1%, ATR stop safe)",
-      "bold": "DORMANT (no positions, waiting XAG >6)"
+      "time": "12:40 UTC",
+      "instrument": "XAG-USD",
+      "action": "SELL 50%",
+      "price": 75.65,
+      "avg_cost": 74.68,
+      "pnl_per_oz": 0.97,
+      "units": "26.92oz sold, 26.92oz remaining",
+      "rationale": "7/9 SELL voters, wconf 0.83, vol 2.0x sell-side, MC p_up 0.25"
     }
   ],
+  "positions_eod": {
+    "patient": {
+      "XAG-USD": {"units_oz": 26.92, "avg_cost": 74.68, "last_price": 75.22, "unrealized_pnl_pct": 0.72, "stop": 74.00}
+    },
+    "bold": "DORMANT"
+  },
   "signals_that_were_right": [
-    {
-      "signal": "drift_regime_gate",
-      "note": "Stable 58.3%/58.5% recent, consistent performer"
-    },
-    {
-      "signal": "fear_greed",
-      "note": "Stable 58.6%, 10K samples, reliable"
-    },
-    {
-      "signal": "ministral",
-      "note": "Stable 58.0%, 6K samples"
-    },
-    {
-      "signal": "news_event",
-      "note": "SURGING: 51.0% all-time -> 75.8% recent (149 sam)"
-    },
-    {
-      "signal": "intraday_seasonality",
-      "note": "IMPROVING: 42.2% -> 54.3% recent (188 sam)"
-    },
-    {
-      "signal": "rsi",
-      "note": "Slight improvement: 52.4% -> 54.0% recent"
-    },
-    {
-      "signal": "vol_ratio_regime",
-      "note": "Improving: 49.1% -> 55.8% recent (514 sam)"
-    }
+    {"signal": "fear_greed", "note": "93.8% XAG acc, correctly held through noise", "accuracy_1d": 58.6},
+    {"signal": "drift_regime_gate", "note": "56.9% recent, correct regime detection", "accuracy_1d_recent": 56.9},
+    {"signal": "news_event", "note": "67.2% recent, strong SELL validated", "accuracy_1d_recent": 67.2},
+    {"signal": "amihud_illiquidity_regime", "note": "56.2% recent, regime accurate", "accuracy_1d_recent": 56.2}
   ],
   "signals_that_were_wrong": [
-    {
-      "signal": "credit_spread_risk",
-      "note": "COLLAPSED: 49.1% -> 0.0% recent (33 sam) \u2014 ACTIVE for BTC/ETH!"
-    },
-    {
-      "signal": "crypto_macro",
-      "note": "COLLAPSED: 53.0% -> 20.2% recent (208 sam) \u2014 ACTIVE for crypto!"
-    },
-    {
-      "signal": "econ_calendar",
-      "note": "CRASHED: 55.5% -> 32.7% recent (649 sam) \u2014 ACTIVE signal!"
-    },
-    {
-      "signal": "hash_ribbons",
-      "note": "CRASHED: 32.3% -> 11.1% recent (72 sam) \u2014 disabled but bad"
-    },
-    {
-      "signal": "statistical_jump_regime",
-      "note": "DECLINING: 52.9% -> 40.6% recent (392 sam) \u2014 ACTIVE"
-    },
-    {
-      "signal": "williams_vix_fix",
-      "note": "CRASHED: 46.4% -> 30.5% recent (131 sam) \u2014 per-ticker active XAU/XAG!"
-    },
-    {
-      "signal": "qwen3",
-      "note": "DECLINING: 59.6% -> 45.8% recent (24 sam) \u2014 small sample, monitor"
-    }
+    {"signal": "statistical_jump_regime", "note": "CRITICAL 52.2%->35.1% recent. BUY acc 15.8%", "accuracy_1d_recent": 35.1},
+    {"signal": "econ_calendar", "note": "CRITICAL 55.1%->33.2% recent. BUY-only in bearish mkt", "accuracy_1d_recent": 33.2},
+    {"signal": "crypto_macro", "note": "CRITICAL 53.0%->27.9% recent. BUY acc 14.5%", "accuracy_1d_recent": 27.9},
+    {"signal": "adx_regime_switch", "note": "49.0% coin-flip, was 67% small-sample illusion", "accuracy_1d": 49.0}
   ],
   "accuracy_changes": {
-    "biggest_drops": {
-      "credit_spread_risk": "-49.1pp (0% recent)",
-      "crypto_macro": "-32.8pp (20.2% recent)",
-      "econ_calendar": "-22.9pp (32.7% recent)",
-      "hash_ribbons": "-21.2pp (11.1% recent)",
-      "williams_vix_fix": "-15.9pp (30.5% recent)",
-      "qwen3": "-13.8pp (45.8% recent, small n=24)",
-      "statistical_jump_regime": "-12.3pp (40.6% recent)"
-    },
-    "biggest_improvements": {
-      "news_event": "+24.8pp (75.8% recent)",
-      "intraday_seasonality": "+12.0pp (54.3% recent)",
-      "vol_ratio_regime": "+6.8pp (55.8% recent)",
-      "oscillators": "+6.0pp (52.6% recent)"
-    },
-    "per_ticker_consensus": {
-      "BTC-USD": "52.7% (n=4479)",
-      "ETH-USD": "49.9% (n=4268)",
-      "MSTR": "46.2% (n=2537)",
-      "XAG-USD": "49.4% (n=3201)",
-      "XAU-USD": "50.5% (n=2846)"
-    }
+    "critical_degradations": [
+      {"signal": "statistical_jump_regime", "all_time": 52.2, "recent_7d": 35.1, "delta": -17.1},
+      {"signal": "econ_calendar", "all_time": 55.1, "recent_7d": 33.2, "delta": -21.9},
+      {"signal": "crypto_macro", "all_time": 53.0, "recent_7d": 27.9, "delta": -25.1}
+    ],
+    "improving": [
+      {"signal": "news_event", "all_time": 51.0, "recent_7d": 67.2, "delta": 16.2},
+      {"signal": "vol_ratio_regime", "all_time": 48.8, "recent_7d": 54.2, "delta": 5.4},
+      {"signal": "intraday_seasonality", "all_time": 42.2, "recent_7d": 54.3, "delta": 12.1}
+    ]
   },
   "system_errors": [
-    {
-      "type": "layer2_contract_violation",
-      "count": 22,
-      "period": "May 26-29",
-      "note": "Layer 2 triggers fire but no journal entry written within timeout. Agent silently failing. Pattern across all instruments."
-    },
-    {
-      "type": "avanza_session_expired",
-      "count": 5,
-      "period": "since May 23",
-      "note": "Avanza session expired, needs manual BankID re-login."
-    },
-    {
-      "type": "accuracy_degradation",
-      "count": 4,
-      "note": "12 signals dropped >15pp on multiple checks"
-    }
+    "accuracy_degradation: 5 signals dropped >15pp below baseline AND below 50%",
+    "l2_timeouts: 4-5 Layer 2 timeouts today (150-1000s)",
+    "portfolio_corruption: portfolio_state.json briefly unreadable at 13:52 UTC"
   ],
   "key_observations": [
-    "System health excellent: 0 errors, 86 cycles, all 50+ signal modules clean",
-    "Last trigger: BTC-USD SELL->HOLD at 20:20 UTC",
-    "XAG Patient position green +1.0% (avg 4.68, current 5.43)",
-    "Bold strategy DORMANT \u2014 no positions, waiting for XAG breakout >6 or BTC >5K",
-    "CRITICAL: 3 active signals (credit_spread_risk, crypto_macro, econ_calendar) have collapsed in recent accuracy \u2014 they are poisoning crypto consensus",
-    "CRITICAL: 15+ signals always emit HOLD (0 samples) \u2014 running code but contributing nothing. Wasted compute.",
-    "OPPORTUNITY: news_event surging to 75.8% recent \u2014 consider enabling or upweighting",
-    "OPPORTUNITY: VWAP Z-Score MR at 63.2% but disabled \u2014 should investigate re-enabling",
-    "OPPORTUNITY: intraday_seasonality improving to 54.3% \u2014 was previously poor",
-    "CONCERN: XAG consensus at 49.4% \u2014 essentially a coin flip for primary trading instrument",
-    "Prophecy beliefs unchanged since Apr 29 review. Silver 20 target (cp through 0 triggered, 20 pending). BTC 00K target (5K triggered, 5K pending). ETH K target (all pending)."
+    "XAG 50% trim at $75.65 correct — price dropped to $74.26 before recovering",
+    "L2 correctly rejected low-accuracy XAG SELL signals (adx 36.5%, bocpd 50.4%)",
+    "BTC extreme oversold RSI 20-24 but regime-dominant SELL — correct to avoid",
+    "3 signals critically broken: stat_jump_regime, econ_calendar, crypto_macro — all BUY-biased failing in bearish market",
+    "Range-bound regime dominant all day across all instruments",
+    "Bold DORMANT by design — no breakout setups"
   ]
 }
