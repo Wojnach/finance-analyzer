@@ -171,22 +171,50 @@ def benchmark(tickers: list[str], days: int, windows: int, ctx_len: int, horizon
                 for name in ("chronos2", "bolt"):
                     d = tres[f"{h}h"][name]
                     d["accuracy"] = round(100 * d["correct"] / d["scored"], 1) if d["scored"] else None
+                    lo, hi = _wilson_ci(d["correct"], d["scored"])
+                    d["ci95"] = [round(100 * lo, 1), round(100 * hi, 1)] if d["scored"] else None
+                    # The ONLY claim that matters: is the model significantly
+                    # better than a coin flip? (95% CI lower bound > 50%.)
+                    d["sig_above_50"] = bool(d["scored"] and lo > 0.5)
             out["tickers"][t] = tres
             print(f"  scored {t}: {tres}")
     return out
 
 
+def _wilson_ci(correct: int, n: int, z: float = 1.96):
+    """Wilson score 95% CI for a binomial proportion. Returns (lo, hi) in [0,1].
+
+    Used instead of normal-approx because n is small per (ticker, horizon)
+    and Wilson stays well-behaved near the tails. The decision hinges on
+    whether the lower bound clears 0.5 — a point estimate of 58% on n=46 is
+    meaningless if the CI is [0.44, 0.73].
+    """
+    if n <= 0:
+        return 0.0, 0.0
+    p = correct / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = (z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5)) / denom
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 def print_report(out: dict) -> None:
     print(f"\nChronos-2 (live) vs chronos-bolt-small — directional hit-rate")
     print("=" * 64)
+    def _cell(d):
+        ci = d.get("ci95")
+        star = " *SIG>50" if d.get("sig_above_50") else ""
+        return f"{d.get('accuracy')}% (n={d['scored']}, CI {ci}){star}"
     for t, tres in out["tickers"].items():
         print(f"\n{t}:")
         for h, m in tres.items():
-            c2 = m["chronos2"]; b = m["bolt"]
-            print(f"  {h:>4s}  chronos-2 {str(c2.get('accuracy')):>6}% (n={c2['scored']})   "
-                  f"bolt {str(b.get('accuracy')):>6}% (n={b['scored']})")
-    print("\nVerdict rule: swap to bolt only if it matches/beats chronos-2 at 1h/3h.")
-    print("If both hover ~50%, forecast is not an intraday edge regardless of model.")
+            print(f"  {h:>4s}  chronos-2 {_cell(m['chronos2'])}")
+            print(f"        bolt      {_cell(m['bolt'])}")
+    # The only claim that matters: any cell with *SIG>50 = 95% CI lower bound
+    # clears a coin flip. No star = within noise of 50% = not a real edge.
+    sig = [(t, h, nm) for t, tr in out["tickers"].items() for h, m in tr.items()
+           for nm in ("chronos2", "bolt") if m[nm].get("sig_above_50")]
+    print(f"\nStatistically significant (>50%, 95% CI): {sig or 'NONE — no model beats a coin flip at any horizon'}")
 
 
 def main() -> int:
