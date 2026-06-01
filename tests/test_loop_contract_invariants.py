@@ -126,6 +126,54 @@ def test_portfolio_arithmetic_handles_malformed_state(tmp_path, monkeypatch):
     assert isinstance(out, list)
 
 
+def test_portfolio_arithmetic_reports_json_line_and_col(tmp_path, monkeypatch):
+    """2026-06-01 diagnostic: malformed JSON must surface the real parse error
+    with line/col, not a misleading bare 'is not a dict'."""
+    state = tmp_path / "portfolio_state.json"
+    # The exact shape of the 2026-06-01 hand-edit: an object dangling after the
+    # array's closing bracket → invalid JSON on the line of the stray '{'.
+    state.write_text(
+        '{\n  "transactions": [\n    {"a": 1}\n  ],\n    {"orphan": 2}\n  ]\n}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))
+    violations = loop_contract.check_portfolio_arithmetic_safe()
+    assert len(violations) == 1
+    v = violations[0]
+    assert v.severity == "CRITICAL"
+    assert v.invariant == "portfolio_arithmetic"
+    assert "not valid JSON" in v.message
+    assert "line" in v.message and "col" in v.message
+    assert isinstance(v.details.get("line"), int)
+    assert isinstance(v.details.get("col"), int)
+
+
+def test_portfolio_arithmetic_flags_top_level_list(tmp_path, monkeypatch):
+    """Valid JSON but wrong structure (top-level array) → reports the type."""
+    state = tmp_path / "portfolio_state.json"
+    state.write_text("[1, 2, 3]", encoding="utf-8")
+    monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))
+    violations = loop_contract.check_portfolio_arithmetic_safe()
+    assert len(violations) == 1
+    assert violations[0].severity == "CRITICAL"
+    assert "list" in violations[0].message
+    assert "expected a JSON object" in violations[0].message
+
+
+def test_portfolio_arithmetic_no_false_positive_when_file_healed(tmp_path, monkeypatch):
+    """Race guard (premortem #4): if load_json saw a non-dict but the re-read
+    parses cleanly as a dict (a concurrent atomic write healed it between the
+    two reads), do NOT emit a corruption violation."""
+    state = tmp_path / "portfolio_state.json"
+    _write_state(state, {"cash_sek": 100.0, "holdings": {}})  # genuinely valid
+    monkeypatch.setattr(loop_contract, "_PORTFOLIO_STATE_FILES", (state,))
+    # Force the first read (load_json) to look corrupt while the file on disk
+    # is valid — simulates the mid-write race the re-read then "heals".
+    monkeypatch.setattr(loop_contract, "load_json", lambda *a, **k: None)
+    violations = loop_contract.check_portfolio_arithmetic_safe()
+    assert violations == []
+
+
 # ──────────────────────────────────────────────────────────────────────
 # check_atomic_write_residue_safe
 # ──────────────────────────────────────────────────────────────────────
