@@ -50,7 +50,8 @@ def fake_house_root(tmp_path: Path) -> Path:
     (runs / "_summary.thesis.md").write_text(
         "# /findapartments — thesis-weighted ranking\n\n"
         "| Rank | Address | Tenure |\n|---|---|---|\n"
-        "| 1 | Test 1 | friköpt |\n",   # matches slug_a's data.json address
+        "| 1 | Test 1 | friköpt |\n"        # matches slug_a's data.json address
+        "| 2 | Sold Addr 9 | bostadsrätt |\n",  # matches _sold.json (archived)
         encoding="utf-8",
     )
 
@@ -302,6 +303,10 @@ def test_run_detail_links_summary_addresses_to_hemnet(client):
     assert ">Test 1</a>" in body
     # The plain (unlinked) cell must be gone.
     assert "<td>Test 1</td>" not in body
+    # The archived row is linked (sold url merged) AND tagged "(sold)".
+    assert '<a href="https://www.hemnet.se/bostad/sold-999"' in body
+    assert "(sold)" in body
+    assert "Sold (1)" in body                     # collapsed section present too
 
 
 def test_run_detail_drops_slug_list(client):

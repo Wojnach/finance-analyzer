@@ -499,6 +499,26 @@ def _render_sold_section(sold: list[dict]) -> str:
     )
 
 
+def _mark_sold_in_summary(html: str, sold: list[dict]) -> str:
+    """Tag each sold listing's row in the (frozen) summary table with a
+    '(sold)'/'(withdrawn)' marker. Best-effort: the address must still appear in
+    the static _summary.md table. Runs after linkify, so it matches the linked
+    cell `>ADDR</a>` (and falls back to plain text)."""
+    for r in sold:
+        addr = escape(str(r.get("address") or ""))
+        if not addr:
+            continue
+        tag = escape(str(r.get("status") or "sold"))
+        marker = f" <span class=\"meta\">({tag})</span>"
+        linked = f">{addr}</a>"
+        plain = f"<td>{addr}</td>"
+        if linked in html:
+            html = html.replace(linked, f">{addr}</a>{marker}", 1)
+        elif plain in html:
+            html = html.replace(plain, f"<td>{addr}{marker}</td>", 1)
+    return html
+
+
 # ---------------------------------------------------------------------------
 # Routes — HTML
 # ---------------------------------------------------------------------------
@@ -654,8 +674,9 @@ def run_detail(run_id: str):
         url = r.get("url")
         if r.get("address") and isinstance(url, str) and url.startswith("http"):
             addr_urls.setdefault(str(r["address"]), url)
-    summary_html = _format_oneliners(
-        _linkify_addr_cells(_render_markdown(text), addr_urls)
+    summary_html = _mark_sold_in_summary(
+        _format_oneliners(_linkify_addr_cells(_render_markdown(text), addr_urls)),
+        sold,
     )
     body = summary_html + _render_sold_section(sold) + footer_links
     return _shell(
