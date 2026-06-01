@@ -1,5 +1,39 @@
 # Session Progress
 
+## 2026-06-01 FGL Adversarial Codebase Review (17:00–18:00 CEST)
+
+### What ran
+8-subsystem adversarial review: 8 fresh review subagents (pr-toolkit + caveman) on
+empty-baseline worktree PRs, in parallel + independent author pass + cross-critique.
+Read-only. Docs in `docs/fgl-review/` (8 subsystem + `_independent-pass.md` + `SYNTHESIS.md`).
+Commits `3518bfed` (plan), `57f4024d` (docs). Pushed. Worktrees cleaned.
+
+### Headline (corrected a false alarm)
+- Startup "12 critical errors / portfolio_state_corrupt" = **TEST POLLUTION**, not prod.
+  6/6 corrupt entries had pytest temp paths; live state parses clean. 3 reviewers converged.
+  Appended 6 resolution lines — startup gate now shows only benign accuracy_degradation +
+  1 operational contract_violation.
+
+### Findings (full detail + fix order in docs/fgl-review/SYNTHESIS.md)
+- **P0** metals: naked-position windows — `update_trailing_stops`/`_rebuild_stop_orders_for`
+  cancel-before-place no rollback; fish BUY opens 5x cert with NO broker stop.
+- **P0** state: Layer 2 LLM hand-edits portfolio_state.json via Edit/Write (playbook:127,
+  agent_invocation:1159) — bypasses atomic I/O. `_rotate_backups` launders corrupt bytes
+  into the whole .bak ring → "no backup recovered."
+- **P1**: test→live critical_errors leak; per-process-only state lock + Windows os.replace
+  conflated with corruption; fx 10× SEK (2 spots bypass _resolve_fx_rate); pension 2674244
+  leaks via avanza_session.get_positions; autonomous regime key `regime` vs `_regime`;
+  residual_pair_reversion dead (always HOLD) on ETH/XAG; futures_data KeyError silent-degrade.
+- Verified SAFE: dashboard auth (no CF-header bypass), stop-loss endpoint invariant, MC cores,
+  atomic primitives, accuracy gate (force-HOLD not inverted), 11/12 signal directions.
+
+### Next (do in a /fgl IMPLEMENTATION run — review was read-only)
+1. Patch 3 corruption tests to tmp_path CRITICAL_ERRORS_LOG (trivial; stops the leak).
+2. Fix the 2 metals naked-position P0s (place-before-cancel; HW stop after fish BUY).
+3. Layer 2 atomic persistence CLI + drop Edit/Write from L2 allow-list.
+4. Validate-before-rotate backups; distinguish OSError from JSONDecodeError on state read.
+5. Route all fx reads through _resolve_fx_rate.
+
 ## 2026-05-31 After-Hours Research (22:30 CEST)
 
 ### Shipped
