@@ -1068,6 +1068,60 @@ def check_portfolio_arithmetic_safe() -> list[Violation]:
         return []
 
 
+def _diagnose_non_dict_state(state_path, state) -> "Violation | None":
+    """Build a precise violation when portfolio state didn't load as a dict.
+
+    The old message said only "is not a dict" because ``load_json`` swallows a
+    JSONDecodeError and returns ``None`` — useless for diagnosis (the 2026-06-01
+    hand-edit corruption was actually invalid JSON at a specific line). This
+    re-reads the raw bytes ONCE and parses that same buffer to surface the real
+    error with line/col.
+
+    Returns ``None`` (no violation) when the re-read parses cleanly as a dict —
+    that means the file healed between ``load_json`` and this read (a concurrent
+    atomic write racing the contract scan), so asserting corruption would be a
+    false positive (premortem #4). A single buffer is used for the dict-check
+    and the error extraction so the two never disagree across a mid-write race.
+    """
+    import json  # local import — matches this module's convention
+    try:
+        raw = state_path.read_bytes()
+    except OSError:
+        # Vanished between exists() and here — transient; next cycle re-checks.
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return Violation(
+            invariant="portfolio_arithmetic",
+            severity="CRITICAL",
+            message=(
+                f"portfolio state at {state_path.name} is not valid JSON: "
+                f"{e.msg} (line {e.lineno} col {e.colno}). File is malformed "
+                f"(hand-edit?) or an atomic write left a partial copy."
+            ),
+            details={
+                "path": str(state_path),
+                "json_error": e.msg,
+                "line": e.lineno,
+                "col": e.colno,
+            },
+        )
+    if isinstance(parsed, dict):
+        # Healed between reads — don't cry corruption on a now-valid file.
+        return None
+    return Violation(
+        invariant="portfolio_arithmetic",
+        severity="CRITICAL",
+        message=(
+            f"portfolio state at {state_path.name} parsed as "
+            f"{type(parsed).__name__}, expected a JSON object — file structure "
+            f"is wrong (top-level should be {{...}})."
+        ),
+        details={"path": str(state_path), "type": type(parsed).__name__},
+    )
+
+
 def _check_portfolio_arithmetic() -> list[Violation]:
     violations: list[Violation] = []
     for state_path in _PORTFOLIO_STATE_FILES:
@@ -1076,15 +1130,9 @@ def _check_portfolio_arithmetic() -> list[Violation]:
             continue
         state = load_json(state_path, default=None)
         if not isinstance(state, dict):
-            violations.append(Violation(
-                invariant="portfolio_arithmetic",
-                severity="CRITICAL",
-                message=(
-                    f"portfolio state at {state_path.name} is not a dict — "
-                    f"file is malformed or atomic write left a partial copy."
-                ),
-                details={"path": str(state_path), "type": type(state).__name__},
-            ))
+            v = _diagnose_non_dict_state(state_path, state)
+            if v is not None:
+                violations.append(v)
             continue
 
         cash = state.get(_PORTFOLIO_CASH_FIELD)
