@@ -20,25 +20,21 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 
 class TestBug30DashboardHeatmapSignals:
-    """Dashboard /api/signal-heatmap should list all 19 enhanced signals."""
+    """Dashboard /api/signal-heatmap derives signals dynamically from
+    tickers.SIGNAL_NAMES (refactored 2026-06-01). Verify key signals
+    are in the canonical list."""
 
-    def test_enhanced_signals_includes_forecast(self):
-        """forecast signal (#28) must be in the heatmap signal list."""
-        app_path = Path(__file__).parent.parent / "dashboard" / "app.py"
-        source = app_path.read_text(encoding="utf-8")
-        assert '"forecast"' in source, "forecast signal missing from dashboard heatmap"
+    def test_signal_names_includes_forecast(self):
+        from portfolio.tickers import SIGNAL_NAMES
+        assert "forecast" in SIGNAL_NAMES
 
-    def test_enhanced_signals_includes_claude_fundamental(self):
-        """claude_fundamental signal (#29) must be in the heatmap signal list."""
-        app_path = Path(__file__).parent.parent / "dashboard" / "app.py"
-        source = app_path.read_text(encoding="utf-8")
-        assert '"claude_fundamental"' in source, "claude_fundamental missing from dashboard heatmap"
+    def test_signal_names_includes_claude_fundamental(self):
+        from portfolio.tickers import SIGNAL_NAMES
+        assert "claude_fundamental" in SIGNAL_NAMES
 
-    def test_enhanced_signals_includes_futures_flow(self):
-        """futures_flow signal (#30) must be in the heatmap signal list."""
-        app_path = Path(__file__).parent.parent / "dashboard" / "app.py"
-        source = app_path.read_text(encoding="utf-8")
-        assert '"futures_flow"' in source, "futures_flow missing from dashboard heatmap"
+    def test_signal_names_includes_futures_flow(self):
+        from portfolio.tickers import SIGNAL_NAMES
+        assert "futures_flow" in SIGNAL_NAMES
 
 
 # ---------------------------------------------------------------------------
