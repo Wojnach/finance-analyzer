@@ -506,6 +506,15 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
     votes = list(sub_signals.values())
     action, confidence = majority_vote(votes)
 
+    # Regime gate: dampen momentum signals in ranging markets.
+    # XAG momentum_factors collapsed 63.4%→37.1% on 2026-06-02 because
+    # momentum sub-signals whipsaw in range-bound price action.
+    regime = context.get("regime", "") if context else ""
+    if regime == "ranging" and action != "HOLD":
+        confidence *= 0.4
+        indicators["regime_dampened"] = True
+        indicators["regime"] = regime
+
     return {
         "action": action,
         "confidence": confidence,

@@ -537,3 +537,31 @@ class TestROC20:
         val, sig = _roc_20(close)
         assert sig == "HOLD"
         assert val == 0.0
+
+
+class TestRegimeDampening:
+    """Regime dampening for momentum signals in ranging markets."""
+
+    def test_ranging_regime_dampens_confidence(self):
+        """In ranging regime, non-HOLD signals get 0.4x confidence."""
+        closes = list(range(100, 160))
+        df = _make_ohlcv(closes)
+        result_normal = compute_momentum_factors_signal(df, context={"regime": "trending-up"})
+        result_ranging = compute_momentum_factors_signal(df, context={"regime": "ranging"})
+        if result_normal["action"] != "HOLD":
+            assert result_ranging["confidence"] < result_normal["confidence"]
+            assert result_ranging["indicators"].get("regime_dampened") is True
+
+    def test_trending_regime_no_dampening(self):
+        """In trending-up regime, no dampening applied."""
+        closes = list(range(100, 160))
+        df = _make_ohlcv(closes)
+        result = compute_momentum_factors_signal(df, context={"regime": "trending-up"})
+        assert result["indicators"].get("regime_dampened") is not True
+
+    def test_no_context_no_dampening(self):
+        """Without context, no dampening applied."""
+        closes = list(range(100, 160))
+        df = _make_ohlcv(closes)
+        result = compute_momentum_factors_signal(df, context=None)
+        assert result["indicators"].get("regime_dampened") is not True
