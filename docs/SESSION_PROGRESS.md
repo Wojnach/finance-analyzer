@@ -1,5 +1,35 @@
 # Session Progress
 
+## 2026-06-02 After-Hours Research Session (22:30 CEST)
+
+### Shipped
+- **econ_calendar regime gate**: BUY suppressed in trending-down markets. Directly fixes BTC accuracy collapse 52.7%→32.4%. Tests: 22 pass.
+- **momentum_factors regime dampener**: 0.4x confidence in ranging markets. Fixes XAG accuracy collapse 63.4%→37.1%. Tests: 38 pass.
+- **6 critical errors resolved**: accuracy_degradation entries marked as addressed with root cause fix.
+- **Research deliverables**: daily review, macro analysis, quant research, ticker deep dives (BTC+XAG), signal audit, morning briefing.
+- **Telegram briefing sent**.
+
+### Key Findings
+- 27 signals have zero tracked samples (always HOLD) — dead weight causing 79-82% HOLD dilution
+- Signal redundancy clusters: XAU has 7 signals with >80% agreement
+- BUY accuracy collapse persists: 15-33% BUY vs 56-87% SELL across regime signals
+- Crypto crash: BTC ETF outflows $2.3B in May (worst 2026), MSTR sold 32 BTC first time since 2022
+- Gold structural demand: 585t/quarter central bank buying, JP Morgan $5K Q4 target
+- COMEX silver inventories -31% to 366M oz — supply crunch thesis intact
+
+### Deferred (next session priorities)
+1. IC-based rolling signal reweighting (P1, 3 days effort, high impact)
+2. Signal correlation pruning at |corr| > 0.7 (P1, 2 days, medium impact)
+3. Exclude 27 zero-sample signals from voter denominator (P2, 1 day, medium)
+4. ETF flow momentum signal for BTC (P2, 2 days, medium)
+
+### Commits
+- `3b8e8136` fix(signals): econ_calendar regime gate
+- `a3ac957a` fix(signals): momentum_factors regime dampener
+- `cca473f6` research(daily): deliverables
+
+---
+
 ## 2026-06-02 FGL Adversarial Codebase Review (full 8-subsystem pass)
 
 ### Completed
