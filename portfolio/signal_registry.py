@@ -425,6 +425,14 @@ def _register_defaults():
                       "portfolio.signals.phi4_mini_reasoning",
                       "compute_phi4_mini_signal",
                       requires_context=True, max_confidence=0.7)
+    # Crypto overnight sentiment — BTC+ETH returns during US equity closure
+    # 2026-06-02: Gu/Liu/Lin (2026) Economic Modelling 161. Positive crypto
+    # overnight returns predict lower next-day VIX. Cross-asset regime signal.
+    # Inverted for safe-haven tickers (XAU/XAG).
+    register_enhanced("crypto_overnight_sentiment",
+                      "portfolio.signals.crypto_overnight_sentiment",
+                      "compute_crypto_overnight_sentiment_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

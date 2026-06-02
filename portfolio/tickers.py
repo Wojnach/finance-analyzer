@@ -289,6 +289,11 @@ DISABLED_SIGNALS = {
                         # Shadow challenger to ministral3/qwen3. Smaller VRAM footprint
                         # (~2.5 GB vs ~4-5 GB for 8B models). Force-HOLD — shadow only.
                         # LLM shadow signal — managed by shadow_registry rotation.
+    "crypto_overnight_sentiment",  # 2026-06-02: NEW. BTC+ETH overnight returns (US close→open)
+                        # as cross-asset sentiment proxy. Gu/Liu/Lin (2026) Econ Modelling
+                        # 161: positive crypto overnight = lower next-day VIX = risk-on.
+                        # Score 7.80/10. Cross-asset. Inverted for safe-haven tickers.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -475,4 +480,5 @@ SIGNAL_NAMES = [
     "crypto_derivatives_composite",
     "eth_btc_ratio_roc_zscore",
     "gold_btc_vol_spillover",
+    "crypto_overnight_sentiment",
 ]
