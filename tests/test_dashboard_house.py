@@ -91,6 +91,9 @@ def fake_house_root(tmp_path: Path) -> Path:
     (raw_c / "data.json").write_text(json.dumps({
         "slug": slug_c, "price": 4_500_000, "sqm": 60,
         "composite_score": {"composite": 40},
+        # Not for-sale on Booli → no Värdekollen; carries a recent slutpris instead,
+        # tagged so the hub renders it as "(sold)" not a model estimate.
+        "booli_estimate": 4_890_000, "booli_estimate_kind": "sold",
     }))
 
     # output/heatmap.html
@@ -260,6 +263,8 @@ def test_index_renders_hub(client):
     # --- Booli est. column (booli_estimate = 7.10M for slug_a) ---
     assert "Booli" in body
     assert "7.10M" in body
+    # slug_c's Booli figure is a slutpris (booli_estimate_kind="sold") → tagged
+    assert "4.89M <span class=\"meta\">(sold)</span>" in body
 
     # --- sortable tables: the sort script + the K10 link are present ---
     assert "data-sort" in body          # from _SORT_JS

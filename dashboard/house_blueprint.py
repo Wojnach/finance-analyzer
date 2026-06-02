@@ -360,6 +360,9 @@ def _candidate_row(run_id: str, slug: str, data: dict) -> dict:
         "prem_l": _nested_num(data, "premium_llm", "tier"),
         "est_value": fair,   # our calculated estimated value (bid_advisor.fair_value)
         "booli_est": _num_or_none(data.get("booli_estimate")),  # Booli värdering
+        # "estimate" (Värdekollen, for-sale ads) or "sold" (recent slutpris, when
+        # the unit isn't for-sale on Booli so no model estimate exists).
+        "booli_kind": data.get("booli_estimate_kind") or "estimate",
         "fair_delta": (price / fair - 1.0) if price and fair else None,
     }
 
@@ -424,6 +427,15 @@ def _fmt_cagr(cagr) -> str:
     return f"{cagr:.1f}" if isinstance(cagr, (int, float)) else _DASH
 
 
+def _sold_tag(row: dict) -> str:
+    """A small '(sold)' marker when the Booli figure is a recent slutpris rather
+    than a Värdekollen estimate (the unit isn't for-sale on Booli). Keeps the
+    column honest — a transacted price is not a model estimate."""
+    if row.get("booli_est") is not None and row.get("booli_kind") == "sold":
+        return " <span class=\"meta\">(sold)</span>"
+    return ""
+
+
 def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
     if not rows:
         return "<p>No candidates in this run.</p>"
@@ -471,7 +483,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
             f"<td>{addr_cell}</td>"
             f"<td class=\"num\">{_fmt_price(r['price'])}</td>"
             f"<td class=\"num\">{_fmt_price(r['est_value'])}</td>"
-            f"<td class=\"num\">{_fmt_price(r['booli_est'])}</td>"
+            f"<td class=\"num\">{_fmt_price(r['booli_est'])}{_sold_tag(r)}</td>"
             f"<td class=\"num\">{_fmt_sint(r['kr_m2'])}</td>"
             f"<td class=\"num\">{_opt(r['sqm'])}</td>"
             f"<td class=\"num\">{_fmt_sint(r['fee'])}</td>"
