@@ -1,32 +1,28 @@
 {
-  "date": "2026-06-01",
-  "generated_at": "2026-06-01T21:30:00+02:00",
-  "market_summary": "S&P 500 at record 7,599.96, ninth consecutive weekly gain driven by AI boom (Dell +33%). Crypto diverged — BTC $72,145 amid record $2.97B ETF outflow streak. US-Iran ceasefire framework uncertain, Brent $92-108/bbl.",
-  "key_events_this_week": [
-    "Mon Jun 2: ISM Manufacturing PMI (May)",
-    "Tue Jun 3: JOLTS Job Openings (April)",
-    "Wed Jun 4: ADP Employment, ISM Services PMI, Fed Beige Book",
-    "Thu Jun 5: Weekly jobless claims",
-    "Fri Jun 6: Nonfarm Payrolls (May) — marquee event",
-    "Jun 10: CPI inflation report",
-    "Jun 16-17: FOMC meeting (97%+ odds hold at 3.50-3.75%)"
+  "date": "2026-06-02",
+  "market_summary": "S&P 500 closed above 7,600 for first time (chip boom: Marvell +30% on Huang praise). Crypto crashed hard: BTC below $70K (-11% 7d), ETH below $2K, MSTR -5.85% on first BTC sale since 2022 (sold 32 BTC). Gold/silver corrected: XAU ranged $4,487-$4,520, XAG held $74.97-$76.22. Oil volatile: Brent ~$91, WTI ~$92, US-Iran Hormuz talks uncertain.",
+  "key_events_tomorrow": [
+    "ADP Non-Farm Employment (Wed Jun 3): consensus 110K jobs added",
+    "JOLTS Job Openings (Tue Jun 2): released today, expect 6.87M",
+    "ISM Manufacturing (Mon Jun 1): already released, week started",
+    "US-Iran Strait of Hormuz negotiations: Trump says MoU within a week",
+    "No FOMC this week (next meeting Jun 16-17)"
   ],
   "overnight_risks": [
-    "KOSPI +3.68% record — Samsung +10% on HBM4E AI chip shipments",
-    "US-Iran ceasefire fragile: Iran reimposed Hormuz restrictions",
-    "BTC $72K support — breakdown targets $68-70K",
-    "MicroStrategy first-ever BTC sale rattled sentiment",
-    "China PMI weak, real estate still cratering"
+    "US-Iran Hormuz talks collapse -> oil spike -> risk-off cascade",
+    "BTC ETF outflows continue (May: -$2.3B net, largest monthly outflow 2026)",
+    "Alphabet $80B equity raise -> tech dilution fears",
+    "ADP miss could signal labor market weakness -> recession fears",
+    "Asia markets may react to US crypto weakness"
   ],
   "instrument_news": {
-    "XAG-USD": "Silver $75.64 (+0.53%). BofA raised 2026 avg to $85.93. Sixth consecutive supply deficit year. June range $72-$88.",
-    "XAU-USD": "Gold $4,455-4,535. Central banks buying 755t. Goldman $5,400, JPM $5,500, UBS $6,000+ targets. COT unextended.",
-    "BTC-USD": "BTC $72,145. Record $2.43B May ETF outflows. MSTR sold 32 BTC. Support $72K, breakdown $68-70K.",
-    "ETH-USD": "ETH $1,950-$2,430 range. Hidden bullish divergence + whale accumulation. Needs $2,500 then $3,100.",
-    "MSTR": "MSTR $150 (-6%). First standalone BTC sale. GF Value $118.67 = 25.6% overvalued. Holds ~815-840K BTC."
+    "BTC-USD": "Below $70K. $1B crypto liquidations. ETF outflows $2.3B in May (worst 2026). 45% below ATH $126.2K. MSTR sold 32 BTC first time since 2022.",
+    "ETH-USD": "Breached $2K support, hit $1,963 intraday. Trending-down since $2,500 rejection. L2 fragmentation narrative headwind.",
+    "MSTR": "Crashed 5.85% to $149.78. First BTC sale (32 BTC/$2.5M) spooked market. Still holds 843,706 BTC. Analyst cut PT 20%. High-beta BTC proxy amplifying downside.",
+    "XAU-USD": "Ranged $4,487-$4,520. JP Morgan targets $5K by Q4 2026. Central banks buying 585t/quarter. Late June potential inflection zone per historical analogs.",
+    "XAG-USD": "Held $74.97-$76.22. Silver prophecy intact. Gold-silver ratio compression thesis playing out. Industrial demand (solar/EV/AI) supportive."
   },
-  "metals_outlook": "Structurally bullish. Central bank buying 755t, silver sixth consecutive deficit year. COT unextended. Binary: FOMC Jun 16-17 could pressure; Hormuz resolution removes safe-haven bid. Goldman/JPM/UBS target $5-6K gold.",
-  "oil_outlook": "Brent $92-108, elevated from Hormuz closure since Feb 28. 60-day ceasefire uncertain. Key transmission: elevated oil keeping inflation up, preventing Fed cuts. Resolution = deflationary risk-on.",
-  "crypto_outlook": "Challenging June. Record ETF outflows, oil-inflation preventing Fed easing, MSTR narrative damage. S&P at records while BTC at 2026 lows. Recovery catalysts: Hormuz reopening, NFP miss, ETF flow reversal.",
-  "sentiment_shift": "Split: extreme risk-on equities (AI boom) but risk-off crypto (record outflows) and cautious commodities. Iran/Hormuz = dominant binary."
+  "metals_outlook": "Bullish medium-term. Central banks buying 585t/quarter gold (structural). JP Morgan $5K Q4 target. Late June may be inflection zone. Silver benefits from industrial demand + ratio compression. Near-term correction risk: $4,300-$4,725 range for June per analysts.",
+  "oil_outlook": "Highly volatile. Brent fell 20% from 2026 peak on Iran ceasefire hopes, then bounced. Trump says Hormuz MoU within a week. If talks fail: full Hormuz + Bab el-Mandeb closure threat. Brent ~$91, WTI ~$92. Remains sensitive to geopolitics.",
+  "sentiment_shift": "Risk-off day. Crypto sentiment extreme fear (F&G 23). Stocks mixed (S&P ATH vs individual selloffs). Flight to safety thesis weakened for gold today (corrected alongside crypto). Oil is the wildcard \u2014 Hormuz resolution would be deflationary, failure would be inflationary."
 }

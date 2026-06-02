@@ -1,59 +1,95 @@
 {
-  "date": "2026-06-01",
-  "generated_at": "2026-06-01T21:10:00+02:00",
+  "date": "2026-06-02",
   "trades_today": [
     {
-      "time": "12:40 UTC",
-      "instrument": "XAG-USD",
+      "ts": "2026-06-02T13:01",
+      "action": "BUY",
+      "ticker": "XAU-USD",
+      "qty": "1.68oz",
+      "price": 4520.19,
+      "reasoning": "BB below_lower mean-reversion, econ_calendar BUY 60.8% acc"
+    },
+    {
+      "ts": "2026-06-02T14:29",
       "action": "SELL 50%",
-      "price": 75.65,
-      "avg_cost": 74.68,
-      "pnl_per_oz": 0.97,
-      "units": "26.92oz sold, 26.92oz remaining",
-      "rationale": "7/9 SELL voters, wconf 0.83, vol 2.0x sell-side, MC p_up 0.25"
+      "ticker": "XAU-USD",
+      "qty": "0.838oz",
+      "price": 4496.69,
+      "reasoning": "2xATR stop breached, price through stop by .42"
+    },
+    {
+      "ts": "2026-06-02T15:21",
+      "action": "SELL 50%",
+      "ticker": "XAU-USD",
+      "qty": "0.4189oz",
+      "price": 4506.9,
+      "reasoning": "Entry thesis dissolved (BB inside, econ_cal HOLD), sustained SELL flip"
+    },
+    {
+      "ts": "2026-06-02T18:44",
+      "action": "SELL ALL",
+      "ticker": "XAU-USD",
+      "qty": "0.419oz",
+      "price": 4489.2,
+      "reasoning": "ATR trailing stop breached, entry thesis expired, 7d/1mo/3mo SELL"
     }
   ],
   "positions_eod": {
     "patient": {
-      "XAG-USD": {"units_oz": 26.92, "avg_cost": 74.68, "last_price": 75.22, "unrealized_pnl_pct": 0.72, "stop": 74.00}
+      "XAG-USD": {
+        "qty": "26.92oz",
+        "avg_cost": 74.68,
+        "last_price": 75.22,
+        "pnl_pct": 0.72,
+        "stop": 74.0
+      }
     },
-    "bold": "DORMANT"
+    "bold": "DORMANT - no positions"
   },
   "signals_that_were_right": [
-    {"signal": "fear_greed", "note": "93.8% XAG acc, correctly held through noise", "accuracy_1d": 58.6},
-    {"signal": "drift_regime_gate", "note": "56.9% recent, correct regime detection", "accuracy_1d_recent": 56.9},
-    {"signal": "news_event", "note": "67.2% recent, strong SELL validated", "accuracy_1d_recent": 67.2},
-    {"signal": "amihud_illiquidity_regime", "note": "56.2% recent, regime accurate", "accuracy_1d_recent": 56.2}
+    "econ_calendar BUY correctly identified XAU mean-reversion entry zone (60.8% acc)",
+    "qwen3 SELL calls on MSTR (trending-down confirmed all day, RSI crashed 44->17)",
+    "amihud_illiquidity_regime SELL correctly identified illiquid falling-knife conditions",
+    "fear_greed extreme fear (23) correctly warned of risk-off day",
+    "drift_regime_gate BUY on XAG (bounced from 74.97 to 75.22, stop held)"
   ],
   "signals_that_were_wrong": [
-    {"signal": "statistical_jump_regime", "note": "CRITICAL 52.2%->35.1% recent. BUY acc 15.8%", "accuracy_1d_recent": 35.1},
-    {"signal": "econ_calendar", "note": "CRITICAL 55.1%->33.2% recent. BUY-only in bearish mkt", "accuracy_1d_recent": 33.2},
-    {"signal": "crypto_macro", "note": "CRITICAL 53.0%->27.9% recent. BUY acc 14.5%", "accuracy_1d_recent": 27.9},
-    {"signal": "adx_regime_switch", "note": "49.0% coin-flip, was 67% small-sample illusion", "accuracy_1d": 49.0}
+    "statistical_jump_regime degraded 62.2%->42.8% (critical error flagged 6x today)",
+    "BTC econ_calendar degraded 52.7%->32.4% (worst single-signal degradation)",
+    "XAG momentum_factors degraded 63.4%->37.1% (was high quality, now broken)",
+    "XAU BB+econ_calendar BUY entry: correct direction but stop was too tight (0.12-0.29% buffer)",
+    "Calibration trap: 83% signal agreement -> only 45% historical accuracy on high-agreement"
   ],
   "accuracy_changes": {
-    "critical_degradations": [
-      {"signal": "statistical_jump_regime", "all_time": 52.2, "recent_7d": 35.1, "delta": -17.1},
-      {"signal": "econ_calendar", "all_time": 55.1, "recent_7d": 33.2, "delta": -21.9},
-      {"signal": "crypto_macro", "all_time": 53.0, "recent_7d": 27.9, "delta": -25.1}
-    ],
-    "improving": [
-      {"signal": "news_event", "all_time": 51.0, "recent_7d": 67.2, "delta": 16.2},
-      {"signal": "vol_ratio_regime", "all_time": 48.8, "recent_7d": 54.2, "delta": 5.4},
-      {"signal": "intraday_seasonality", "all_time": 42.2, "recent_7d": 54.3, "delta": 12.1}
-    ]
+    "top_performers_1d": {
+      "cot_positioning": "80.0% (15 samples - too few)",
+      "vwap_zscore_mr": "61.2% (139 samples)",
+      "onchain": "60.0% (45 samples)",
+      "qwen3": "59.7% (4018 samples - reliable)",
+      "fear_greed": "58.6% (10232 samples - reliable)",
+      "amihud_illiquidity_regime": "58.2% (613 samples)"
+    },
+    "degraded_signals": {
+      "statistical_jump_regime": "62.2% -> 42.8% (CRITICAL)",
+      "btc_econ_calendar": "52.7% -> 32.4% (CRITICAL)",
+      "xag_momentum_factors": "63.4% -> 37.1% (CRITICAL)"
+    },
+    "zero_sample_signals": "22 signals with 0 samples (never fire or always HOLD)",
+    "below_47pct_gate": "macro_regime 46.9%, forecast 46.9%, oscillators 46.7%, sentiment 46.2%, volatility_sig 46.1%, trend 46.0%, fibonacci 44.5%, futures_flow 38.3%, funding 30.8%, hash_ribbons 30.1%"
   },
   "system_errors": [
-    "accuracy_degradation: 5 signals dropped >15pp below baseline AND below 50%",
-    "l2_timeouts: 4-5 Layer 2 timeouts today (150-1000s)",
-    "portfolio_corruption: portfolio_state.json briefly unreadable at 13:52 UTC"
+    "6 unresolved accuracy_degradation critical errors (all same 3 signals)",
+    "1 overdue pickup: LLM-CRYPTOTRADER-72H LoRA verification",
+    "No actual system crashes or runtime errors - 87 cycles, 0 error_count"
   ],
   "key_observations": [
-    "XAG 50% trim at $75.65 correct — price dropped to $74.26 before recovering",
-    "L2 correctly rejected low-accuracy XAG SELL signals (adx 36.5%, bocpd 50.4%)",
-    "BTC extreme oversold RSI 20-24 but regime-dominant SELL — correct to avoid",
-    "3 signals critically broken: stat_jump_regime, econ_calendar, crypto_macro — all BUY-biased failing in bearish market",
-    "Range-bound regime dominant all day across all instruments",
-    "Bold DORMANT by design — no breakout setups"
+    "Ugly day for crypto: BTC -11.1% 7d to 7K, ETH -7.2% 7d, MSTR -14.84% 7d",
+    "Gold failed mean-reversion: XAU BUY at 520 -> full exit at 489 (-0.69%)",
+    "Silver held: XAG 26.92oz stop 4.00 never triggered (1.29% minimum buffer)",
+    "Bold strategy correctly DORMANT all day - no breakout conditions met",
+    "BUY accuracy collapse persists: 15-33% BUY vs 56-87% SELL across regime signals",
+    "Calibration warning active: high-agreement signals only 45% accurate historically",
+    "22 of 80+ signals have zero tracked samples - never activate or always HOLD",
+    "Regime was range-bound all day despite trending-down price action in crypto/stocks"
   ]
 }

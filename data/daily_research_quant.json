@@ -1,34 +1,136 @@
 {
-  "date": "2026-06-01",
-  "generated_at": "2026-06-01T21:35:00+02:00",
+  "date": "2026-05-25",
+  "generated_at": "2026-06-02T20:39:48.445219+00:00",
   "research_topics": [
-    "Adaptive signal weighting (PPO/exponential-decay/Thompson sampling)",
-    "Regime detection (NHMM, geometric observables, soft regime assignments)",
-    "Signal combination and multi-resolution ensembles",
-    "Walk-forward validation with purged/embargoed CV",
-    "Multi-agent LLM trading frameworks (TradingAgents v0.2.5)",
-    "Gold/silver ratio and metals prediction models",
-    "Bitcoin on-chain prediction (CNN-LSTM, feature selection)",
-    "Adaptive stop-loss with regime-conditional ATR",
-    "Inverse-volatility position sizing",
-    "IC-based dynamic weighting with Spearman rank IC"
+    "Signal combination methods (IC-weighted, stacking, meta-learning)",
+    "Regime-adaptive signal selection",
+    "Walk-forward signal reweighting",
+    "Silver/gold prediction features",
+    "Crypto prediction (on-chain + market data)",
+    "Signal correlation and redundancy pruning",
+    "Position sizing under uncertainty"
   ],
   "findings": [
-    {"topic": "Exponential Weights Online Learning", "finding": "Foundational online learning: weight_i = exp(-eta * cumulative_loss). Sublinear regret, no stationarity assumptions.", "relevance_to_us": "Much simpler than PPO. Convert existing 70/30 blend to exp-decay. Would auto-downweight econ_calendar 55%->33% within 1-2 weeks.", "implementation_difficulty": "easy", "expected_impact": "high", "source": "arxiv 1802.07543"},
-    {"topic": "PPO Signal Weight Optimization", "finding": "Arxiv 2509.01393: PPO reweights 50 LLM alpha signals. Higher Sharpe, smaller drawdowns.", "relevance_to_us": "Directly addresses degraded signal problem but requires training infrastructure.", "implementation_difficulty": "hard", "expected_impact": "high", "source": "arxiv 2509.01393"},
-    {"topic": "Thompson Sampling Signal Selection", "finding": "Beta posterior per signal, updated by hit/miss. Probabilistic exploration/exploitation.", "relevance_to_us": "Could replace accuracy gate cascade with cleaner probabilistic logic.", "implementation_difficulty": "medium", "expected_impact": "high", "source": "arxiv 1911.05309"},
-    {"topic": "Soft Regime Assignments", "finding": "Sigmoid smoothing around regime thresholds eliminates hard flip-flopping.", "relevance_to_us": "ADX/BOCPD near coin-flip partly due to hard thresholds. Soft assignments reduce whiplash.", "implementation_difficulty": "medium", "expected_impact": "high", "source": "arxiv 2510.03236"},
-    {"topic": "3-State NHMM for BTC", "finding": "3 states (bull/bear/consolidation) outperform 2-state for BTC. Consolidation = where BUY signals fail.", "relevance_to_us": "Our BUY bias failure is specifically during consolidation. 3-state model provides missing label.", "implementation_difficulty": "hard", "expected_impact": "medium", "source": "preprints.org 202603.0831"},
-    {"topic": "Geometric Observables", "finding": "Berry Phase Rate achieves Cohen d=0.72 with 67% fewer false alarms than Random Forest.", "relevance_to_us": "Fundamentally different from our regime signals. Largely uncorrelated = captures distinct risk factors.", "implementation_difficulty": "hard", "expected_impact": "medium", "source": "arxiv 2605.17117"},
-    {"topic": "TradingAgents Multi-Agent", "finding": "TauricResearch v0.2.5, 60K+ GitHub stars. Bull/bear/risk debate. Supports Claude.", "relevance_to_us": "L2 could use structured debate instead of monolithic analysis. Start with prompt engineering.", "implementation_difficulty": "medium", "expected_impact": "medium", "source": "github.com/tauricresearch/tradingagents"},
-    {"topic": "Inverse-Volatility Position Sizing", "finding": "Sharpe 0.99->1.54, max drawdown -30.8% to -13.8% in backtests.", "relevance_to_us": "BTC vol ~60% vs XAU ~15%. Vol-targeting gives consistent risk per instrument.", "implementation_difficulty": "easy", "expected_impact": "medium", "source": "concretumgroup.com"},
-    {"topic": "Regime-Conditional ATR Stops", "finding": "2026 best practice: ADX filters modify ATR multiplier — 1.0x range, 2.0x trending.", "relevance_to_us": "Static stops get hit too often in ranging. Regime-conditional improves.", "implementation_difficulty": "easy", "expected_impact": "medium", "source": "alphaexcapital.com"}
+    {
+      "topic": "Signal combination methods",
+      "finding": "IC-weighted ensembles: weight signals by rolling Information Coefficient (rank correlation of signal value vs forward returns). IC above 0.05 indicates meaningful predictive power. Max Information Ratio weighting consistently outperforms equal-weight. Signal can be 51% directionally accurate but have meaningful IC if magnitude predicts return magnitude.",
+      "relevance_to_us": "System uses accuracy-weighted voting. IC-weighted would be strictly superior. LinearFactorModel and SignalWeightOptimizer infrastructure exists but not wired into live consensus path.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "FactSet IC weighting research, arxiv 2509.01393"
+    },
+    {
+      "topic": "Signal combination methods",
+      "finding": "MWU learning rate: our SignalWeightManager uses eta=0.1. Optimal eta = sqrt(ln(N)/T) with N=15 signals, T=30K samples gives eta ~0.013. Current rate too aggressive, causes weight oscillation.",
+      "relevance_to_us": "Direct fix: reduce eta from 0.1 to 0.015 in signal_weights.py. MWU weights computed but normalized weights never consumed by _weighted_consensus.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "Hedge algorithm theory (Freund & Schapire 1997)"
+    },
+    {
+      "topic": "Regime-adaptive signal selection",
+      "finding": "HMM-based regime detection with per-regime signal whitelist. Fit GaussianHMM (3-4 states) on [log_returns, realized_vol, volume_ratio]. Per-regime, only activate signals with IC > 0.02. Refit monthly on rolling 6-month window.",
+      "relevance_to_us": "drift_regime_gate (68.1% recent) should gate which signals participate, not just apply a multiplier. REGIME_GATED_SIGNALS exists but is manually curated, not data-driven.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "high",
+      "source": "arxiv 2508.11338, quantinsti.com regime-adaptive"
+    },
+    {
+      "topic": "Walk-forward signal reweighting",
+      "finding": "Walk-forward optimizer already exists in signal_weight_optimizer.py with 30d train / 7d test windows. Results saved to data/models/walkforward_results.json but NEVER consumed by _weighted_consensus(). Highest-ROI single change.",
+      "relevance_to_us": "Wire walkforward_results.json into consensus: if avg_oos_corr > 0.02, use recommended_weights as multipliers. Fallback to accuracy-only if OOS correlation too low.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "Existing codebase analysis"
+    },
+    {
+      "topic": "Silver/gold prediction features",
+      "finding": "Top features for gold/silver: (1) US 10Y TIPS real yield (strongest predictor), (2) DXY (weakening since 2022), (3) COT positioning, (4) Gold ETF flows, (5) Central bank purchases. Real yields now better predictor than DXY alone.",
+      "relevance_to_us": "gold_real_yield_paradox signal is DISABLED. FRED integration exists. Re-enabling with walk-forward validation could add 2-3% accuracy for XAU/XAG.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "JP Morgan gold research, sciencedirect precious metals ML"
+    },
+    {
+      "topic": "Crypto prediction",
+      "finding": "Combined on-chain + market models achieve 84.3% for macro cycle positioning. Key features: MVRV Z-Score (current 1.32), SOPR, exchange netflow (6yr lows), LTH supply ratio (78%). Funding rates mean-reverting and predictive at extremes.",
+      "relevance_to_us": "onchain signal (60% 1d) already uses MVRV/SOPR. Should weight MORE heavily on longer horizons (3d/5d). Funding rate should be FILTER not standalone voter.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "Bitcoin ML research, sciencedirect crypto forecasting"
+    },
+    {
+      "topic": "Signal correlation and redundancy",
+      "finding": "Agreement rate (fraction of time two signals vote same direction) > 80% indicates functional redundancy. After pruning redundant signals, re-optimize weights. Likely redundant pairs: (RSI, mean_reversion), (BB, mean_reversion), (momentum, RSI).",
+      "relevance_to_us": "_compute_agreement_rate() already exists in signal_engine.py. Pruning from 15 to 10-12 independent signals could improve consensus by eliminating double-counted votes.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "arxiv 2509.01393, 2509.25055"
+    },
+    {
+      "topic": "Position sizing under uncertainty",
+      "finding": "Full Kelly optimal only with perfect estimates. With 4/5 instruments at <=50% accuracy, full Kelly = zero position. Quarter-Kelly retains 75% growth rate, halves variance. MacLean (2004): most successful institutions use quarter-to-half Kelly.",
+      "relevance_to_us": "kelly_sizing.py exists. Enforce quarter-Kelly max. Hard rule: if consensus accuracy <52% on trailing 30d, cap position at 2% portfolio.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "Kelly criterion literature, MacLean et al. 2004"
+    }
   ],
   "recommended_improvements": [
-    {"title": "Exponential-decay signal weighting", "priority": 1, "effort_days": 2, "rationale": "Auto-downweight degraded signals. Sublinear regret. Minimal code change."},
-    {"title": "Soft regime assignments (sigmoid thresholds)", "priority": 2, "effort_days": 3, "rationale": "Eliminates hard regime flip-flopping. ADX/BOCPD coin-flip partly from hard boundaries."},
-    {"title": "Rolling Spearman IC recomputation (14d window, daily)", "priority": 3, "effort_days": 2, "rationale": "IC is leading indicator of accuracy decay. Catches degradation 1-2 weeks earlier."},
-    {"title": "Regime-conditional ATR stop multipliers", "priority": 4, "effort_days": 2, "rationale": "Static stops fail in ranging markets. Uses existing regime output."},
-    {"title": "Inverse-volatility position sizing", "priority": 5, "effort_days": 2, "rationale": "Consistent risk per instrument. BTC 4x more volatile than XAU."}
+    {
+      "title": "Wire walk-forward weights into live consensus",
+      "description": "Load recommended_weights from data/models/walkforward_results.json into _weighted_consensus(). Fallback if OOS corr < 0.02.",
+      "priority": 1,
+      "effort_days": 1,
+      "expected_accuracy_improvement": "+2-4% consensus accuracy",
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/signal_weight_optimizer.py"
+      ]
+    },
+    {
+      "title": "IC-based signal weighting",
+      "description": "Replace accuracy gating with rolling 30d rank-IC per signal per ticker. Weight by IC * sqrt(ICIR).",
+      "priority": 2,
+      "effort_days": 3,
+      "expected_accuracy_improvement": "+3-5% for metals/ETH",
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "title": "Regime-conditional signal selection",
+      "description": "Use drift_regime_gate to partition history into regimes. Per-regime, only activate signals with IC > 0.02.",
+      "priority": 3,
+      "effort_days": 3,
+      "expected_accuracy_improvement": "+2-3%",
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "title": "TIPS real yield feature for metals",
+      "description": "Add DFII10 (10Y TIPS yield) from FRED to metals_cross_assets.py. Audit gold_real_yield_paradox for re-enable.",
+      "priority": 4,
+      "effort_days": 1,
+      "expected_accuracy_improvement": "+2-3% XAU/XAG",
+      "files_affected": [
+        "portfolio/metals_cross_assets.py",
+        "portfolio/signals/gold_real_yield_paradox.py"
+      ]
+    },
+    {
+      "title": "Reduce MWU eta and wire weights into consensus",
+      "description": "Reduce eta from 0.1 to 0.015. Wire MWU normalized weights into _weighted_consensus().",
+      "priority": 5,
+      "effort_days": 1,
+      "expected_accuracy_improvement": "+0.5-1%",
+      "files_affected": [
+        "portfolio/signal_weights.py",
+        "portfolio/signal_engine.py"
+      ]
+    }
   ]
 }

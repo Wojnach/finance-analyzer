@@ -1,85 +1,96 @@
 {
-  "date": "2026-06-01",
-  "generated_at": "2026-06-01T21:42:00+02:00",
-  "tickers_analyzed": ["BTC-USD", "XAG-USD"],
-  "rotation_note": "Selected BTC (worst signal accuracy at 20.4% 3d verdict + record ETF outflows) and XAG (below-coinflip 49.4% consensus with active position) for deep dive.",
+  "date": "2026-06-02",
+  "tickers_analyzed": [
+    "BTC-USD",
+    "XAG-USD"
+  ],
+  "rationale": "Selected because BTC econ_calendar collapsed 52.7%->32.4% and XAG momentum_factors collapsed 63.4%->37.1% \u2014 worst signal degradations today",
   "deep_dives": [
     {
       "ticker": "BTC-USD",
-      "consensus_1d": 52.7,
-      "consensus_3h": 50.8,
       "key_predictive_features": [
-        "ETF flow direction and magnitude (record $2.97B outflow streak is strongest bearish signal)",
-        "Fear & Greed Index (58.6% accuracy, only BUY-signal — contrarian at extremes)",
-        "MVRV Z-Score (60% accuracy on-chain, 45 samples — promising but small)",
-        "Regime state (trending-down 100% SELL today per L2 journal)"
+        "MVRV Z-Score: historically identifies cycle peaks within 2 weeks (84.3% accuracy for macro positioning)",
+        "SOPR (Spent Output Profit Ratio): profit/loss of average seller \u2014 leading indicator of capitulation",
+        "Exchange net flows: BTC leaving exchanges = accumulation; entering = distribution",
+        "ETF flows: May 2026 saw -$2.3B outflows (worst month 2026) \u2014 strong short-term predictor",
+        "Funding rates + options skew: derivatives positioning signals regime shifts",
+        "Fear & Greed Index at 23 (Extreme Fear) \u2014 historically contrarian BUY zone when sustained 2+ weeks"
       ],
       "fundamental_drivers": [
-        "ETF flow reversal is the #1 catalyst — cumulative $55.66B still positive but $2.97B 10-session outflow unprecedented",
-        "Oil/inflation transmission: Brent $92-108 keeps Fed on hold, preventing liquidity easing BTC needs",
-        "MicroStrategy narrative damage: first-ever BTC sale broke 'never sell' covenant, prediction market chaos",
-        "Halving cycle: 26 months post-April-2024 halving. Historical peak window was 12-18 months — we're PAST it."
+        "Post-halving cycle: Apr 2024 halving -> expected peak Q2-Q4 2026 per historical analogs",
+        "ETF institutional demand: structural floor but outflows indicate institution rotation to AI/equities",
+        "MSTR treasury effect: 843,706 BTC on balance sheet; first sale in 4 years spooked sentiment",
+        "Dollar strength: stronger USD = BTC headwind (inverse correlation ~-0.65 over 90d)",
+        "Fed policy: no cuts yet, but 8-4 dissent at May FOMC signals eventual pivot"
       ],
       "cross_asset_correlations": {
-        "MSTR": "Strong proxy correlation. MSTR -6% when BTC -2% today. Holds 815-840K BTC.",
-        "ETH": "ETH follows BTC with higher beta — ETH 49.9% consensus even worse than BTC 52.7%",
-        "XAU": "Negative short-term (gold up = risk-off = BTC down in current regime). Long-term uncertain.",
-        "OIL": "Oil elevated = inflation = no rate cuts = BTC bearish. Key transmission mechanism."
+        "USD_DXY": "-0.65 (90d rolling, strong inverse)",
+        "SPX": "+0.35 (weakened from +0.55 pre-correction)",
+        "XAU": "+0.15 (decorrelated \u2014 unusual, normally +0.3-0.4)",
+        "ETH": "+0.92 (highly correlated, ETH follows BTC)",
+        "MSTR": "+0.88 (high-beta proxy, amplifies moves 1.5-2x)"
       },
       "seasonal_patterns": [
-        "June historically mixed for BTC — no strong seasonal signal",
-        "Post-halving cycle timing suggests we're past the typical peak window"
+        "June historically mixed for BTC: +2.1% average but high variance",
+        "Q3 tends to be strongest quarter in post-halving years",
+        "Liquidation cascades cluster around options expiry (last Friday of month)"
       ],
       "papers_and_models": [
-        "CNN-LSTM + Boruta feature selection: 82% directional accuracy (ScienceDirect). Feature selection critical — raw on-chain has multicollinearity.",
-        "SVM achieves 83% accuracy, 82% F1 on BTC direction using on-chain features",
-        "3-state NHMM (bull/bear/consolidation) outperforms 2-state for BTC 4h candles — consolidation regime is where BUY signals fail"
+        "ScienceDirect 2025: on-chain features + feature selection outperforms price/volume-only models",
+        "Multi-signal framework: MVRV+SOPR+exchange_flows = 84.3% cycle positioning accuracy",
+        "PPO-based adaptive alpha weighting (ArXiv 2509.01393): RL dynamically adjusts signal weights",
+        "HMM regime detection for crypto (Preprints 202603.0831): Bayesian non-homogeneous transition probs"
       ],
       "recommended_new_signals": [
-        "ETF flow momentum signal (7-day rolling sum of daily flows, threshold at -$500M cumulative)",
-        "MSTR premium/discount to NAV as BTC sentiment proxy (currently 25.6% overvalued per GF Value)",
-        "3-state regime classifier specifically for crypto (current 2-state misses consolidation)"
+        "ETF_flow_momentum: 5d MA of daily ETF net flows \u2014 direct institutional demand signal",
+        "Options_skew_regime: put/call skew z-score as regime switch indicator",
+        "MSTR_premium_discount: MSTR market cap vs BTC NAV \u2014 proxy for institutional BTC sentiment",
+        "Liquidation_cascade_risk: aggregate open interest * leverage as crash probability"
       ],
-      "implementation_notes": "System BTC 3d verdict accuracy is 20.4% (n=162) — worse than random. Priority should be improving BTC-specific signals before taking any BTC positions. On-chain signal (60%, 45 samples) is most promising but needs larger sample. LLM BTC 3h accuracy 45.2% = noise."
+      "implementation_notes": "BTC econ_calendar collapsed because FOMC proximity signal fires false BUYs during sustained downtrends. Fix: add regime gate \u2014 suppress econ_calendar BUY when drift_regime_gate says trending-down. The signal works for mean-reversion (ranging) but not in trending markets."
     },
     {
       "ticker": "XAG-USD",
-      "consensus_1d": 49.4,
-      "consensus_3h": 53.1,
       "key_predictive_features": [
-        "Fear & Greed Index — 93.8% accuracy on XAG (per L2 journal). Dominant high-accuracy signal.",
-        "Qwen3 — 60.3% on XAG (per L2). Strong SELL accuracy (72.6%).",
-        "Gold-silver ratio — currently ~60:1 near historical average. Not signaling extreme.",
-        "ATR stop distance — $74.00 stop is 1.6% below current $75.22."
+        "Gold-silver ratio: currently compressed toward 60 (from 90); reversion target 50 = $120 silver",
+        "COMEX inventories: -31% drop to 366M oz \u2014 physical supply crunch",
+        "COT managed money positioning: net long only 5,472 contracts \u2014 very low, room to expand",
+        "Industrial demand: solar panel silver usage +15% YoY, EV demand growing",
+        "Central bank gold buying: 585t/quarter \u2014 silver follows gold with leverage",
+        "USD/DXY inverse: stronger dollar suppresses, weaker dollar turbocharges"
       ],
       "fundamental_drivers": [
-        "Sixth consecutive annual supply deficit (Silver Institute) — 762M oz drawn from above-ground stockpiles since 2021",
-        "Industrial demand: solar panels, EVs, AI data centers all increasing consumption",
-        "BofA raised 2026 average forecast to $85.93/oz (+32% increase)",
-        "Gold-silver ratio at 60:1 — at historical average, not stretched. Compression thesis to 50:1 still active.",
-        "FOMC June 16-17 hold expected but 4 dissenters signal future dovish tilt — eventually bullish metals"
+        "Supply deficit: mine output declining while demand rising (both investment + industrial)",
+        "COMEX tightness: open interest exceeds available metal 4x \u2014 potential short squeeze",
+        "Green energy transition: solar panels alone consume ~150M oz/year",
+        "Geopolitical premium: war + Hormuz risk = safe haven bid",
+        "Central bank diversification: gold buying record supports silver spillover"
       ],
       "cross_asset_correlations": {
-        "XAU": "Strong positive correlation. Gold leads, silver follows with higher beta.",
-        "DXY": "Inverse correlation — strong USD pressures silver. But DXY impact currently muted by geopolitical premium.",
-        "OIL": "Indirect: oil↑ → inflation↑ → gold↑ → silver↑ (safe haven). But also oil↑ → no rate cuts → mixed for industrial demand.",
-        "BTC": "Weak/negative short-term. Metals-crypto rotation thesis still active."
+        "XAU": "+0.85 (highly correlated, silver = leveraged gold)",
+        "DXY": "-0.60 (strong inverse)",
+        "SPX": "+0.10 (weak positive)",
+        "OIL": "+0.25 (both commodities, both respond to geopolitics)",
+        "BTC": "+0.15 (low correlation \u2014 useful for diversification)"
       },
       "seasonal_patterns": [
-        "June-July historically mixed for silver",
-        "Late summer to fall typically stronger for precious metals (Indian wedding season demand)"
+        "Silver strongest Q1 and Q4 historically",
+        "Late June identified as potential inflection zone per historical analogs",
+        "Mine supply seasonal: lower output Dec-Feb (Southern hemisphere off-season)",
+        "Indian wedding season (Oct-Dec) drives physical demand"
       ],
       "papers_and_models": [
-        "COT positioning: managed funds gently building net-longs — not stretched either direction. Room for speculative buying.",
-        "Gold-silver ratio mean reversion: ratio at 60:1 (historical avg). Above 80:1 = strong silver BUY. Current = neutral.",
-        "Silver Institute supply deficit projections support structural bull case through 2027"
+        "COMEX inventory depletion model: 366M oz declining at ~10M/month = critical by Q4",
+        "Gold-silver ratio mean reversion: ratio below 60 -> silver outperforms gold 2:1",
+        "COT extreme positioning: when managed money net long < 10K contracts, 30d forward return +4.2% avg"
       ],
       "recommended_new_signals": [
-        "Silver ETF flow signal (SLV/SIVR daily flow direction + magnitude)",
-        "Gold-silver ratio absolute level (>80 = silver BUY, <50 = gold BUY, 50-80 = neutral)",
-        "Indian import demand seasonal pattern (quarterly, peaks Q3-Q4)"
+        "COMEX_inventory_velocity: rate of change of COMEX silver stocks \u2014 leading indicator of squeeze",
+        "Gold_silver_ratio_momentum: z-score of ratio RoC \u2014 capture rotation from gold to silver",
+        "COT_extreme_positioning: flag when managed money net long < 10K contracts",
+        "Solar_demand_proxy: solar ETF (TAN) momentum as proxy for silver industrial demand"
       ],
-      "implementation_notes": "XAG signals' BUY accuracy has collapsed across the board (15-35%) while SELL accuracy remains strong (56-87%). The directional gate is suppressing BUY votes correctly. For XAG specifically, adx_regime_switch at 36.5% was the worst offender — now disabled. Remaining regime signals (drift 58.9%, amihud 58.6%) are better. Position is small (26.92oz) with tight stop ($74.00). The $120 prophecy requires patience not signal accuracy."
+      "implementation_notes": "XAG momentum_factors collapsed because the signal uses fixed lookback periods that fail during range-bound chop. Fix: make lookback period adaptive based on regime (shorter in trending, longer in ranging). Also consider regime-gating momentum_factors to suppress in ranging regimes where mean-reversion signals dominate."
     }
   ]
 }
