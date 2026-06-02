@@ -107,10 +107,13 @@ def _compute_overnight_returns(df_1h: pd.DataFrame, close_hour: int,
         except Exception:
             return []
 
-    close_prices = df_1h[df_1h.index.hour == close_hour]["close"]
-    open_prices = df_1h[df_1h.index.hour == open_hour]["close"]
+    # Use ±1h window to handle DST transitions robustly
+    close_hours = {close_hour, (close_hour + 1) % 24}
+    open_hours = {open_hour, (open_hour + 1) % 24}
+    close_prices = df_1h[df_1h.index.hour.isin(close_hours)]["close"]
+    open_prices = df_1h[df_1h.index.hour.isin(open_hours)]["close"]
 
-    if len(close_prices) < 5 or len(open_prices) < 5:
+    if len(close_prices) < 3 or len(open_prices) < 3:
         return []
 
     returns = []
@@ -251,12 +254,17 @@ def compute_crypto_overnight_sentiment_signal(
     else:
         momentum_vote = "HOLD"
 
-    # --- Sub-signal 3: Intraday divergence ---
+    # --- Sub-signal 3: Intraday divergence (averaged BTC+ETH) ---
     btc_intra = _compute_intraday_returns(btc_1h, open_hour, close_hour)
+    eth_intra = _compute_intraday_returns(eth_1h, open_hour, close_hour)
     divergence_vote = "HOLD"
-    if btc_intra and avg_rets:
+    intra_vals = [v for v in [
+        btc_intra[-1] if btc_intra else None,
+        eth_intra[-1] if eth_intra else None,
+    ] if v is not None]
+    if intra_vals and avg_rets:
         last_overnight = avg_rets[-1]
-        last_intraday = btc_intra[-1] if btc_intra else 0
+        last_intraday = sum(intra_vals) / len(intra_vals)
         if last_overnight > 0 and last_intraday < 0:
             divergence_vote = "BUY"
         elif last_overnight < 0 and last_intraday > 0:
