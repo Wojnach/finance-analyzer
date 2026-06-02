@@ -1,5 +1,44 @@
 # Session Progress
 
+## 2026-06-02 FGL Adversarial Codebase Review (full 8-subsystem pass)
+
+### Completed
+- Ran `/fgl` adversarial review: partitioned the codebase into 8 subsystems, built
+  **empty-baseline branches** in a throwaway worktree (each subsystem = clean add-only
+  diff), spawned **8 background Claude Code review subagents** (7× `pr-review-toolkit:code-reviewer`,
+  1× `caveman:cavecrew-reviewer` for avanza-api), wrote an **independent main-thread pass**,
+  cross-critiqued, and synthesized.
+- Deliverables committed + pushed (commit `9203a234`):
+  `docs/AGENT_REVIEW_{SIGNALS_CORE,ORCHESTRATION,PORTFOLIO_RISK,METALS_CORE,AVANZA_API,SIGNALS_MODULES,DATA_EXTERNAL,INFRASTRUCTURE}_2026-06-02.md`,
+  `docs/ADVERSARIAL_REVIEW_INDEPENDENT_2026-06-02.md`, `docs/ADVERSARIAL_SYNTHESIS_2026-06-02.md`.
+- ~92 raw findings, **~22 distinct P0** after dedup. Worktree + 9 review branches cleaned up.
+
+### Top P0s to fix next (from synthesis Tier 0/1 — ORDER MATTERS)
+1. `file_utils.py:295` `jsonl_sidecar_lock` 10s give-up held across 50MB `rotate_jsonl` gzip →
+   silent lost journal appends. **Fix FIRST** (the cross-process-lock refactor depends on it).
+2. SHORT/BEAR blindness LIVE (37/84 certs SHORT): `warrant_pnl:96`, `exit_optimizer`,
+   `risk_management` stops LONG-only, `record_warrant_transaction` no `direction` → gate SHORT off w/ TODO.
+3. `cusum_accuracy_monitor` is **dead code** (never called from `backfill_outcomes`) — the
+   degradation safety net for the live accuracy collapse observes zero outcomes.
+4. `metals_loop.py:1086` silver fast-tick reads only legacy POSITIONS → all exit alerts dead for swing silver.
+5. `main.py:990` off-hours branch (LIVE) drops weekend crypto/metals triggers — add autonomous fallback.
+
+### Live accuracy collapse verdict (the 4 critical_errors)
+Genuine market regression + ONE module bug (`statistical_jump_regime.py:97-110` neutral-state
+counter increments both directions → fabricated regimes) + two dead detectors. Measurement is
+sound (signals-core verified); 44% gate IS force-HOLDing them so live trading is protected.
+`XAG-USD::momentum_factors` collapse is a per-ticker slice (global momentum_factors healthy 54%).
+
+### Cross-critiques recorded
+Prior Bearer-cookie P0 was OVER-RATED (now RESOLVED). Own econ_calendar-tz hypothesis REFUTED
+(proximity is wall-clock-derived). Both documented in the independent pass + synthesis.
+
+### Unresolved (carried in, not addressed this session — review-only task)
+- 4 `accuracy_degradation` critical_errors still open (the collapse above — genuine, gated).
+- OVERDUE pickup `LLM-CRYPTOTRADER-72H` (cryptotrader_lm v2 LoRA 72h shadow verification).
+
+---
+
 ## 2026-06-01 After-Hours Research Session (21:07–22:00+ CEST)
 
 ### Completed
