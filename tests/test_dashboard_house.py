@@ -58,6 +58,7 @@ def fake_house_root(tmp_path: Path) -> Path:
     # Per-candidate reports
     (runs / f"{slug_a}.thesis.md").write_text(
         "# #1: Test Address — composite 66\n\n"
+        "## Unit\n\n- Hemnet: https://www.hemnet.se/bostad/test-a-123\n\n"
         "## Thesis fit\n\n- friköpt + skuldfri\n",
         encoding="utf-8",
     )
@@ -336,6 +337,11 @@ def test_candidate_detail_renders_thesis_md(client):
     body = resp.get_data(as_text=True)
     assert "Thesis fit" in body
     assert "friköpt" in body
+    # Bare Hemnet URL in the report markdown is autolinked (clickable).
+    assert (
+        '<a href="https://www.hemnet.se/bostad/test-a-123" '
+        'target="_blank" rel="noopener">https://www.hemnet.se/bostad/test-a-123</a>'
+    ) in body
     # Raw-link footer
     assert "/raw" in body
 

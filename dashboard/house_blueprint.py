@@ -288,12 +288,29 @@ def _shell(title: str, body_html: str, breadcrumbs: list[tuple[str, str]],
     )
 
 
+# Bare http(s) URL not already inside a tag/attribute or an anchor's text. The
+# lookbehind rejects the three contexts a URL is already linked in: href="URL
+# ("), >URL (anchor text after the opening tag), =URL (any attribute). The char
+# class stops at the next tag/space/quote/paren so trailing markup isn't swallowed.
+_BARE_URL_RE = re.compile(r"""(?<![">=])(https?://[^\s<>"')]+)""")
+
+
+def _autolink(html: str) -> str:
+    """Wrap bare URLs in rendered markdown as clickable links. Python-Markdown
+    has no core autolinker, so report lines like `Hemnet: https://…` render as
+    dead text — this makes them clickable without a new dependency."""
+    # nosemgrep: python.flask.security.injection.raw-html-concat.raw-html-format
+    return _BARE_URL_RE.sub(
+        r'<a href="\1" target="_blank" rel="noopener">\1</a>', html
+    )
+
+
 def _render_markdown(text: str) -> str:
-    return md_lib.markdown(
+    return _autolink(md_lib.markdown(
         text,
         extensions=["tables", "fenced_code", "sane_lists"],
         output_format="html5",
-    )
+    ))
 
 
 # ---------------------------------------------------------------------------
