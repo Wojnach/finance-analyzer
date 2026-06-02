@@ -312,3 +312,50 @@ class TestCompositeWithRelief:
         # With 4 HOLD + 1 BUY, majority_vote should produce BUY
         assert result["sub_signals"]["post_event_relief"] == "BUY"
         assert result["action"] == "BUY"
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_regime_gate_suppresses_buy_in_trending_down(self, mock_next, mock_events_within, mock_recent):
+        """BUY suppressed to HOLD when regime is trending-down."""
+        mock_next.return_value = {
+            "date": date(2026, 6, 10),
+            "type": "CPI",
+            "impact": "high",
+            "hours_until": 200.0,
+        }
+        mock_events_within.return_value = []
+        mock_recent.return_value = [
+            {"type": "CPI", "impact": "high", "hours_since": 8.0,
+             "date": date(2026, 5, 13)}
+        ]
+        df = _make_df()
+        result = compute_econ_calendar_signal(
+            df, context={"ticker": "BTC-USD", "config": {}, "regime": "trending-down"}
+        )
+        assert result["sub_signals"]["post_event_relief"] == "BUY"
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("regime_gate_suppressed") is True
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_regime_gate_allows_buy_in_ranging(self, mock_next, mock_events_within, mock_recent):
+        """BUY allowed when regime is ranging."""
+        mock_next.return_value = {
+            "date": date(2026, 6, 10),
+            "type": "CPI",
+            "impact": "high",
+            "hours_until": 200.0,
+        }
+        mock_events_within.return_value = []
+        mock_recent.return_value = [
+            {"type": "CPI", "impact": "high", "hours_since": 8.0,
+             "date": date(2026, 5, 13)}
+        ]
+        df = _make_df()
+        result = compute_econ_calendar_signal(
+            df, context={"ticker": "BTC-USD", "config": {}, "regime": "ranging"}
+        )
+        assert result["action"] == "BUY"
+        assert result["indicators"].get("regime_gate_suppressed") is not True

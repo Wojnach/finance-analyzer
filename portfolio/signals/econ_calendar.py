@@ -261,6 +261,17 @@ def compute_econ_calendar_signal(df: pd.DataFrame, context: dict = None) -> dict
     # Cap confidence
     result["confidence"] = min(result["confidence"], _MAX_CONFIDENCE)
 
+    # Regime gate: suppress BUY in trending-down markets.
+    # econ_calendar BUY (post_event_relief) fires false positives during
+    # sustained downtrends — BTC accuracy collapsed 52.7%->32.4% on 2026-06-02
+    # because relief BUYs kept firing while price fell 11% over 7 days.
+    regime = context.get("regime", "") if context else ""
+    if result["action"] == "BUY" and regime == "trending-down":
+        result["action"] = "HOLD"
+        result["confidence"] *= 0.2
+        result["indicators"]["regime_gate_suppressed"] = True
+        result["indicators"]["regime"] = regime
+
     # Pause-period dampener: when next high-impact event is >14 days away,
     # the signal has minimal predictive value (events produce round-trips
     # during extended Fed pause periods). Reduce confidence aggressively.
