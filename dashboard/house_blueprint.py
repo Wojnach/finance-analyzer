@@ -423,17 +423,21 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
         # address/url still escaped as defence-in-depth. Link the address only
         # when a per-candidate report exists, else render it as plain text so
         # we don't emit a link to candidate_detail()'s 404.
+        # Address links to the canonical Hemnet ad — present for EVERY candidate,
+        # so all rows get a link (the report link, top-N only, moves to the last
+        # column). Prior behaviour linked the address to the internal report and
+        # left non-deep-dived rows as dead plain text.
         addr_text = escape(str(r["address"]))
-        if r["has_report"]:
+        if r["url"]:
             addr_cell = (
-                f"<a href=\"/house/runs/{escape(run_id)}/{escape(r['slug'])}\">"
+                f"<a href=\"{escape(r['url'])}\" target=\"_blank\" rel=\"noopener\">"
                 f"{addr_text}</a>"
             )
         else:
             addr_cell = addr_text
-        hemnet = (
-            f"<a href=\"{escape(r['url'])}\" target=\"_blank\" rel=\"noopener\">↗</a>"
-            if r["url"] else ""
+        report = (
+            f"<a href=\"/house/runs/{escape(run_id)}/{escape(r['slug'])}\">report</a>"
+            if r["has_report"] else ""
         )
         delta = r["fair_delta"]
         if delta is None:
@@ -458,7 +462,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
             f"<td class=\"num\">{escape(prem)}</td>"
             f"<td class=\"num\">{_fmt_cagr(r['cagr'])}</td>"
             f"<td class=\"num\">{fair_cell}</td>"
-            f"<td>{hemnet}</td>"
+            f"<td>{report}</td>"
             "</tr>"
         )
     return (

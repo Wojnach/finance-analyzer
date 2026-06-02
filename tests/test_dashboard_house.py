@@ -227,15 +227,22 @@ def test_index_renders_hub(client):
     assert "99 929" in body                    # kr/m² = 6_995_000 / 70 (nbsp-grouped)
     assert ">2.6</td>" in body                      # weighted_cagr.composite
     assert "-4%" in body                            # price 6.995M vs fair 7.30M
-    assert "https://www.hemnet.se/bostad/test-a-123" in body   # Hemnet ↗
+    # --- address links to the Hemnet ad for EVERY candidate with a url ---
+    assert (
+        '<a href="https://www.hemnet.se/bostad/test-a-123" '
+        'target="_blank" rel="noopener">Test 1</a>'
+    ) in body
 
     # --- row ordering: slug_a (66) sorts above slug_c (40) ---
     assert body.index(">66</td>") < body.index(">40</td>")
 
-    # --- slug_a has a report → linked; slug_c has data.json but NO report →
-    # rendered but NOT linked (the high-sev fix: never link to a 404). ---
-    assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123" in body
-    assert "lagenhet-3rum-test-slug-c-789" in body
+    # --- report link (last column) shows only when a markdown report exists:
+    # slug_a has one → "report" link present; slug_c has none → no report link
+    # (the high-sev fix: never link to candidate_detail()'s 404). ---
+    assert (
+        '<a href="/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-a-123">report</a>'
+    ) in body
+    assert "lagenhet-3rum-test-slug-c-789" in body                  # row rendered
     assert "/house/runs/2026-05-01-0032/lagenhet-3rum-test-slug-c-789" not in body
 
     # --- heatmap embedded + linked ---
