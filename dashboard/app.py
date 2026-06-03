@@ -824,6 +824,55 @@ def logout():
     return response
 
 
+@app.route("/go/<slug>")
+def share_link(slug):
+    """Magic-link auth: a memorable, shareable URL that grants a 1-year cookie.
+
+    Added 2026-06-03. Share e.g. https://bets.raanman.lol/go/raanman-uploadme.
+    Hitting it sets the same ``pf_dashboard_token`` cookie ``require_auth``
+    checks, then 302-redirects to ``/`` — the dashboard_token itself never
+    appears in the URL or the response body, so it can't be lifted from
+    browser history / referrer / server logs.
+
+    The path segment IS a shared secret (anyone with the link gets a 1-year
+    pass; rotate ``dashboard_share_slug`` to revoke everyone). Security
+    properties:
+
+    * Validated constant-time against config ``dashboard_share_slug`` (encoded
+      to bytes first so a hostile non-ASCII slug yields 404, not a 500 from
+      ``hmac.compare_digest``).
+    * Returns a featureless 404 on ANY mismatch and when the feature is
+      unconfigured — never 401/403 — so a path scanner can't distinguish a
+      wrong slug from a disabled feature. The 503 branch is only reachable
+      with the correct slug (operator-only), so it leaks nothing to scanners.
+    * Inert (404 for every input) unless ``dashboard_share_slug`` is set.
+
+    Read config through ``dashboard.auth`` at call time (not the module-level
+    import binding) so tests patching ``dashboard.auth._get_config`` take
+    effect, per the convention documented at the top of dashboard/auth.py.
+    """
+    from dashboard.auth import _get_config, _get_dashboard_token
+
+    configured = (_get_config().get("dashboard_share_slug") or "").strip()
+    # Always run the constant-time compare (even when unset, against a fixed
+    # sentinel that no real slug can be) so response timing doesn't reveal
+    # whether the share feature is enabled.
+    expected = configured or "\x00share-link-disabled\x00"
+    matched = hmac.compare_digest(slug.encode("utf-8"), expected.encode("utf-8"))
+    if not configured or not matched:
+        return jsonify({"error": "not_found"}), 404
+
+    token = _get_dashboard_token()
+    if token is None:
+        # Reachable only with the correct slug → operator-only, safe to be
+        # explicit. share_slug is set but dashboard_token isn't: misconfig.
+        logger.error("share_link: dashboard_share_slug set but dashboard_token missing")
+        return jsonify({"error": "misconfigured"}), 503
+
+    logger.info("share_link: slug redeemed, issuing 1-year auth cookie")
+    return _refresh_cookie(redirect("/", code=302), token)
+
+
 # ---------------------------------------------------------------------------
 # Routes — API (all require auth)
 # ---------------------------------------------------------------------------

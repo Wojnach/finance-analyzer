@@ -183,5 +183,10 @@
   "force_entry_enable": true,
   "internals": {
     "process_throttle_secs": 5
-  }
+  },
+  "_comment_dashboard_auth": "Dashboard auth (dashboard/auth.py + cf_access.py). These live ONLY in the real config.json, which is untracked. A config rewrite on 2026-05-29 silently dropped cf_access_team_domain + cf_access_aud_tag and broke bets.raanman.lol SSO — recorded here so the template documents them and a future drop is noticeable. dashboard_token: shared secret for ?token=/cookie/Bearer auth. dashboard_share_slug: memorable path for the /go/<slug> magic-link (a shared secret; rotate to revoke). cf_access_*: from Cloudflare Zero Trust > Access > Applications > the app's Application Audience (AUD) Tag + team domain.",
+  "dashboard_token": "CHANGE_ME_random_secret",
+  "dashboard_share_slug": "",
+  "cf_access_team_domain": "",
+  "cf_access_aud_tag": ""
 }
