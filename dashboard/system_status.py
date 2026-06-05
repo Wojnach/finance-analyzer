@@ -40,6 +40,13 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 HEARTBEAT_GREEN_S = 120
 HEARTBEAT_YELLOW_S = 600
 ERRORS_YELLOW_MAX = 3
+# Lookback window for counting unresolved criticals on the home hero. Matches
+# scripts/check_critical_errors.py DEFAULT_DAYS so the dashboard and the CLI
+# gate agree on what "unresolved" means. 2026-06-06: before this, the dashboard
+# scanned all-time with no auto-resolve and pinned the hero RED on ancient
+# quiescent categories (4 May-2026 avanza session-expiry alerts the 7d gate
+# already ignored). See docs/SESSION_PROGRESS.md 2026-06-06.
+CRITICAL_ERRORS_LOOKBACK_DAYS = 7
 LLM_GREEN_PCT = 95.0
 LLM_YELLOW_PCT = 80.0
 LAYER2_GREEN_PCT = 85.0
@@ -193,36 +200,33 @@ def _hb_default(error: str | None = None) -> dict[str, Any]:
 
 
 def _errors_unresolved(dd: Path) -> dict[str, Any]:
-    """Walk critical_errors.jsonl. An entry with category="resolution"
-    and ``resolves_ts`` pointing at an earlier entry resolves it.
+    """Count unresolved critical errors using the SAME semantics as
+    scripts/check_critical_errors.py (the CLI startup gate), so the home
+    hero and the gate can never disagree:
 
-    Codex P1 finding 2026-05-04: this MUST scan the whole file, not a
-    fixed tail. If 500 newer info/resolution rows came after older
-    unresolved criticals, the older ones disappeared from the count
-    and the home page silently flipped to GREEN. critical_errors.jsonl
-    is small (~120 KB at the time of writing); we accept the full scan
-    behind the 30s TTL cache.
+      - ``CRITICAL_ERRORS_LOOKBACK_DAYS`` window (criticals older than this
+        no longer pin the hero — they are the gate's responsibility while
+        fresh, and stale noise after);
+      - explicit ``resolves_ts`` back-references resolve an earlier entry;
+      - auto-resolution of stale categories (a category quiet for >=3 days
+        that has a later info/resolution row).
+
+    The full file is still scanned (Codex P1 finding 2026-05-04: never a
+    fixed tail — newer info/resolution rows must not hide older unresolved
+    criticals). The file is small and this sits behind the 30s TTL cache.
     """
     try:
         entries = load_jsonl(dd / "critical_errors.jsonl")
     except Exception as e:
         return {"unresolved": 0, "recent": [], "error": f"errors load: {type(e).__name__}: {e}"}
     try:
-        resolved_ts: set[str] = set()
-        by_ts: dict[str, dict] = {}
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            ts = entry.get("ts")
-            if entry.get("category") == "resolution" and entry.get("resolves_ts"):
-                resolved_ts.add(str(entry["resolves_ts"]))
-                continue
-            # Skip non-critical levels (resolution rows arrive as "info").
-            if entry.get("level") and entry.get("level") != "critical":
-                continue
-            if ts:
-                by_ts[ts] = entry
-        unresolved = [e for ts, e in by_ts.items() if ts not in resolved_ts]
+        # Reuse the canonical gate logic (window + auto-resolve-stale) so there
+        # is a single source of truth. Lazy import keeps the dashboard's other
+        # sections working even if scripts/ is somehow unavailable.
+        from scripts.check_critical_errors import find_unresolved
+
+        clean = [e for e in entries if isinstance(e, dict)]
+        unresolved = find_unresolved(clean, days=CRITICAL_ERRORS_LOOKBACK_DAYS)
         unresolved.sort(key=lambda x: x.get("ts", ""), reverse=True)
         recent = [
             {

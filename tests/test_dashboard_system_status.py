@@ -996,3 +996,55 @@ class TestColorFrozenReason:
         severity, reasons = ss._color(self._healthy(True))
         assert severity == "GREEN"
         assert not any("frozen" in r.lower() for r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# Errors lookback window + auto-resolve parity with the CLI gate — 2026-06-06
+# ---------------------------------------------------------------------------
+
+
+class TestErrorsUnresolvedWindow:
+    def test_old_critical_outside_window_not_counted(self, tmp_path: Path):
+        # >7d old, no resolution row — the all-time scanner used to pin this
+        # RED forever (the 4 May avanza alerts). The window must drop it.
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [{"ts": _ts(-86400 * 15), "level": "critical",
+              "category": "avanza_account_mismatch", "caller": "x", "message": "old"}],
+        )
+        assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
+
+    def test_recent_critical_counted(self, tmp_path: Path):
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [{"ts": _ts(-3600), "level": "critical",
+              "category": "foo", "caller": "x", "message": "fresh"}],
+        )
+        assert ss._errors_unresolved(tmp_path)["unresolved"] == 1
+
+    def test_explicit_resolves_ts_honored(self, tmp_path: Path):
+        orig = _ts(-3600)
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {"ts": orig, "level": "critical", "category": "foo",
+                 "caller": "x", "message": "f"},
+                {"ts": _ts(-60), "level": "info", "category": "resolution",
+                 "resolves_ts": orig, "message": "r"},
+            ],
+        )
+        assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
+
+    def test_stale_category_auto_resolved(self, tmp_path: Path):
+        # Critical 5d ago (within 7d window but quiet >=3d) + a later info row
+        # for the same category -> auto-resolved, matching the CLI gate.
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {"ts": _ts(-86400 * 5), "level": "critical", "category": "bar",
+                 "caller": "x", "message": "old-but-in-window"},
+                {"ts": _ts(-86400 * 1), "level": "info", "category": "bar",
+                 "caller": "x", "message": "later activity"},
+            ],
+        )
+        assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
