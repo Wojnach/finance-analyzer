@@ -88,12 +88,13 @@ def _iter_processes() -> list[dict[str, Any]]:
     monkey-patch this and feed in a list of fake process dicts.
     """
     out: list[dict[str, Any]] = []
-    for p in psutil.process_iter(["pid", "cmdline", "create_time", "name"]):
+    for p in psutil.process_iter(["pid", "ppid", "cmdline", "create_time", "name"]):
         try:
             info = p.info
             out.append(
                 {
                     "pid": int(info.get("pid") or 0),
+                    "ppid": int(info.get("ppid") or 0),
                     "name": info.get("name") or "",
                     "cmdline": info.get("cmdline") or [],
                     "create_time": float(info.get("create_time") or 0.0),
@@ -135,6 +136,18 @@ def scan(now_utc: datetime | None = None) -> dict[str, Any]:
                 continue
             if pat in hay:
                 matches.append(proc)
+
+        # VENV-LAUNCHER COLLAPSE (added 2026-06-06): on Windows the
+        # .venv\Scripts\python.exe shim re-execs the base interpreter, so
+        # the same loop script shows up in BOTH the shim (parent) and its
+        # child with identical argv tails — every loop on the live box
+        # was false-flagged as duplicate 2026-06-05. Drop any matched
+        # proc that is the parent of another matched proc; the surviving
+        # leaf interpreter is the real loop. A genuine duplicate (two
+        # independent pairs) leaves two leaves → still flagged.
+        matched_pids = {m["pid"] for m in matches}
+        parent_pids = {m["ppid"] for m in matches if m["ppid"] in matched_pids}
+        matches = [m for m in matches if m["pid"] not in parent_pids]
 
         pids = [m["pid"] for m in matches]
         starts = [

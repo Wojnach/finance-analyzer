@@ -13,9 +13,9 @@ import pytest
 from portfolio import loop_processes
 
 
-def _fake_proc(pid: int, cmdline: list[str], create_time: float = 1_700_000_000.0):
+def _fake_proc(pid: int, cmdline: list[str], create_time: float = 1_700_000_000.0, ppid: int = 0):
     """Shape returned by loop_processes._iter_processes()."""
-    return {"pid": pid, "name": "python.exe", "cmdline": cmdline, "create_time": create_time}
+    return {"pid": pid, "name": "python.exe", "cmdline": cmdline, "create_time": create_time, "ppid": ppid}
 
 
 def _patch_processes(monkeypatch: pytest.MonkeyPatch, procs):
@@ -63,6 +63,49 @@ def test_scan_detects_duplicate(monkeypatch):
     assert set(metals["pids"]) == {123, 124}
     assert metals["duplicate"] is True
     assert payload["any_duplicate"] is True
+
+
+def test_scan_collapses_venv_shim_child_pair(monkeypatch):
+    """Windows venv python.exe re-execs the base interpreter, so the
+    same loop script appears in TWO processes with identical argv tails:
+    the .venv shim (parent) and the Python3xx child. They are ONE logical
+    loop, not a duplicate. The child's ppid == the shim's pid; the
+    scanner must drop the shim and report count=1.
+
+    Regression: every loop on the live box was flagged duplicate
+    2026-06-05 because both halves of the pair matched the substring.
+    """
+    procs = [
+        # .venv shim (parent) — spawned the real interpreter
+        _fake_proc(16708, [".venv\\Scripts\\python.exe", "-u", "portfolio\\main.py", "--loop"]),
+        # base-interpreter child — its parent IS the shim above
+        _fake_proc(16724, ["C:\\Python312\\python.exe", "-u", "portfolio\\main.py", "--loop"], ppid=16708),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    main = next(L for L in payload["loops"] if L["name"] == "main")
+    assert main["count"] == 1
+    assert main["pids"] == [16724]  # leaf interpreter, not the shim
+    assert main["duplicate"] is False
+    assert payload["any_duplicate"] is False
+
+
+def test_scan_true_duplicate_of_shim_child_pairs(monkeypatch):
+    """Two independent shim+child pairs = a REAL duplicate loop. After
+    collapsing each pair to its child, two leaf interpreters remain →
+    duplicate must still fire."""
+    procs = [
+        _fake_proc(100, [".venv\\Scripts\\python.exe", "-u", "data\\metals_loop.py"]),
+        _fake_proc(101, ["C:\\Python312\\python.exe", "-u", "data\\metals_loop.py"], ppid=100),
+        _fake_proc(200, [".venv\\Scripts\\python.exe", "-u", "data\\metals_loop.py"]),
+        _fake_proc(201, ["C:\\Python312\\python.exe", "-u", "data\\metals_loop.py"], ppid=200),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    metals = next(L for L in payload["loops"] if L["name"] == "metals")
+    assert metals["count"] == 2
+    assert set(metals["pids"]) == {101, 201}
+    assert metals["duplicate"] is True
 
 
 def test_scan_path_separator_normalisation(monkeypatch):
