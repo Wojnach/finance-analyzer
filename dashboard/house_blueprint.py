@@ -359,6 +359,10 @@ def _candidate_row(run_id: str, slug: str, data: dict) -> dict:
         "prem_s": _nested_num(data, "premium_structured", "tier"),
         "prem_l": _nested_num(data, "premium_llm", "tier"),
         "est_value": fair,   # our calculated estimated value (bid_advisor.fair_value)
+        # bid_advisor prices living area only — flag listings whose terrace /
+        # uterum / bastu makes that a lower bound, not a fair value.
+        "est_understated": bool(data.get("bid_advisor_understated")),
+        "est_understated_terms": data.get("understatement_terms") or [],
         "booli_est": _num_or_none(data.get("booli_estimate")),  # Booli värdering
         # "estimate" (Värdekollen, for-sale ads) or "sold" (recent slutpris, when
         # the unit isn't for-sale on Booli so no model estimate exists).
@@ -436,6 +440,17 @@ def _sold_tag(row: dict) -> str:
     return ""
 
 
+def _understated_tag(row: dict) -> str:
+    """A ⚠ after our Est. value when bid_advisor (living-area only) likely
+    understates it — the listing's terrace / uterum / bastu etc. isn't priced.
+    Read the figure as a floor, not a fair value."""
+    if not row.get("est_understated"):
+        return ""
+    terms = ", ".join(row.get("est_understated_terms") or [])
+    title = f"Est. value is a floor — bid_advisor ignores biarea/amenities: {terms}"
+    return f" <span class=\"meta\" title=\"{escape(title)}\">⚠</span>"
+
+
 def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
     if not rows:
         return "<p>No candidates in this run.</p>"
@@ -482,7 +497,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
             f"<td class=\"num score\">{_opt(r['score'])}</td>"
             f"<td>{addr_cell}</td>"
             f"<td class=\"num\">{_fmt_price(r['price'])}</td>"
-            f"<td class=\"num\">{_fmt_price(r['est_value'])}</td>"
+            f"<td class=\"num\">{_fmt_price(r['est_value'])}{_understated_tag(r)}</td>"
             f"<td class=\"num\">{_fmt_price(r['booli_est'])}{_sold_tag(r)}</td>"
             f"<td class=\"num\">{_fmt_sint(r['kr_m2'])}</td>"
             f"<td class=\"num\">{_opt(r['sqm'])}</td>"
