@@ -32,6 +32,13 @@ def test_detect_auth_failure_matches_each_marker(marker, monkeypatch, tmp_path):
     assert detect_auth_failure(output, caller="test") is True
 
 
+def test_detect_auth_failure_401_api_error(monkeypatch, tmp_path):
+    """Regression test for 2026-06-05 outage: 401 errors were not detected."""
+    monkeypatch.setattr(claude_gate, "CRITICAL_ERRORS_LOG", tmp_path / "crit.jsonl")
+    output = "Failed to authenticate. API Error: 401 Invalid authentication credentials\n"
+    assert detect_auth_failure(output, caller="test") is True
+
+
 def test_detect_auth_failure_benign_output(monkeypatch, tmp_path):
     """Normal claude output without the markers must NOT trigger detection."""
     monkeypatch.setattr(claude_gate, "CRITICAL_ERRORS_LOG", tmp_path / "crit.jsonl")

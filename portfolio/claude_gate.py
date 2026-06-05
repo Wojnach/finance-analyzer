@@ -187,7 +187,13 @@ def _clean_env() -> dict:
 # paths. Do not re-add `--bare`. If a new CLI flag or env tweak
 # re-introduces this class of silent auth error, this detector should
 # catch it.
-_AUTH_ERROR_MARKERS = ("Not logged in", "Please run /login", "Invalid API key")
+_AUTH_ERROR_MARKERS = (
+    "Not logged in",
+    "Please run /login",
+    "Invalid API key",
+    "Failed to authenticate",
+    "401 Invalid authentication credentials",
+)
 
 # 2026-04-16: feedback-loop fix. CLAUDE.md tells every agent to surface
 # unresolved critical_errors.jsonl entries verbatim at session start. Those
