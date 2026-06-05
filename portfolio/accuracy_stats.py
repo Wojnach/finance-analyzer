@@ -260,6 +260,13 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
         acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
         buy_acc = s["correct_buy"] / s["total_buy"] if s["total_buy"] > 0 else 0.0
         sell_acc = s["correct_sell"] / s["total_sell"] if s["total_sell"] > 0 else 0.0
+        total_directional = s["total_buy"] + s["total_sell"]
+        if total_directional > 0:
+            buy_share = s["total_buy"] / total_directional
+            directional_skew = abs(buy_share - 0.5) * 2
+        else:
+            directional_skew = 0.0
+
         result[sig_name] = {
             "correct": s["correct"],
             "total": s["total"],
@@ -273,6 +280,7 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
             "correct_sell": s["correct_sell"],
             "total_sell": s["total_sell"],
             "sell_accuracy": round(sell_acc, 4),
+            "directional_skew": round(directional_skew, 4),
         }
     return result
 
