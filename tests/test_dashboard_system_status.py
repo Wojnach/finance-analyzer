@@ -1048,3 +1048,51 @@ class TestErrorsUnresolvedWindow:
             ],
         )
         assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Degraded errors-reader must surface (never silent GREEN) — 2026-06-06
+# (adversarial-review P2: aggregate/import failure used to return unresolved=0)
+# ---------------------------------------------------------------------------
+
+
+class TestErrorsReaderDegraded:
+    def test_aggregate_failure_returns_none_not_zero(self, tmp_path: Path, monkeypatch):
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [{"ts": _ts(-3600), "level": "critical", "category": "foo",
+              "caller": "x", "message": "live"}],
+        )
+        import scripts.check_critical_errors as cce
+
+        def _boom(*a, **k):
+            raise RuntimeError("simulated gate failure")
+
+        monkeypatch.setattr(cce, "find_unresolved", _boom)
+        out = ss._errors_unresolved(tmp_path)
+        assert out["unresolved"] is None, "must NOT fabricate a clean 0 on failure"
+        assert "error" in out
+
+    def test_color_yellow_on_errors_error_field(self):
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": None, "error": "errors aggregate: RuntimeError: x"},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+        }
+        severity, reasons = ss._color(payload)
+        assert severity == "YELLOW"
+        assert any("degraded" in r.lower() for r in reasons)
+
+    def test_color_normal_count_still_works(self):
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 5},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+        }
+        severity, reasons = ss._color(payload)
+        assert severity == "RED"
+        assert any("5 unresolved" in r for r in reasons)

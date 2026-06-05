@@ -218,7 +218,10 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
     try:
         entries = load_jsonl(dd / "critical_errors.jsonl")
     except Exception as e:
-        return {"unresolved": 0, "recent": [], "error": f"errors load: {type(e).__name__}: {e}"}
+        # unresolved=None (NOT 0): a degraded reader must never fabricate a
+        # clean count — _color surfaces None/error as YELLOW so a broken
+        # critical-errors check can't silently flip the hero GREEN.
+        return {"unresolved": None, "recent": [], "error": f"errors load: {type(e).__name__}: {e}"}
     try:
         # Reuse the canonical gate logic (window + auto-resolve-stale) so there
         # is a single source of truth. Lazy import keeps the dashboard's other
@@ -239,7 +242,10 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
         ]
         return {"unresolved": len(unresolved), "recent": recent}
     except Exception as e:
-        return {"unresolved": 0, "recent": [], "error": f"errors aggregate: {type(e).__name__}: {e}"}
+        # unresolved=None (NOT 0): if the gate import/logic fails, do NOT report
+        # a clean zero — that is exactly the "silently flipped to GREEN" class
+        # the Codex P1 2026-05-04 note guards against. _color turns this YELLOW.
+        return {"unresolved": None, "recent": [], "error": f"errors aggregate: {type(e).__name__}: {e}"}
 
 
 def _violations_recent(dd: Path) -> dict[str, Any]:
@@ -790,13 +796,20 @@ def _color(payload: dict[str, Any]) -> tuple[str, list[str]]:
         reasons.append(f"loop heartbeat {int(age)}s ago")
 
     err = payload.get("errors") or {}
-    n = err.get("unresolved", 0) or 0
-    if n > ERRORS_YELLOW_MAX:
-        bump("RED")
-        reasons.append(f"{n} unresolved errors")
-    elif n > 0:
+    if err.get("error") or err.get("unresolved") is None:
+        # Degraded reader (load/import/logic failure). NEVER silently GREEN —
+        # an unknown count must be visible. YELLOW = "look at this" (Codex P1
+        # 2026-05-04: a fabricated 0 once hid real unresolved criticals).
         bump("YELLOW")
-        reasons.append(f"{n} unresolved error{'s' if n != 1 else ''}")
+        reasons.append("critical-errors check degraded")
+    else:
+        n = err.get("unresolved", 0) or 0
+        if n > ERRORS_YELLOW_MAX:
+            bump("RED")
+            reasons.append(f"{n} unresolved errors")
+        elif n > 0:
+            bump("YELLOW")
+            reasons.append(f"{n} unresolved error{'s' if n != 1 else ''}")
 
     cv = payload.get("contract_violations") or {}
     vn = cv.get("unresolved", 0) or 0
