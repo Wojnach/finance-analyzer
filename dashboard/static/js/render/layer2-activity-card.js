@@ -36,6 +36,28 @@ export function layer2ActivityCard(layer2Payload) {
   title.textContent = "Layer 2 activity (24h)";
   header.append(title);
 
+  // Claude-gate badge: shows when Layer 2 / Claude trading is intentionally
+  // FROZEN (token-saving) vs LIVE. Driven by system_status.layer2.gate.
+  // Tooltip breaks down the three switches (config / gate / metals).
+  const gate = layer2Payload?.gate;
+  if (gate && gate.label && gate.label !== "UNKNOWN") {
+    const frozen = gate.enabled === false;
+    const pill = document.createElement("span");
+    pill.textContent = frozen ? "⏸ FROZEN" : "● LIVE";
+    pill.title =
+      `config.layer2=${gate.config_layer2_enabled} · ` +
+      `gate=${gate.claude_gate_enabled} · metals=${gate.metals_claude_enabled}`;
+    pill.style.fontSize = "0.7rem";
+    pill.style.fontWeight = "700";
+    pill.style.padding = "1px 6px";
+    pill.style.borderRadius = "999px";
+    pill.style.marginLeft = "var(--sp-2)";
+    pill.style.whiteSpace = "nowrap";
+    pill.style.color = frozen ? "var(--yel)" : "var(--grn)";
+    pill.style.border = `1px solid ${frozen ? "var(--yel)" : "var(--grn)"}`;
+    header.append(pill);
+  }
+
   const triggers = layer2Payload?.triggers_24h ?? 0;
   const pct = layer2Payload?.success_pct;
   const headline = document.createElement("span");

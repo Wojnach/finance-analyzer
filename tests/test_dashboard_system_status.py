@@ -612,8 +612,16 @@ class TestSignalAggregate:
 
 
 class TestColor:
-    def test_all_green(self, tmp_path: Path):
+    def test_all_green(self, tmp_path: Path, monkeypatch):
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-30)})
+        # Force the Claude gate ACTIVE so this "nominal" assertion is
+        # deterministic regardless of the repo's real layer2.enabled state
+        # (a frozen gate legitimately appends a reason — see TestColorFrozenReason).
+        import portfolio.claude_gate as cg
+
+        monkeypatch.setattr(cg, "CLAUDE_ENABLED", True, raising=False)
+        monkeypatch.setattr(cg, "_load_config_layer2_enabled", lambda: True, raising=False)
+        _write_metals_loop(tmp_path, "True")
         out = ss.compute(data_dir=tmp_path)
         assert out["overall"] == "GREEN"
         assert out["reasons"] == ["all systems nominal"]
@@ -883,3 +891,108 @@ class TestDashboardSourceIdentityEquivalence:
         ce_hash = hashlib.sha256(ce_payload.encode("utf-8")).hexdigest()
         assert ce_hash == source_hash
 
+
+
+# ---------------------------------------------------------------------------
+# Claude gate (Layer 2 ACTIVE vs FROZEN indicator) — added 2026-06-06
+# ---------------------------------------------------------------------------
+
+
+def _write_metals_loop(dd: Path, value: str | None) -> None:
+    """Write a stub metals_loop.py with (or without) the CLAUDE_ENABLED const."""
+    dd.mkdir(parents=True, exist_ok=True)
+    body = "# stub\nCHECK_INTERVAL = 60\n"
+    if value is not None:
+        body = f"# stub\nCLAUDE_ENABLED = {value}   # comment\nCHECK_INTERVAL = 60\n"
+    (dd / "metals_loop.py").write_text(body, encoding="utf-8")
+
+
+class TestParseMetalsClaudeEnabled:
+    def test_true(self, tmp_path):
+        _write_metals_loop(tmp_path, "True")
+        assert ss._parse_metals_claude_enabled(tmp_path / "metals_loop.py") is True
+
+    def test_false(self, tmp_path):
+        _write_metals_loop(tmp_path, "False")
+        assert ss._parse_metals_claude_enabled(tmp_path / "metals_loop.py") is False
+
+    def test_missing_file(self, tmp_path):
+        assert ss._parse_metals_claude_enabled(tmp_path / "nope.py") is None
+
+    def test_missing_constant(self, tmp_path):
+        _write_metals_loop(tmp_path, None)
+        assert ss._parse_metals_claude_enabled(tmp_path / "metals_loop.py") is None
+
+    def test_ignores_indented_occurrence(self, tmp_path):
+        # An indented (in-function) assignment must NOT match — only the
+        # top-level constant counts.
+        (tmp_path / "metals_loop.py").write_text(
+            "def f():\n    CLAUDE_ENABLED = True\n    return 1\n"
+            "CLAUDE_ENABLED = False\n",
+            encoding="utf-8",
+        )
+        assert ss._parse_metals_claude_enabled(tmp_path / "metals_loop.py") is False
+
+
+class TestClaudeGate:
+    def _patch(self, monkeypatch, gate_enabled, config_enabled):
+        import portfolio.claude_gate as cg
+
+        monkeypatch.setattr(cg, "CLAUDE_ENABLED", gate_enabled, raising=False)
+        monkeypatch.setattr(
+            cg, "_load_config_layer2_enabled", lambda: config_enabled, raising=False
+        )
+
+    def test_frozen_when_all_off(self, tmp_path, monkeypatch):
+        self._patch(monkeypatch, gate_enabled=False, config_enabled=False)
+        _write_metals_loop(tmp_path, "False")
+        out = ss._claude_gate(tmp_path)
+        assert out["enabled"] is False
+        assert out["label"] == "FROZEN"
+        assert out["config_layer2_enabled"] is False
+        assert out["claude_gate_enabled"] is False
+        assert out["metals_claude_enabled"] is False
+
+    def test_frozen_when_any_one_off(self, tmp_path, monkeypatch):
+        # config still on, but the master gate is off -> still FROZEN.
+        self._patch(monkeypatch, gate_enabled=False, config_enabled=True)
+        _write_metals_loop(tmp_path, "True")
+        out = ss._claude_gate(tmp_path)
+        assert out["enabled"] is False
+        assert out["label"] == "FROZEN"
+
+    def test_active_when_all_on(self, tmp_path, monkeypatch):
+        self._patch(monkeypatch, gate_enabled=True, config_enabled=True)
+        _write_metals_loop(tmp_path, "True")
+        out = ss._claude_gate(tmp_path)
+        assert out["enabled"] is True
+        assert out["label"] == "ACTIVE"
+
+    def test_compute_attaches_gate(self, tmp_path, monkeypatch):
+        self._patch(monkeypatch, gate_enabled=False, config_enabled=False)
+        _write_metals_loop(tmp_path, "False")
+        payload = ss.compute(tmp_path)
+        gate = payload["layer2"]["gate"]
+        assert gate["label"] == "FROZEN"
+
+
+class TestColorFrozenReason:
+    def _healthy(self, gate_enabled):
+        return {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 0},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {"gate": {"enabled": gate_enabled}},
+        }
+
+    def test_frozen_adds_reason_without_red(self):
+        severity, reasons = ss._color(self._healthy(False))
+        # Intentional freeze must NOT escalate the hero to RED/YELLOW.
+        assert severity == "GREEN"
+        assert any("frozen" in r.lower() for r in reasons)
+
+    def test_active_no_frozen_reason(self):
+        severity, reasons = ss._color(self._healthy(True))
+        assert severity == "GREEN"
+        assert not any("frozen" in r.lower() for r in reasons)

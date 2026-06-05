@@ -72,6 +72,13 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
         "signal_aggregate": _signal_aggregate(dd),
         "pnl_footer": _pnl_footer(dd),
     }
+    # 2026-06-06: attach Claude-gate state into the layer2 section so the home
+    # page shows when Layer 2 / Claude trading is intentionally FROZEN
+    # (token-saving) instead of looking like a silent outage. Nested under
+    # layer2 (not a top-level key) so the existing layer2-activity-card renders
+    # the badge with no home.js rewiring. See _claude_gate + SESSION_PROGRESS.
+    if isinstance(out.get("layer2"), dict):
+        out["layer2"]["gate"] = _claude_gate(dd)
     overall, reasons = _color(out)
     out["overall"] = overall
     out["reasons"] = reasons
@@ -81,6 +88,68 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------
+
+
+def _claude_gate(dd: Path) -> dict[str, Any]:
+    """Layer 2 / Claude invocation-gate state (ACTIVE vs FROZEN).
+
+    Surfaces the three independent kill switches so the home page shows when
+    Claude trading is *intentionally* frozen (token-saving) rather than
+    looking like a silent outage:
+      - config.json layer2.enabled            — runtime gate for the
+        crypto/MSTR Layer 2 agent + every portfolio.claude_gate caller
+      - portfolio.claude_gate.CLAUDE_ENABLED  — master module switch
+      - data/metals_loop.py CLAUDE_ENABLED    — metals loop claude_proc spawn
+
+    ``enabled`` is False if ANY switch is off (label FROZEN), True only when
+    none are off (label ACTIVE), and None/UNKNOWN if nothing could be read.
+    See docs/SESSION_PROGRESS.md 2026-06-06 (token-conservation freeze).
+    """
+    out: dict[str, Any] = {
+        "config_layer2_enabled": None,
+        "claude_gate_enabled": None,
+        "metals_claude_enabled": None,
+        "enabled": None,
+        "label": "UNKNOWN",
+    }
+    try:
+        import portfolio.claude_gate as _cg
+
+        out["claude_gate_enabled"] = bool(_cg.CLAUDE_ENABLED)
+        try:
+            out["config_layer2_enabled"] = bool(_cg._load_config_layer2_enabled())
+        except Exception:
+            pass
+    except Exception as e:  # pragma: no cover - import guard
+        out["error"] = f"claude_gate: {type(e).__name__}: {e}"
+
+    out["metals_claude_enabled"] = _parse_metals_claude_enabled(dd / "metals_loop.py")
+
+    flags = (
+        out["config_layer2_enabled"],
+        out["claude_gate_enabled"],
+        out["metals_claude_enabled"],
+    )
+    if any(f is not None for f in flags):
+        any_off = any(f is False for f in flags)
+        out["enabled"] = not any_off
+        out["label"] = "ACTIVE" if out["enabled"] else "FROZEN"
+    return out
+
+
+def _parse_metals_claude_enabled(path: Path) -> bool | None:
+    """Read the top-level ``CLAUDE_ENABLED`` constant from metals_loop.py
+    WITHOUT importing it (the module pulls in heavy LLM deps + import-time
+    side effects). Returns None if the file/constant can't be read.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    m = re.search(r"(?m)^CLAUDE_ENABLED\s*=\s*(True|False)\b", text)
+    if not m:
+        return None
+    return m.group(1) == "True"
 
 
 def _heartbeat(dd: Path) -> dict[str, Any]:
@@ -756,6 +825,15 @@ def _color(payload: dict[str, Any]) -> tuple[str, list[str]]:
         elif l2pct < LAYER2_GREEN_PCT:
             bump("YELLOW")
             reasons.append(f"Layer 2 success {l2pct}%")
+
+    gate = (payload.get("layer2") or {}).get("gate") or {}
+    if gate.get("enabled") is False:
+        # Intentional token-saving freeze — surface it on the hero but do NOT
+        # bump severity: the system is healthy, just not spending Claude tokens.
+        # ASCII only: this string is logged/printed on a cp1252 Windows console;
+        # a non-ASCII glyph here raises UnicodeEncodeError. The browser pill
+        # (layer2-activity-card.js) carries the visual icon instead.
+        reasons.append("Layer 2 frozen (token-saving)")
 
     if not reasons:
         reasons = ["all systems nominal"]
