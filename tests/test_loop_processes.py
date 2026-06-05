@@ -108,6 +108,43 @@ def test_scan_true_duplicate_of_shim_child_pairs(monkeypatch):
     assert metals["duplicate"] is True
 
 
+def test_scan_matches_powershell_hw_monitor(monkeypatch):
+    """hw monitoring runs as a PowerShell script (read_temps.ps1) under
+    wscript/cmd, not a python module. The pattern must match the .ps1
+    path so the tile shows it green when PF-HWMonitor is live."""
+    procs = [
+        _fake_proc(
+            777,
+            ["powershell.exe", "-File", "Q:\\finance-analyzer\\data\\read_temps.ps1"],
+        ),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    hw = next(L for L in payload["loops"] if L["name"] == "hw_monitor")
+    assert hw["count"] == 1
+    assert hw["duplicate"] is False
+
+
+def test_scan_matches_module_launched_dashboard(monkeypatch):
+    """Dashboard launches via `-m dashboard.app`; the pattern must match
+    the module token, not the legacy file path."""
+    procs = [
+        _fake_proc(888, ["C:\\py.exe", "-m", "dashboard.app"]),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    dash = next(L for L in payload["loops"] if L["name"] == "dashboard")
+    assert dash["count"] == 1
+
+
+def test_telegram_poller_not_process_checked(monkeypatch):
+    """telegram_poller is a daemon thread inside main.py, never a
+    standalone process — it must not appear as a tile row."""
+    _patch_processes(monkeypatch, [])
+    payload = loop_processes.scan()
+    assert "telegram_poller" not in [L["name"] for L in payload["loops"]]
+
+
 def test_scan_path_separator_normalisation(monkeypatch):
     """KNOWN_LOOPS uses forward slashes; cmdline may contain either."""
     procs = [
@@ -124,8 +161,8 @@ def test_scan_omits_own_pid(monkeypatch):
     import os
     own = os.getpid()
     procs = [
-        _fake_proc(own, ["py", "dashboard/app.py"]),  # this is us
-        _fake_proc(999, ["py", "dashboard/app.py"]),  # the real dashboard
+        _fake_proc(own, ["py", "-m", "dashboard.app"]),  # this is us
+        _fake_proc(999, ["py", "-m", "dashboard.app"]),  # the real dashboard
     ]
     _patch_processes(monkeypatch, procs)
     payload = loop_processes.scan()

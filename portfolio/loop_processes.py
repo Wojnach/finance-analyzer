@@ -59,11 +59,22 @@ KNOWN_LOOPS: dict[str, str] = {
     "mstr":           "portfolio.mstr_loop",
     "golddigger":     "portfolio.golddigger",
     "silver_monitor": "data/silver_monitor.py",
-    "dashboard":      "dashboard/app.py",
-    "hw_monitor":     "hw_monitor.py",
+    # dashboard launches via module form (`-m dashboard.app`), not the
+    # file path — match the module token (2026-06-06: the old
+    # "dashboard/app.py" pattern never matched, so the tile showed the
+    # live dashboard as grey/count=0 while it was serving the page).
+    "dashboard":      "dashboard.app",
+    # hw monitoring is a PowerShell script (PF-HWMonitor → read_temps.ps1),
+    # not a python module — the old "hw_monitor.py" never existed as a
+    # process (2026-06-06).
+    "hw_monitor":     "data/read_temps.ps1",
     "fix_agent":      "scripts/fix_agent_dispatcher.py",
-    "telegram_poller": "telegram_poller",
     "log_rotation":   "portfolio.log_rotation",
+    # NOTE: telegram_poller is NOT process-checked — it runs as a daemon
+    # thread inside the main loop (portfolio/main.py → TelegramPoller),
+    # never a standalone process, so it would render a permanent false
+    # grey row. Its liveness is implied by `main` being green. Removed
+    # 2026-06-06.
 }
 
 
