@@ -290,6 +290,30 @@ class TestAtomicAppendJsonl:
         assert len(lines) == 5
         assert [json.loads(line)["i"] for line in lines] == [0, 1, 2, 3, 4]
 
+    def test_self_heals_missing_trailing_newline(self, tmp_path):
+        # A prior non-canonical writer (killed process / ad-hoc agent `echo >>`
+        # — CLAUDE.md tells agents to "append a resolution line") left the file
+        # WITHOUT a trailing newline. The next append must NOT concatenate two
+        # JSON objects onto one physical line (the legacy critical_errors.jsonl
+        # 127/212 corruption).
+        path = tmp_path / "log.jsonl"
+        path.write_text('{"event": "dangling"}', encoding="utf-8")  # no newline
+        atomic_append_jsonl(path, {"event": "next"})
+        raw = path.read_text(encoding="utf-8")
+        lines = raw.strip().splitlines()
+        assert len(lines) == 2, f"expected 2 separate lines, got: {raw!r}"
+        assert json.loads(lines[0]) == {"event": "dangling"}
+        assert json.loads(lines[1]) == {"event": "next"}
+
+    def test_no_extra_newline_when_already_terminated(self, tmp_path):
+        # File already ends with a newline -> exactly one separator, no blank
+        # line inserted (self-heal must be a no-op on well-formed files).
+        path = tmp_path / "log.jsonl"
+        path.write_text('{"a": 1}\n', encoding="utf-8")
+        atomic_append_jsonl(path, {"b": 2})
+        raw = path.read_text(encoding="utf-8")
+        assert raw == '{"a": 1}\n{"b": 2}\n', repr(raw)
+
 
 class TestAtomicWriteJsonFsync:
     """H34: Verify fsync is called before os.replace."""

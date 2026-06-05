@@ -327,7 +327,23 @@ def atomic_append_jsonl(path, entry):
     path = Path(path)
     data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
     with jsonl_sidecar_lock(path):
-        with open(path, "ab") as f:
+        # Open read+append so we can inspect the final byte. O_APPEND still
+        # forces every write() to EOF, so the seek below is read-only and does
+        # not change where `data` lands.
+        with open(path, "a+b") as f:
+            # 2026-06-06: self-heal a dangling final line. If a prior writer
+            # left the file without a trailing newline — a process killed
+            # mid-line, or an ad-hoc agent `echo >>` / one-liner that bypassed
+            # this primitive (CLAUDE.md instructs agents to "append a
+            # resolution line" to critical_errors.jsonl) — a plain append would
+            # butt two JSON objects onto one physical line (the legacy
+            # critical_errors.jsonl 127/212 corruption: `...}{"ts":...}`).
+            # Under the lock, guarantee a '\n' terminator before appending.
+            f.seek(0, os.SEEK_END)
+            if f.tell() > 0:
+                f.seek(-1, os.SEEK_END)
+                if f.read(1) != b"\n":
+                    f.write(b"\n")  # O_APPEND -> lands at EOF
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
