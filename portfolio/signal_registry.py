@@ -433,6 +433,14 @@ def _register_defaults():
                       "portfolio.signals.crypto_overnight_sentiment",
                       "compute_crypto_overnight_sentiment_signal",
                       requires_context=True, max_confidence=0.7)
+    # Gold/Platinum ratio risk — cross-asset tail risk/geopolitical fear signal
+    # 2026-06-05: Huang & Kilic (2019), JFE 132(3), 50-75. GP = log(gold/platinum).
+    # One std dev GP increase predicts 6.4% annual excess stock returns.
+    # Inverted for metals (high GP = fear priced in = SELL).
+    register_enhanced("gold_platinum_ratio_risk",
+                      "portfolio.signals.gold_platinum_ratio_risk",
+                      "compute_gold_platinum_ratio_risk_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

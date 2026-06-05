@@ -294,6 +294,10 @@ DISABLED_SIGNALS = {
                         # 161: positive crypto overnight = lower next-day VIX = risk-on.
                         # Score 7.80/10. Cross-asset. Inverted for safe-haven tickers.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "gold_platinum_ratio_risk",  # 2026-06-05: NEW. Log(gold/platinum) cross-asset tail risk
+                        # signal. Huang & Kilic (2019) JFE 132(3). 6.4% annual predictive
+                        # power. Score 8.30/10. All tickers. Inverted for metals.
+                        # Shadow mode — accumulate accuracy data before enabling.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
@@ -481,4 +485,5 @@ SIGNAL_NAMES = [
     "eth_btc_ratio_roc_zscore",
     "gold_btc_vol_spillover",
     "crypto_overnight_sentiment",
+    "gold_platinum_ratio_risk",
 ]
