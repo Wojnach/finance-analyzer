@@ -1,4 +1,11 @@
 @echo off
+REM ##############################################################
+REM  DISABLED 2026-06-05 — PF-SignalResearch task set /DISABLE to cut Claude
+REM  token usage (user pivot). This .bat calls `claude -p` DIRECTLY (opus,
+REM  full-context) and bypasses claude_gate — the ONLY guard is the disabled
+REM  Task Scheduler entry. DO NOT re-enable (schtasks /Change /ENABLE or
+REM  re-running install-signal-research-task.ps1) without user sign-off.
+REM ##############################################################
 REM ============================================================
 REM  PF-SignalResearch — Daily AI signal discovery & implementation
 REM  Scheduled: 18:30 CET daily via Task Scheduler

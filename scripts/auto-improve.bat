@@ -1,4 +1,11 @@
 @echo off
+REM ##############################################################
+REM  DISABLED 2026-06-05 — PF-AutoImprove task set /DISABLE to cut Claude
+REM  token usage (user pivot). This .bat calls `claude -p` DIRECTLY (opus,
+REM  full-context) and bypasses claude_gate — the ONLY guard is the disabled
+REM  Task Scheduler entry. DO NOT re-enable (schtasks /Change /ENABLE) without
+REM  user sign-off.
+REM ##############################################################
 REM ============================================================
 REM  PF-AutoImprove — Daily autonomous improvement session
 REM  Scheduled: 09:00 CET daily via Task Scheduler

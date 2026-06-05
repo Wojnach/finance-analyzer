@@ -882,6 +882,15 @@ def run(force_report=False, active_symbols=None):
         # outside agent window) are NOT wrapped — they don't block.
         from portfolio.health import heartbeat_keepalive
 
+        # 2026-06-05: config.layer2.enabled set to false to cut Claude token
+        # usage. TEMPORARY token-conservation freeze — re-enable PLANNED end of
+        # week of 2026-06-05 after the user checks remaining weekly Claude
+        # usage; not a permanent kill. When false, the elif branches below skip
+        # invoke_agent entirely and Layer 2 trade decisions stop (Layer 3
+        # autonomous fallback gives recommendations only). Re-enabling means
+        # editing config.json layer2.enabled=true AND flipping the two code
+        # switches: portfolio/claude_gate.py CLAUDE_ENABLED and
+        # data/metals_loop.py CLAUDE_ENABLED. Do NOT re-enable by accident.
         layer2_cfg = config.get("layer2", {})
         budget_cfg = config.get("claude_budget", {}) or {}
         if os.environ.get("NO_TELEGRAM"):

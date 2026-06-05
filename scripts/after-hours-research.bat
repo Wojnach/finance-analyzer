@@ -1,4 +1,11 @@
 @echo off
+REM ##############################################################
+REM  DISABLED 2026-06-05 — PF-AfterHoursResearch task set /DISABLE to cut
+REM  Claude token usage (user pivot). This .bat calls `claude -p` DIRECTLY
+REM  (opus, full-context) and bypasses claude_gate — the ONLY guard is the
+REM  disabled Task Scheduler entry. DO NOT re-enable (schtasks /Change
+REM  /ENABLE or re-running install-research-task.ps1) without user sign-off.
+REM ##############################################################
 REM ============================================================
 REM  PF-AfterHoursResearch — Daily research agent after market close
 REM  Scheduled: 22:30 CET daily via Task Scheduler

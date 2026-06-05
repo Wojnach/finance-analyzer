@@ -43,7 +43,23 @@ import threading
 # Master kill switch.  Set to False to block ALL Claude Code invocations
 # across the entire codebase — no exceptions.
 # ---------------------------------------------------------------------------
-CLAUDE_ENABLED = True
+# #########################################################################
+# ⚠ DO NOT FLIP BACK TO True WITHOUT EXPLICIT USER SIGN-OFF. ⚠
+# 2026-06-05: master kill flipped to False to cut Claude token usage.
+# TEMPORARY token-conservation freeze — re-enable is PLANNED for the end of
+# the week of 2026-06-05, once the user checks how much Claude usage is left
+# for the week. Not a permanent kill. Blocks ALL gate callers — bigbet,
+# iskbets, multi_agent_layer2, claude_fundamental.
+#
+# Layer 2 trade agent (agent_invocation.py) BYPASSES this gate, so it is
+# ALSO disabled via config.layer2.enabled=false (the runtime Gate 2 read by
+# _load_config_layer2_enabled + main.py:885/985). Both must be re-enabled
+# together to restore Claude trading — flipping only one is a silent half-on
+# state. The metals loop has its OWN switch (data/metals_loop.py CLAUDE_ENABLED).
+# This was previously re-enabled "by user request" in past sessions; if you
+# are re-enabling, confirm the user actually asked THIS session, not a stale note.
+# #########################################################################
+CLAUDE_ENABLED = False
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"

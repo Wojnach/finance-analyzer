@@ -386,7 +386,16 @@ except ImportError:
         return 1.0, []
 
 # --- CONFIG ---
-CLAUDE_ENABLED = True         # 2026-04-15: re-enabled metals Layer 2 (user request)
+# ⚠ DO NOT FLIP BACK TO True WITHOUT EXPLICIT USER SIGN-OFF (token-cost guard). ⚠
+# 2026-06-05: disabled to cut Claude token usage. TEMPORARY token-conservation
+# freeze — re-enable PLANNED end of week of 2026-06-05 once the user checks
+# remaining weekly Claude usage. Not a permanent kill.
+# Gates the claude_proc subprocess at lines ~6551 / ~6673 — metals loop now
+# falls back to local-LLM / autonomous decisions only, zero Claude tokens.
+# History: this was flipped to True "2026-04-15: re-enabled metals Layer 2
+# (user request)" — that is exactly the kind of stale note that accidentally
+# turns spend back on. If re-enabling, confirm the user asked THIS session.
+CLAUDE_ENABLED = False
 CHECK_INTERVAL = 60           # target seconds between checks
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)

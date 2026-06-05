@@ -1,4 +1,12 @@
 @echo off
+REM ##############################################################
+REM  DISABLED 2026-06-05 — PF-AdversarialReview task set /DISABLE to cut
+REM  Claude token usage (user pivot to reduce spend). This .bat calls
+REM  `claude -p` DIRECTLY and bypasses claude_gate, so the ONLY guard is the
+REM  disabled Task Scheduler entry. DO NOT re-enable (schtasks /Change
+REM  /ENABLE, or re-running install-adversarial-review-task.ps1) without
+REM  explicit user sign-off — this is one of the biggest single-session burns.
+REM ##############################################################
 REM PF-AdversarialReview — Daily adversarial review (Claude Code subagents only)
 REM Runs claude code CLI with the full review prompt.
 REM Output: data\adversarial_review_out.txt

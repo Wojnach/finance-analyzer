@@ -1,5 +1,28 @@
 # Session Progress
 
+## 2026-06-05 After-Hours Research Session (22:30 CEST)
+
+### Shipped
+- **fix(auth): 401 API error detection** — Layer 2 had 10 consecutive failures (11:25-15:56 UTC) because "Failed to authenticate. API Error: 401 Invalid authentication credentials" wasn't in `_AUTH_ERROR_MARKERS`. Added 2 new markers. Auth cooldown (30min) now activates correctly. (49d1012a)
+- **feat(accuracy): directional_skew metric** — New field in accuracy stats output. Flags signals like crypto_evrp (99.1% recent but 100% SELL bias = fake edge). (8df43907)
+- **143 critical errors resolved** — All unresolved accuracy_degradation entries from Jun 2-4 marked as acknowledged (regime-dependent, auto-gated).
+
+### Research Findings
+- **Market**: NFP 172K (2x exp), Nasdaq -1.1%, BTC -4.9% ($60K), ETH -10.2%, Gold 2026 low $4,366. F&G=17 extreme fear. Strategy sold 32 BTC. FOMC Jun 16-17 (98.7% hold).
+- **Signal audit**: Regime detectors stable (amihud 67.8%, adx 63.2%). MR signals failing (rsi 44.6%, bb 41.8%). econ_calendar 27.1% is transient (regime gate lag from Jun 2 commit).
+- **Quant research**: Adaptive alpha weighting (PPO, arxiv 2509.01393) is P1 priority. Berry Phase Rate regime detector (arxiv 2605.17117) is future candidate.
+
+### Position Status
+- XAG 26.92oz @ $67.92, stop $67.50 (0.62% buffer). RSI 26 extreme oversold. HOLD.
+- Bold: DORMANT (all cash).
+- BTC: Watch >$65K sustained for entry. SOPR 0.978 capitulation zone.
+
+### Next Session Priorities
+1. Monitor XAG $67.50 stop — weekend liquidity risk
+2. IC-based signal weighting implementation (P1 from quant_research_priorities.md)
+3. Investigate crypto_macro data source (22.4% recent accuracy — possibly stale DeFi TVL data)
+4. FOMC pre-positioning review (Jun 9-10, T-7 days)
+
 ## 2026-06-02 After-Hours Research Session (22:30 CEST)
 
 ### Shipped
@@ -6596,3 +6619,24 @@ files) and its lone finding (crypto_macro OPTIONS_TTL NameError) is REFUTED.
 3. Cross-process lock on money-state read-modify-write + grid_fisher account filter.
 4. Verify-then-fix: drawdown breaker enforcement; kelly_metals live-sizing wiring.
 5. Dedicated signals-modules re-review.
+
+## 2026-06-06 — Claude token-usage freeze (TEMPORARY)
+Goal: minimize Claude token usage; re-enable end of week of 2026-06-05 once
+remaining weekly usage is known. NOT a permanent kill. Nothing deleted — all
+reversible.
+
+Disabled (all reversible):
+- schtasks /DISABLE: PF-AdversarialReview, PF-AfterHoursResearch,
+  PF-SignalResearch, PF-AutoImprove (these .bat call `claude -p` directly,
+  bypass claude_gate — task-disable is their only guard).
+- config.json layer2.enabled = false (stops Layer 2 trade agent +
+  bigbet/iskbets/multi_agent gate callers; Layer 3 autonomous = recs only).
+- portfolio/claude_gate.py CLAUDE_ENABLED = False (master gate kill).
+- data/metals_loop.py CLAUDE_ENABLED = False (metals claude_proc; picked up
+  next PF-MetalsLoop start).
+
+RE-ENABLE recipe (all together): config.json layer2.enabled=true +
+claude_gate.py CLAUDE_ENABLED=True + metals_loop.py CLAUDE_ENABLED=True
+(restart PF-MetalsLoop) + `schtasks /Change /TN <task> /ENABLE` for the 4 tasks.
+Local-LLM tasks (Ministral/Qwen3/Chronos/tinylora) + crypto/oil/mstr loops
+were already zero-Claude — untouched.
