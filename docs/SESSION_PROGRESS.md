@@ -1,5 +1,20 @@
 # Session Progress
 
+## 2026-06-06 Dashboard Loop-Tile Fixes (00:30 CEST)
+
+### Shipped
+- **fix(dashboard): venv shim+child collapse in dup-detection** — `portfolio/loop_processes.py` substring-matched cmdline, but on Windows the `.venv\Scripts\python.exe` shim re-execs the base interpreter, so every loop's script appeared in TWO procs (shim parent + Python3xx child) with identical argv → every loop false-flagged as duplicate. Now drops any matched proc that is the parent (ppid) of another match; genuine dupes (two independent pairs) still fire. (1a866602)
+- **fix(dashboard): correct 3 mis-modeled loop patterns** — tile showed live services grey/count=0: `dashboard` (launches `-m dashboard.app`, pattern wanted `dashboard/app.py`) → repointed to `dashboard.app`; `hw_monitor` (PF-HWMonitor runs `data/read_temps.ps1` PowerShell, not a nonexistent `hw_monitor.py`) → repointed; `telegram_poller` (daemon thread inside main.py, never a standalone proc) → removed (liveness implied by `main`). (1aca504b)
+- Tests: 13/13 pass in `tests/test_loop_processes.py` (+5 new: shim/child collapse, true-dupe-of-pairs, powershell hw_monitor, module-launched dashboard, telegram_poller-not-listed).
+
+### Verified live (PF-Dashboard restarted twice)
+- `any_duplicate: false`. All 6 real loops (main/metals/crypto/oil/mstr/golddigger) count=1 green.
+- dashboard + hw_monitor now green (were false grey). dashboard re-detected at new PID across restart → stable.
+- silver_monitor/fix_agent/log_rotation count=0 grey = honest (market-hours / transient-scheduled).
+
+### Ops note
+- PF-Dashboard restart from WSL: `taskkill /PID <shim> /PID <child> /F` then `schtasks /run /tn PF-Dashboard` via cmd.exe (both worked this session — Q: was mapped in the cmd context).
+
 ## 2026-06-05 After-Hours Research Session (22:30 CEST)
 
 ### Shipped
