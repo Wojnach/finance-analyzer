@@ -21,7 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 PROPHECY_DIR = DATA_DIR / "prophecy_runs"
 
-CONFIG_FILE = PROPHECY_DIR / "config.json"
+# NOTE: named prophecy_config.json (NOT config.json) — the repo .gitignore has a
+# global `config.json` rule guarding the API-key secret symlink; a file literally
+# named config.json anywhere would be silently untracked.
+CONFIG_FILE = PROPHECY_DIR / "prophecy_config.json"
 # Freeze sentinel: if present, the daily .bat exits 0 before any Claude call
 # (premortem #3 — this path bypasses claude_gate, so the sentinel is its guard).
 FROZEN_SENTINEL = PROPHECY_DIR / "SYSTEM_DISABLED"
