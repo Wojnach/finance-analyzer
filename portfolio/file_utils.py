@@ -401,13 +401,12 @@ def last_jsonl_entry(path, field=None):
         line = line.strip()
         if not line:
             continue
-        try:
-            entry = json.loads(line)
+        objs = _decode_jsonl_line(line)
+        if objs:
+            entry = objs[-1]
             if field is not None:
-                return entry.get(field)
+                return entry.get(field) if isinstance(entry, dict) else None
             return entry
-        except (json.JSONDecodeError, AttributeError):
-            continue
     return None
 
 

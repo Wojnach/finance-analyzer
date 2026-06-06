@@ -11,6 +11,7 @@ from portfolio.file_utils import (
     atomic_write_json,
     atomic_write_text,
     count_jsonl_lines,
+    last_jsonl_entry,
     load_json,
     load_jsonl,
     require_json,
@@ -497,3 +498,45 @@ class TestSymlinkSafeWrites:
         link.symlink_to(target)
         resolved = _resolve_write_path(link)
         assert resolved == target
+
+
+class TestLastJsonlEntry:
+    def test_normal_entry(self, tmp_path):
+        p = tmp_path / "test.jsonl"
+        p.write_text('{"a":1}\n{"a":2}\n{"a":3}\n')
+        assert last_jsonl_entry(p) == {"a": 3}
+
+    def test_missing_file(self, tmp_path):
+        assert last_jsonl_entry(tmp_path / "nope.jsonl") is None
+
+    def test_empty_file(self, tmp_path):
+        p = tmp_path / "empty.jsonl"
+        p.write_text("")
+        assert last_jsonl_entry(p) is None
+
+    def test_field_extraction(self, tmp_path):
+        p = tmp_path / "test.jsonl"
+        p.write_text('{"ts":"old","v":1}\n{"ts":"new","v":2}\n')
+        assert last_jsonl_entry(p, field="ts") == "new"
+
+    def test_concatenated_objects_recovery(self, tmp_path):
+        """Recover from legacy append-race corruption: two JSON objects on one line."""
+        p = tmp_path / "concat.jsonl"
+        p.write_text('{"a":1}\n{"old":true}{"latest":true}\n')
+        result = last_jsonl_entry(p)
+        assert result == {"latest": True}
+
+    def test_concatenated_objects_field(self, tmp_path):
+        p = tmp_path / "concat.jsonl"
+        p.write_text('{"a":1}\n{"ts":"old"}{"ts":"new"}\n')
+        assert last_jsonl_entry(p, field="ts") == "new"
+
+    def test_garbage_line_skipped(self, tmp_path):
+        p = tmp_path / "garbage.jsonl"
+        p.write_text('{"good":1}\nnot json at all\n')
+        assert last_jsonl_entry(p) == {"good": 1}
+
+    def test_all_garbage(self, tmp_path):
+        p = tmp_path / "all_garbage.jsonl"
+        p.write_text("not json\nalso not json\n")
+        assert last_jsonl_entry(p) is None
