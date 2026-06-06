@@ -6655,3 +6655,56 @@ claude_gate.py CLAUDE_ENABLED=True + metals_loop.py CLAUDE_ENABLED=True
 (restart PF-MetalsLoop) + `schtasks /Change /TN <task> /ENABLE` for the 4 tasks.
 Local-LLM tasks (Ministral/Qwen3/Chronos/tinylora) + crypto/oil/mstr loops
 were already zero-Claude — untouched.
+
+## 2026-06-06 — Token freeze + dashboard gate indicator + crit-errors hardening + adversarial review
+Session theme: cut Claude token usage to minimum (temporary, re-enable end of
+week after quota check), then surface/verify it on the dashboard and harden
+adjacent infra. 5 commits, all pushed to origin/main, all tested.
+
+### Shipped (commits)
+- eabc8a90 chore(cost): TEMPORARY token freeze — see prior 2026-06-06 entry above
+  for the full disable inventory + re-enable recipe. config.layer2.enabled=false
+  (symlink, not committed) + claude_gate.CLAUDE_ENABLED=False +
+  metals_loop.CLAUDE_ENABLED=False + 4 schtasks /DISABLE (PF-AdversarialReview,
+  PF-AfterHoursResearch, PF-SignalResearch, PF-AutoImprove). DO-NOT-REENABLE
+  banners on every switch.
+- 931f5407 feat(dashboard): Layer 2 / Claude gate ACTIVE-vs-FROZEN indicator.
+  system_status.compute() attaches layer2.gate (reads the 3 switches; metals via
+  regex, not import). _color appends ASCII "Layer 2 frozen (token-saving)" (no
+  severity bump). Pill in layer2-activity-card.js (LIVE/FROZEN).
+- ff85a975 fix(dashboard): _errors_unresolved now reuses
+  scripts.check_critical_errors.find_unresolved (7d window + auto-resolve-stale)
+  as single source of truth — fixes hero RED (4 stale May avanza alerts) while
+  CLI gate said RC0.
+- 9fecfa8b fix(io): atomic_append_jsonl self-heals a dangling final line (a+b,
+  ensure trailing \n under the lock) — root cause of critical_errors.jsonl
+  127/212 `}{` concatenation. Also repaired the 2 legacy torn lines in place
+  (lock-protected rewrite, 986 objs from 984, 0 lost).
+- a4a1a250 fix(dashboard): _errors_unresolved returns unresolved=None (not 0) on
+  reader failure; _color shows YELLOW "critical-errors check degraded". Closes a
+  silent-GREEN regression found in adversarial review.
+
+### Non-git state changes
+- config.json layer2.enabled=false (external symlink).
+- data/critical_errors.jsonl (gitignored): 4 resolution rows for the stale
+  avanza_account_mismatch alerts (2026-05-21..25) + 2 legacy torn lines repaired.
+
+### Adversarial review (3 fresh agents over the diff)
+- file_utils self-heal: clean. JS pill / freeze switches / main.py: clean.
+- 1 real P2 found + fixed (the a4a1a250 silent-GREEN).
+- 3 .bat PowerShell-quoting "bugs" = FALSE POSITIVE. Verified empirically via
+  cmd.exe: TS_* are ISO 'o' (no spaces) and -Command sits in cmd "..."; even a
+  spaced value writes valid JSON rc=0. No change made.
+
+### Current state
+PF-DataLoop running (signals + Layer 3 autonomous only, ZERO Claude tokens).
+Dashboard hero GREEN, layer2 pill = FROZEN. Metals loop not running (picks up
+CLAUDE_ENABLED=False at next start).
+
+### Open / next
+- RE-ENABLE (end of week, after the user checks remaining Claude quota): flip all
+  3 switches together + schtasks /Change /ENABLE the 4 tasks. Recipe in the
+  earlier 2026-06-06 freeze entry + memory project_claude_token_freeze_20260606.
+- 3 cosmetic/known P3s (no action taken): _claude_gate reads host-global config
+  (non-hermetic tests — test_all_green pinned); _parse_metals_claude_enabled uses
+  first regex match; file_utils atomic_append_jsonl docstring typo "Unxfails".
