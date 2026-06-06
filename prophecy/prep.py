@@ -237,36 +237,57 @@ def build_context(date: str | None = None, *, throttle: bool = True) -> dict:
 
     bundle: dict[str, dict] = {}
     for inst in instruments:
+        # Per-instrument isolation (review P2): one instrument's unexpected
+        # failure must not abort the whole sweep — flag it needs_work and continue.
         pb = strategies.playbook_for(inst)
-        price, source = _fetch_price(inst)
-        if throttle:
-            time.sleep(_PRICE_THROTTLE_S)
+        try:
+            price, source = _fetch_price(inst)
+            if throttle:
+                time.sleep(_PRICE_THROTTLE_S)
 
-        stored = _ticker_signals(agent_summary, inst)
-        accuracy = _ticker_accuracy(accuracy_cache, inst)
-        beliefs = _ticker_beliefs(belief_ctx, inst)
-        research = _ticker_research(briefing, deep_dive, inst)
-        tokens = _capability_tokens(inst, price, stored, agent_summary, accuracy, beliefs, research)
-        coverage = _seed_coverage(inst, price, tokens)
+            stored = _ticker_signals(agent_summary, inst)
+            accuracy = _ticker_accuracy(accuracy_cache, inst)
+            beliefs = _ticker_beliefs(belief_ctx, inst)
+            research = _ticker_research(briefing, deep_dive, inst)
+            tokens = _capability_tokens(inst, price, stored, agent_summary, accuracy, beliefs, research)
+            coverage = _seed_coverage(inst, price, tokens)
 
-        bundle[inst] = {
-            "instrument": inst,
-            "asset_class": pb.asset_class,
-            "strategy": pb.strategy_id,
-            "live_price": price,
-            "price_source": source,
-            "regime": stored.get("regime"),
-            "playbook": _playbook_dict(pb),
-            "stored_signals": stored,
-            "accuracy": accuracy,
-            "macro_beliefs": beliefs,
-            "recent_research": research,
-            "coverage_seed": coverage,
-        }
-        logger.info(
-            "prep %-12s px=%-12s src=%-14s suff=%-12s needs_work=%s",
-            inst, price, source, coverage["data_sufficiency"], coverage["needs_work"],
-        )
+            bundle[inst] = {
+                "instrument": inst,
+                "asset_class": pb.asset_class,
+                "strategy": pb.strategy_id,
+                "live_price": price,
+                "price_source": source,
+                "regime": stored.get("regime"),
+                "playbook": _playbook_dict(pb),
+                "stored_signals": stored,
+                "accuracy": accuracy,
+                "macro_beliefs": beliefs,
+                "recent_research": research,
+                "coverage_seed": coverage,
+            }
+            logger.info(
+                "prep %-12s px=%-12s src=%-14s suff=%-12s needs_work=%s",
+                inst, price, source, coverage["data_sufficiency"], coverage["needs_work"],
+            )
+        except Exception as exc:
+            logger.warning("prep failed for %s: %r — flagging needs_work, continuing", inst, exc)
+            bundle[inst] = {
+                "instrument": inst,
+                "asset_class": getattr(pb, "asset_class", None),
+                "strategy": getattr(pb, "strategy_id", None),
+                "live_price": None,
+                "price_source": "prep_error",
+                "regime": None,
+                "playbook": _playbook_dict(pb) if pb else {},
+                "stored_signals": {},
+                "accuracy": {},
+                "macro_beliefs": [],
+                "recent_research": {},
+                "coverage_seed": build_coverage(
+                    data_sufficiency="insufficient", has_proper_equation=False,
+                    missing_inputs=["prep_error"], note=f"prep exception: {exc!r}"[:200]),
+            }
 
     out = {
         "date": date,

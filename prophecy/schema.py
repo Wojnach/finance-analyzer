@@ -121,10 +121,13 @@ def _validate_horizon(name: str, raw: dict, errors: list[str]) -> dict | None:
         errors.append(f"{name}: bad direction {raw.get('direction')!r}")
         return None
 
-    try:
-        target = float(raw.get("target"))
-    except (TypeError, ValueError):
-        errors.append(f"{name}: target not numeric ({raw.get('target')!r})")
+    # Route through _safe_float (rejects NaN/inf) — a raw float("inf") would pass
+    # the `> 0` check, survive round(), then json.dump(allow_nan=True) would emit a
+    # non-standard `Infinity` token that breaks the browser's r.json() and any
+    # strict reader (review P1).
+    target = _safe_float(raw.get("target"))
+    if target is None:
+        errors.append(f"{name}: target not numeric/finite ({raw.get('target')!r})")
         return None
     if not (target > 0):
         errors.append(f"{name}: target <= 0 ({target})")

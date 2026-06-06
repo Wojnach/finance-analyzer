@@ -50,8 +50,10 @@ REM --- step 1: prep (zero tokens) ---
 
 REM --- step 2: claude run (the token spend). --max-turns is a runaway backstop,
 REM     NOT the cost lever (control cost later by trimming instruments/depth in
-REM     prophecy_config.json). --output-format json so cost.py can price it. ---
-type Q:\finance-analyzer\docs\prophecy-prompt.md | claude -p --verbose --model claude-opus-4-8 --output-format json --max-turns 600 > %PDIR%\run_%PDATE%.json 2>&1
+REM     prophecy_config.json). --output-format json => stdout is a single JSON
+REM     result object cost.py parses; stderr goes to a SEPARATE .log so verbose/
+REM     diagnostic lines never corrupt the JSON deliverable (review P2). ---
+type Q:\finance-analyzer\docs\prophecy-prompt.md | claude -p --model claude-opus-4-8 --output-format json --max-turns 600 > %PDIR%\run_%PDATE%.json 2> %PDIR%\run_%PDATE%.log
 set EXIT_CODE=%ERRORLEVEL%
 
 REM --- steps 3-5 (zero tokens). Run EVEN IF claude failed so anti-stale guard +

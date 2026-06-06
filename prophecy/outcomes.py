@@ -90,10 +90,16 @@ def score(max_records: int | None = None) -> int:
         if not (inst and run_id and pred_ts) or spot is None:
             continue
 
+        # Dedup identity is (date, instrument, horizon) — STABLE across publish
+        # re-runs. run_id embeds a per-invocation timestamp, so a retry/re-run of
+        # publish appends fresh journal rows with a new run_id for the SAME
+        # prediction; keying on run_id would score both and inflate the rollup n
+        # (review P1). Keying on date scores each (date, inst, horizon) once.
+        day = rec.get("date") or pred_ts.strftime("%Y-%m-%d")
         for h, pred in (rec.get("horizons") or {}).items():
             if h not in HORIZON_DELTAS or not isinstance(pred, dict):
                 continue
-            key = f"{run_id}|{inst}|{h}"
+            key = f"{day}|{inst}|{h}"
             if key in already:
                 continue
             target_dt = pred_ts + HORIZON_DELTAS[h]

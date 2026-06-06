@@ -108,6 +108,11 @@ def record_cost(date: str | None = None) -> int:
     rows = load_jsonl_tail(pcfg.COST_LOG, max_entries=60) or []
     cumulative = sum(r.get("total_cost_usd") or 0.0 for r in rows[-30:])
 
+    # latest.json is MULTI-WRITER: publish.py writes the predictions snapshot,
+    # then this re-reads it and sets only cost_summary. The .bat enforces the
+    # order publish -> outcomes -> cost, so cost always layers on top of a fresh
+    # snapshot (review P2). We re-read immediately before writing to pick up
+    # publish's version; only cost_summary is mutated here.
     latest = load_json(pcfg.LATEST_FILE, default={}) or {}
     latest["cost_summary"] = {
         "last_run_usd": total_usd,

@@ -65,6 +65,11 @@ function probOf(h){ // probability aligned to predicted direction
   if(h.direction==="down") return h.prob_down;
   return h.prob_flat;
 }
+// Escape model-generated free text before innerHTML (rationale, missing_inputs,
+// note, strategy come from raw_<date>.json — a prompt-injected web source could
+// otherwise land script-y content). Review P3.
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>(
+  {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
 function render(data){
   const latest = data.latest || {};
@@ -82,7 +87,7 @@ function render(data){
   badges.push(data.frozen
     ? `<span class="badge frozen">● FROZEN (no token spend)</span>`
     : `<span class="badge live">● LIVE</span>`);
-  if(latest.stale) badges.push(`<span class="badge frozen">⚠ STALE: ${latest.stale_reason||""}</span>`);
+  if(latest.stale) badges.push(`<span class="badge frozen">⚠ STALE: ${esc(latest.stale_reason)}</span>`);
   const cov = latest.coverage_summary || {};
   if(cov.total_instruments!=null)
     badges.push(`<span class="badge">${cov.total_instruments-(cov.count_needing_work||0)}/${cov.total_instruments} fully covered</span>`);
@@ -91,7 +96,7 @@ function render(data){
   // needs-work banner
   const needs = (cov.instruments_needing_work)||[];
   document.getElementById("warnbar").innerHTML = needs.length
-    ? `<div class="warnbar">⚠ Needs more data / equations (${needs.length}): <b>${needs.join(", ")}</b> — predictions for these are low-confidence; build out their signals.</div>`
+    ? `<div class="warnbar">⚠ Needs more data / equations (${needs.length}): <b>${esc(needs.join(", "))}</b> — predictions for these are low-confidence; build out their signals.</div>`
     : "";
 
   if(!names.length){
@@ -110,9 +115,9 @@ function render(data){
     const c = r.coverage||{};
     const nw = c.needs_work;
     h += `<tr class="${nw?"needs":""}"><td class="inst">`+
-         `<div class="sym">${name}</div>`+
-         `<div class="strat">${r.strategy||""}${r.spot_at_prediction!=null?` · spot ${fmtPrice(r.spot_at_prediction)}`:""}</div>`+
-         (nw?`<div class="warn" title="${(c.missing_inputs||[]).join(', ')||c.note||''}">⚠ needs work${c.missing_inputs&&c.missing_inputs.length?` (${c.missing_inputs.length} gaps)`:""}</div>`:"")+
+         `<div class="sym">${esc(name)}</div>`+
+         `<div class="strat">${esc(r.strategy||"")}${r.spot_at_prediction!=null?` · spot ${fmtPrice(r.spot_at_prediction)}`:""}</div>`+
+         (nw?`<div class="warn" title="${esc((c.missing_inputs||[]).join(', ')||c.note||'')}">⚠ needs work${c.missing_inputs&&c.missing_inputs.length?` (${c.missing_inputs.length} gaps)`:""}</div>`:"")+
          `</td>`;
     const hzs = r.horizons||{};
     for(const hz of HORIZONS){
@@ -121,7 +126,7 @@ function render(data){
       const [arrow,cls] = DIR[p.direction]||["?","flat"];
       const a = (acc[name]||{})[hz];
       const accStr = a&&a.dir_hit_rate!=null ? `<div class="acc ${cls}" title="n=${a.n}, Brier ${a.brier}">acc ${pct(a.dir_hit_rate)}</div>`:"";
-      h += `<td class="cell" title="${(p.rationale||"").replace(/"/g,"'")}">`+
+      h += `<td class="cell" title="${esc(p.rationale)}">`+
            `<div class="dir ${cls}">${arrow} ${fmtPrice(p.target)}</div>`+
            `<div class="p">P ${pct(probOf(p))} · c ${pct(p.confidence)}</div>`+
            accStr+`</td>`;
