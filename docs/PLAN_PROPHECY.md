@@ -64,5 +64,54 @@ Spec: `docs/superpowers/specs/2026-06-06-prophecy-design.md`. Worktree
 - imports clean; `python -m prophecy.prep` hits live prices; publish on fixture →
   valid latest.json; dashboard route 200 + shape.
 
-## Premortem
-_(populated by fresh agent below)_
+## Premortem (fresh agent a404df49 + my decisions)
+
+**DESIGN CHANGE — adopted:** physical data dir renamed `data/prophecy/` →
+**`data/prophecy_runs/`** to eliminate any collision class with the existing
+`data/prophecy.json` macro-beliefs FILE. User-facing name + `/api/prophecy` route
+unchanged.
+
+1. **[a] prophecy.json clobber (HIGH×HIGH).** New dir at same stem as load-bearing
+   `data/prophecy.json` (read by main/reporting/news_event/crypto_scheduler/...). A glob
+   cleanup or path typo could nuke it → silent macro-context loss everywhere.
+   → **FIX:** dir renamed to `data/prophecy_runs/` (collision impossible). prep.py also
+   `assert os.path.isfile("data/prophecy.json")` after its own dir create (tripwire).
+
+2. **[f] COST 10× during freeze (CRITICAL×CRITICAL).** One `claude -p` fans /deep-research
+   ×13 + `ultracode` multi-agent → token multiplication; cost.py is post-hoc (too late).
+   → **FIX:** `--max-turns` on the claude call + `ExecutionTimeLimit` on PF-Prophecy +
+   pre-run warn (read yesterday's cost_log; if > soft-cap, log critical + still run since
+   "unhinged" was authorized). cost.py writes a critical_errors alert when a run exceeds
+   `budget_usd_soft_cap`. Real-time mid-run cap impossible via `claude -p`; turns+wallclock
+   are the bounds.
+
+3. **[c] freeze bypass (HIGH×CRITICAL).** `.bat` bypasses claude_gate (like the other
+   research .bat); only guard is task-disabled state. New task ships ENABLED would spend
+   despite the freeze.
+   → **FIX:** `.bat` checks `data/prophecy_runs/SYSTEM_DISABLED` sentinel → exit 0 before
+   any claude call. install-prophecy-task.ps1 registers PF-Prophecy in **/DISABLE** and
+   creates the sentinel. Going live = explicit user action (remove sentinel + enable task).
+   Documented in the .bat header.
+
+4. **[d] silent empty/stale (HIGH×MED).** Agent crashes mid-fan-out / hits turn limit /
+   prints prose → raw_<date>.json missing/torn → publish quarantines all → latest.json
+   keeps yesterday's calls dated today → outcomes poisons accuracy. Exit 0 throughout.
+   → **FIX:** publish.py asserts raw mtime ≥ run start AND record_count > 0; on failure
+   writes `data/critical_errors.jsonl` + sets `latest.json.stale=true` (never silently
+   overwrites with stale, never appends phantom journal rows). Also parses
+   `run_<date>.json` for `is_error`/`subtype`.
+
+5. **[b] races (MED×MED).** (i) publish reading raw mid-write → strictly sequential .bat
+   (publish only after claude exits) + defensive load_json+size check. (ii) prep's 13×
+   `_fetch_current_price` FAPI burst collides with 60s main-loop FAPI → 429.
+   → **FIX:** prep throttles ~250ms/instrument; logs source; tolerates None.
+
+6. **[e] worktree/prod drift (MED×MED).** Worktree lacks config.json symlink → stock
+   prices (MSTR/SAAB-B/SEB-C/INVE-B via Alpaca) silently yfinance-fallback or None; relative
+   paths assume cwd=repo root but .bat could launch elsewhere.
+   → **FIX:** prep logs price source per instrument + flags None→coverage needs_work (no
+   crash); .bat `cd /d Q:\finance-analyzer` + asserts config.json exists before claude;
+   verify step `python -m prophecy.prep --dry-run` (no pytest).
+
+ACCEPT: no real-time token kill mid-`claude -p` (not exposed); bounded by turns+wallclock
++ ship-disabled. Acceptable given explicit "unhinged to begin with" + merge gate.
