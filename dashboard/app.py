@@ -1541,6 +1541,38 @@ def api_warrants():
 
 
 # ---------------------------------------------------------------------------
+# Prophecy: daily AI price predictions (separate subsystem, prophecy/ package).
+# Reads data/prophecy_runs/ snapshots written by the zero-token publish/outcomes
+# steps. Additive — does not touch existing routes.
+# ---------------------------------------------------------------------------
+
+@app.route("/api/prophecy")
+@require_auth
+def api_prophecy():
+    """Prophecy predictions snapshot + accuracy + cost + coverage gaps.
+
+    Degrades to an empty payload if Prophecy has not produced a run yet.
+    """
+    pdir = DATA_DIR / "prophecy_runs"
+    latest = _read_json(pdir / "latest.json") or {}
+    accuracy = _read_json(pdir / "accuracy.json") or {}
+    return jsonify({
+        "latest": latest,
+        "accuracy": accuracy.get("instruments", {}),
+        "accuracy_updated_at": accuracy.get("updated_at"),
+        "frozen": (pdir / "SYSTEM_DISABLED").exists(),
+    })
+
+
+@app.route("/prophecy")
+@require_auth
+def prophecy_page():
+    if request.args.get("token"):
+        return redirect("/prophecy", code=302)
+    return send_from_directory("static", "prophecy.html")
+
+
+# ---------------------------------------------------------------------------
 # New: Risk data (Monte Carlo + VaR)
 # ---------------------------------------------------------------------------
 

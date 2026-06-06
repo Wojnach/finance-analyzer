@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prophecy — Daily Price Predictions</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --txt:#c9d1d9; --dim:#8b949e;
+    --up:#3fb950; --down:#f85149; --flat:#8b949e; --warn:#d29922; --accent:#58a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:16px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
+  h1{margin:0 0 4px;font-size:20px}
+  h1 .v{color:var(--accent)}
+  .meta{color:var(--dim);font-size:12.5px}
+  .badges{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+  .badge{padding:3px 9px;border-radius:12px;font-size:12px;border:1px solid var(--border);background:var(--panel)}
+  .badge.frozen{color:var(--warn);border-color:var(--warn)}
+  .badge.live{color:var(--up);border-color:var(--up)}
+  .warnbar{margin:12px 20px;padding:10px 12px;border:1px solid var(--warn);border-radius:8px;background:rgba(210,153,34,.08);color:var(--warn);font-size:13px}
+  .wrap{padding:8px 20px 60px;overflow-x:auto}
+  table{border-collapse:collapse;width:100%;min-width:1100px}
+  th,td{border:1px solid var(--border);padding:6px 8px;text-align:center;vertical-align:top}
+  th{background:var(--panel);font-size:12px;color:var(--dim);position:sticky;top:0}
+  td.inst,th.inst{text-align:left;position:sticky;left:0;background:var(--panel);min-width:190px;z-index:2}
+  tr.needs td.inst{border-left:3px solid var(--warn)}
+  .inst .sym{font-weight:600}
+  .inst .strat{color:var(--dim);font-size:11px}
+  .inst .warn{color:var(--warn);font-size:11px;margin-top:3px}
+  .cell .dir{font-size:15px;font-weight:600}
+  .cell .tgt{font-size:13px}
+  .cell .p{color:var(--dim);font-size:11px}
+  .cell .acc{font-size:10.5px;margin-top:2px}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+  .empty{padding:60px 20px;text-align:center;color:var(--dim)}
+  a.home{color:var(--accent);text-decoration:none;font-size:12px}
+  .cost b{color:var(--txt)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔮 <span class="v">Prophecy</span> — Daily Price Predictions</h1>
+  <div class="meta" id="meta">Loading…</div>
+  <div class="badges" id="badges"></div>
+  <div class="meta" style="margin-top:6px"><a class="home" href="/">← dashboard</a></div>
+</header>
+<div id="warnbar"></div>
+<div class="wrap"><div id="content" class="empty">Loading predictions…</div></div>
+
+<script>
+const HORIZONS = ["1d","2d","3d","4d","5d","6d","7d","1mo","2mo","6mo"];
+const DIR = {up:["▲","up"], down:["▼","down"], flat:["▬","flat"]};
+
+function fmtPrice(v){
+  if(v==null||isNaN(v)) return "—";
+  if(v>=1000) return v.toLocaleString(undefined,{maximumFractionDigits:0});
+  if(v>=10)   return v.toLocaleString(undefined,{maximumFractionDigits:2});
+  return v.toLocaleString(undefined,{maximumFractionDigits:4});
+}
+function pct(v){ return v==null?"—":Math.round(v*100)+"%"; }
+function probOf(h){ // probability aligned to predicted direction
+  if(h.direction==="up") return h.prob_up;
+  if(h.direction==="down") return h.prob_down;
+  return h.prob_flat;
+}
+
+function render(data){
+  const latest = data.latest || {};
+  const insts = latest.instruments || {};
+  const acc = data.accuracy || {};
+  const names = Object.keys(insts);
+
+  // meta + badges
+  const cost = latest.cost_summary || {};
+  document.getElementById("meta").innerHTML =
+    `Run: <b>${latest.date||"—"}</b> · model <b>${latest.model||"—"}</b>` +
+    (latest.market_outlook?` · outlook <b>${latest.market_outlook}</b>`:"") +
+    (cost.last_run_usd!=null?` · <span class="cost">cost <b>$${(+cost.last_run_usd).toFixed(2)}</b> (30d $${(+cost.cumulative_30d_usd||0).toFixed(2)})</span>`:"");
+  const badges = [];
+  badges.push(data.frozen
+    ? `<span class="badge frozen">● FROZEN (no token spend)</span>`
+    : `<span class="badge live">● LIVE</span>`);
+  if(latest.stale) badges.push(`<span class="badge frozen">⚠ STALE: ${latest.stale_reason||""}</span>`);
+  const cov = latest.coverage_summary || {};
+  if(cov.total_instruments!=null)
+    badges.push(`<span class="badge">${cov.total_instruments-(cov.count_needing_work||0)}/${cov.total_instruments} fully covered</span>`);
+  document.getElementById("badges").innerHTML = badges.join("");
+
+  // needs-work banner
+  const needs = (cov.instruments_needing_work)||[];
+  document.getElementById("warnbar").innerHTML = needs.length
+    ? `<div class="warnbar">⚠ Needs more data / equations (${needs.length}): <b>${needs.join(", ")}</b> — predictions for these are low-confidence; build out their signals.</div>`
+    : "";
+
+  if(!names.length){
+    document.getElementById("content").className="empty";
+    document.getElementById("content").textContent =
+      "No prediction run yet. Prophecy ships frozen — see data/prophecy_runs/SYSTEM_DISABLED to go live.";
+    return;
+  }
+
+  // table
+  let h = `<table><thead><tr><th class="inst">Instrument</th>`;
+  for(const hz of HORIZONS) h += `<th>${hz}</th>`;
+  h += `</tr></thead><tbody>`;
+  for(const name of names){
+    const r = insts[name];
+    const c = r.coverage||{};
+    const nw = c.needs_work;
+    h += `<tr class="${nw?"needs":""}"><td class="inst">`+
+         `<div class="sym">${name}</div>`+
+         `<div class="strat">${r.strategy||""}${r.spot_at_prediction!=null?` · spot ${fmtPrice(r.spot_at_prediction)}`:""}</div>`+
+         (nw?`<div class="warn" title="${(c.missing_inputs||[]).join(', ')||c.note||''}">⚠ needs work${c.missing_inputs&&c.missing_inputs.length?` (${c.missing_inputs.length} gaps)`:""}</div>`:"")+
+         `</td>`;
+    const hzs = r.horizons||{};
+    for(const hz of HORIZONS){
+      const p = hzs[hz];
+      if(!p){ h += `<td class="cell"><span class="flat">—</span></td>`; continue; }
+      const [arrow,cls] = DIR[p.direction]||["?","flat"];
+      const a = (acc[name]||{})[hz];
+      const accStr = a&&a.dir_hit_rate!=null ? `<div class="acc ${cls}" title="n=${a.n}, Brier ${a.brier}">acc ${pct(a.dir_hit_rate)}</div>`:"";
+      h += `<td class="cell" title="${(p.rationale||"").replace(/"/g,"'")}">`+
+           `<div class="dir ${cls}">${arrow} ${fmtPrice(p.target)}</div>`+
+           `<div class="p">P ${pct(probOf(p))} · c ${pct(p.confidence)}</div>`+
+           accStr+`</td>`;
+    }
+    h += `</tr>`;
+  }
+  h += `</tbody></table>`;
+  const el = document.getElementById("content");
+  el.className=""; el.innerHTML = h;
+}
+
+fetch("/api/prophecy",{credentials:"same-origin"})
+  .then(r=>r.json()).then(render)
+  .catch(e=>{
+    document.getElementById("content").textContent = "Failed to load /api/prophecy: "+e;
+  });
+</script>
+</body>
+</html>
