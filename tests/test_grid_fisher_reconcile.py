@@ -778,3 +778,52 @@ class TestMinutesUntilEod:
         mins = gf.minutes_until_eod(now)
         # > 23 hours away
         assert mins > 60 * 23
+
+
+# ---------------------------------------------------------------------------
+# EOD flatten — stop-safety on sell failure (P0, FGL 2026-06-06)
+# ---------------------------------------------------------------------------
+
+
+class TestEodFlatStopSafety:
+    """eod_market_flat nulls the stop BEFORE placing the close-auction sell.
+    If that sell fails, the lot must not be left naked overnight — the fix
+    flags stop_needs_rearm so the tick-time honor path restores protection."""
+
+    @staticmethod
+    def _stocked_inst():
+        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
+                               cert_name="BULL_SILVER_X5_AVA_4",
+                               active_direction="LONG")
+        inst.inventory_units = 24
+        inst.avg_entry_price = 42.50
+        inst.stop_loss_id = "STOP-existing"
+        inst.stop_loss_price = 41.0
+        return inst
+
+    def test_sell_none_failure_flags_rearm(self, fisher, fake_session, monkeypatch):
+        inst = self._stocked_inst()
+        fisher.state.by_instrument["1650161"] = inst
+        monkeypatch.setattr(fake_session, "place_sell_order", lambda *a, **k: None)
+        fisher.eod_market_flat()
+        assert inst.stop_loss_id is None          # cancelled at EOD
+        assert inst.stop_needs_rearm is True       # P0: not left naked
+        assert inst.inventory_units == 24          # still held
+
+    def test_sell_rejected_flags_rearm(self, fisher, fake_session, monkeypatch):
+        inst = self._stocked_inst()
+        fisher.state.by_instrument["1650161"] = inst
+        monkeypatch.setattr(
+            fake_session, "place_sell_order",
+            lambda *a, **k: {"orderRequestStatus": "ERROR", "message": "halt"},
+        )
+        fisher.eod_market_flat()
+        assert inst.stop_needs_rearm is True
+        assert inst.eod_sell_order_id is None
+
+    def test_sell_success_no_rearm(self, fisher, fake_session):
+        inst = self._stocked_inst()
+        fisher.state.by_instrument["1650161"] = inst
+        fisher.eod_market_flat()  # default FakeSession sell succeeds
+        assert inst.eod_sell_order_id is not None
+        assert inst.stop_needs_rearm is False

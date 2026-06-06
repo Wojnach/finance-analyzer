@@ -190,6 +190,45 @@ class TestSessionRoll:
         assert silver_long_inst.inventory_units == 24
         assert silver_long_inst.avg_entry_price == 42.50
 
+    def test_roll_flags_rearm_for_unprotected_carryover(self, monkeypatch, silver_long_inst):
+        """P0 (FGL 2026-06-06): yesterday's EOD nulled stop_loss_id, but the EOD
+        sell never filled so inventory carried over. Clearing eod_sell_order_id
+        on roll otherwise leaves that inventory with no stop AND no sell until
+        the next EOD window. Roll must flag stop_needs_rearm so the tick-time
+        honor path restores protection."""
+        monkeypatch.setattr(gf, "_today_session_id", lambda: "2026-05-12")
+        state = gf.GridFisherState(session_id="2026-05-11")
+        silver_long_inst.inventory_units = 24
+        silver_long_inst.stop_loss_id = None        # nulled at prior EOD
+        silver_long_inst.stop_loss_price = 41.0      # preserved → re-arm can fire
+        silver_long_inst.eod_sell_order_id = "SELL-stale"
+        state.by_instrument[silver_long_inst.ob_id] = silver_long_inst
+        gf.roll_session_if_new_day(state)
+        assert silver_long_inst.eod_sell_order_id is None
+        assert silver_long_inst.stop_needs_rearm is True
+
+    def test_roll_no_rearm_when_flat(self, monkeypatch, silver_long_inst):
+        """Flat instrument (no carryover) → nothing to protect → no flag."""
+        monkeypatch.setattr(gf, "_today_session_id", lambda: "2026-05-12")
+        state = gf.GridFisherState(session_id="2026-05-11")
+        silver_long_inst.inventory_units = 0
+        state.by_instrument[silver_long_inst.ob_id] = silver_long_inst
+        gf.roll_session_if_new_day(state)
+        assert silver_long_inst.stop_needs_rearm is False
+
+    def test_roll_no_rearm_when_stop_still_live(self, monkeypatch, silver_long_inst):
+        """Inventory carried over but a stop is STILL live → must NOT flag
+        re-arm, or the honor path (which does not cancel first) would place a
+        second stop → double-stop / overfill."""
+        monkeypatch.setattr(gf, "_today_session_id", lambda: "2026-05-12")
+        state = gf.GridFisherState(session_id="2026-05-11")
+        silver_long_inst.inventory_units = 24
+        silver_long_inst.stop_loss_id = "STOP-live"
+        silver_long_inst.stop_loss_price = 41.0
+        state.by_instrument[silver_long_inst.ob_id] = silver_long_inst
+        gf.roll_session_if_new_day(state)
+        assert silver_long_inst.stop_needs_rearm is False
+
 
 # ---------------------------------------------------------------------------
 # Direction flip

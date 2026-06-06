@@ -190,7 +190,8 @@ class TestDeleteOrderNoPage:
 class TestDeleteStopLossNoPage:
     @patch("portfolio.avanza_control._api_delete")
     def test_delegates_to_session(self, mock_delete):
-        mock_delete.return_value = {}
+        # _api_delete real contract: {"http_status", "ok"} (avanza_session.py).
+        mock_delete.return_value = {"http_status": 200, "ok": True}
         ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
         assert ok is True
         mock_delete.assert_called_once_with("/_api/trading/stoploss/1625505/SL-123")
@@ -209,3 +210,23 @@ class TestDeleteStopLossNoPage:
         ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
         assert ok is False
         assert result.get("errorCode") == "NOT_FOUND"
+
+    @patch("portfolio.avanza_control._api_delete")
+    def test_http_500_returns_false(self, mock_delete):
+        """P0 (FGL 2026-06-06): _api_delete returns {"http_status","ok"} — NOT
+        errorCode. The old `result.get("errorCode")` check was always falsy on a
+        real HTTP 500 → returned ok=True, so the caller believed the stop was
+        cancelled. Per the metals rule (cancel stop BEFORE sell to prevent
+        overfill), a silent failed-delete leaves old stop + new sell both live."""
+        mock_delete.return_value = {"http_status": 500, "ok": False}
+        ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
+        assert ok is False
+        assert result == {"http_status": 500, "ok": False}
+
+    @patch("portfolio.avanza_control._api_delete")
+    def test_404_treated_as_deleted(self, mock_delete):
+        """404 = stop already gone; _api_delete flags ok=True for it, so the
+        delete is idempotently successful."""
+        mock_delete.return_value = {"http_status": 404, "ok": True}
+        ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
+        assert ok is True

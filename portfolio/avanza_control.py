@@ -395,11 +395,17 @@ def delete_stop_loss_no_page(account_id, stop_id):
     resolved_account_id = str(account_id or get_account_id())
     try:
         result = _api_delete(f"/_api/trading/stoploss/{resolved_account_id}/{stop_id}")
-        # H18: Check for error indicators in the response.
-        # API returns {} on success (200 with empty body).
-        # A non-empty response with error keys indicates failure.
-        if isinstance(result, dict) and result.get("errorCode"):
-            logger.warning("Delete stop-loss returned error for stop %s: %s", stop_id, result)
+        # P0 (FGL 2026-06-06): _api_delete (avanza_session.py) returns
+        # {"http_status", "ok"} — it has NO "errorCode" key, so the old
+        # `result.get("errorCode")` check was ALWAYS falsy and an HTTP 500
+        # returned ok=True. The caller (fin_snipe_manager) then believed the
+        # stop was cancelled; per the metals rule "cancel stop BEFORE placing
+        # a sell (prevents overfill)", a silent failed-delete leaves the old
+        # stop + the new sell both live → double-exit / overfill. Trust the
+        # `ok` flag (404 = already-gone is flagged ok=True upstream). The
+        # errorCode guard is retained for any legacy/page-shaped caller.
+        if not (isinstance(result, dict) and result.get("ok") is True and not result.get("errorCode")):
+            logger.warning("Delete stop-loss did not confirm success for stop %s: %s", stop_id, result)
             return False, result
         return True, result
     except Exception as e:

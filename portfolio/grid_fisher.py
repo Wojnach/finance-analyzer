@@ -515,6 +515,14 @@ def roll_session_if_new_day(state: GridFisherState) -> bool:
         # corresponding order is from yesterday's session; either it filled
         # (inventory already 0) or it expired/got cancelled overnight.
         inst.eod_sell_order_id = None
+        # P0 (FGL 2026-06-06): if inventory carried over (yesterday's EOD sell
+        # never filled) and the stop was already nulled at EOD, clearing the
+        # sell flag alone leaves this inventory with NO stop AND NO sell until
+        # the next EOD window. Flag re-arm so the tick-time honor path restores
+        # a protective stop. Guard on `not stop_loss_id` — never double-stop a
+        # lot that still has a live stop (the honor path does not cancel first).
+        if inst.inventory_units > 0 and not inst.stop_loss_id:
+            inst.stop_needs_rearm = True
         # Gate B counters reset at session boundary — yesterday's
         # silent-rejection state shouldn't follow us into a new
         # trading day where the issue may have resolved.
@@ -1967,6 +1975,12 @@ class GridFisher:
                 self._log("eod_market_sell_failed", ob_id=inst.ob_id,
                           ticker=inst.ticker,
                           error="session_call returned None")
+                # P0 (FGL 2026-06-06): the stop was already nulled above
+                # (line ~1956), so a failed sell here would leave the lot with
+                # NO stop AND NO sell = naked overnight leveraged exposure — the
+                # exact invariant this sweep exists to forbid. Flag re-arm so the
+                # tick-time honor path restores a protective stop next tick.
+                inst.stop_needs_rearm = True
                 # Leave eod_sell_order_id unset so a future tick can retry
                 # once the session call recovers. Without this, a single
                 # transient Avanza error would skip the sweep entirely.
@@ -1979,6 +1993,9 @@ class GridFisher:
                           status=status,
                           qty=inst.inventory_units,
                           price=aggressive)
+                # P0 (FGL 2026-06-06): stop already nulled above — re-arm so the
+                # rejected lot is not left naked overnight (see None-branch).
+                inst.stop_needs_rearm = True
                 # Avanza rejected (e.g. trading halt, instrument suspended).
                 # Same retry-next-tick rationale as the None branch.
                 continue
