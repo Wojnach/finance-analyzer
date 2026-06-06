@@ -1,0 +1,17 @@
+Prophecy is FROZEN at the system level.
+
+While this file exists, scripts/prophecy-daily.bat exits 0 BEFORE calling
+`claude -p` — i.e. zero Claude token spend. This guard exists because the .bat
+bypasses claude_gate (like the other research .bat files), so a scheduled task
+alone is not a sufficient kill switch.
+
+Created 2026-06-06 to respect the active token-spend freeze. The daily
+prediction run is built and ready but will NOT spend tokens until a human
+removes this file.
+
+TO GO LIVE (explicit, deliberate):
+  1. del data\prophecy_runs\SYSTEM_DISABLED
+  2. schtasks /Change /TN "PF-Prophecy" /ENABLE   (or run install-prophecy-task.ps1)
+
+TO RE-FREEZE:
+  echo frozen > data\prophecy_runs\SYSTEM_DISABLED

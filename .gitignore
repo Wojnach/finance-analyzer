@@ -121,6 +121,19 @@ data/loop.log
 # as "modified" so they're a deliberate choice to commit, not an accident.
 data/crypto_loop.heartbeat
 data/oil_loop.heartbeat
+
+# Prophecy daily prediction runtime outputs (config.json + SYSTEM_DISABLED are
+# deliberately TRACKED as system scaffolds; everything below is per-run state).
+data/prophecy_runs/context_*.json
+data/prophecy_runs/raw_*.json
+data/prophecy_runs/run_*.json
+data/prophecy_runs/run_*.log
+data/prophecy_runs/prediction_journal.jsonl
+data/prophecy_runs/latest.json
+data/prophecy_runs/accuracy.jsonl
+data/prophecy_runs/accuracy.json
+data/prophecy_runs/cost_log.jsonl
+data/prophecy_runs/quarantine/
 data/mstr_loop.heartbeat
 data/metals_loop.heartbeat
 data/golddigger_loop.heartbeat
