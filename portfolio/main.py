@@ -160,7 +160,6 @@ from portfolio.market_timing import (  # noqa: E402, F401
     INTERVAL_MARKET_CLOSED,
     INTERVAL_MARKET_OPEN,
     INTERVAL_WEEKEND,
-    MARKET_OPEN_HOUR,
     _is_agent_window,
     _is_us_dst,
     _market_close_hour_utc,
