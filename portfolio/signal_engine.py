@@ -784,7 +784,7 @@ _SHADOW_SAFE_SIGNALS = frozenset({
     "calendar",  # 2026-05-09: disabled at 29.3%, shadow-track for recovery
     # 2026-05-11: Expanded shadow set — all pending-validation OHLCV-only signals.
     # residual_pair_reversion excluded (uses yfinance).
-    "drift_regime_gate",
+    # drift_regime_gate: REMOVED 2026-06-06 — active signal (re-enabled 2026-05-22)
     "vol_ratio_regime",
     "williams_vix_fix",
     "intraday_seasonality",
@@ -797,7 +797,7 @@ _SHADOW_SAFE_SIGNALS = frozenset({
     # by outcome_tracker).
     "ttm_squeeze",
     "tsi_chop_mr",
-    "amihud_illiquidity_regime",
+    # amihud_illiquidity_regime: REMOVED 2026-06-06 — active signal (re-enabled 2026-05-28)
     "absorption_ratio_regime",
     "trend_slope_momentum",
     "sentiment_extremity_gate",

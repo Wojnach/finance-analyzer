@@ -8,8 +8,8 @@ from datetime import UTC, date, datetime, timedelta
 
 from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYMBOLS
 
-# Backward compat: MARKET_OPEN_HOUR kept at 7 (summer value).
-# Callers that need DST-aware EU open should use _eu_market_open_hour_utc().
+# DEPRECATED: Wrong by 1h in winter. Use _eu_market_open_hour_utc(dt) instead.
+# Kept for test_market_timing.py backward compat only.
 MARKET_OPEN_HOUR = 7
 
 # Loop intervals by market state.

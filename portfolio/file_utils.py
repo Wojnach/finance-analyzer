@@ -50,7 +50,7 @@ def atomic_write_text(path, text, encoding="utf-8"):
         raise
 
 
-def atomic_write_json(path, data, indent=2, ensure_ascii=True):
+def atomic_write_json(path, data, indent=2, ensure_ascii=False):
     """Atomically write JSON data to a file using tempfile + os.replace.
 
     Ensures the file is never left in a partially-written state.
@@ -401,13 +401,12 @@ def last_jsonl_entry(path, field=None):
         line = line.strip()
         if not line:
             continue
-        try:
-            entry = json.loads(line)
+        objs = _decode_jsonl_line(line)
+        if objs:
+            entry = objs[-1]
             if field is not None:
-                return entry.get(field)
+                return entry.get(field) if isinstance(entry, dict) else None
             return entry
-        except (json.JSONDecodeError, AttributeError):
-            continue
     return None
 
 

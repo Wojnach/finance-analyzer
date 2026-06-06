@@ -230,7 +230,7 @@ def _check_recent_trade(state):
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     global _startup_grace_active
     state = _load_state()
-    state["_current_tickers"] = set(signals.keys())  # for pruning in _save_state
+    state["_current_tickers"] = list(signals.keys())  # for pruning in _save_state
 
     # Startup grace period: on the first iteration after a restart, update the
     # baseline (prices, signals, consensus) WITHOUT triggering Layer 2.

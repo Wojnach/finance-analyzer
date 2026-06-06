@@ -235,7 +235,8 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
             - current_value: float -- current portfolio value in SEK
             - initial_value: float -- starting portfolio value
     """
-    portfolio = load_json(portfolio_path, default={})
+    from portfolio.portfolio_mgr import _load_state_from
+    portfolio = _load_state_from(pathlib.Path(portfolio_path))
     initial_value = portfolio.get("initial_value_sek", INITIAL_VALUE_DEFAULT)
 
     if agent_summary_path is None:

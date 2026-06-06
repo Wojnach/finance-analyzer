@@ -815,9 +815,9 @@ def invoke_agent(reasons, tier=3):
     # already handles the auth_failure entry in critical_errors.jsonl; this
     # gate just stops the storm of doomed spawns in the meantime.
     try:
-        recent = load_jsonl(INVOCATIONS_FILE)
+        recent = load_jsonl_tail(INVOCATIONS_FILE, max_entries=50)
         # Walk backwards to find the most recent non-skip status.
-        for entry in reversed(recent[-50:]):
+        for entry in reversed(recent):
             status = entry.get("status", "")
             if status.startswith("skipped"):
                 continue

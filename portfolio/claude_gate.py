@@ -709,7 +709,7 @@ def invoke_claude_text(
     caller: str,
     model: str = "sonnet",
     timeout: int = 60,
-) -> tuple[str, bool, int]:
+) -> tuple[str, bool, int, str]:
     """Invoke Claude CLI for text-only Q&A (no tools, single turn).
 
     Unlike ``invoke_claude()``, this captures stdout and returns the text

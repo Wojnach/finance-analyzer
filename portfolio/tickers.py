@@ -302,6 +302,10 @@ DISABLED_SIGNALS = {
                         # Source: Nechepurenko 2026, arxiv:2604.27041. Confirms credible moves,
                         # fades manipulative/noise spikes. OHLCV-only, cross-asset. Score 7.90/10.
                         # Shadow mode — accumulate accuracy data before enabling.
+    "metals_cross_asset",  # 2026-06-06: DISABLED. Was in _TICKER_DISABLED_SIGNALS for both
+                        # XAU-USD and XAG-USD (only applicable tickers), so vote was always
+                        # force-HOLD. Wasting yfinance+FRED API calls every cycle for zero
+                        # accuracy data. Formal disable saves I/O.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
