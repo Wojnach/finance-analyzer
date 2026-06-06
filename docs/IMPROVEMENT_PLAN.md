@@ -1,97 +1,151 @@
-# Improvement Plan — 2026-06-01 Auto Session
+# Improvement Plan — Auto-Session 2026-06-06
 
-**Branch:** `improve/auto-session-2026-06-01`
-**Sources:** 5 parallel exploration agents + P0 verification agent + cross-reference
-with May 21 (419 findings) and May 31 (81 findings) adversarial review syntheses.
-All P0 findings independently verified against current code at `f10c63ce`.
+Generated from deep exploration of all major subsystems by 4 parallel agents.
+
+## Prioritization Key
+
+- **P0 (Critical)**: Correctness bugs that affect trading decisions or data integrity
+- **P1 (High)**: Performance, reliability, or silent-failure issues
+- **P2 (Medium)**: Code quality, maintainability, dead code
+- **P3 (Low)**: Style, documentation, minor inconsistencies
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### P0 — Fix immediately
+### B1 [P0] `_cached()` TTL field not stored — eviction defaults wrong
+**File:** `portfolio/shared_state.py:99`
+**Issue:** `_cached()` stores cache entries as `{"data": ..., "time": ...}` without a `ttl` field. The eviction logic at line 56 uses `v.get("ttl", 3600)` — so entries with TTL=300s (Fear & Greed) are evicted at 3600×3=10800s instead of 300×3=900s. Entries from `_update_cache` and `_cached_or_enqueue` correctly include `ttl`.
+**Impact:** Stale data served from cache beyond intended TTL during eviction pressure. Low-frequency because eviction only triggers at `_CACHE_MAX_SIZE`, but semantically wrong.
+**Fix:** Add `"ttl": ttl` to the cache entry dict in `_cached()`.
 
-| # | File | Bug | Impact | Fix |
-|---|------|-----|--------|-----|
-| B1 | `portfolio/outcome_tracker.py:218-252` | `_fetch_historical_price` uses `interval="1h"` and returns close (`data[0][4]`). Target price can be up to 59 min late. | All short-horizon accuracy stats biased — 33% error at 3h, up to 100% at 1h. Every accuracy-gated decision, IC weight, and Mode-B probability affected. **#1 correctness bug.** | Change to `interval="1m"`, return `data[0][1]` (open price). |
-| B2 | `portfolio/agent_invocation.py:~1628-1680` | `auth_error` status writes no journal stub — `failed` and `incomplete` do but `auth_error` falls through. | Auth outages leave zero journal record. Contract violations fire. Outage invisible to journal consumers. | Add `elif status == "auth_error"` branch mirroring `failed`. |
-| B3 | `portfolio/signal_engine.py:650,3908,4582` | `_cross_ticker_consensus` keyed by `ticker` only — all 7 horizons overwrite the same entry. | MSTR btc_proxy reads whichever BTC horizon finished last. Can flip vote direction. | Key by `(ticker, horizon)`, lookup by `(ticker, horizon)`. |
-| B4 | `portfolio/fx_rates.py:47-53` | Sanity-check failure falls through to stale-cache block silently — serves old rate when live API returns bad data. | FX rate could be days stale with no distinct warning. Portfolio valuations drift. | Explicit early return after sanity-check failure with logged distinction. |
-| B5 | `data/metals_loop.py:~6986` | `for t, _ in SILVER_ALERT_LEVELS` then `t[0]` — `t` is a float, `TypeError`. | Startup crash when silver positions active. | Fix unpack to use float directly: `f'{t}%'`. |
+### B2 [P0] `risk_management.check_drawdown` bypasses `portfolio_mgr` backup recovery
+**File:** `portfolio/risk_management.py`
+**Issue:** `check_drawdown` calls `load_json(portfolio_path)` directly instead of `portfolio_mgr.load_state()`. If `portfolio_state.json` is corrupt, `load_json` returns `{}`, which means `cash_sek = 0`, `holdings = {}` → no drawdown detected → trading continues when it should halt.
+**Impact:** Circuit breaker fails to trip on corrupt state. The backup recovery and quarantine logic in `portfolio_mgr` exists precisely for this case.
+**Fix:** Import and use `portfolio_mgr.load_state()` / `load_bold_state()`.
 
-### P1 — Fix this session
+### B3 [P1] `claude_gate.invoke_claude_text` docstring says 3-tuple, returns 4-tuple
+**File:** `portfolio/claude_gate.py`
+**Issue:** Docstring says returns `tuple[str, bool, int]` but actual return is `(text, status == "invoked", exit_code, status)` — 4 elements. Any caller destructuring to 3 will crash.
+**Impact:** Runtime error for callers that trust the docstring. Need to verify call sites.
+**Fix:** Update docstring to match actual 4-tuple return.
 
-| # | File | Bug | Impact | Fix |
-|---|------|-----|--------|-----|
-| B6 | `portfolio/risk_management.py:728-739` | `_CORRELATED_PAIRS = []` on transient import failure permanently disables correlation risk. | Correlation risk gate dead for entire process lifetime. | Use `_NOT_LOADED` sentinel; retry on next call. |
-| B7 | `dashboard/app.py:1115-1126` | Signal heatmap hardcodes 30 signals from outdated layout. Missing active signals, includes removed. | Heatmap shows phantom HOLDs, missing real signals. | Generate dynamically from `tickers.SIGNAL_NAMES` + signal registry. |
-| B8 | `scripts/check_critical_errors.py` | No auto-resolve: stale `contract_violation` entries (fixed May 30) and mislabeled `avanza_account_mismatch` stay unresolved forever. | Fix-agent budget burn. 31 phantom unresolved entries. Operator can't triage. | Add auto-resolve: resolve when category hasn't fired in 3+ days and a post-dated resolution exists. |
+### B4 [P1] `last_jsonl_entry` does not use recovery decoder
+**File:** `portfolio/file_utils.py:373-411`
+**Issue:** Uses `json.loads(line)` directly. Concatenated-object lines (from legacy append-race corruption) raise `JSONDecodeError`, causing the entry to be skipped. The recovery decoder `_decode_jsonl_line` exists for this exact case but is not used here.
+**Impact:** Returns older entry instead of latest on corrupt lines. Affects `check_agent_completion`, health monitoring, and any module calling `last_jsonl_entry`.
+**Fix:** Use `_decode_jsonl_line(line)` and take the last decoded object.
 
-### P2 — Document and defer
+### B5 [P1] `metals_cross_asset` signal listed as active but disabled per-ticker
+**File:** `portfolio/signal_engine.py:948-956`, `portfolio/tickers.py`
+**Issue:** `metals_cross_asset` is listed in CLAUDE.md as active signal #11 but exists in `_TICKER_DISABLED_SIGNALS["XAU-USD"]` and `_TICKER_DISABLED_SIGNALS["XAG-USD"]` — the only tickers it applies to. Computes every cycle (yfinance + FRED calls) but vote is force-HOLD'd.
+**Impact:** Wasted I/O (2 API calls/cycle), misleading signal count in docs, zero accuracy data accumulated.
+**Fix:** Add to `DISABLED_SIGNALS` properly (saves the API calls) and update CLAUDE.md signal count.
 
-| # | File | Bug | Note |
-|---|------|-----|------|
-| B9 | `signal_engine.py:4175` | 3d/5d/10d horizons collapse to 1d accuracy | Acknowledged TODO. Complex fix, needs data migration. |
-| B10 | `claude_gate.py:343` | `_count_today_invocations()` full JSONL scan on every call | Perf degradation. Switch to `load_jsonl_tail`. |
-| B11 | `metals_loop.py:1692` | `_underlying_prices` dict race (fast-tick vs LLM read) | Structurally racy but GIL-protected for single-key ops. |
+### B6 [P1] `_SHADOW_SAFE_SIGNALS` contains active signals (dead code)
+**File:** `portfolio/signal_engine.py`
+**Issue:** `_SHADOW_SAFE_SIGNALS` includes `drift_regime_gate`, `vol_ratio_regime`, `bocpd_regime_switch`, `amihud_illiquidity_regime` — all currently active (not in `DISABLED_SIGNALS`). The shadow path only executes for disabled signals, so these entries are dead code.
+**Impact:** Maintenance confusion. Changing status of these signals requires auditing two structures.
+**Fix:** Remove active signals from `_SHADOW_SAFE_SIGNALS`.
 
----
+### B7 [P1] `trigger.py` stores non-serializable `set` in state dict
+**File:** `portfolio/trigger.py:233`
+**Issue:** `state["_current_tickers"] = set(signals.keys())` — Python `set` is not JSON-serializable. Works only because `_save_state` pops this key before writing. If the pop is ever missed (e.g., early return on error), the state file write crashes.
+**Impact:** Fragile — one missed pop causes `TypeError` on state save, breaking trigger detection.
+**Fix:** Use `list(signals.keys())` instead of `set(...)`, or move the set to a local variable instead of state dict.
 
-## 2. Documentation Fixes
+### B8 [P2] `autonomous.py` writes orphaned `layer2_decisions.jsonl`
+**File:** `portfolio/autonomous.py:187`
+**Issue:** Writes to `DECISIONS_FILE` (`layer2_decisions.jsonl`) on every call. Nothing in the codebase reads this file. It grows unbounded with no pruning.
+**Impact:** Disk space leak, confusing artifact.
+**Fix:** Remove the write, or wire up a consumer. Given nothing reads it, remove.
 
-| # | What | Where | Fix |
-|---|------|-------|-----|
-| D1 | Route count stale | `CLAUDE.md` | Update "33 endpoints" → actual count (~55 including house blueprint). |
-| D2 | Signal counts | `docs/SYSTEM_OVERVIEW.md` | Sync module/signal counts with current state. |
-| D3 | Known issues | `docs/SYSTEM_OVERVIEW.md` | Update "Known Issues" section with what's fixed vs open. |
+### B9 [P2] `silver_monitor.py` raw JSON I/O violations
+**File:** `data/silver_monitor.py:106,606,608`
+**Issue:** Uses `json.load(open(...))` and `with open(..., 'a') as f: f.write(json.dumps(...))` bypassing `file_utils`. Violates CLAUDE.md rule 4.
+**Impact:** No atomic writes, no corruption recovery, no sidecar locking on JSONL appends.
+**Fix:** Replace with `load_json` / `atomic_append_jsonl`.
 
----
-
-## 3. Batch Plan
-
-### Batch 1: Critical correctness (5 files, 5 P0 fixes)
-
-**Files:** `portfolio/outcome_tracker.py`, `portfolio/agent_invocation.py`,
-`portfolio/signal_engine.py`, `portfolio/fx_rates.py`, `data/metals_loop.py`
-
-| Change | Risk | Test needed |
-|--------|------|-------------|
-| B1: 1h→1m + open price | LOW | Update existing `test_outcome_tracker.py` |
-| B2: auth_error journal stub | LOW | Add test for auth_error stub write |
-| B3: cache key (ticker,horizon) | MED | Update `test_cross_ticker_consensus` |
-| B4: fx_rates explicit return | LOW | Add test for sanity-check failure path |
-| B5: SILVER_ALERT_LEVELS unpack | LOW | Add test for alert level formatting |
-
-### Batch 2: P1 reliability (3 files)
-
-**Files:** `portfolio/risk_management.py`, `dashboard/app.py`,
-`scripts/check_critical_errors.py`
-
-| Change | Risk | Test needed |
-|--------|------|-------------|
-| B6: sentinel + retry | LOW | Test import failure → retry succeeds |
-| B7: dynamic signal heatmap | LOW | Test signal list matches registry |
-| B8: auto-resolve stale criticals | MED | Test auto-resolve logic with fixtures |
-
-### Batch 3: Documentation (2 files)
-
-**Files:** `CLAUDE.md`, `docs/SYSTEM_OVERVIEW.md`
-
-No code risk. Update counts and known issues.
+### B10 [P2] `agent_invocation.py` auth cooldown loads entire `invocations.jsonl`
+**File:** `portfolio/agent_invocation.py:818-838`
+**Issue:** Calls `load_jsonl(INVOCATIONS_FILE)` then slices `[-50:]`. On a long-running system with thousands of entries, this is O(n) per invocation check. `load_jsonl_tail` is available and used elsewhere.
+**Impact:** Unnecessary I/O on every Layer 2 trigger.
+**Fix:** Replace with `load_jsonl_tail(INVOCATIONS_FILE, max_entries=50)`.
 
 ---
 
-## 4. Dependencies
+## 2. Architecture Improvements
 
-All Batch 1 fixes are independent. Batch 2 has no Batch 1 deps.
-Batch 3 depends on Batch 1+2 (docs reflect final state).
+### A1 [P2] `atomic_write_json` `ensure_ascii` inconsistency
+**File:** `portfolio/file_utils.py:53`
+**Issue:** `atomic_write_json` uses `ensure_ascii=True` while `atomic_append_jsonl` uses `ensure_ascii=False`. Raw file inspection of JSON files shows escaped Unicode.
+**Fix:** Change `atomic_write_json` default to `ensure_ascii=False` to match.
 
-## 5. Impact Assessment
+### A2 [P3] `classify_tier` double-reads trigger state
+**File:** `portfolio/trigger.py:609`, `portfolio/main.py`
+**Issue:** `classify_tier` loads state from disk when `state=None`, but `main.py` just loaded it in `check_triggers`. The `state` parameter exists but isn't passed.
+**Fix:** Pass state from `check_triggers` return to `classify_tier`.
 
-- B1 changes outcome backfill precision but does NOT retroactively fix existing entries.
-  A re-backfill of short-horizon outcomes would be needed to fully correct accuracy stats.
-- B3 changes cache key format — no persistence, pure in-memory. No migration needed.
-- B7 changes the heatmap API response shape (signal list). Dashboard frontend
-  should handle this gracefully since it iterates the returned list.
-- B8 adds new logic to a startup script — if buggy, worst case is stale errors
-  persist (same as today). Fail-safe.
+### A3 [P3] `MARKET_OPEN_HOUR = 7` exported as constant
+**File:** `portfolio/market_timing.py:13`
+**Issue:** Labelled "backward compat, kept at 7 (summer value)" but exported. Wrong by 1h in winter.
+**Fix:** Deprecate or remove; callers should use `_eu_market_open_hour_utc(dt)`.
+
+---
+
+## 3. Implementation Batches
+
+### Batch 1: Critical data integrity fixes [B1, B2, B4]
+Files: `portfolio/shared_state.py`, `portfolio/risk_management.py`, `portfolio/file_utils.py`
+- Fix `_cached()` TTL storage
+- Fix `check_drawdown` to use `portfolio_mgr`
+- Fix `last_jsonl_entry` to use recovery decoder
+Tests: Run existing + add targeted tests for each fix
+
+### Batch 2: Signal system cleanup [B5, B6]
+Files: `portfolio/signal_engine.py`, `portfolio/tickers.py`
+- Move `metals_cross_asset` to `DISABLED_SIGNALS`
+- Remove active signals from `_SHADOW_SAFE_SIGNALS`
+Tests: Run signal engine tests
+
+### Batch 3: Reliability fixes [B3, B7, B10]
+Files: `portfolio/claude_gate.py`, `portfolio/trigger.py`, `portfolio/agent_invocation.py`
+- Fix invoke_claude_text docstring
+- Fix trigger state set serialization
+- Optimize auth cooldown to use load_jsonl_tail
+Tests: Run claude_gate, trigger, agent_invocation tests
+
+### Batch 4: Dead code and I/O cleanup [B8, B9, A1]
+Files: `portfolio/autonomous.py`, `data/silver_monitor.py`, `portfolio/file_utils.py`
+- Remove orphaned decisions file write
+- Fix silver_monitor raw I/O
+- Fix ensure_ascii inconsistency
+Tests: Run autonomous and file_utils tests
+
+### Batch 5: Minor optimizations [A2, A3]
+Files: `portfolio/trigger.py`, `portfolio/main.py`, `portfolio/market_timing.py`
+- Pass state through classify_tier
+- Deprecate MARKET_OPEN_HOUR constant
+Tests: Run trigger and market_timing tests
+
+---
+
+## 4. Impact Assessment
+
+All changes are backward-compatible. No API changes, no config changes, no new dependencies.
+
+Risk areas:
+- B2 (check_drawdown): changes the load path for circuit breaker. If `portfolio_mgr.load_state()` has different error handling than `load_json`, the drawdown check could behave differently on edge cases. Mitigation: the backup recovery in `portfolio_mgr` is strictly more robust.
+- B4 (last_jsonl_entry): changing the parser could surface previously-hidden corrupt lines. This is desired behavior but may cause different entries to be returned for the same file. Mitigation: `_decode_jsonl_line` is already used in `load_jsonl` and is well-tested.
+- A1 (ensure_ascii): existing files with `\uXXXX` escapes will still be readable. New writes will use raw UTF-8. No backward compat issue.
+
+---
+
+## 5. Out of Scope (Deferred)
+
+- **signal_engine.py decomposition** (4698 lines → multiple modules): High-impact but high-risk refactor. Needs dedicated session with careful test coverage.
+- **metals_loop.py decomposition** (7904 lines): Same — too large for this session.
+- **Circuit breaker per-ticker isolation**: Architectural change to data_collector. Needs design doc.
+- **IC-based signal weighting**: P1 research priority, already has a plan in `quant_research_priorities.md`.
+- **Backtester look-ahead bias** (P1.6): Needs walk-forward infrastructure.
