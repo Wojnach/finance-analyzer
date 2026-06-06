@@ -1,1548 +1,220 @@
 {
-  "generated_at": "2026-06-02T20:29:18.065686+00:00",
-  "analysis_window": "last 500 signal_log entries",
+  "date": "2026-05-25",
+  "generated_at": "2026-06-06T00:14:43.445342+00:00",
+  "total_signals": 80,
+  "active": 16,
+  "disabled": 64,
   "top_signals": [
     {
-      "signal": "vwap_zscore_mr",
-      "accuracy_1d_pct": 61.2,
-      "samples_1d": 139,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 54.5
+      "signal": "drift_regime_gate",
+      "all_time_1d": "58.1%",
+      "recent_7d": "68.1% (626 sam)",
+      "best_ticker": "ETH-USD 67.2%",
+      "status": "ACTIVE",
+      "verdict": "STAR - consider boosting weight"
     },
     {
-      "signal": "onchain",
-      "accuracy_1d_pct": 60.0,
-      "samples_1d": 45,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
+      "signal": "vwap_zscore_mr",
+      "all_time_1d": "68.4%",
+      "recent_7d": "67.6% (37 sam)",
+      "best_ticker": "XAU-USD 84.2% (19 sam)",
+      "status": "DISABLED",
+      "verdict": "RE-ENABLE - consistently high but low samples"
+    },
+    {
+      "signal": "bb",
+      "all_time_1d": "54.9%",
+      "recent_7d": "60.5% (428 sam)",
+      "best_ticker": "XAU-USD 62.6%",
+      "status": "ACTIVE",
+      "verdict": "STRONG - performing well across tickers"
+    },
+    {
+      "signal": "williams_vix_fix",
+      "all_time_1d": "51.0%",
+      "recent_7d": "61.5% (205 sam)",
+      "best_ticker": "XAU-USD 76.5% (68 sam)",
+      "status": "DISABLED",
+      "verdict": "RE-ENABLE for metals only"
+    },
+    {
+      "signal": "realized_skewness",
+      "all_time_1d": "51.6%",
+      "recent_7d": "64.3% (485 sam)",
+      "best_ticker": "XAU-USD 60.3% (572 sam)",
+      "status": "DISABLED",
+      "verdict": "RE-ENABLE for XAU - strong recent surge"
+    },
+    {
+      "signal": "rsi",
+      "all_time_1d": "52.4%",
+      "recent_7d": "57.5% (496 sam)",
+      "best_ticker": "XAU-USD 60.5% (1197 sam)",
+      "status": "ACTIVE",
+      "verdict": "SOLID - best edge on metals"
     },
     {
       "signal": "qwen3",
-      "accuracy_1d_pct": 59.7,
-      "samples_1d": 4018,
-      "accuracy_3h_pct": 59.4,
-      "samples_3h": 3385,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 51.7
+      "all_time_1d": "59.7%",
+      "recent_7d": "53.8% (145 sam)",
+      "best_ticker": "BTC-USD 68.3% (63 sam)",
+      "status": "ACTIVE",
+      "verdict": "GOOD overall, excellent for BTC"
     },
     {
-      "signal": "fear_greed",
-      "accuracy_1d_pct": 58.6,
-      "samples_1d": 10232,
-      "accuracy_3h_pct": 53.9,
-      "samples_3h": 7205,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "amihud_illiquidity_regime",
-      "accuracy_1d_pct": 58.2,
-      "samples_1d": 613,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 53.8
-    },
-    {
-      "signal": "ministral",
-      "accuracy_1d_pct": 58.0,
-      "samples_1d": 6304,
-      "accuracy_3h_pct": 52.3,
-      "samples_3h": 4733,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 100.0
-    },
-    {
-      "signal": "drift_regime_gate",
-      "accuracy_1d_pct": 58.0,
-      "samples_1d": 2060,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 58.5
-    },
-    {
-      "signal": "claude_fundamental",
-      "accuracy_1d_pct": 57.9,
-      "samples_1d": 11581,
-      "accuracy_3h_pct": 0.0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "calendar",
-      "accuracy_1d_pct": 56.7,
-      "samples_1d": 8976,
-      "accuracy_3h_pct": 67.9,
-      "samples_3h": 4928,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 45.0
-    },
-    {
-      "signal": "crypto_evrp",
-      "accuracy_1d_pct": 56.6,
-      "samples_1d": 376,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": true,
-      "accuracy_1d_recent_pct": 100.0
+      "signal": "onchain",
+      "all_time_1d": "60.0%",
+      "recent_7d": "insufficient",
+      "best_ticker": "BTC-USD only (58.3%)",
+      "status": "ACTIVE",
+      "verdict": "GOOD but BTC-only"
     }
   ],
   "worst_signals": [
     {
-      "signal": "macro_regime",
-      "accuracy_1d_pct": 46.9,
-      "samples_1d": 29766,
-      "accuracy_3h_pct": 45.1,
-      "samples_3h": 20305,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
+      "signal": "crypto_evrp",
+      "all_time_1d": "55.5%",
+      "recent_7d": "40.2% (127 sam)",
+      "status": "ACTIVE",
+      "verdict": "DISABLE globally, but 64.8% on ETH -- per-ticker gate"
     },
     {
-      "signal": "forecast",
-      "accuracy_1d_pct": 46.9,
-      "samples_1d": 7167,
-      "accuracy_3h_pct": 47.2,
-      "samples_3h": 5320,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
+      "signal": "statistical_jump_regime",
+      "all_time_1d": "54.3%",
+      "recent_7d": "46.9% (693 sam)",
+      "per_ticker": "BTC 61.3%, XAG 60.3%, XAU 50.2%",
+      "status": "ACTIVE",
+      "verdict": "Per-ticker gate: keep for BTC/XAG, disable for XAU"
     },
     {
-      "signal": "oscillators",
-      "accuracy_1d_pct": 46.7,
-      "samples_1d": 9195,
-      "accuracy_3h_pct": 43.0,
-      "samples_3h": 1366,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 50.8
+      "signal": "news_event",
+      "all_time_1d": "50.6%",
+      "recent_7d": "51.5% (264 sam)",
+      "status": "ACTIVE",
+      "verdict": "MARGINAL - only 50% edge, high complexity"
     },
     {
-      "signal": "sentiment",
-      "accuracy_1d_pct": 46.2,
-      "samples_1d": 41312,
-      "accuracy_3h_pct": 45.1,
-      "samples_3h": 31590,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 54.5
+      "signal": "credit_spread_risk",
+      "all_time_1d": "50.0%",
+      "per_ticker": "BTC/ETH 57.4%, XAG 17.3%, XAU 35.4%",
+      "status": "DISABLED",
+      "verdict": "CORRECT to disable globally. Re-enable for crypto ONLY."
     },
     {
-      "signal": "volatility_sig",
-      "accuracy_1d_pct": 46.1,
-      "samples_1d": 8150,
-      "accuracy_3h_pct": 47.2,
-      "samples_3h": 2072,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "trend",
-      "accuracy_1d_pct": 46.0,
-      "samples_1d": 18047,
-      "accuracy_3h_pct": 40.3,
-      "samples_3h": 11125,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "connors_rsi2",
-      "accuracy_1d_pct": 45.9,
-      "samples_1d": 109,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 48.4
-    },
-    {
-      "signal": "gold_overnight_bias",
-      "accuracy_1d_pct": 45.7,
-      "samples_1d": 269,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 49.4
-    },
-    {
-      "signal": "btc_proxy",
-      "accuracy_1d_pct": 45.6,
-      "samples_1d": 171,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 44.4
-    },
-    {
-      "signal": "cubic_trend_persistence",
-      "accuracy_1d_pct": 45.5,
-      "samples_1d": 2860,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 46.8
-    },
-    {
-      "signal": "williams_vix_fix",
-      "accuracy_1d_pct": 45.4,
-      "samples_1d": 624,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 40.6
-    },
-    {
-      "signal": "macd",
-      "accuracy_1d_pct": 45.0,
-      "samples_1d": 6878,
-      "accuracy_3h_pct": 43.7,
-      "samples_3h": 4952,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 48.6
-    },
-    {
-      "signal": "fibonacci",
-      "accuracy_1d_pct": 44.5,
-      "samples_1d": 20436,
-      "accuracy_3h_pct": 43.3,
-      "samples_3h": 8811,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 49.5
-    },
-    {
-      "signal": "shannon_entropy",
-      "accuracy_1d_pct": 44.2,
-      "samples_1d": 814,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": true,
-      "accuracy_1d_recent_pct": 44.8
-    },
-    {
-      "signal": "intraday_seasonality",
-      "accuracy_1d_pct": 43.9,
-      "samples_1d": 896,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 55.3
-    },
-    {
-      "signal": "dxy_cross_asset",
-      "accuracy_1d_pct": 43.3,
-      "samples_1d": 30,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "ml",
-      "accuracy_1d_pct": 41.7,
-      "samples_1d": 1714,
-      "accuracy_3h_pct": 52.3,
-      "samples_3h": 1705,
-      "disabled": true,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "futures_flow",
-      "accuracy_1d_pct": 38.3,
-      "samples_1d": 2168,
-      "accuracy_3h_pct": 50.0,
-      "samples_3h": 8,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "sentiment_extremity_gate",
-      "accuracy_1d_pct": 34.4,
-      "samples_1d": 151,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 26.0
-    },
-    {
-      "signal": "funding",
-      "accuracy_1d_pct": 30.8,
-      "samples_1d": 743,
-      "accuracy_3h_pct": 74.2,
-      "samples_3h": 535,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 0.0
-    },
-    {
-      "signal": "hash_ribbons",
-      "accuracy_1d_pct": 30.1,
-      "samples_1d": 336,
-      "accuracy_3h_pct": 0,
-      "samples_3h": 0,
-      "disabled": false,
-      "accuracy_1d_recent_pct": 11.6
+      "signal": "fear_greed",
+      "all_time_1d": "58.6%",
+      "status": "ACTIVE",
+      "verdict": "CAUTION - BUY-only signal (never SELL)"
     }
   ],
-  "correlation_clusters": {
-    "BTC-USD": {
-      "active_signals": [
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "choppiness_regime_gate",
-        "connors_rsi2",
-        "crypto_evrp",
-        "crypto_macro",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "fibonacci",
-        "hash_ribbons",
-        "intraday_seasonality",
-        "macd",
-        "mean_reversion",
+  "correlation_clusters": [
+    {
+      "name": "momentum_cluster",
+      "signals": [
         "momentum",
         "momentum_factors",
-        "news_event",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "vwap_zscore_mr",
-        "williams_vix_fix"
+        "ema",
+        "macd",
+        "trend"
       ],
-      "high_agreement_pairs": [
-        {
-          "signal_1": "qwen3",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 88.2
-        },
-        {
-          "signal_1": "sentiment_extremity_gate",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 85.6
-        },
-        {
-          "signal_1": "qwen3",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 85.3
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "qwen3",
-          "agreement_pct": 84.6
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 84.4
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 82.9
-        },
-        {
-          "signal_1": "qwen3",
-          "signal_2": "shannon_entropy",
-          "agreement_pct": 81.2
-        },
-        {
-          "signal_1": "shannon_entropy",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 80.8
-        }
-      ],
-      "high_directional_pairs": [
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 70.4
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 60.5
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "bocpd_regime_switch",
-          "agreement_pct": 57.9
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 57.5
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "ema",
-          "agreement_pct": 56.8
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "rsi",
-          "agreement_pct": 55.3
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 54.6
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "mean_reversion",
-          "agreement_pct": 53.9
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 53.5
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 53.3
-        },
-        {
-          "signal_1": "crypto_macro",
-          "signal_2": "econ_calendar",
-          "agreement_pct": 52.9
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 51.2
-        },
-        {
-          "signal_1": "drift_regime_gate",
-          "signal_2": "mean_reversion",
-          "agreement_pct": 50.7
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "oscillators",
-          "agreement_pct": 50.1
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "oscillators",
-          "agreement_pct": 49.5
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "econ_calendar",
-          "agreement_pct": 49.1
-        },
-        {
-          "signal_1": "choppiness_regime_gate",
-          "signal_2": "ema",
-          "agreement_pct": 48.9
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "oscillators",
-          "agreement_pct": 48.8
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 47.9
-        },
-        {
-          "signal_1": "choppiness_regime_gate",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 47.8
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "hash_ribbons",
-          "agreement_pct": 47.5
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "ema",
-          "agreement_pct": 47.5
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "choppiness_regime_gate",
-          "agreement_pct": 46.6
-        },
-        {
-          "signal_1": "mean_reversion",
-          "signal_2": "rsi",
-          "agreement_pct": 46.5
-        },
-        {
-          "signal_1": "mean_reversion",
-          "signal_2": "momentum",
-          "agreement_pct": 46.2
-        }
-      ],
-      "clusters": [
-        [
-          "macd",
-          "qwen3",
-          "sentiment_extremity_gate",
-          "shannon_entropy",
-          "vwap_zscore_mr"
-        ]
-      ]
+      "correlation": "high",
+      "note": "All use price momentum/trend indicators. Redundant information when trending."
     },
-    "ETH-USD": {
-      "active_signals": [
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "choppiness_regime_gate",
-        "connors_rsi2",
-        "crypto_evrp",
-        "crypto_macro",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "fibonacci",
-        "intraday_seasonality",
-        "macd",
+    {
+      "name": "mean_reversion_cluster",
+      "signals": [
         "mean_reversion",
-        "momentum",
-        "momentum_factors",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
         "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "williams_vix_fix"
+        "bb"
       ],
-      "high_agreement_pairs": [
-        {
-          "signal_1": "crypto_macro",
-          "signal_2": "econ_calendar",
-          "agreement_pct": 88.0
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 84.6
-        },
-        {
-          "signal_1": "qwen3",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 81.1
-        }
-      ],
-      "high_directional_pairs": [
-        {
-          "signal_1": "crypto_macro",
-          "signal_2": "econ_calendar",
-          "agreement_pct": 87.7
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 68.2
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "bocpd_regime_switch",
-          "agreement_pct": 62.8
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 60.8
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "ema",
-          "agreement_pct": 57.1
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 56.0
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 52.6
-        },
-        {
-          "signal_1": "choppiness_regime_gate",
-          "signal_2": "ema",
-          "agreement_pct": 52.1
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "oscillators",
-          "agreement_pct": 52.0
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "rsi",
-          "agreement_pct": 51.9
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 51.4
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 50.7
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 50.7
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "cubic_trend_persistence",
-          "agreement_pct": 50.7
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 50.7
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 50.6
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "ema",
-          "agreement_pct": 50.3
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 49.3
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "choppiness_regime_gate",
-          "agreement_pct": 49.0
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 48.2
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "ema",
-          "agreement_pct": 47.7
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 47.7
-        },
-        {
-          "signal_1": "choppiness_regime_gate",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 47.4
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "oscillators",
-          "agreement_pct": 47.1
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "oscillators",
-          "agreement_pct": 47.0
-        }
-      ],
-      "clusters": [
-        [
-          "crypto_macro",
-          "econ_calendar"
-        ],
-        [
-          "macd",
-          "qwen3",
-          "sentiment_extremity_gate"
-        ]
-      ]
+      "correlation": "moderate",
+      "note": "RSI and BB overlap with mean_reversion but BB has independent volatility component."
     },
-    "XAG-USD": {
-      "active_signals": [
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "choppiness_regime_gate",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "fibonacci",
-        "gold_overnight_bias",
-        "intraday_seasonality",
-        "macd",
-        "mean_reversion",
-        "momentum",
-        "momentum_factors",
-        "news_event",
-        "oscillators",
+    {
+      "name": "llm_cluster",
+      "signals": [
+        "ministral",
         "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "williams_vix_fix"
+        "claude_fundamental"
       ],
-      "high_agreement_pairs": [
-        {
-          "signal_1": "qwen3",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 89.5
-        }
-      ],
-      "high_directional_pairs": [
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "gold_overnight_bias",
-          "agreement_pct": 65.9
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "rsi",
-          "agreement_pct": 60.2
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 57.7
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "macd",
-          "agreement_pct": 55.5
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 54.1
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "oscillators",
-          "agreement_pct": 53.8
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 53.7
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "ema",
-          "agreement_pct": 52.4
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "ema",
-          "agreement_pct": 50.5
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "bocpd_regime_switch",
-          "agreement_pct": 50.3
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 49.8
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 48.3
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "gold_overnight_bias",
-          "agreement_pct": 46.8
-        },
-        {
-          "signal_1": "mean_reversion",
-          "signal_2": "rsi",
-          "agreement_pct": 46.8
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 45.2
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 45.1
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "cubic_trend_persistence",
-          "agreement_pct": 44.9
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "mean_reversion",
-          "agreement_pct": 44.6
-        },
-        {
-          "signal_1": "choppiness_regime_gate",
-          "signal_2": "ema",
-          "agreement_pct": 44.4
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "oscillators",
-          "agreement_pct": 43.9
-        },
-        {
-          "signal_1": "gold_overnight_bias",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 43.8
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "statistical_jump_regime",
-          "agreement_pct": 43.6
-        },
-        {
-          "signal_1": "drift_regime_gate",
-          "signal_2": "mean_reversion",
-          "agreement_pct": 43.1
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "gold_overnight_bias",
-          "agreement_pct": 42.6
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 42.5
-        }
-      ],
-      "clusters": [
-        [
-          "qwen3",
-          "sentiment_extremity_gate"
-        ]
-      ]
+      "correlation": "moderate",
+      "note": "All LLMs see similar features. qwen3 has distinct SELL bias (72.7% SELL accuracy)."
     },
-    "XAU-USD": {
-      "active_signals": [
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "choppiness_regime_gate",
-        "cubic_trend_persistence",
+    {
+      "name": "regime_cluster",
+      "signals": [
         "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "fibonacci",
-        "gold_overnight_bias",
-        "intraday_seasonality",
-        "macd",
-        "mean_reversion",
-        "momentum",
-        "momentum_factors",
-        "news_event",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
         "statistical_jump_regime",
-        "tsi_chop_mr",
         "vol_ratio_regime",
-        "volume",
-        "vwap_zscore_mr",
-        "williams_vix_fix"
+        "hurst_regime"
       ],
-      "high_agreement_pairs": [
-        {
-          "signal_1": "intraday_seasonality",
-          "signal_2": "shannon_entropy",
-          "agreement_pct": 89.5
-        },
-        {
-          "signal_1": "shannon_entropy",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 89.3
-        },
-        {
-          "signal_1": "sentiment_extremity_gate",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 87.6
-        },
-        {
-          "signal_1": "sentiment_extremity_gate",
-          "signal_2": "shannon_entropy",
-          "agreement_pct": 87.3
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "shannon_entropy",
-          "agreement_pct": 85.3
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 85.3
-        },
-        {
-          "signal_1": "qwen3",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 84.9
-        },
-        {
-          "signal_1": "qwen3",
-          "signal_2": "shannon_entropy",
-          "agreement_pct": 84.3
-        },
-        {
-          "signal_1": "intraday_seasonality",
-          "signal_2": "vwap_zscore_mr",
-          "agreement_pct": 83.9
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 83.3
-        },
-        {
-          "signal_1": "intraday_seasonality",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 82.7
-        },
-        {
-          "signal_1": "qwen3",
-          "signal_2": "sentiment_extremity_gate",
-          "agreement_pct": 82.7
-        },
-        {
-          "signal_1": "vwap_zscore_mr",
-          "signal_2": "williams_vix_fix",
-          "agreement_pct": 81.4
-        },
-        {
-          "signal_1": "macd",
-          "signal_2": "qwen3",
-          "agreement_pct": 80.4
-        },
-        {
-          "signal_1": "intraday_seasonality",
-          "signal_2": "macd",
-          "agreement_pct": 80.2
-        }
-      ],
-      "high_directional_pairs": [
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "gold_overnight_bias",
-          "agreement_pct": 69.0
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "bocpd_regime_switch",
-          "agreement_pct": 65.5
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 63.0
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 61.4
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "rsi",
-          "agreement_pct": 59.9
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 56.4
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 54.9
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "oscillators",
-          "agreement_pct": 52.8
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 52.6
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "ema",
-          "agreement_pct": 52.3
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 51.6
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 50.4
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "oscillators",
-          "agreement_pct": 49.8
-        },
-        {
-          "signal_1": "ema",
-          "signal_2": "gold_overnight_bias",
-          "agreement_pct": 49.3
-        },
-        {
-          "signal_1": "momentum_factors",
-          "signal_2": "oscillators",
-          "agreement_pct": 48.7
-        },
-        {
-          "signal_1": "bb",
-          "signal_2": "mean_reversion",
-          "agreement_pct": 48.6
-        },
-        {
-          "signal_1": "drift_regime_gate",
-          "signal_2": "mean_reversion",
-          "agreement_pct": 48.0
-        },
-        {
-          "signal_1": "econ_calendar",
-          "signal_2": "momentum_factors",
-          "agreement_pct": 47.5
-        },
-        {
-          "signal_1": "adx_regime_switch",
-          "signal_2": "cubic_trend_persistence",
-          "agreement_pct": 47.5
-        },
-        {
-          "signal_1": "choppiness_regime_gate",
-          "signal_2": "ema",
-          "agreement_pct": 45.4
-        },
-        {
-          "signal_1": "drift_regime_gate",
-          "signal_2": "gold_overnight_bias",
-          "agreement_pct": 45.4
-        },
-        {
-          "signal_1": "mean_reversion",
-          "signal_2": "momentum",
-          "agreement_pct": 44.7
-        },
-        {
-          "signal_1": "cubic_trend_persistence",
-          "signal_2": "vol_ratio_regime",
-          "agreement_pct": 44.6
-        },
-        {
-          "signal_1": "bocpd_regime_switch",
-          "signal_2": "oscillators",
-          "agreement_pct": 44.6
-        },
-        {
-          "signal_1": "mean_reversion",
-          "signal_2": "rsi",
-          "agreement_pct": 44.5
-        }
-      ],
-      "clusters": [
-        [
-          "intraday_seasonality",
-          "macd",
-          "qwen3",
-          "sentiment_extremity_gate",
-          "shannon_entropy",
-          "vwap_zscore_mr",
-          "williams_vix_fix"
-        ]
-      ]
+      "correlation": "low-moderate",
+      "note": "Different regime detection methods. drift_regime_gate is star, others mediocre."
     }
+  ],
+  "regime_performance": {
+    "current_regime": "ranging",
+    "ranging_penalty": "0.75x confidence",
+    "high_vol_penalty": "0.80x confidence",
+    "observation": "In ranging regime, trend-following signals (ema, macd, momentum) systematically underperform. Mean reversion (rsi, bb, mean_reversion) outperform. Current weights do NOT adjust enough for this."
   },
-  "hold_dilution_stats": {
-    "BTC-USD": {
-      "total_signals": 87,
-      "permanent_hold_count": 40,
-      "disabled_hold_signals": [
-        "complexity_gap_regime",
-        "copper_gold_ratio",
-        "cross_asset_tsmom",
-        "futures_basis",
-        "gold_real_yield_paradox",
-        "hurst_regime",
-        "mahalanobis_turbulence",
-        "ml",
-        "network_momentum",
-        "orderbook_flow",
-        "ovx_metals_spillover",
-        "smart_money",
-        "vix_term_structure",
-        "xtrend_equity_spillover"
-      ],
-      "accuracy_gated_hold_signals": [
-        "breakeven_inflation_momentum",
-        "btc_proxy",
-        "calendar",
-        "candlestick",
-        "claude_fundamental",
-        "cot_positioning",
-        "credit_spread_risk",
-        "dxy_cross_asset",
-        "fear_greed",
-        "forecast",
-        "funding",
-        "futures_flow",
-        "heikin_ashi",
-        "macro_regime",
-        "metals_cross_asset",
-        "metals_vrp",
-        "ministral",
-        "onchain",
-        "residual_pair_reversion",
-        "structure",
-        "treasury_risk_rotation",
-        "trend",
-        "trend_slope_momentum",
-        "ttm_squeeze",
-        "volatility_sig",
-        "volume_flow"
-      ],
-      "active_voter_count": 47,
-      "active_voter_names": [
-        "absorption_ratio_regime",
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "btc_gold_correlation_regime",
-        "choppiness_regime_gate",
-        "connors_rsi2",
-        "crypto_derivatives_composite",
-        "crypto_evrp",
-        "crypto_macro",
-        "cryptotrader_lm",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "eth_btc_ratio_roc_zscore",
-        "fibonacci",
-        "finance_llama",
-        "gold_btc_vol_spillover",
-        "gold_overnight_bias",
-        "gs_kalman_zscore_regime",
-        "hash_ribbons",
-        "intraday_seasonality",
-        "kalman_trend_momentum",
-        "macd",
-        "mean_reversion",
-        "meta_trader",
-        "momentum",
-        "momentum_factors",
-        "mstr_mnav_discount",
-        "news_event",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "stablecoin_supply_ratio",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "vwap_zscore_mr",
-        "williams_vix_fix"
-      ],
-      "avg_hold_pct": 79.4
-    },
-    "ETH-USD": {
-      "total_signals": 87,
-      "permanent_hold_count": 43,
-      "disabled_hold_signals": [
-        "complexity_gap_regime",
-        "copper_gold_ratio",
-        "cross_asset_tsmom",
-        "futures_basis",
-        "gold_real_yield_paradox",
-        "hurst_regime",
-        "mahalanobis_turbulence",
-        "ml",
-        "network_momentum",
-        "orderbook_flow",
-        "ovx_metals_spillover",
-        "smart_money",
-        "vix_term_structure",
-        "xtrend_equity_spillover"
-      ],
-      "accuracy_gated_hold_signals": [
-        "breakeven_inflation_momentum",
-        "btc_proxy",
-        "calendar",
-        "candlestick",
-        "claude_fundamental",
-        "cot_positioning",
-        "credit_spread_risk",
-        "dxy_cross_asset",
-        "fear_greed",
-        "forecast",
-        "funding",
-        "futures_flow",
-        "hash_ribbons",
-        "heikin_ashi",
-        "macro_regime",
-        "metals_cross_asset",
-        "metals_vrp",
-        "ministral",
-        "news_event",
-        "onchain",
-        "residual_pair_reversion",
-        "structure",
-        "treasury_risk_rotation",
-        "trend",
-        "trend_slope_momentum",
-        "ttm_squeeze",
-        "volatility_sig",
-        "volume_flow",
-        "vwap_zscore_mr"
-      ],
-      "active_voter_count": 44,
-      "active_voter_names": [
-        "absorption_ratio_regime",
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "btc_gold_correlation_regime",
-        "choppiness_regime_gate",
-        "connors_rsi2",
-        "crypto_derivatives_composite",
-        "crypto_evrp",
-        "crypto_macro",
-        "cryptotrader_lm",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "eth_btc_ratio_roc_zscore",
-        "fibonacci",
-        "finance_llama",
-        "gold_btc_vol_spillover",
-        "gold_overnight_bias",
-        "gs_kalman_zscore_regime",
-        "intraday_seasonality",
-        "kalman_trend_momentum",
-        "macd",
-        "mean_reversion",
-        "meta_trader",
-        "momentum",
-        "momentum_factors",
-        "mstr_mnav_discount",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "stablecoin_supply_ratio",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "williams_vix_fix"
-      ],
-      "avg_hold_pct": 79.6
-    },
-    "XAG-USD": {
-      "total_signals": 87,
-      "permanent_hold_count": 44,
-      "disabled_hold_signals": [
-        "complexity_gap_regime",
-        "copper_gold_ratio",
-        "cross_asset_tsmom",
-        "crypto_evrp",
-        "futures_basis",
-        "gold_real_yield_paradox",
-        "hurst_regime",
-        "mahalanobis_turbulence",
-        "ml",
-        "network_momentum",
-        "orderbook_flow",
-        "ovx_metals_spillover",
-        "smart_money",
-        "vix_term_structure",
-        "xtrend_equity_spillover"
-      ],
-      "accuracy_gated_hold_signals": [
-        "breakeven_inflation_momentum",
-        "btc_proxy",
-        "calendar",
-        "candlestick",
-        "claude_fundamental",
-        "cot_positioning",
-        "credit_spread_risk",
-        "crypto_macro",
-        "dxy_cross_asset",
-        "fear_greed",
-        "forecast",
-        "funding",
-        "futures_flow",
-        "hash_ribbons",
-        "heikin_ashi",
-        "macro_regime",
-        "metals_cross_asset",
-        "metals_vrp",
-        "ministral",
-        "onchain",
-        "residual_pair_reversion",
-        "structure",
-        "treasury_risk_rotation",
-        "trend",
-        "trend_slope_momentum",
-        "ttm_squeeze",
-        "volatility_sig",
-        "volume_flow",
-        "vwap_zscore_mr"
-      ],
-      "active_voter_count": 43,
-      "active_voter_names": [
-        "absorption_ratio_regime",
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "btc_gold_correlation_regime",
-        "choppiness_regime_gate",
-        "connors_rsi2",
-        "crypto_derivatives_composite",
-        "cryptotrader_lm",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "eth_btc_ratio_roc_zscore",
-        "fibonacci",
-        "finance_llama",
-        "gold_btc_vol_spillover",
-        "gold_overnight_bias",
-        "gs_kalman_zscore_regime",
-        "intraday_seasonality",
-        "kalman_trend_momentum",
-        "macd",
-        "mean_reversion",
-        "meta_trader",
-        "momentum",
-        "momentum_factors",
-        "mstr_mnav_discount",
-        "news_event",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "stablecoin_supply_ratio",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "williams_vix_fix"
-      ],
-      "avg_hold_pct": 80.2
-    },
-    "XAU-USD": {
-      "total_signals": 87,
-      "permanent_hold_count": 43,
-      "disabled_hold_signals": [
-        "complexity_gap_regime",
-        "copper_gold_ratio",
-        "cross_asset_tsmom",
-        "crypto_evrp",
-        "futures_basis",
-        "gold_real_yield_paradox",
-        "hurst_regime",
-        "mahalanobis_turbulence",
-        "ml",
-        "network_momentum",
-        "orderbook_flow",
-        "ovx_metals_spillover",
-        "smart_money",
-        "vix_term_structure",
-        "xtrend_equity_spillover"
-      ],
-      "accuracy_gated_hold_signals": [
-        "breakeven_inflation_momentum",
-        "btc_proxy",
-        "calendar",
-        "candlestick",
-        "claude_fundamental",
-        "cot_positioning",
-        "credit_spread_risk",
-        "crypto_macro",
-        "dxy_cross_asset",
-        "fear_greed",
-        "forecast",
-        "funding",
-        "futures_flow",
-        "hash_ribbons",
-        "heikin_ashi",
-        "macro_regime",
-        "metals_cross_asset",
-        "metals_vrp",
-        "ministral",
-        "onchain",
-        "residual_pair_reversion",
-        "structure",
-        "treasury_risk_rotation",
-        "trend",
-        "trend_slope_momentum",
-        "ttm_squeeze",
-        "volatility_sig",
-        "volume_flow"
-      ],
-      "active_voter_count": 44,
-      "active_voter_names": [
-        "absorption_ratio_regime",
-        "adx_regime_switch",
-        "amihud_illiquidity_regime",
-        "autotune_adaptive_cycle",
-        "bb",
-        "bocpd_regime_switch",
-        "btc_gold_correlation_regime",
-        "choppiness_regime_gate",
-        "connors_rsi2",
-        "crypto_derivatives_composite",
-        "cryptotrader_lm",
-        "cubic_trend_persistence",
-        "drift_regime_gate",
-        "econ_calendar",
-        "ema",
-        "eth_btc_ratio_roc_zscore",
-        "fibonacci",
-        "finance_llama",
-        "gold_btc_vol_spillover",
-        "gold_overnight_bias",
-        "gs_kalman_zscore_regime",
-        "intraday_seasonality",
-        "kalman_trend_momentum",
-        "macd",
-        "mean_reversion",
-        "meta_trader",
-        "momentum",
-        "momentum_factors",
-        "mstr_mnav_discount",
-        "news_event",
-        "oscillators",
-        "qwen3",
-        "realized_skewness",
-        "rsi",
-        "sentiment",
-        "sentiment_extremity_gate",
-        "shannon_entropy",
-        "stablecoin_supply_ratio",
-        "statistical_jump_regime",
-        "tsi_chop_mr",
-        "vol_ratio_regime",
-        "volume",
-        "vwap_zscore_mr",
-        "williams_vix_fix"
-      ],
-      "avg_hold_pct": 81.6
-    }
+  "critical_finding": {
+    "title": "Per-ticker signal accuracy divergence is the #1 problem",
+    "detail": "Signals like credit_spread_risk (57% BTC vs 17% XAG) and statistical_jump_regime (61% BTC vs 50% XAU) have massive per-ticker accuracy differences. Using them globally destroys metals/ETH consensus. System has NO EDGE on 4/5 instruments.",
+    "root_cause": "No per-ticker signal gating beyond DISABLED_SIGNALS list.",
+    "fix": "Implement per-ticker per-signal accuracy gating: if signal X has <47% accuracy for ticker Y (>=30 samples), force HOLD for that ticker."
   },
   "recommendations": [
-    "CRITICAL: BTC-USD has 79% HOLD dilution - 40 of 87 signals are permanent HOLD. Only 47 signals actively vote. Exclude permanently-disabled signals from voter count.",
-    "CRITICAL: ETH-USD has 80% HOLD dilution - 43 of 87 signals are permanent HOLD. Only 44 signals actively vote. Exclude permanently-disabled signals from voter count.",
-    "CRITICAL: XAG-USD has 80% HOLD dilution - 44 of 87 signals are permanent HOLD. Only 43 signals actively vote. Exclude permanently-disabled signals from voter count.",
-    "CRITICAL: XAU-USD has 82% HOLD dilution - 43 of 87 signals are permanent HOLD. Only 44 signals actively vote. Exclude permanently-disabled signals from voter count.",
-    "REDUNDANCY: BTC-USD cluster ['macd', 'qwen3', 'sentiment_extremity_gate', 'shannon_entropy', 'vwap_zscore_mr'] - 5 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
-    "REDUNDANCY: ETH-USD pair ['crypto_macro', 'econ_calendar'] agree >80%. Low marginal info from both.",
-    "REDUNDANCY: ETH-USD cluster ['macd', 'qwen3', 'sentiment_extremity_gate'] - 3 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
-    "REDUNDANCY: XAG-USD pair ['qwen3', 'sentiment_extremity_gate'] agree >80%. Low marginal info from both.",
-    "REDUNDANCY: XAU-USD cluster ['intraday_seasonality', 'macd', 'qwen3', 'sentiment_extremity_gate', 'shannon_entropy', 'vwap_zscore_mr', 'williams_vix_fix'] - 7 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
-    "ACCURACY: macro_regime at 46.9% (1d, 29766 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: forecast at 46.9% (1d, 7167 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: oscillators at 46.7% (1d, 9195 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: sentiment at 46.2% (1d, 41312 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: volatility_sig at 46.1% (1d, 8150 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: trend at 46.0% (1d, 18047 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: connors_rsi2 at 45.9% (1d, 109 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: gold_overnight_bias at 45.7% (1d, 269 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: btc_proxy at 45.6% (1d, 171 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: cubic_trend_persistence at 45.5% (1d, 2860 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: williams_vix_fix at 45.4% (1d, 624 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: macd at 45.0% (1d, 6878 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: fibonacci at 44.5% (1d, 20436 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: intraday_seasonality at 43.9% (1d, 896 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: dxy_cross_asset at 43.3% (1d, 30 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: futures_flow at 38.3% (1d, 2168 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: sentiment_extremity_gate at 34.4% (1d, 151 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: funding at 30.8% (1d, 743 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "ACCURACY: hash_ribbons at 30.1% (1d, 336 sam) - below accuracy gate, should be force-HOLD or disabled.",
-    "DEAD WEIGHT: 27 signals have 0 accuracy samples and are permanent HOLD: ['absorption_ratio_regime', 'breakeven_inflation_momentum', 'btc_gold_correlation_regime', 'copper_gold_ratio', 'cross_asset_tsmom', 'crypto_derivatives_composite', 'cryptotrader_lm', 'eth_btc_ratio_roc_zscore', 'finance_llama', 'futures_basis', 'gold_btc_vol_spillover', 'gold_real_yield_paradox', 'gs_kalman_zscore_regime', 'hurst_regime', 'kalman_trend_momentum', 'mahalanobis_turbulence', 'meta_trader', 'metals_vrp', 'mstr_mnav_discount', 'network_momentum', 'ovx_metals_spillover', 'residual_pair_reversion', 'stablecoin_supply_ratio', 'treasury_risk_rotation', 'trend_slope_momentum', 'vix_term_structure', 'xtrend_equity_spillover']. Remove from voter denominator."
+    {
+      "priority": 1,
+      "title": "Implement per-ticker signal accuracy gating",
+      "description": "Gate signals per-ticker based on per-ticker accuracy from signal_log.db. If signal has <47% accuracy for a specific ticker with >=30 samples, force HOLD for that ticker.",
+      "expected_impact": "HIGH - could improve metals consensus from 49.6% to 55%+",
+      "effort": "medium",
+      "files": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "priority": 2,
+      "title": "Re-enable williams_vix_fix for metals (XAU, XAG)",
+      "description": "williams_vix_fix has 76.5% accuracy on XAU (68 sam) and 60.9% on XAG (92 sam). Currently disabled globally. Enable per-ticker.",
+      "expected_impact": "MEDIUM - adds high-accuracy voter for metals",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "priority": 3,
+      "title": "Disable crypto_evrp or gate it to ETH-only",
+      "description": "crypto_evrp regressed to 40.2% recent. But per-ticker it is 64.8% on ETH. Gate to ETH-only.",
+      "expected_impact": "MEDIUM",
+      "effort": "easy",
+      "files": [
+        "portfolio/tickers.py"
+      ]
+    },
+    {
+      "priority": 4,
+      "title": "Boost drift_regime_gate weight",
+      "description": "drift_regime_gate at 68.1% recent (626 sam) is star performer. No weight boost currently.",
+      "expected_impact": "LOW-MEDIUM",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "priority": 5,
+      "title": "Disable statistical_jump_regime for XAU",
+      "description": "statistical_jump_regime at 50.2% for XAU adds noise. Keep for BTC (61.3%) and XAG (60.3%).",
+      "expected_impact": "LOW",
+      "effort": "easy",
+      "files": [
+        "portfolio/tickers.py"
+      ]
+    }
   ]
 }

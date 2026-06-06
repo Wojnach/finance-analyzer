@@ -1,135 +1,111 @@
 {
-  "date": "2026-05-25",
-  "generated_at": "2026-06-02T20:39:48.445219+00:00",
+  "date": "2026-06-06",
   "research_topics": [
-    "Signal combination methods (IC-weighted, stacking, meta-learning)",
-    "Regime-adaptive signal selection",
-    "Walk-forward signal reweighting",
-    "Silver/gold prediction features",
-    "Crypto prediction (on-chain + market data)",
-    "Signal correlation and redundancy pruning",
-    "Position sizing under uncertainty"
+    "IC-based signal weighting",
+    "BUY/SELL asymmetry calibration",
+    "Regime-conditioned signal selection",
+    "Mean reversion in metals",
+    "Crypto on-chain signal advances"
   ],
   "findings": [
     {
-      "topic": "Signal combination methods",
-      "finding": "IC-weighted ensembles: weight signals by rolling Information Coefficient (rank correlation of signal value vs forward returns). IC above 0.05 indicates meaningful predictive power. Max Information Ratio weighting consistently outperforms equal-weight. Signal can be 51% directionally accurate but have meaningful IC if magnitude predicts return magnitude.",
-      "relevance_to_us": "System uses accuracy-weighted voting. IC-weighted would be strictly superior. LinearFactorModel and SignalWeightOptimizer infrastructure exists but not wired into live consensus path.",
+      "topic": "IC-Based Walk-Forward Signal Weighting",
+      "finding": "Current best practice uses rolling 180-day windows to compute per-signal IC (Spearman rank correlation between signal value and N-day forward return), then weights signals proportional to their trailing IC. A 'Mega-Alpha' approach filters and re-weights recently effective alphas via linear regression at each rebalance, discarding stale signals automatically. Key metrics: IC, ICIR (IC Information Ratio = mean(IC)/std(IC)), RIC (Rank IC). Bounded regression caps any single signal contribution to enforce diversification. XGBoost trained on top-IC alphas as a nonlinear combiner outperforms linear IC-weighting in walk-forward tests (arxiv 2512.12924). PPO-based adaptive alpha weighting (arxiv 2509.01393) uses deep RL to continuously mine and re-weight signals in non-stationary markets.",
+      "relevance_to_us": "We currently use equal weights across 21 active signals. Switching to trailing-IC weighting would upweight our 60-68% accuracy regime signals (ADX, Amihud, Choppiness) and downweight noisy ones (RSI at 52%, Mean Reversion at 52.6%). The 180-day rolling window aligns with our existing accuracy_cache.json 30-day recalc. Implementation: compute per-signal IC in outcome_tracker.py, store in accuracy_cache, use IC as weight in signal_engine.py consensus.",
       "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "FactSet IC weighting research, arxiv 2509.01393"
+      "expected_impact": "high — estimated 3-5 ppt improvement in consensus accuracy based on literature",
+      "source": "arxiv 2512.12924, arxiv 2509.01393, quantbeckman.com walk-forward guide, alphascientist.com"
     },
     {
-      "topic": "Signal combination methods",
-      "finding": "MWU learning rate: our SignalWeightManager uses eta=0.1. Optimal eta = sqrt(ln(N)/T) with N=15 signals, T=30K samples gives eta ~0.013. Current rate too aggressive, causes weight oscillation.",
-      "relevance_to_us": "Direct fix: reduce eta from 0.1 to 0.015 in signal_weights.py. MWU weights computed but normalized weights never consumed by _weighted_consensus.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "Hedge algorithm theory (Freund & Schapire 1997)"
+      "topic": "BUY/SELL Asymmetric Signal Calibration",
+      "finding": "Research confirms that buy and sell signals should be treated as separate prediction problems. Asymmetric loss functions (penalizing wrong-direction forecasts more heavily) improve directional accuracy by 3.4-6.1 ppt over MSE/MAE (MDPI 2673-2688/6/10/268). Practical approaches: (1) Maintain separate accuracy stats for BUY vs SELL per signal — a signal with 70% SELL accuracy but 30% BUY accuracy should only emit SELL, with BUY suppressed. (2) Direction-specific confidence multipliers: if a signal's BUY accuracy is below random (50%), its BUY votes get 0 weight (not inverted — inversion causes whiplash, which our system already learned). (3) Coherence weighting: amplify signal when directional components agree, attenuate when they conflict. (4) Asymmetric exit rules: more conservative exits for bearish signals even without confirmation, since downside moves are faster.",
+      "relevance_to_us": "CRITICAL. Our BUY signals are 26-45% accurate vs SELL at 60-75%. Current system treats both directions equally. Fix: split accuracy_cache.json into per-direction stats. In signal_engine.py, apply direction-specific weight: if signal X has BUY accuracy < 47%, its BUY votes get weight 0 (force HOLD on buy side only). SELL votes from same signal keep full weight. This alone should dramatically reduce false BUY signals dragging down consensus.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "very high — directly addresses our worst failure mode (false BUY signals)",
+      "source": "MDPI 2673-2688/6/10/268, arxiv 2411.05938, extractalpha.com top-7-signals"
     },
     {
-      "topic": "Regime-adaptive signal selection",
-      "finding": "HMM-based regime detection with per-regime signal whitelist. Fit GaussianHMM (3-4 states) on [log_returns, realized_vol, volume_ratio]. Per-regime, only activate signals with IC > 0.02. Refit monthly on rolling 6-month window.",
-      "relevance_to_us": "drift_regime_gate (68.1% recent) should gate which signals participate, not just apply a multiplier. REGIME_GATED_SIGNALS exists but is manually curated, not data-driven.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "arxiv 2508.11338, quantinsti.com regime-adaptive"
+      "topic": "Regime-Conditioned Signal Selection",
+      "finding": "The regime detection AI market hit $1.84B in 2025 (CAGR 23.8%). Modern implementations use ensemble HMMs (Gaussian + Variational Bayesian) with adaptive model selection at each timestep plus smoothing to prevent noise-driven regime flips. Key finding: regime-conditioned strategies achieve higher Sharpe and lower drawdown across all phases. Statistical Jump Model approach (arxiv 2402.05272) uses jump detection for regime shifts — we already have this as signal #14 (Statistical Jump Regime, 54.3% accuracy). Dynamic Factor Allocation (arxiv 2410.14841) leverages regime-switching signals to rotate factor exposure. Two-Level Uncertainty framework (arxiv 2603.13252) adds safety via uncertainty quantification when alpha breaks in regime transitions.",
+      "relevance_to_us": "We have 6 regime signals (ADX, Amihud, Choppiness, BOCPD, Vol Ratio, Drift Regime Gate) averaging 60-68% accuracy — our best performers. Current use: regime penalties (0.75x ranging, 0.80x high-vol) applied uniformly. Improvement: instead of just penalizing, use regime state to SELECT which non-regime signals are active. E.g., in trending regime (ADX>25), enable momentum/trend signals and disable mean-reversion; in ranging regime, do the opposite. This is signal SELECTION not just weighting.",
+      "implementation_difficulty": "high",
+      "expected_impact": "high — regime-conditional selection is the #1 differentiator in institutional quant systems",
+      "source": "arxiv 2410.14841, arxiv 2402.05272, arxiv 2603.13252, blog.pickmytrade.trade regime-detection-2026"
     },
     {
-      "topic": "Walk-forward signal reweighting",
-      "finding": "Walk-forward optimizer already exists in signal_weight_optimizer.py with 30d train / 7d test windows. Results saved to data/models/walkforward_results.json but NEVER consumed by _weighted_consensus(). Highest-ROI single change.",
-      "relevance_to_us": "Wire walkforward_results.json into consensus: if avg_oos_corr > 0.02, use recommended_weights as multipliers. Fallback to accuracy-only if OOS correlation too low.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "Existing codebase analysis"
+      "topic": "Mean Reversion in Silver (XAG)",
+      "finding": "Gold-silver ratio (GSR) is the primary mean-reversion vehicle for precious metals. Current GSR ~60:1 (down from 105:1 in Apr 2025). Historical mean-reversion range: 40:1 to 90:1, long-term average 60-70:1. At current ~60, ratio is near fair value — less mean-reversion alpha available than when it was at 88-105. Best indicators: RSI on GSR (not on silver alone), Bollinger Bands on GSR, rate-of-change of GSR. Silver seasonality: January (65% positive) and October (68% positive) are strongest months; mid-year weakness June-August. Since 2020, pattern shifted: Feb weakest, March strong. Supply deficit (6th consecutive year, 100-120M oz annual shortfall) creates structural bid. Solar demand >200M oz/year by end-2026. Industrial demand (55% of total) dominates seasonal pattern.",
+      "relevance_to_us": "Our Mean Reversion signal (52.6% accuracy) applies generic RSI(2/3)/IBS/BB%B to silver. Should add GSR-specific mean reversion: compute GSR, apply RSI/BB on the ratio instead of raw price. Also add seasonality overlay (our calendar signal is disabled). Supply deficit context should feed into prophecy.json conviction. Current silver prophecy ($120, 0.8 conviction) aligns with analyst consensus ($87-100 base case).",
+      "implementation_difficulty": "low-medium",
+      "expected_impact": "medium — GSR mean reversion is well-established, but current ratio near fair value limits near-term alpha",
+      "source": "fxstreet.com GSR analysis, usagold.com GSR guide, investinghaven.com seasonality, fxempire.com silver forecast"
     },
     {
-      "topic": "Silver/gold prediction features",
-      "finding": "Top features for gold/silver: (1) US 10Y TIPS real yield (strongest predictor), (2) DXY (weakening since 2022), (3) COT positioning, (4) Gold ETF flows, (5) Central bank purchases. Real yields now better predictor than DXY alone.",
-      "relevance_to_us": "gold_real_yield_paradox signal is DISABLED. FRED integration exists. Re-enabling with walk-forward validation could add 2-3% accuracy for XAU/XAG.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "JP Morgan gold research, sciencedirect precious metals ML"
-    },
-    {
-      "topic": "Crypto prediction",
-      "finding": "Combined on-chain + market models achieve 84.3% for macro cycle positioning. Key features: MVRV Z-Score (current 1.32), SOPR, exchange netflow (6yr lows), LTH supply ratio (78%). Funding rates mean-reverting and predictive at extremes.",
-      "relevance_to_us": "onchain signal (60% 1d) already uses MVRV/SOPR. Should weight MORE heavily on longer horizons (3d/5d). Funding rate should be FILTER not standalone voter.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "Bitcoin ML research, sciencedirect crypto forecasting"
-    },
-    {
-      "topic": "Signal correlation and redundancy",
-      "finding": "Agreement rate (fraction of time two signals vote same direction) > 80% indicates functional redundancy. After pruning redundant signals, re-optimize weights. Likely redundant pairs: (RSI, mean_reversion), (BB, mean_reversion), (momentum, RSI).",
-      "relevance_to_us": "_compute_agreement_rate() already exists in signal_engine.py. Pruning from 15 to 10-12 independent signals could improve consensus by eliminating double-counted votes.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "arxiv 2509.01393, 2509.25055"
-    },
-    {
-      "topic": "Position sizing under uncertainty",
-      "finding": "Full Kelly optimal only with perfect estimates. With 4/5 instruments at <=50% accuracy, full Kelly = zero position. Quarter-Kelly retains 75% growth rate, halves variance. MacLean (2004): most successful institutions use quarter-to-half Kelly.",
-      "relevance_to_us": "kelly_sizing.py exists. Enforce quarter-Kelly max. Hard rule: if consensus accuracy <52% on trailing 30d, cap position at 2% portfolio.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "Kelly criterion literature, MacLean et al. 2004"
+      "topic": "Crypto On-Chain Signal Advances 2025-2026",
+      "finding": "MVRV Z-Score reliability questioned: peaked at only 2.524 in Jan 2025 (vs 4.0 in 2017, 3.2 in 2021), suggesting cycle dynamics changing with ETF adoption. SOPR + exchange flow composite achieved 74% directional accuracy over 7-day horizons in 2025 (Glassnode). New developments: (1) ETF flow integration — $125B AUM spot BTC ETFs create new holder category requiring separate tracking. (2) Composite scoring: 5 of 7 core metrics flashing bottom signals as of Mar 2026 (MVRV at 1.2, aSOPR at 0.97-0.99, exchange reserves at 7-year low). (3) Best ML approach: Temporal Fusion Transformers combining MVRV, SOPR, exchange flows, options IV, and macro indicators — outperforms standalone on-chain signals. (4) Bitcoin Barometer: 27 on-chain metrics condensed to one weekly score. (5) Historical pattern: MVRV 1.0-1.5 band reversals produced positive 12-month forward returns 7/7 times since 2013.",
+      "relevance_to_us": "Our On-Chain BTC signal (#13, 60% accuracy, BTC-only) uses MVRV, SOPR, NUPL, Exchange Netflow. Two improvements: (1) Add ETF flow data as on-chain proxy — significant new signal source. (2) Use SOPR+exchange flow composite (74% accuracy per Glassnode) instead of individual metrics. (3) Consider Temporal Fusion Transformer approach for combining on-chain with our other signals. Current MVRV at 1.2 suggests we're in a historically positive accumulation zone.",
+      "implementation_difficulty": "medium-high",
+      "expected_impact": "medium — on-chain already at 60% accuracy, improvements likely incremental",
+      "source": "neutralis.finance on-chain metrics, spotedcrypto.com bottom signals, nansen.ai onchain metrics, altcointrading.net ML models"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Wire walk-forward weights into live consensus",
-      "description": "Load recommended_weights from data/models/walkforward_results.json into _weighted_consensus(). Fallback if OOS corr < 0.02.",
-      "priority": 1,
-      "effort_days": 1,
-      "expected_accuracy_improvement": "+2-4% consensus accuracy",
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/signal_weight_optimizer.py"
-      ]
-    },
-    {
-      "title": "IC-based signal weighting",
-      "description": "Replace accuracy gating with rolling 30d rank-IC per signal per ticker. Weight by IC * sqrt(ICIR).",
-      "priority": 2,
+      "title": "Direction-Specific Accuracy Gating",
+      "description": "Split accuracy tracking into BUY accuracy and SELL accuracy per signal per ticker. In signal_engine.py, apply direction-specific weight: if BUY accuracy < 47% (30+ samples), that signal's BUY vote gets weight 0 (becomes HOLD). SELL votes unaffected. This directly addresses the 26-45% BUY vs 60-75% SELL asymmetry without inversion.",
+      "priority": "P0 — highest impact, addresses worst failure mode",
       "effort_days": 3,
-      "expected_accuracy_improvement": "+3-5% for metals/ETH",
       "files_affected": [
+        "portfolio/accuracy_stats.py",
         "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
+        "portfolio/outcome_tracker.py",
+        "data/accuracy_cache.json"
       ]
     },
     {
-      "title": "Regime-conditional signal selection",
-      "description": "Use drift_regime_gate to partition history into regimes. Per-regime, only activate signals with IC > 0.02.",
-      "priority": 3,
+      "title": "Trailing-IC Signal Weighting",
+      "description": "Replace equal-weight consensus with IC-weighted consensus. Compute rolling 90-day IC (rank correlation of signal value vs 1d/3d forward return) per signal per ticker. Store in accuracy_cache.json alongside existing accuracy. In signal_engine.py, weight each signal's vote by max(0, trailing_IC) instead of 1.0. Signals with zero or negative IC contribute nothing.",
+      "priority": "P1 — high impact, well-supported by literature",
+      "effort_days": 5,
+      "files_affected": [
+        "portfolio/accuracy_stats.py",
+        "portfolio/signal_engine.py",
+        "portfolio/outcome_tracker.py",
+        "data/accuracy_cache.json",
+        "data/signal_log.db"
+      ]
+    },
+    {
+      "title": "Regime-Conditional Signal Activation",
+      "description": "Use regime signal outputs (ADX, Choppiness, Drift Gate) to conditionally enable/disable non-regime signals. Define signal subsets: trending_signals = [Momentum, EMA, MACD], ranging_signals = [Mean Reversion, BB, RSI]. When regime = trending (ADX>25 + Choppiness<38.2), only trending_signals vote; when ranging, only ranging_signals vote. Regime-agnostic signals (News, On-Chain, F&G) always vote.",
+      "priority": "P2 — high impact but complex, requires careful backtesting",
+      "effort_days": 8,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/signals/adx_regime_switch.py",
+        "portfolio/signals/choppiness_regime_gate.py",
+        "portfolio/signals/drift_regime_gate.py",
+        "config.json"
+      ]
+    },
+    {
+      "title": "Gold-Silver Ratio Mean Reversion Signal",
+      "description": "Add GSR-specific mean reversion signal for XAG/XAU. Compute GSR from live prices, apply RSI(14) and BB(20,2) on ratio (not raw price). BUY silver when GSR > 80 + RSI(GSR) > 70, SELL silver when GSR < 50 + RSI(GSR) < 30. More reliable than raw price mean reversion for metals.",
+      "priority": "P2 — targeted improvement for metals",
+      "effort_days": 2,
+      "files_affected": [
+        "portfolio/signals/metals_cross_assets.py",
+        "portfolio/signal_registry.py"
+      ]
+    },
+    {
+      "title": "SOPR+Exchange Flow Composite for BTC",
+      "description": "Replace individual MVRV/SOPR/Netflow inputs in on-chain signal with Glassnode-style composite scoring. Weight SOPR(0.3) + Exchange Netflow(0.3) + MVRV(0.2) + NUPL(0.2). The composite achieved 74% 7d directional accuracy in 2025 testing. Add ETF flow data as supplementary input when available.",
+      "priority": "P2 — incremental improvement on already-decent signal",
       "effort_days": 3,
-      "expected_accuracy_improvement": "+2-3%",
       "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
-      ]
-    },
-    {
-      "title": "TIPS real yield feature for metals",
-      "description": "Add DFII10 (10Y TIPS yield) from FRED to metals_cross_assets.py. Audit gold_real_yield_paradox for re-enable.",
-      "priority": 4,
-      "effort_days": 1,
-      "expected_accuracy_improvement": "+2-3% XAU/XAG",
-      "files_affected": [
-        "portfolio/metals_cross_assets.py",
-        "portfolio/signals/gold_real_yield_paradox.py"
-      ]
-    },
-    {
-      "title": "Reduce MWU eta and wire weights into consensus",
-      "description": "Reduce eta from 0.1 to 0.015. Wire MWU normalized weights into _weighted_consensus().",
-      "priority": 5,
-      "effort_days": 1,
-      "expected_accuracy_improvement": "+0.5-1%",
-      "files_affected": [
-        "portfolio/signal_weights.py",
-        "portfolio/signal_engine.py"
+        "portfolio/signals/onchain_btc.py",
+        "portfolio/onchain_data.py"
       ]
     }
   ]

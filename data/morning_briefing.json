@@ -1,89 +1,115 @@
 {
-  "date": "2026-06-02",
-  "generated_at": "2026-06-02T20:57:21.166090+00:00",
-  "market_outlook": "neutral",
-  "confidence": 0.55,
-  "summary": "Risk-off day with crypto crash (BTC -11% 7d, ETH below $2K) driven by $2.3B ETF outflows and MSTR first BTC sale. Stocks mixed (S&P ATH on chip boom vs individual selloffs). Gold/silver corrected but structural demand intact (585t/quarter central bank buying). Oil volatile on Hormuz uncertainty. Regime: range-bound across all instruments.",
+  "date": "2026-06-06",
+  "generated_at": "2026-06-06T00:20:51.311310+00:00",
+  "market_outlook": "bearish",
+  "confidence": 0.75,
+  "summary": "Brutal Friday selloff: Nasdaq -4.2%, silver -7.5%, BTC -18% weekly. Hot May NFP (172K vs 85K) killed rate-cut narrative. Markets now pricing possible rate HIKE. CPI Tuesday Jun 10 is make-or-break for everything. OPEC+ meets Saturday \u2014 could gap oil Monday. All our assets in trending-down regime. System holding XAG remnant (26.92oz) with 7.50 hard stop, 0.57% buffer. Bold portfolio DORMANT.",
   "key_levels": {
     "XAG-USD": {
-      "support": 74.0,
-      "resistance": 79.0,
-      "current": 75.22,
-      "stop": 74.0
+      "current": 67.89,
+      "hard_stop": 67.5,
+      "support": [
+        65.0,
+        60.0
+      ],
+      "resistance": [
+        72.0,
+        74.0
+      ],
+      "note": "Only 0.57% above hard stop. If 7.50 breached, exit 26.92oz remnant. CPI cool = snap-back to 2+. CPI hot = test 5."
     },
     "XAU-USD": {
-      "support": 4480,
-      "resistance": 4560,
-      "current": 4490,
-      "stop": "N/A (exited)"
+      "current": 4329,
+      "support": [
+        4200,
+        4000
+      ],
+      "resistance": [
+        4500
+      ],
+      "note": "No position. Lowest of 2026. SELL signals dominate."
     },
     "BTC-USD": {
-      "support": 65000,
-      "resistance": 70500,
-      "current": 67023
+      "current": 61000,
+      "support": [
+        58000,
+        52000
+      ],
+      "resistance": [
+        65000,
+        70000
+      ],
+      "note": "F&G=12 extreme fear. MVRV 1.2 in accumulation band. ETF outflows 13 straight days. Watch for flow reversal as bottom signal."
     },
     "ETH-USD": {
-      "support": 1850,
-      "resistance": 2100,
-      "current": 1905
+      "current": 1595,
+      "support": [
+        1500,
+        1400
+      ],
+      "resistance": [
+        1800,
+        2000
+      ],
+      "note": "Follows BTC. No independent catalyst. Trending-down."
     },
     "MSTR": {
-      "support": 130,
-      "resistance": 158,
-      "current": 136.73
+      "current": 117,
+      "support": [
+        115,
+        100
+      ],
+      "resistance": [
+        140
+      ],
+      "note": "First-ever BTC sale. Correlated with BTC. If BTC <8K, MSTR tests 00."
     }
-  },
-  "positions": {
-    "patient": {
-      "XAG-USD": "HOLD 26.92oz @ $74.68 avg (+0.7%). Stop $74.00 (1.62% buffer). Silver prophecy $120 intact.",
-      "XAU-USD": "EXITED. Full exit at $4,489 after 4-step ATR stop cascade.",
-      "cash": "~34,981 SEK from XAU sales"
-    },
-    "bold": "DORMANT. No positions. No breakout conditions met."
   },
   "trade_ideas": [
     {
       "instrument": "XAG-USD",
-      "direction": "LONG (already held)",
-      "rationale": "Silver prophecy intact. COMEX inventories -31% (366M oz). Late June historical inflection zone. 26.92oz position held with $74 stop.",
-      "entry_zone": "Already in at $74.68 avg",
-      "target": "$79-80 (near-term), $120 (thesis)",
-      "stop": "$74.00",
-      "confidence": 0.6
+      "direction": "HOLD existing",
+      "rationale": "RSI 26-29 extreme oversold. Stop 7.50 intact. Silver prophecy 20 intact. June is seasonally weak for silver. CPI Tuesday is the catalyst \u2014 cool CPI = violent snap-back.",
+      "entry_zone": "N/A \u2014 existing position",
+      "target": "2 (gap fill) short-term, 20 long-term prophecy",
+      "stop": "7.50 hard stop",
+      "confidence": 0.5,
+      "timeframe": "Medium-term hold"
     },
     {
       "instrument": "BTC-USD",
-      "direction": "WATCH",
-      "rationale": "RSI extreme oversold, F&G 23 Extreme Fear \u2014 2/3 Bold watchlist conditions met. But volume still SELL, ETF outflows heavy. Wait for volume flip + regime shift before entry.",
-      "entry_zone": "Below $65K with volume confirmation",
-      "target": "$80K-100K (thesis)",
-      "stop": "N/A",
-      "confidence": 0.3
+      "direction": "WATCH for entry",
+      "rationale": "MVRV 1.2 in accumulation band (7/7 positive 12M returns historically). aSOPR 0.97-0.99 = capitulation. Exchange reserves 7-year low. BUT: no entry until ETF outflow streak breaks AND price sustains >5K.",
+      "entry_zone": "5K+ sustained with volume expansion",
+      "target": "0K",
+      "stop": "8K",
+      "confidence": 0.35,
+      "timeframe": "Wait for CPI catalyst + ETF flow reversal"
     }
   ],
-  "system_improvements_implemented": [
-    "econ_calendar regime gate: BUY suppressed in trending-down (fixes BTC accuracy collapse 52.7%->32.4%)",
-    "momentum_factors regime dampener: 0.4x confidence in ranging markets (fixes XAG accuracy collapse 63.4%->37.1%)",
-    "Resolved 6 critical accuracy_degradation errors",
-    "Signal correlation audit run: identified 4 redundancy clusters and 27 dead-weight zero-sample signals"
-  ],
   "system_improvements_proposed": [
-    "P1: IC-based rolling signal reweighting (effort: 3 days, impact: high)",
-    "P1: Signal correlation pruning at |corr| > 0.7 threshold (effort: 2 days, impact: medium)",
-    "P2: ETF flow momentum signal for BTC (effort: 2 days, impact: medium)",
-    "P2: Exclude 27 zero-sample signals from voter denominator (effort: 1 day, impact: medium)"
+    "P0: Manual 1d HORIZON_SIGNAL_WEIGHTS updated \u2014 drift_regime_gate collapsed from 1.4 to 0.5, bb from 1.3 to 0.5",
+    "P1: crypto_evrp showing 99.1% recent but has history of small-sample illusion. NOT enabling \u2014 monitoring.",
+    "P2: Directional accuracy weighting already implemented (BUG-182 fix). Gate at 44% threshold.",
+    "P3: 30+ shadow signals with 0 outcome samples \u2014 need outcome_tracker.py investigation.",
+    "P4: Per-ticker consensus tracking shows 0 samples \u2014 data pipeline appears broken.",
+    "P5: IC-based weighting (P1 from quant research) \u2014 already partially implemented. Full walk-forward IC is 5-day effort."
   ],
   "risk_warnings": [
-    "XAG stop $74.00 is 1.62% away \u2014 if silver corrects further, stop triggers",
-    "BTC ETF outflows may continue \u2014 $2.3B May was worst month 2026",
-    "Hormuz talks failure would spike oil and cascade risk-off across all assets",
-    "Calibration warning still active: high signal agreement -> only 45% historical accuracy",
-    "ADP employment data (Jun 3) could move markets if it misses consensus 110K"
+    "XAG hard stop 7.50 \u2014 only 0.57% buffer. Weekend gap risk if OPEC+ surprises.",
+    "CPI Tuesday Jun 10 \u2014 hot print extends selloff across ALL assets. Cool print = violent relief rally.",
+    "Layer 2 had 7 consecutive failures (exit code 1) early Friday \u2014 auth detection issue persists.",
+    "BTC at 1K with thin weekend liquidity \u2014 could flash-crash to 8K before Monday equity markets open.",
+    "OPEC+ Saturday meeting \u2014 oil could gap either direction Monday. Indirect metals impact.",
+    "Multiple signal weights have drifted significantly from their tuned values (drift_regime_gate, bb, crypto_macro)."
   ],
   "research_highlights": [
-    "PPO-based adaptive alpha weighting (ArXiv 2509.01393): RL dynamically adjusts signal weights \u2014 direct replacement for our static weighting",
-    "TradingAgents v0.2.4: 12-agent bull-bear debate framework with 51K GitHub stars \u2014 validated multi-agent architecture we could adopt",
-    "COMEX silver inventories dropped 31% to 366M oz \u2014 structural supply crunch supports silver thesis",
-    "MVRV+SOPR+exchange_flows combo achieves 84.3% BTC macro cycle positioning \u2014 we should add ETF flow tracking"
+    "Silver seasonality: June historically weak. January/October strongest months. Current drop is seasonally consistent.",
+    "Gold-Silver ratio at ~60 near fair value \u2014 less MR alpha available than when it was 88-105.",
+    "BTC on-chain: MVRV 1.2 in accumulation band. 7/7 positive 12M forward returns at this level since 2013.",
+    "Signal engine BUY/SELL asymmetry: aggregate BUY accuracy 53.1% vs SELL 54.1%. Individual signals have 20-49% directional gaps.",
+    "Disabled gems: crypto_evrp 99.1% recent (but oscillation history), shannon_entropy 79.5% recent, intraday_seasonality 74.1% recent.",
+    "Dynamic horizon weight computation is working \u2014 manual weights are fallback only. Stale manual weights less impactful than feared.",
+    "IC-based signal weighting and regime-conditioned signal selection identified as highest-impact structural improvements."
   ]
 }

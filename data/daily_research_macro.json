@@ -1,28 +1,79 @@
 {
-  "date": "2026-06-02",
-  "market_summary": "S&P 500 closed above 7,600 for first time (chip boom: Marvell +30% on Huang praise). Crypto crashed hard: BTC below $70K (-11% 7d), ETH below $2K, MSTR -5.85% on first BTC sale since 2022 (sold 32 BTC). Gold/silver corrected: XAU ranged $4,487-$4,520, XAG held $74.97-$76.22. Oil volatile: Brent ~$91, WTI ~$92, US-Iran Hormuz talks uncertain.",
-  "key_events_tomorrow": [
-    "ADP Non-Farm Employment (Wed Jun 3): consensus 110K jobs added",
-    "JOLTS Job Openings (Tue Jun 2): released today, expect 6.87M",
-    "ISM Manufacturing (Mon Jun 1): already released, week started",
-    "US-Iran Strait of Hormuz negotiations: Trump says MoU within a week",
-    "No FOMC this week (next meeting Jun 16-17)"
+  "date": "2026-06-06",
+  "market_summary": "US equities suffered a brutal Friday selloff led by semiconductors. The Nasdaq plunged 4.2% — worst session since April 2025 — as Marvell (-16%), Micron (-13%), Intel (-11%), AMD (-11%), and Nvidia (-5.9%) cratered. The S&P 500 lost 2.6% and the Dow fell 1.4%. The catalyst was a much-hotter-than-expected May jobs report: 172K nonfarm payrolls vs 85K forecast, pushing 10Y yields above 4.5% and 30Y above 5%. Markets now price a quarter-point Fed rate HIKE by year-end, a dramatic shift from the rate-cut hopes that prevailed just weeks ago.\n\nPrecious metals were hammered alongside equities. Gold fell below $4,370/oz — lowest of 2026, heading for a 4% weekly decline. Silver collapsed from $74.18 open to $68.29 close, a 7.5% single-day wipeout, as the jobs report crushed any remaining rate-cut narrative. The stronger dollar and surging yields created a toxic combination for non-yielding assets. Middle East ceasefire uncertainty (Iran rejected US-mediated deal, Hezbollah rejected ceasefire proposal) added to the confusion but couldn't overcome the macro headwinds.\n\nCrypto continued its liquidation cascade. BTC dropped from ~$75K on June 1 to ~$61K by Friday, down 50% from the October 2025 ATH of $126.2K. MicroStrategy's first-ever BTC sale (32 coins, $2.5M) broke the 'never sell' narrative. Bitcoin ETFs recorded their 13th consecutive day of net outflows — longest streak ever — with AUM falling from $107.8B to $82.8B since May 14. ETH traded around $1,664, down from ~$5,000 peak in August 2025. Capital is rotating aggressively into AI stocks, leaving crypto without a bid.",
+  "key_events_next_week": [
+    {
+      "event": "OPEC+ 41st Ministerial Meeting",
+      "date": "2026-06-07 (Saturday)",
+      "impact_estimate": "HIGH — Production decision will set oil tone for rest of year. Prior meeting added 188K bpd in June. With Hormuz disruptions ongoing and oil at ~$106 Brent, any surprise production increase would crash oil; maintaining cuts supports current elevated prices."
+    },
+    {
+      "event": "US CPI (May) — Consumer Price Index",
+      "date": "2026-06-10 (Tuesday) 8:30 AM ET",
+      "impact_estimate": "VERY HIGH — April CPI came in hot at 3.8% headline, 4.1% core YoY. Another hot print cements the rate-hike narrative and would extend the equity/metals/crypto selloff. A cool print could trigger a massive relief rally across all assets."
+    },
+    {
+      "event": "FOMC Meeting (preview week)",
+      "date": "2026-06-16-17 (following week, but positioning starts Jun 8-12)",
+      "impact_estimate": "HIGH — Fed blackout period begins ~Jun 7. No Fed speakers next week. Markets will position aggressively based on CPI data for the June 16-17 FOMC decision. Currently pricing no cut, possible hike."
+    },
+    {
+      "event": "US-Iran peace negotiations (ongoing)",
+      "date": "Throughout week",
+      "impact_estimate": "HIGH — Iran's supreme leader hardened stance Jun 2, calling US bases 'no longer safe.' Hezbollah rejected ceasefire. Any breakthrough = oil crash + risk-on. Any escalation = oil spike + gold bid + equity selloff."
+    },
+    {
+      "event": "Bitcoin ETF flow data (daily)",
+      "date": "2026-06-09-13",
+      "impact_estimate": "MEDIUM-HIGH — 13 consecutive days of outflows. If streak breaks = potential BTC bottom signal. If continues = further downside pressure toward $58K support."
+    }
   ],
   "overnight_risks": [
-    "US-Iran Hormuz talks collapse -> oil spike -> risk-off cascade",
-    "BTC ETF outflows continue (May: -$2.3B net, largest monthly outflow 2026)",
-    "Alphabet $80B equity raise -> tech dilution fears",
-    "ADP miss could signal labor market weakness -> recession fears",
-    "Asia markets may react to US crypto weakness"
+    "OPEC+ meeting Saturday Jun 7 — production decision could gap oil either direction on Monday",
+    "US-Iran escalation over weekend — Strait of Hormuz closure risk remains elevated, any military action gaps oil higher and equities lower",
+    "Bitcoin weekend liquidity thin — BTC at critical $61K support, weekend break below could cascade to $58K before Monday equity markets open",
+    "MicroStrategy contagion — if BTC breaks below MSTR's average cost basis, forced selling risk increases, MSTR stock could gap down hard Monday",
+    "China PBOC weekend policy announcements — any surprise stimulus would be bullish metals/commodities",
+    "Middle East ceasefire surprise — positive headline would crash oil from $106 and trigger rotation into risk assets"
   ],
   "instrument_news": {
-    "BTC-USD": "Below $70K. $1B crypto liquidations. ETF outflows $2.3B in May (worst 2026). 45% below ATH $126.2K. MSTR sold 32 BTC first time since 2022.",
-    "ETH-USD": "Breached $2K support, hit $1,963 intraday. Trending-down since $2,500 rejection. L2 fragmentation narrative headwind.",
-    "MSTR": "Crashed 5.85% to $149.78. First BTC sale (32 BTC/$2.5M) spooked market. Still holds 843,706 BTC. Analyst cut PT 20%. High-beta BTC proxy amplifying downside.",
-    "XAU-USD": "Ranged $4,487-$4,520. JP Morgan targets $5K by Q4 2026. Central banks buying 585t/quarter. Late June potential inflection zone per historical analogs.",
-    "XAG-USD": "Held $74.97-$76.22. Silver prophecy intact. Gold-silver ratio compression thesis playing out. Industrial demand (solar/EV/AI) supportive."
+    "XAG-USD": {
+      "price_friday_close": 68.29,
+      "weekly_change_pct": -7.5,
+      "key_developments": "Collapsed 7.5% in single session from $74.18 open to $68.29. Lowest since late March. Hot jobs report (172K vs 85K) killed rate-cut hopes, pushed dollar higher. Silver's industrial demand component (solar, EVs) provides floor but rate-hike pricing is the dominant force. Weekly decline over 7%.",
+      "technical_levels": "Support at $65 (March low), $60 (February low). Resistance at $72-74 (Friday's open gap).",
+      "catalyst_watch": "CPI Tuesday is make-or-break. Cool CPI = snap-back to $72+. Hot CPI = test $65."
+    },
+    "XAU-USD": {
+      "price_friday_close": 4329,
+      "weekly_change_pct": -4.0,
+      "key_developments": "Fell below $4,370 — lowest level of 2026. Heading for ~4% weekly decline. Strong jobs report + higher yields + stronger dollar all negative. Central bank buying (China PBOC 17+ consecutive months) provides floor but can't offset macro headwinds. Iran uncertainty adds some haven bid but not enough.",
+      "technical_levels": "Support at $4,200 (Q1 low), $4,000 psychological. Resistance at $4,500.",
+      "catalyst_watch": "CPI Tuesday critical. FOMC positioning. Any Iran escalation = safe-haven bid."
+    },
+    "BTC-USD": {
+      "price_friday": 61000,
+      "weekly_change_pct": -18.0,
+      "key_developments": "Down 50% from Oct 2025 ATH ($126.2K). MicroStrategy sold 32 BTC — first-ever sale, breaking 'never sell' commitment. Bitcoin ETFs: 13 consecutive days of net outflows, AUM dropped $25B in 3 weeks. Capital rotating to AI stocks. Fear & Greed at 25 (extreme fear). Macro: no rate cuts = no liquidity tailwind for crypto.",
+      "technical_levels": "Critical support $58K-$60K (Feb lows). Below that $52K (200-week MA). Resistance $65K, $70K.",
+      "catalyst_watch": "ETF flow reversal would be first bottom signal. CPI cool = relief rally. FOMC dovish surprise = major bid."
+    },
+    "ETH-USD": {
+      "price_friday": 1664,
+      "weekly_change_pct": -12.0,
+      "key_developments": "Trading at $1,664, down from ~$5,000 peak Aug 2025. Vitalik Buterin sold millions in ETH early 2026, damaging sentiment. ETH underperforming BTC on the way down. Market cap ~$233B vs BTC ~$1.33T. No near-term catalyst for reversal without broader crypto sentiment shift.",
+      "technical_levels": "Support $1,500 (Feb low), $1,400. Resistance $1,800, $2,000.",
+      "catalyst_watch": "Follows BTC. Any ETF flow reversal in BTC would lift ETH. Layer-2 activity metrics declining."
+    },
+    "MSTR": {
+      "price_friday": 127.51,
+      "range_friday": "122.70-131.47",
+      "key_developments": "Sold 32 BTC for $2.5M in late May — first-ever Bitcoin sale. Broke Michael Saylor's 'never sell' commitment. Sale used to fund preferred-stock distributions. Stock heavily correlated with BTC price. If BTC approaches MSTR's average cost basis, forced-selling narrative intensifies. Holds ~500K BTC total.",
+      "technical_levels": "Support $115-$120. Resistance $140.",
+      "catalyst_watch": "BTC price is the only driver. Below $58K BTC = MSTR tests $100."
+    }
   },
-  "metals_outlook": "Bullish medium-term. Central banks buying 585t/quarter gold (structural). JP Morgan $5K Q4 target. Late June may be inflection zone. Silver benefits from industrial demand + ratio compression. Near-term correction risk: $4,300-$4,725 range for June per analysts.",
-  "oil_outlook": "Highly volatile. Brent fell 20% from 2026 peak on Iran ceasefire hopes, then bounced. Trump says Hormuz MoU within a week. If talks fail: full Hormuz + Bab el-Mandeb closure threat. Brent ~$91, WTI ~$92. Remains sensitive to geopolitics.",
-  "sentiment_shift": "Risk-off day. Crypto sentiment extreme fear (F&G 23). Stocks mixed (S&P ATH vs individual selloffs). Flight to safety thesis weakened for gold today (corrected alongside crypto). Oil is the wildcard \u2014 Hormuz resolution would be deflationary, failure would be inflationary."
+  "metals_outlook": "Gold and silver are in a corrective phase driven by the macro regime shift from 'rate cuts coming' to 'rate hike possible.' The May jobs report (172K vs 85K forecast) was the nail in the coffin for dovish expectations, pushing 10Y yields above 4.5% and the dollar higher — both toxic for metals. Silver's 7.5% single-day drop signals leveraged positioning being unwound. However, structural supports remain: China PBOC has bought gold for 17+ consecutive months, physical demand from India/China is strong, and the Iran/Hormuz situation keeps geopolitical premium alive. The CPI release Tuesday is the single most important event — a cool print could trigger a violent snap-back in both metals. A hot print sends gold toward $4,200 and silver toward $65. The FOMC June 16-17 is the next major inflection. Silver's industrial demand (solar panels, EVs) provides a higher floor than pure-monetary gold, but its higher beta means larger swings in both directions.",
+  "oil_outlook": "Oil remains elevated (~$106 Brent) due to the Iran war and effective Strait of Hormuz closure. Global inventories drew 129M barrels in March and 117M in April — the market is severely undersupplied. OPEC+ meets Saturday June 7 and previously agreed to a modest 188K bpd increase for June. The key question is whether they accelerate unwinding cuts given high prices, or maintain discipline given geopolitical uncertainty. Any Iran peace breakthrough would crash oil $20-30 rapidly as the war premium unwinds. Any escalation keeps prices above $100. The EIA forecasts inventories will fall 8.5M bpd in Q2, keeping Brent around $106. The tight physical market provides a floor, but a ceasefire would be the biggest bearish catalyst since the war began.",
+  "sentiment_shift": "Friday marked a decisive sentiment shift from 'soft landing with rate cuts' to 'no landing, possible rate hike.' The 172K jobs report destroyed the weak-labor-market narrative that had been building. Treasury yields surging above 4.5%/5.0% (10Y/30Y) repriced every asset class simultaneously: equities sold off (especially duration-sensitive tech/semis), metals lost their rate-cut bid, and crypto lost its liquidity-expansion thesis. The rotation from tech/crypto into defensives (healthcare, staples) and cash suggests institutional positioning for a tighter-for-longer Fed. The Fear & Greed index across asset classes is at multi-month lows. The next sentiment pivot depends entirely on Tuesday's CPI — a cool print could reverse the entire move."
 }
