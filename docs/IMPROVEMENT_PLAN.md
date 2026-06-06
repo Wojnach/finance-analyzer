@@ -94,40 +94,35 @@ Generated from deep exploration of all major subsystems by 4 parallel agents.
 
 ---
 
-## 3. Implementation Batches
+## 3. Implementation Results
 
-### Batch 1: Critical data integrity fixes [B1, B2, B4]
-Files: `portfolio/shared_state.py`, `portfolio/risk_management.py`, `portfolio/file_utils.py`
-- Fix `_cached()` TTL storage
-- Fix `check_drawdown` to use `portfolio_mgr`
-- Fix `last_jsonl_entry` to use recovery decoder
-Tests: Run existing + add targeted tests for each fix
+### Batch 1: Critical data integrity fixes [B2, B4] ✅
+- B1 SKIPPED: already fixed (line 99 includes `"ttl": ttl`)
+- B2 DONE: `check_drawdown` now uses `portfolio_mgr._load_state_from()` with backup recovery
+- B4 DONE: `last_jsonl_entry` now uses `_decode_jsonl_line()` recovery decoder + 8 new tests
+- 329 signal engine tests + 142 file_utils tests pass
 
-### Batch 2: Signal system cleanup [B5, B6]
-Files: `portfolio/signal_engine.py`, `portfolio/tickers.py`
-- Move `metals_cross_asset` to `DISABLED_SIGNALS`
-- Remove active signals from `_SHADOW_SAFE_SIGNALS`
-Tests: Run signal engine tests
+### Batch 2: Signal system cleanup [B5, B6] ✅
+- B5 DONE: `metals_cross_asset` added to `DISABLED_SIGNALS` (saves yfinance+FRED API calls)
+- B6 DONE: removed `drift_regime_gate` and `amihud_illiquidity_regime` from `_SHADOW_SAFE_SIGNALS` (active signals, shadow path unreachable)
+- 329 signal engine tests pass
 
-### Batch 3: Reliability fixes [B3, B7, B10]
-Files: `portfolio/claude_gate.py`, `portfolio/trigger.py`, `portfolio/agent_invocation.py`
-- Fix invoke_claude_text docstring
-- Fix trigger state set serialization
-- Optimize auth cooldown to use load_jsonl_tail
-Tests: Run claude_gate, trigger, agent_invocation tests
+### Batch 3: Reliability fixes [B3, B7, B10] ✅
+- B3 DONE: `invoke_claude_text` type annotation fixed to 4-tuple
+- B7 DONE: `trigger.py` `_current_tickers` changed from `set()` to `list()`
+- B10 DONE: auth cooldown replaced `load_jsonl` with `load_jsonl_tail(max_entries=50)`
+- 349 trigger/agent tests pass (1 pre-existing failure: test_bug38_empty_set_prunes_all)
 
-### Batch 4: Dead code and I/O cleanup [B8, B9, A1]
-Files: `portfolio/autonomous.py`, `data/silver_monitor.py`, `portfolio/file_utils.py`
-- Remove orphaned decisions file write
-- Fix silver_monitor raw I/O
-- Fix ensure_ascii inconsistency
-Tests: Run autonomous and file_utils tests
+### Batch 4: I/O cleanup [A1] ✅
+- B8 SKIPPED: `decision_outcome_tracker.py` reads `layer2_decisions.jsonl` (exploration agent incorrectly reported no consumers)
+- B9 SKIPPED: flagged lines 606/608 are inside a Claude prompt template string, not real code
+- A1 DONE: `atomic_write_json` default `ensure_ascii=False` (was True, inconsistent with `atomic_append_jsonl`)
+- 142 file_utils tests pass
 
-### Batch 5: Minor optimizations [A2, A3]
-Files: `portfolio/trigger.py`, `portfolio/main.py`, `portfolio/market_timing.py`
-- Pass state through classify_tier
-- Deprecate MARKET_OPEN_HOUR constant
-Tests: Run trigger and market_timing tests
+### Batch 5: Minor cleanup [A3] ✅
+- A2 SKIPPED: requires changing `check_triggers` return signature — too invasive for P3
+- A3 DONE: removed dead `MARKET_OPEN_HOUR` re-export from `main.py`, added deprecation comment
+- 223 market_timing tests pass
 
 ---
 
