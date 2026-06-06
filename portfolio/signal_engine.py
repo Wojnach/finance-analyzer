@@ -1547,31 +1547,34 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "mean_reversion": 0.7,
         "volume_flow": 0.7,
     },
-    "1d": {
-        "drift_regime_gate": 1.4,   # 68.1% at 1d_recent (626 sam) — STAR performer, 2026-05-25 audit
-        "bb": 1.3,              # 60.5% at 1d_recent (428 sam) — confirmed 2026-05-25
-        "rsi": 1.1,             # 57.5% at 1d_recent (496 sam) — updated 2026-05-25
-        "credit_spread_risk": 0.3,  # 0.0% at 1d_recent (33 sam) — collapsed from 56.4%, 2026-05-31
-        "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — NEW 2026-04-27
-        "macd": 1.1,            # 52.2% at 1d_recent (205 sam) — updated 2026-05-25
-        "mean_reversion": 1.1,  # 56.7% at 1d_recent (727 sam) — updated 2026-05-25
-        "news_event": 1.6,      # 75.8% at 1d_recent (149 sam), 70.0% at 3h_recent (1762 sam) — surging 2026-05-31
-        "williams_vix_fix": 0.5,    # 30.5% at 1d_recent (131 sam) — collapsed, removed from per-ticker rescue 2026-05-31
-        "claude_fundamental": 0.5,  # 40.5% at 1d_recent (1178 sam) — NEW 2026-04-27 penalty
-        "sentiment": 0.4,       # 45.9% at 1d_recent (296 sam) — updated 2026-05-25
+    "1d": {  # Fallback weights — updated 2026-06-06 from 1d_recent accuracy
+        "crypto_evrp": 1.5,     # 99.1% at 1d_recent (233 sam) — massive jump from 40.2%
+        "news_event": 1.6,      # 78.4% at 1d_recent (208 sam) — still top performer
+        "amihud_illiquidity_regime": 1.5, # 69.6% at 1d_recent (618 sam) — NEW
+        "sentiment": 1.3,       # 62.8% at 1d_recent (403 sam) — recovered from 45.9%
+        "ema": 1.1,             # 57.5% at 1d_recent (810 sam) — recovered from 46.6%
+        "statistical_jump_regime": 1.1, # 56.4% at 1d_recent (495 sam) — recovered from 46.9%
+        "momentum_factors": 1.1, # 55.6% at 1d_recent (689 sam) — recovered from 36.2%
+        "momentum": 1.1,        # 55.5% at 1d_recent (582 sam) — NEW
+        "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — kept from prior
+        "macd": 0.7,            # 47.7% at 1d_recent (197 sam) — dropped from 52.2%
+        "rsi": 0.7,             # 45.3% at 1d_recent (386 sam) — dropped from 57.5%
+        "mean_reversion": 0.7,  # 44.7% at 1d_recent (604 sam) — dropped from 56.7%
+        "bb": 0.5,              # 40.9% at 1d_recent (342 sam) — collapsed from 60.5%
+        "drift_regime_gate": 0.5, # 38.9% at 1d_recent (579 sam) — collapsed from 68.1%
+        "econ_calendar": 0.5,   # 35.1% at 1d_recent (465 sam) — NEW
+        "crypto_macro": 0.5,    # 21.4% at 1d_recent (234 sam) — collapsed from 53.6%
+        "credit_spread_risk": 0.3,  # 0.0% at 1d_recent (33 sam) — still dead
+        "williams_vix_fix": 0.5,    # 30.5% at 1d_recent — still collapsed
+        "claude_fundamental": 0.5,  # kept from prior
         "fear_greed": 0.4,      # 25.9% at 1d — still terrible
         "macro_regime": 0.5,    # 36.8% at 1d_recent
         "volatility_sig": 0.5,  # 45.5% at 1d_recent
-        "structure": 0.5,       # 33.7% at 1d_recent — tightened from 0.6
+        "structure": 0.5,       # 33.7% at 1d_recent
         "forecast": 0.5,        # 44.6% at 1d_recent
-        "ema": 0.5,             # 46.6% at 1d_recent — updated 2026-05-25
-        "trend": 0.5,           # 37.7% at 1d_recent — tightened from 0.6
-        "heikin_ashi": 0.6,     # 42.7% at 1d_recent — tightened from 0.7
-        "momentum_factors": 0.5, # 36.2% at 1d_recent — updated 2026-05-25
-        "volume_flow": 0.5,     # 40.0% at 1d_recent — NEW 2026-04-27
-        "crypto_macro": 0.7,    # 53.6% at 1d_recent (347 sam) — updated 2026-05-25
-        "statistical_jump_regime": 0.7, # 46.9% at 1d_recent (693 sam) — regressing, 2026-05-25
-        "crypto_evrp": 0.6,     # 40.2% at 1d_recent (127 sam) — regressing, 2026-05-25
+        "trend": 0.5,           # 37.7% at 1d_recent
+        "heikin_ashi": 0.5,     # 42.7% at 1d_recent — tightened from 0.6
+        "volume_flow": 0.5,     # 40.0% at 1d_recent
     },
 }
 
