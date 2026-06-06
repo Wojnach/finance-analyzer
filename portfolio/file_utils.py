@@ -50,7 +50,7 @@ def atomic_write_text(path, text, encoding="utf-8"):
         raise
 
 
-def atomic_write_json(path, data, indent=2, ensure_ascii=True):
+def atomic_write_json(path, data, indent=2, ensure_ascii=False):
     """Atomically write JSON data to a file using tempfile + os.replace.
 
     Ensures the file is never left in a partially-written state.
