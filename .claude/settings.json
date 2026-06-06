@@ -6,7 +6,9 @@
       "Write(*)",
       "WebFetch(*)",
       "WebSearch(*)",
-      "NotebookEdit(*)"
+      "NotebookEdit(*)",
+      "mcp__plugin_playwright_playwright__browser_network_request",
+      "mcp__plugin_playwright_playwright__browser_network_requests"
     ],
     "additionalDirectories": [
       "/mnt/q/models/"
