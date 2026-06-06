@@ -6708,3 +6708,21 @@ CLAUDE_ENABLED=False at next start).
 - 3 cosmetic/known P3s (no action taken): _claude_gate reads host-global config
   (non-hermetic tests — test_all_green pinned); _parse_metals_claude_enabled uses
   first regex match; file_utils atomic_append_jsonl docstring typo "Unxfails".
+
+## 2026-06-06 (cont.) — adversarial review fix + permission allowlist
+- a4a1a250 fix(dashboard): _errors_unresolved returns unresolved=None (not 0) on
+  reader failure; _color shows YELLOW "critical-errors check degraded". Closes a
+  silent-GREEN regression caught by the 3-agent adversarial review of this
+  session's diff. The other review findings: file_utils self-heal clean; JS pill
+  / freeze switches clean; the 3 .bat PowerShell-quoting flags were a FALSE
+  POSITIVE (verified via cmd.exe — TS_* are ISO 'o' no-space + -Command in cmd
+  "..." → valid JSON rc=0, no change made).
+- 77c4deb6 chore(settings): /fewer-permission-prompts — added 2 read-only
+  playwright MCP tools (browser_network_request[s]) to .claude/settings.json
+  permissions.allow. Bash already blanket-allowed via Bash(*); rest auto-allowed
+  or arbitrary-exec/mutating. Verified live (exact-name match + probe, no prompt).
+- Dashboard restarted onto latest code (PID 19536). Hero GREEN, heartbeat ~11s,
+  unresolved errors 0, layer2 gate FROZEN. Loop alive, zero Claude tokens.
+
+Freeze unchanged: still disabled, re-enable ONLY on explicit user request (user
+declined an end-of-week reminder). No auto-re-enable path exists.
