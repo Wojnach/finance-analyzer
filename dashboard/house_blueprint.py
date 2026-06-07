@@ -363,6 +363,15 @@ def _candidate_row(run_id: str, slug: str, data: dict) -> dict:
         # uterum / bastu makes that a lower bound, not a fair value.
         "est_understated": bool(data.get("bid_advisor_understated")),
         "est_understated_terms": data.get("understatement_terms") or [],
+        # cashflow risk from the BRF AR (analysis/brf_maintenance.py): a vacant
+        # lokal / temporary extra avgift / decided hike means the listed fee may
+        # carry a surcharge. score_candidate writes risk_flags; fall back to the
+        # raw brf_maintenance booleans for runs scored before that field existed.
+        "cashflow_flags": (
+            (data.get("composite_score") or {}).get("risk_flags")
+            or [k for k in ("vacant_lokal", "temporary_extra_fee", "fee_increase_signaled")
+                if (data.get("brf_maintenance") or {}).get(k)]
+        ),
         "booli_est": _num_or_none(data.get("booli_estimate")),  # Booli värdering
         # "estimate" (Värdekollen, for-sale ads) or "sold" (recent slutpris, when
         # the unit isn't for-sale on Booli so no model estimate exists).
@@ -451,6 +460,18 @@ def _understated_tag(row: dict) -> str:
     return f" <span class=\"meta\" title=\"{escape(title)}\">⚠</span>"
 
 
+def _cashflow_tag(row: dict) -> str:
+    """A ⚠ after the Fee when the BRF AR shows a vacant lokal / temporary extra
+    avgift / decided hike — the listed monthly fee may carry a surcharge that
+    lifts when the lokal re-lets, or a rise that's coming. See the wired
+    findapartments signals in analysis/brf_maintenance.py."""
+    flags = row.get("cashflow_flags") or []
+    if not flags:
+        return ""
+    title = "Fee may be distorted — " + ", ".join(flags)
+    return f" <span class=\"meta\" title=\"{escape(title)}\">⚠</span>"
+
+
 def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
     if not rows:
         return "<p>No candidates in this run.</p>"
@@ -501,7 +522,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
             f"<td class=\"num\">{_fmt_price(r['booli_est'])}{_sold_tag(r)}</td>"
             f"<td class=\"num\">{_fmt_sint(r['kr_m2'])}</td>"
             f"<td class=\"num\">{_opt(r['sqm'])}</td>"
-            f"<td class=\"num\">{_fmt_sint(r['fee'])}</td>"
+            f"<td class=\"num\">{_fmt_sint(r['fee'])}{_cashflow_tag(r)}</td>"
             f"<td class=\"num\">{_opt(r['built'])}</td>"
             f"<td class=\"num\">{escape(prem)}</td>"
             f"<td class=\"num\">{_fmt_cagr(r['cagr'])}</td>"
