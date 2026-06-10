@@ -40,7 +40,17 @@ powershell -NoProfile -Command ^
 echo [%TS_START%] Signal Research session starting...
 
 REM --- Run claude with the research prompt ---
-type Q:\finance-analyzer\docs\signal-research-prompt.md | claude -p --verbose --model claude-opus-4-6 > Q:\finance-analyzer\data\signal_research_out.txt 2>&1
+REM 2026-06-11 (audit batch 3, prompt-injection hardening): this agent fetches
+REM untrusted web content (arXiv/SSRN/blogs). Unlike prophecy-daily.bat it
+REM CANNOT drop Bash/Edit — the prompt's job is implementing + testing signal
+REM code — so the restriction here is partial: --strict-mcp-config removes MCP
+REM servers (avanza-mcp order placement etc.) and the explicit --allowedTools
+REM pins the toolset instead of inheriting whatever the project settings
+REM allow. Residual risk: an injected page can still reach Bash. Real fix =
+REM split research phase (web, no Bash) from build phase (Bash, no web) —
+REM out of batch-3 scope. Task is currently DISABLED (2026-06-05 token
+REM freeze); revisit before re-enable.
+type Q:\finance-analyzer\docs\signal-research-prompt.md | claude -p --verbose --model claude-opus-4-6 --strict-mcp-config --allowedTools "Read,Glob,Grep,Edit,Write,Bash,WebSearch,WebFetch,Task,TodoWrite" > Q:\finance-analyzer\data\signal_research_out.txt 2>&1
 set EXIT_CODE=%ERRORLEVEL%
 
 REM --- Timestamp end ---

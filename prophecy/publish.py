@@ -20,12 +20,49 @@ import logging
 from datetime import UTC, datetime
 
 from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
-
 from prophecy import config as pcfg
 from prophecy.alerts import log_critical
-from prophecy.schema import validate_record
+from prophecy.schema import _safe_float, validate_record
 
 logger = logging.getLogger("prophecy.publish")
+
+# 2026-06-11 (audit batch 3): sanity band for the Claude-self-reported
+# spot_at_prediction fallback (used only when prep had no live price). Same
+# band as outcomes._SPOT_SANITY_BAND — keep in sync.
+_SPOT_SANITY_BAND = 0.20
+
+
+def _validated_fallback_spot(inst: str, raw_spot) -> tuple[float | None, str | None]:
+    """Validate a Claude-self-reported spot. Returns (spot, rejection_note).
+
+    The fallback fires only when prep's live_price was None, so the reference
+    is a fresh fetch through prep's own price routing. No reference available
+    (the usual case for no-feed instruments) -> accept a positive finite spot
+    but stamp it claude_self_reported so outcomes re-validates before scoring.
+    Band breach -> spot dropped to None (+ rate-limited critical) instead of
+    journaling a value that would poison every future accuracy row.
+    """
+    spot = _safe_float(raw_spot)
+    if raw_spot is None:
+        return None, None
+    if spot is None or spot <= 0:
+        return None, f"claude spot_at_prediction not a positive number ({raw_spot!r}) — dropped"
+    reference = None
+    try:
+        from prophecy.prep import _fetch_price
+        reference, _src = _fetch_price(inst)
+    except Exception as exc:
+        logger.warning("reference price fetch failed for %s: %r", inst, exc)
+    if reference is not None and reference > 0 and abs(spot / reference - 1.0) > _SPOT_SANITY_BAND:
+        log_critical(
+            "prophecy_spot_invalid",
+            f"{inst}: claude-supplied spot_at_prediction {spot} breaches "
+            f"+/-{_SPOT_SANITY_BAND:.0%} band vs live reference {reference} — dropped",
+            caller="publish.spot_band",
+            context={"instrument": inst, "spot": spot, "reference": reference},
+        )
+        return None, f"claude spot {spot} breached sanity band vs live {reference} — dropped"
+    return spot, None
 
 
 def _today() -> str:
@@ -89,6 +126,10 @@ def publish(date: str | None = None) -> int:
     run_id = f"prophecy-{date}T{datetime.now(UTC).strftime('%H%M%SZ')}"
     model = ctx.get("model") or pcfg.model()
     now_iso = datetime.now(UTC).isoformat()
+    # 2026-06-11 (audit batch 3): reconcile against the enabled set. Before
+    # this, a hallucinated instrument (e.g. DOGE-USD) was journaled forever and
+    # a partial run (3 of 13 instruments) published stale=false with no alert.
+    enabled = set(pcfg.enabled_instruments())
 
     published: dict[str, dict] = {}
     quarantined: list[dict] = []
@@ -102,18 +143,36 @@ def publish(date: str | None = None) -> int:
             continue
 
         inst = clean["instrument"]
+        if inst not in enabled:
+            quarantined.append({"raw": raw_rec, "errors": errors + [
+                f"{inst}: not an enabled instrument (hallucinated?) — rejected"]})
+            log_critical(
+                "prophecy_publish_unknown_instrument",
+                f"claude emitted a record for {inst!r}, which is not in the "
+                f"enabled instrument set — quarantined, not journaled",
+                caller="publish.unknown_instrument",
+                context={"date": date, "instrument": inst},
+            )
+            continue
+
         ctx_block = ctx_instr.get(inst, {})
-        # spot_at_prediction: trust prep's live price; fall back to record's own.
+        # spot_at_prediction: trust prep's live price; fall back to the
+        # record's own claim only after sanity validation (audit batch 3 —
+        # an unvalidated claude spot used to crash/poison outcome scoring).
         spot = ctx_block.get("live_price")
+        spot_source = ctx_block.get("price_source")
         if spot is None:
-            spot = raw_rec.get("spot_at_prediction")
+            spot, rejection = _validated_fallback_spot(inst, raw_rec.get("spot_at_prediction"))
+            spot_source = "claude_self_reported" if spot is not None else spot_source
+            if rejection:
+                errors.append(rejection)
         clean.update({
             "run_id": run_id,
             "ts": now_iso,
             "date": date,
             "model": clean.get("model") or model,
             "spot_at_prediction": spot,
-            "spot_source": ctx_block.get("price_source"),
+            "spot_source": spot_source,
         })
         # If prep already flagged a gap, keep it flagged (never clear it here).
         seed = ctx_block.get("coverage_seed") or {}
@@ -132,6 +191,20 @@ def publish(date: str | None = None) -> int:
     if not published:
         return _mark_stale(date, f"all {len(records)} records failed validation", "publish.all_invalid")
 
+    # 2026-06-11 (audit batch 3): enabled instruments absent from this run are
+    # flagged in the publish record + alerted — partial coverage must never
+    # look healthy on the dashboard. The run still publishes (partial data
+    # beats none); stale stays false.
+    missing = sorted(enabled - set(published))
+    if missing:
+        log_critical(
+            "prophecy_publish_missing_instruments",
+            f"run for {date} published {len(published)}/{len(enabled)} enabled "
+            f"instruments; missing: {missing}",
+            caller="publish.missing_instruments",
+            context={"date": date, "missing": missing},
+        )
+
     needing_work = [i for i, r in published.items() if r["coverage"].get("needs_work")]
     latest = {
         "date": date,
@@ -144,6 +217,8 @@ def publish(date: str | None = None) -> int:
             "instruments_needing_work": needing_work,
             "count_needing_work": len(needing_work),
             "total_instruments": len(published),
+            "missing_instruments": missing,
+            "enabled_instruments": len(enabled),
         },
         "quarantined_count": len(quarantined),
         # cost_summary is filled in by cost.py after the run is priced.
@@ -152,6 +227,7 @@ def publish(date: str | None = None) -> int:
     atomic_write_json(pcfg.LATEST_FILE, latest)
 
     print(f"published {len(published)} | quarantined {len(quarantined)} | "
+          f"missing {len(missing)} -> {missing} | "
           f"needs_work {len(needing_work)} -> {needing_work} | repairs {total_errors}")
     return 0
 

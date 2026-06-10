@@ -8,11 +8,9 @@ package docstring / premortem #1).
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
-
 from prophecy import strategies
 from prophecy.schema import HORIZONS
 
@@ -31,6 +29,19 @@ FROZEN_SENTINEL = PROPHECY_DIR / "SYSTEM_DISABLED"
 
 DEFAULT_MODEL = "claude-opus-4-8"
 
+# 2026-06-11 (audit batch 3): instruments with NO historical price source for
+# outcome scoring. Warrants (Avanza-only pricing, no historical API without a
+# live BankID session) and Tier-2 Swedish equities (no internal feed; prep
+# prices them as no_feed too). These are explicitly flagged scoreable=false in
+# config so outcomes.py can warn ONCE at startup instead of silently skipping
+# them forever (audit P1->P2: 8/13 enabled instruments structurally
+# unscoreable with zero alerts). Oil (CL=F/BZ=F) is NOT in this set — it
+# gained a yfinance daily-bar scoring path in outcomes.py in the same change.
+NO_HISTORICAL_FEED = frozenset({
+    "XBT-TRACKER", "ETH-TRACKER", "MINI-SILVER",  # warrants (Avanza-only)
+    "SAAB-B", "SEB-C", "INVE-B",                  # Tier-2 Swedish equities
+})
+
 
 def _default_config() -> dict:
     return {
@@ -38,7 +49,15 @@ def _default_config() -> dict:
         "horizons": list(HORIZONS),
         "budget_usd_soft_cap": None,  # null => unhinged (alert only, never blocks)
         "instruments": {
-            inst: {"enabled": True, "strategy": pb.strategy_id, "asset_class": pb.asset_class}
+            inst: {
+                "enabled": True,
+                "strategy": pb.strategy_id,
+                "asset_class": pb.asset_class,
+                # scoreable=false: predictions are journaled but outcome scoring
+                # has no historical price source — surfaced as one startup
+                # warning per outcomes run, never silence.
+                "scoreable": inst not in NO_HISTORICAL_FEED,
+            }
             for inst, pb in strategies.PLAYBOOKS.items()
         },
     }
@@ -102,6 +121,22 @@ def enabled_instruments(config: dict | None = None) -> list[str]:
     return [
         inst for inst in strategies.all_instruments()
         if blocks.get(inst, {}).get("enabled", False) and strategies.playbook_for(inst)
+    ]
+
+
+def unscoreable_instruments(config: dict | None = None) -> list[str]:
+    """Enabled instruments explicitly flagged scoreable=false in config.
+
+    These are journaled + dashboarded but never outcome-scored (no historical
+    price source). outcomes.py warns once per run; anything enabled that is
+    neither scoreable nor flagged here is a coverage bug and raises a critical
+    (audit batch 3, 2026-06-11).
+    """
+    config = config or load_config()
+    blocks = config.get("instruments", {})
+    return [
+        inst for inst in enabled_instruments(config)
+        if blocks.get(inst, {}).get("scoreable", True) is False
     ]
 
 

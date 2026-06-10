@@ -23,7 +23,6 @@ import time
 from datetime import UTC, datetime
 
 from portfolio.file_utils import atomic_write_json, load_json
-
 from prophecy import config as pcfg
 from prophecy import strategies
 from prophecy.schema import build_coverage, grade_sufficiency

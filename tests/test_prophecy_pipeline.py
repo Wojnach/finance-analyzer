@@ -235,3 +235,347 @@ def test_outcomes_spot_zero_no_crash(ptmp, monkeypatch):
     monkeypatch.setattr("portfolio.outcome_tracker._fetch_historical_price", lambda t, ts: 100.0)
     atomic_append_jsonl(pcfg.JOURNAL_FILE, _backdated_row(spot=0.0))
     assert outcomes.score() == 0  # no ZeroDivisionError
+
+
+# --- audit batch 3 (2026-06-11): alerts level + rate limit ------------------
+def _crit_lines():
+    p = pcfg.DATA_DIR / "critical_errors.jsonl"
+    if not p.exists():
+        return []
+    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+
+
+def test_alert_default_level_is_critical_and_surfaced(ptmp):
+    from prophecy.alerts import log_critical
+    log_critical("prophecy_test", "boom", caller="test")
+    rows = _crit_lines()
+    assert len(rows) == 1 and rows[0]["level"] == "critical"
+
+    # the startup check must actually see it (the original P1: it didn't)
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import check_critical_errors as cce
+    unresolved = cce.find_unresolved(rows, days=7)
+    assert len(unresolved) == 1
+
+
+def test_alert_rate_limit_one_per_category_per_day(ptmp):
+    from prophecy.alerts import log_critical
+    log_critical("prophecy_flood", "first", caller="test")
+    log_critical("prophecy_flood", "second (suppressed)", caller="test")
+    log_critical("prophecy_other", "different category", caller="test")
+    rows = _crit_lines()
+    cats = [r["category"] for r in rows]
+    assert cats.count("prophecy_flood") == 1
+    assert cats.count("prophecy_other") == 1
+
+
+def test_alert_rate_limit_resets_next_day(ptmp):
+    from prophecy import alerts
+    from prophecy.alerts import log_critical
+    log_critical("prophecy_flood", "day one", caller="test")
+    # simulate yesterday's mark
+    state_path = alerts._ratelimit_path()
+    atomic_write_json(state_path, {"prophecy_flood": "2020-01-01"})
+    log_critical("prophecy_flood", "next day", caller="test")
+    assert sum(1 for r in _crit_lines() if r["category"] == "prophecy_flood") == 2
+
+
+def test_alert_warning_level_not_rate_limited(ptmp):
+    from prophecy.alerts import log_critical
+    log_critical("prophecy_cost", "soft cap a", caller="test", level="warning")
+    log_critical("prophecy_cost", "soft cap b", caller="test", level="warning")
+    rows = [r for r in _crit_lines() if r["level"] == "warning"]
+    assert len(rows) == 2
+
+
+# --- audit batch 3: outcomes coverage reconcile -----------------------------
+def test_outcomes_coverage_gap_raises_critical(ptmp, monkeypatch):
+    # SAAB-B has no scoring source; un-flag it -> coverage bug -> critical
+    cfg = pcfg._default_config()
+    cfg["instruments"]["SAAB-B"]["scoreable"] = True
+    atomic_write_json(pcfg.CONFIG_FILE, cfg)
+    monkeypatch.setattr("portfolio.outcome_tracker._fetch_historical_price", lambda t, ts: 100.0)
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, _backdated_row())
+    assert outcomes.score() == 0
+    assert any(r["category"] == "prophecy_scoring_coverage" and "SAAB-B" in r["message"]
+               for r in _crit_lines())
+
+
+def test_outcomes_flagged_unscoreable_warns_not_critical(ptmp, monkeypatch, caplog):
+    # default config flags warrants/Tier-2 scoreable=false -> single warning,
+    # zero criticals, rows skipped without counting as silent noise
+    monkeypatch.setattr("portfolio.outcome_tracker._fetch_historical_price", lambda t, ts: 100.0)
+    row = _backdated_row()
+    row["instrument"] = "XBT-TRACKER"
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, row)
+    with caplog.at_level("WARNING", logger="prophecy.outcomes"):
+        assert outcomes.score() == 0
+    assert any("unscoreable by config" in m for m in caplog.messages)
+    assert not any(r["category"] == "prophecy_scoring_coverage" for r in _crit_lines())
+    assert not pcfg.ACCURACY_JSONL.exists() or count_jsonl_lines(pcfg.ACCURACY_JSONL) == 0
+
+
+def test_outcomes_oil_is_scoreable_via_daily_bar(ptmp, monkeypatch):
+    assert outcomes._scoring_source("CL=F") == "daily_bar"
+    assert outcomes._scoring_source("BZ=F") == "daily_bar"
+    assert outcomes._scoring_source("MSTR") == "daily_bar"
+    assert outcomes._scoring_source("BTC-USD") == "binance"
+    assert outcomes._scoring_source("SAAB-B") is None
+
+
+# --- audit batch 3: weekend/holiday horizon fix ------------------------------
+def test_outcomes_daily_bar_pending_until_next_session(ptmp, monkeypatch):
+    # Friday prediction, 1d horizon = Saturday: no bar on/after target yet ->
+    # pending, NOT scored against Friday's close (the old ~4h-window bug)
+    monkeypatch.setattr(outcomes, "_fetch_daily_bar_close", lambda inst, dt: (None, None))
+    row = _backdated_row(days_ago=2, spot=400.0)
+    row["instrument"] = "MSTR"
+    row["spot_source"] = "price_source"  # trusted -> no reference fetch
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, row)
+    assert outcomes.score() == 0
+    assert not pcfg.ACCURACY_JSONL.exists() or count_jsonl_lines(pcfg.ACCURACY_JSONL) == 0
+
+
+def test_outcomes_daily_bar_scores_next_session_close(ptmp, monkeypatch):
+    monkeypatch.setattr(outcomes, "_fetch_daily_bar_close",
+                        lambda inst, dt: (440.0, "2026-06-01"))
+    row = _backdated_row(days_ago=9, spot=400.0)
+    row["instrument"] = "MSTR"
+    row["spot_source"] = "price_source"
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, row)
+    assert outcomes.score() == 0
+    rows = [json.loads(line) for line in pcfg.ACCURACY_JSONL.read_text().splitlines()]
+    assert rows and all(r["realized_bar_ts"] == "2026-06-01" for r in rows)
+    assert all(r["realized"] == 440.0 for r in rows)
+
+
+# --- audit batch 3: spot_at_prediction validation ----------------------------
+def test_outcomes_poisoned_spot_skipped_not_crash(ptmp, monkeypatch):
+    monkeypatch.setattr("portfolio.outcome_tracker._fetch_historical_price", lambda t, ts: 66000.0)
+    bad = _backdated_row()
+    bad["spot_at_prediction"] = "not-a-number"
+    good = _backdated_row()
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, bad)
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, good)
+    assert outcomes.score() == 0  # poisoned row must not abort the loop
+    assert any(r["category"] == "prophecy_spot_invalid" for r in _crit_lines())
+    # the good row still scored
+    assert count_jsonl_lines(pcfg.ACCURACY_JSONL) > 0
+
+
+def test_outcomes_untrusted_spot_band_reject(ptmp, monkeypatch):
+    # reference (scoring source at prediction time) = 100000; claimed spot
+    # 60000 breaches the +/-20% band -> record rejected + critical
+    monkeypatch.setattr("portfolio.outcome_tracker._fetch_historical_price", lambda t, ts: 100000.0)
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, _backdated_row(spot=60000.0))  # no spot_source -> untrusted
+    assert outcomes.score() == 0
+    assert any(r["category"] == "prophecy_spot_invalid" for r in _crit_lines())
+    assert not pcfg.ACCURACY_JSONL.exists() or count_jsonl_lines(pcfg.ACCURACY_JSONL) == 0
+
+
+def test_outcomes_trusted_spot_skips_band_check(ptmp, monkeypatch):
+    monkeypatch.setattr("portfolio.outcome_tracker._fetch_historical_price", lambda t, ts: 100000.0)
+    row = _backdated_row(spot=60000.0)
+    row["spot_source"] = "binance_spot"  # prep-sourced -> trusted
+    atomic_append_jsonl(pcfg.JOURNAL_FILE, row)
+    assert outcomes.score() == 0
+    assert count_jsonl_lines(pcfg.ACCURACY_JSONL) > 0
+
+
+# --- audit batch 3: publish reconcile ----------------------------------------
+def test_publish_rejects_hallucinated_instrument(ptmp):
+    _write_context(ptmp, {"BTC-USD": {"live_price": 61000.0, "price_source": "binance_spot"}})
+    atomic_write_json(pcfg.raw_file(DATE), _raw({
+        "BTC-USD": {"instrument": "BTC-USD", "horizons": _hz(61000, True)},
+        "DOGE-USD": {"instrument": "DOGE-USD", "horizons": _hz(0.1, True)}}))
+    assert publish.publish(DATE) == 0
+    latest = load_json(pcfg.LATEST_FILE)
+    assert "DOGE-USD" not in latest["instruments"]
+    assert latest["quarantined_count"] == 1
+    assert count_jsonl_lines(pcfg.JOURNAL_FILE) == 1  # DOGE never journaled
+    assert any(r["category"] == "prophecy_publish_unknown_instrument" for r in _crit_lines())
+
+
+def test_publish_flags_missing_instruments(ptmp):
+    _write_context(ptmp, {"BTC-USD": {"live_price": 61000.0, "price_source": "binance_spot"}})
+    atomic_write_json(pcfg.raw_file(DATE), _raw({
+        "BTC-USD": {"instrument": "BTC-USD", "horizons": _hz(61000, True)}}))
+    assert publish.publish(DATE) == 0
+    latest = load_json(pcfg.LATEST_FILE)
+    missing = latest["coverage_summary"]["missing_instruments"]
+    # count derived from config so instrument-set drift can't silently rot
+    # this assertion (review of 68546e7d)
+    assert "ETH-USD" in missing and "XAG-USD" in missing
+    assert len(missing) == len(pcfg.enabled_instruments()) - 1  # all but BTC-USD
+    assert latest["stale"] is False  # partial run publishes, but flagged
+    assert any(r["category"] == "prophecy_publish_missing_instruments" for r in _crit_lines())
+
+
+def test_publish_full_run_has_no_missing(ptmp):
+    insts = pcfg.enabled_instruments()
+    _write_context(ptmp, {i: {"live_price": 100.0, "price_source": "binance_spot"} for i in insts})
+    atomic_write_json(pcfg.raw_file(DATE), _raw({
+        i: {"instrument": i, "horizons": _hz(100, True)} for i in insts}))
+    assert publish.publish(DATE) == 0
+    latest = load_json(pcfg.LATEST_FILE)
+    assert latest["coverage_summary"]["missing_instruments"] == []
+    assert not any(r["category"] == "prophecy_publish_missing_instruments" for r in _crit_lines())
+
+
+# --- audit batch 3: publish spot fallback validation -------------------------
+def test_publish_claude_spot_band_breach_dropped(ptmp, monkeypatch):
+    monkeypatch.setattr("prophecy.prep._fetch_price", lambda t: (100.0, "binance_spot"))
+    _write_context(ptmp, {"BTC-USD": {"live_price": None, "price_source": "no_feed"}})
+    atomic_write_json(pcfg.raw_file(DATE), _raw({
+        "BTC-USD": {"instrument": "BTC-USD", "horizons": _hz(100, True),
+                    "spot_at_prediction": 200.0}}))  # 2x reference -> breach
+    assert publish.publish(DATE) == 0
+    latest = load_json(pcfg.LATEST_FILE)
+    assert latest["instruments"]["BTC-USD"]["spot_at_prediction"] is None
+    assert any(r["category"] == "prophecy_spot_invalid" for r in _crit_lines())
+
+
+def test_publish_claude_spot_within_band_kept_and_tagged(ptmp, monkeypatch):
+    monkeypatch.setattr("prophecy.prep._fetch_price", lambda t: (100.0, "binance_spot"))
+    _write_context(ptmp, {"BTC-USD": {"live_price": None, "price_source": "no_feed"}})
+    atomic_write_json(pcfg.raw_file(DATE), _raw({
+        "BTC-USD": {"instrument": "BTC-USD", "horizons": _hz(100, True),
+                    "spot_at_prediction": 105.0}}))
+    assert publish.publish(DATE) == 0
+    rec = load_json(pcfg.LATEST_FILE)["instruments"]["BTC-USD"]
+    assert rec["spot_at_prediction"] == 105.0
+    assert rec["spot_source"] == "claude_self_reported"
+
+
+def test_publish_claude_spot_nonnumeric_dropped(ptmp, monkeypatch):
+    monkeypatch.setattr("prophecy.prep._fetch_price", lambda t: (None, "no_feed"))
+    _write_context(ptmp, {"BTC-USD": {"live_price": None, "price_source": "no_feed"}})
+    atomic_write_json(pcfg.raw_file(DATE), _raw({
+        "BTC-USD": {"instrument": "BTC-USD", "horizons": _hz(100, True),
+                    "spot_at_prediction": {"weird": "dict"}}}))
+    assert publish.publish(DATE) == 0
+    assert load_json(pcfg.LATEST_FILE)["instruments"]["BTC-USD"]["spot_at_prediction"] is None
+
+
+# --- audit batch 3: cost 30d window + same-day dedupe ------------------------
+def _cost_row(days_ago, usd, session="s1", date=None):
+    ts = (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+    return {"ts": ts, "date": date or ts[:10], "total_cost_usd": usd,
+            "session_id": session, "is_error": False}
+
+
+def test_cost_30d_window_excludes_old_rows(ptmp):
+    atomic_append_jsonl(pcfg.COST_LOG, _cost_row(40, 100.0, session="old"))
+    atomic_append_jsonl(pcfg.COST_LOG, _cost_row(5, 2.0, session="recent"))
+    atomic_write_json(pcfg.run_file(DATE), {"type": "result", "is_error": False,
+        "total_cost_usd": 3.0, "num_turns": 5, "usage": {}, "session_id": "today"})
+    assert cost.record_cost(DATE) == 0
+    cum = load_json(pcfg.LATEST_FILE)["cost_summary"]["cumulative_30d_usd"]
+    assert cum == pytest.approx(5.0)  # 2 + 3; the 40-day-old 100 excluded
+
+
+def test_cost_same_day_reparse_counted_once(ptmp):
+    # same (date, session_id) appended twice = same claude spend re-parsed
+    atomic_write_json(pcfg.run_file(DATE), {"type": "result", "is_error": False,
+        "total_cost_usd": 4.0, "num_turns": 5, "usage": {}, "session_id": "sess-a"})
+    assert cost.record_cost(DATE) == 0
+    assert cost.record_cost(DATE) == 0  # manual re-run, same result file
+    assert count_jsonl_lines(pcfg.COST_LOG) == 2  # audit trail keeps both rows
+    cum = load_json(pcfg.LATEST_FILE)["cost_summary"]["cumulative_30d_usd"]
+    assert cum == pytest.approx(4.0)  # but the spend counts once
+
+
+def test_cost_same_day_distinct_sessions_both_count(ptmp):
+    # a genuine same-day re-run (new claude session) is real additional spend
+    atomic_append_jsonl(pcfg.COST_LOG, _cost_row(0, 6.0, session="sess-a"))
+    atomic_write_json(pcfg.run_file(DATE), {"type": "result", "is_error": False,
+        "total_cost_usd": 4.0, "num_turns": 5, "usage": {}, "session_id": "sess-b"})
+    assert cost.record_cost(DATE) == 0
+    cum = load_json(pcfg.LATEST_FILE)["cost_summary"]["cumulative_30d_usd"]
+    assert cum == pytest.approx(10.0)
+
+
+def test_cost_records_result_model_when_present(ptmp):
+    atomic_write_json(pcfg.run_file(DATE), {"type": "result", "is_error": False,
+        "total_cost_usd": 1.0, "num_turns": 5, "usage": {}, "model": "claude-opus-4-9"})
+    assert cost.record_cost(DATE) == 0
+    rows = [json.loads(line) for line in pcfg.COST_LOG.read_text().splitlines()]
+    assert rows[-1]["model"] == "claude-opus-4-9"
+
+
+# --- review of 68546e7d: write_guard (post-claude integrity check) -----------
+def test_write_guard_pre_writes_snapshot(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: [" M portfolio/main.py", "?? data/foo.json"])
+    snap = tmp_path / "snap.txt"
+    assert write_guard.snapshot(str(snap)) == 0
+    assert " M portfolio/main.py" in snap.read_text()
+
+
+def test_write_guard_clean_when_unchanged(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    lines = [" M data/metals_swing_state.json", " M portfolio/main.py"]
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: list(lines))
+    snap = tmp_path / "snap.txt"
+    assert write_guard.snapshot(str(snap)) == 0
+    # identical state after run -> clean, even though a non-data file was
+    # already dirty pre-run (pre-existing churn is not a breach)
+    assert write_guard.check(str(snap)) == 0
+    assert not any(r["category"] == "prophecy_write_breach" for r in _crit_lines())
+
+
+def test_write_guard_breach_on_new_code_write(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    snap = tmp_path / "snap.txt"
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.snapshot(str(snap)) == 0
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: ["?? scripts/evil.py", " M portfolio/main.py"])
+    assert write_guard.check(str(snap)) == 2
+    breach = [r for r in _crit_lines() if r["category"] == "prophecy_write_breach"]
+    assert breach and "scripts/evil.py" in breach[0]["message"]
+
+
+def test_write_guard_ignores_data_churn(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    snap = tmp_path / "snap.txt"
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.snapshot(str(snap)) == 0
+    # loop-churned tracked data files + prophecy's own outputs: expected
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: [" M data/metals_swing_state.json",
+                                 "?? data/prophecy_runs/raw_2026-06-11.json"])
+    assert write_guard.check(str(snap)) == 0
+    assert not any(r["category"] == "prophecy_write_breach" for r in _crit_lines())
+
+
+def test_write_guard_rename_uses_new_path(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    snap = tmp_path / "snap.txt"
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.snapshot(str(snap)) == 0
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: ["R  data/old.json -> portfolio/hijacked.py"])
+    assert write_guard.check(str(snap)) == 2  # renamed INTO code = breach
+
+
+def test_write_guard_pre_failure_is_blocking(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+
+    def boom():
+        raise RuntimeError("git unavailable")
+
+    monkeypatch.setattr(write_guard, "_git_status_lines", boom)
+    snap = tmp_path / "snap.txt"
+    assert write_guard.snapshot(str(snap)) == 1  # .bat skips the claude run
+    assert any(r["category"] == "prophecy_write_guard_error" for r in _crit_lines())
+
+
+def test_write_guard_check_missing_snapshot_quarantines(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.check(str(tmp_path / "never_written.txt")) == 1
+    assert any(r["category"] == "prophecy_write_guard_error" for r in _crit_lines())

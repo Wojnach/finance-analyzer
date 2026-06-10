@@ -17,10 +17,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl_tail
-
 from prophecy import config as pcfg
 from prophecy.alerts import log_critical
 
@@ -93,7 +92,12 @@ def record_cost(date: str | None = None) -> int:
     entry = {
         "ts": datetime.now(UTC).isoformat(),
         "date": date,
-        "model": pcfg.model(),
+        # 2026-06-11 (audit batch 3): prophecy-daily.bat now resolves its
+        # --model from the SAME config key (prophecy_config.json "model"), so
+        # this stamp matches the actually-used model. Prefer the model the
+        # claude result self-reports when present (belt and braces against a
+        # config edit landing mid-run).
+        "model": result.get("model") or pcfg.model(),
         "total_cost_usd": total_usd,
         "num_turns": result.get("num_turns"),
         "duration_ms": result.get("duration_ms"),
@@ -105,8 +109,30 @@ def record_cost(date: str | None = None) -> int:
     atomic_append_jsonl(pcfg.COST_LOG, entry)
 
     # 30-day cumulative for the dashboard.
-    rows = load_jsonl_tail(pcfg.COST_LOG, max_entries=60) or []
-    cumulative = sum(r.get("total_cost_usd") or 0.0 for r in rows[-30:])
+    # 2026-06-11 (audit batch 3): previously summed the last 30 JSONL *entries*
+    # — same-day retries inflated the figure and skipped days silently widened
+    # the window past 30 days. Now: a real ts >= now-30d window, deduped to the
+    # LAST entry per (date, session_id). Rationale: re-parsing the same
+    # run_<date>.json (manual `python -m prophecy.cost` re-run) appends a
+    # duplicate row for the SAME claude session = same spend, counted once;
+    # a genuine same-day re-run (Task Scheduler retry that re-invoked claude)
+    # has a new session_id = new real spend, still counted. The only consumer
+    # is the dashboard cost_summary tile (the soft-cap gate below uses the
+    # per-run total only), so display semantics are the constraint.
+    rows = load_jsonl_tail(pcfg.COST_LOG, max_entries=1000) or []
+    cutoff = datetime.now(UTC) - timedelta(days=30)
+    last_per_run: dict[tuple, dict] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        try:
+            ts = datetime.fromisoformat(r.get("ts"))
+        except (TypeError, ValueError):
+            continue
+        if ts < cutoff:
+            continue
+        last_per_run[(r.get("date"), r.get("session_id"))] = r
+    cumulative = sum(r.get("total_cost_usd") or 0.0 for r in last_per_run.values())
 
     # latest.json is MULTI-WRITER: publish.py writes the predictions snapshot,
     # then this re-reads it and sets only cost_summary. The .bat enforces the
@@ -127,6 +153,15 @@ def record_cost(date: str | None = None) -> int:
     if is_error:
         log_critical("prophecy_cost", f"claude run reported error: {result.get('subtype')}",
                      caller="cost.run_error", context={"date": date})
+    # The soft-cap alert below uses level="warning" INTENTIONALLY — i.e. it is
+    # intentionally NON-surfacing: check_critical_errors.py + the fix-agent
+    # dispatcher only act on level == "critical". The soft cap is a "measure,
+    # don't block" budget tripwire ("go unhinged to begin with") — it lands in
+    # the journal for cost archaeology but must not page the session-start
+    # check or spawn fix agents. Escalate to the default (critical) only when
+    # a HARD budget policy is decided. (audit batch 3, 2026-06-11; comment
+    # hoisted above the guard per review of 68546e7d so maintainers see it
+    # even while no cap is configured and the branch never runs.)
     soft_cap = pcfg.budget_soft_cap()
     if soft_cap is not None and isinstance(total_usd, (int, float)) and total_usd > soft_cap:
         log_critical("prophecy_cost",
