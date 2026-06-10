@@ -2,19 +2,20 @@
   "model": "claude-opus-4-8",
   "horizons": ["1d", "2d", "3d", "4d", "5d", "6d", "7d", "1mo", "2mo", "6mo"],
   "budget_usd_soft_cap": null,
+  "_scoreable_note": "scoreable=false (2026-06-11, audit batch 3): no historical price source for outcome scoring (warrants are Avanza-only; Tier-2 Swedish equities have no internal feed). Predictions are journaled + dashboarded but never accuracy-scored; outcomes.py warns once per run. Flip to true only after wiring a historical price path in prophecy/outcomes.py.",
   "instruments": {
-    "BTC-USD": {"enabled": true, "strategy": "btc_onchain_flow_cycle", "asset_class": "crypto"},
-    "ETH-USD": {"enabled": true, "strategy": "eth_ratio_staking_beta", "asset_class": "crypto"},
-    "XAU-USD": {"enabled": true, "strategy": "gold_realyield_dxy_cb", "asset_class": "metals"},
-    "XAG-USD": {"enabled": true, "strategy": "silver_gsr_industrial_cot", "asset_class": "metals"},
-    "MSTR": {"enabled": true, "strategy": "mstr_mnav_btc_beta", "asset_class": "equity"},
-    "CL=F": {"enabled": true, "strategy": "wti_opec_inventory_term", "asset_class": "oil"},
-    "BZ=F": {"enabled": true, "strategy": "brent_global_supply_spread", "asset_class": "oil"},
-    "XBT-TRACKER": {"enabled": true, "strategy": "warrant_btc_tracker", "asset_class": "warrant"},
-    "ETH-TRACKER": {"enabled": true, "strategy": "warrant_eth_tracker", "asset_class": "warrant"},
-    "MINI-SILVER": {"enabled": true, "strategy": "warrant_silver_mini_5x", "asset_class": "warrant"},
-    "SAAB-B": {"enabled": true, "strategy": "saab_defense_orders", "asset_class": "equity"},
-    "SEB-C": {"enabled": true, "strategy": "seb_rates_credit_nim", "asset_class": "equity"},
-    "INVE-B": {"enabled": true, "strategy": "investor_nav_discount", "asset_class": "equity"}
+    "BTC-USD": {"enabled": true, "strategy": "btc_onchain_flow_cycle", "asset_class": "crypto", "scoreable": true},
+    "ETH-USD": {"enabled": true, "strategy": "eth_ratio_staking_beta", "asset_class": "crypto", "scoreable": true},
+    "XAU-USD": {"enabled": true, "strategy": "gold_realyield_dxy_cb", "asset_class": "metals", "scoreable": true},
+    "XAG-USD": {"enabled": true, "strategy": "silver_gsr_industrial_cot", "asset_class": "metals", "scoreable": true},
+    "MSTR": {"enabled": true, "strategy": "mstr_mnav_btc_beta", "asset_class": "equity", "scoreable": true},
+    "CL=F": {"enabled": true, "strategy": "wti_opec_inventory_term", "asset_class": "oil", "scoreable": true},
+    "BZ=F": {"enabled": true, "strategy": "brent_global_supply_spread", "asset_class": "oil", "scoreable": true},
+    "XBT-TRACKER": {"enabled": true, "strategy": "warrant_btc_tracker", "asset_class": "warrant", "scoreable": false},
+    "ETH-TRACKER": {"enabled": true, "strategy": "warrant_eth_tracker", "asset_class": "warrant", "scoreable": false},
+    "MINI-SILVER": {"enabled": true, "strategy": "warrant_silver_mini_5x", "asset_class": "warrant", "scoreable": false},
+    "SAAB-B": {"enabled": true, "strategy": "saab_defense_orders", "asset_class": "equity", "scoreable": false},
+    "SEB-C": {"enabled": true, "strategy": "seb_rates_credit_nim", "asset_class": "equity", "scoreable": false},
+    "INVE-B": {"enabled": true, "strategy": "investor_nav_discount", "asset_class": "equity", "scoreable": false}
   }
 }
