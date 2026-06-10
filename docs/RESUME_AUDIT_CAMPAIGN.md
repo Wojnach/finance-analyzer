@@ -24,40 +24,23 @@ implementing any batch.
 | B1 ops-automation | DONE, merged `31df4c77`, retro-reviewed, **pushed** |
 | B2 live-incident signals | DONE, merged `0d0d2e94`, retro-reviewed, **pushed** |
 | plan + premortem + retro fixes | DONE, merged `bb72e445`, **pushed** |
-| B3 prophecy | Commit `68546e7d` ON BRANCH (pushed), **NOT merged to main** — review fixes were IN FLIGHT when the session died (see below) |
+| B3 prophecy | DONE — `68546e7d` + review fixes `30d38f95`, merged to main `aa667166`, reviewed, **pushed** |
 | B4-B12 | Not started — specs in PLAN.md |
 
-Both `main` and the branch are pushed to origin.
+Both `main` and the branch are pushed to origin. **Next session starts directly at B4.**
 
-### B3 — first thing to do next session
+### B3 security notes worth knowing (already fixed, context only)
 
-A background agent was applying 5 adversarial-review fixes to `68546e7d` when usage ran
-out. Check `git -C .worktrees/audit-fixes log --oneline -3` and `status --short`:
-
-- If a commit like "fix(prophecy): review fixes for 68546e7d" exists → merge branch to
-  main, push, proceed to B4.
-- If instead there are UNCOMMITTED changes (last seen: `M scripts/prophecy-daily.bat`,
-  new `prophecy/write_guard.py`) → finish the work yourself, guided by this fix list:
-  1. **Write-scoping doubt (security):** reviewer claims claude CLI `--allowedTools`
-     does not honor `Write(data/prophecy_runs/**)` path syntax (tool names only) → Write
-     would be unrestricted for the headless web-researching prophecy agent. Regardless
-     of how the syntax question resolves, add a post-run integrity guard to
-     `scripts/prophecy-daily.bat`: snapshot `git status --porcelain` before the claude
-     call, compare after; any modified tracked file or new file outside
-     `data/prophecy_runs/` → rate-limited critical (category `prophecy_write_breach`),
-     exit non-zero, skip publish. (`prophecy/write_guard.py` was being created for
-     this.) Add "verify Write denial outside data/prophecy_runs/" to the unfreeze smoke
-     checklist in the .bat header.
-  2. Fix misleading fail-closed ordering comment in the .bat (code exits before
-     alerts.py runs; sentinel recreation is belt-and-braces, not a strict ordering).
-  3. `prophecy/cost.py` ~339: move soft-cap-warning rationale comment outside the `if`.
-     (Last-seen transcript suggests this one was already applied.)
-  4. `prophecy/outcomes.py` ~666: comment documenting daily-bar weekend scoring latency
-     (MSTR/oil Fri-targeting predictions score Monday+1).
-  5. `tests/test_prophecy_pipeline.py` ~1232: `len(missing) == 12` →
-     `len(pcfg.enabled_instruments()) - 1`.
-  Then: run `tests/test_prophecy_pipeline.py`, commit
-  ("fix(prophecy): review fixes for 68546e7d"), merge to main, push.
+- claude CLI `--allowedTools` DOES accept specifier rules (`Write(path/**)` etc. — own
+  help text uses `"Bash(git *) Edit"`), reviewer's contrary claim was wrong; runtime
+  enforcement still gets verified at the unfreeze smoke run (checklist in
+  scripts/prophecy-daily.bat header).
+- Windows user settings (`C:\Users\Herc2\.claude\settings.json`) allow `Write(*)`/
+  `Bash(*)` — so the prophecy .bat uses `--setting-sources ""` (load NO settings) to
+  keep the restricted toolset airtight.
+- `prophecy/write_guard.py` = post-run git-porcelain integrity guard (new file outside
+  data/ after the claude run → `prophecy_write_breach` critical, publish skipped).
+  data/ excluded wholesale (60s loops churn it); permission layer polices data/.
 
 ## Per-batch flow (repeat for B4 → B12)
 
