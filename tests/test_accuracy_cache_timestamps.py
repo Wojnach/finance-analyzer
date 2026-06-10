@@ -275,8 +275,11 @@ class TestEntriesParameter:
 
         assert result["rsi"]["correct"] == 1
         assert result["rsi"]["total"] == 1
-        assert result["macd"]["correct"] == 0
-        assert result["macd"]["total"] == 1
+        # 2026-06-10 (audit batch 2): macd is in DISABLED_SIGNALS, so its
+        # untagged-row vote lands in the shadow bucket, not the headline.
+        assert result["macd"]["total"] == 0
+        assert result["macd"]["shadow_total"] == 1
+        assert result["macd"]["shadow_correct"] == 0
 
     def test_consensus_accuracy_uses_provided_entries(self):
         """consensus_accuracy uses provided entries."""

@@ -167,6 +167,68 @@ def load_entries():
 _MIN_CHANGE_PCT = 0.05  # outcomes within ±0.05% are treated as neutral (skip)
 
 
+# --- Consensus-eligibility classification (2026-06-10, audit batch 2) -------
+#
+# signal_log rows store the SHADOW vote for globally-disabled shadow-tracked
+# signals (signal_engine logs raw_votes incl. shadow_votes so outcome_tracker
+# can grade them), but until now signal_accuracy counted those rows
+# identically to consensus votes. Result: the williams_vix_fix "global
+# degradation" alert was ~70% driven by BTC/ETH/MSTR shadow votes on tickers
+# where the signal never votes in consensus. Per the project rule "tag rows
+# at write-time, filter at read-time": new rows carry a per-ticker
+# "shadow_signals" list (written by outcome_tracker.log_signal_snapshot);
+# old rows fall back to the current eligibility config below. The fallback
+# reflects TODAY's config, not the config at row-write time — acceptable
+# drift for old rows, and it decays as tagged rows accumulate.
+
+def _consensus_eligibility_config():
+    """Return (disabled_overrides, ticker_disabled) from signal_engine.
+
+    Lazy import — signal_engine itself lazy-imports accuracy_stats in
+    several hot paths, so a module-level import here would be a cycle.
+    Fails open to (frozenset(), {}): with no override/blacklist info, a
+    globally-enabled signal counts as eligible everywhere and a
+    DISABLED_SIGNALS member as shadow everywhere — the same behavior the
+    headline numbers had for active signals before this change.
+    """
+    try:
+        from portfolio.signal_engine import (
+            _DISABLED_SIGNAL_OVERRIDES,
+            _TICKER_DISABLED_SIGNALS,
+        )
+        return _DISABLED_SIGNAL_OVERRIDES, _TICKER_DISABLED_SIGNALS
+    except Exception:
+        logger.debug("signal_engine eligibility config unavailable", exc_info=True)
+        return frozenset(), {}
+
+
+def is_consensus_eligible(sig_name, ticker):
+    """True when `sig_name` actually votes in consensus for `ticker`.
+
+    Mirrors the dispatch gate in signal_engine.generate_signal: globally
+    disabled signals are force-HOLD (shadow-only) unless rescued by a
+    per-ticker override, and per-ticker blacklisted signals never vote.
+    Dynamic shadow-registry promotions are not reconstructed here — promoted
+    shadows vote in consensus, so their rows are not shadow-tagged at write
+    time and classify correctly via the row tag.
+    """
+    overrides, ticker_disabled = _consensus_eligibility_config()
+    if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in overrides:
+        return False
+    return sig_name not in ticker_disabled.get(ticker, ())
+
+
+def _vote_is_shadow(tdata, sig_name, ticker):
+    """Classify one logged vote as shadow (True) or consensus-eligible.
+
+    Row tag wins when present (write-time truth); config fallback otherwise.
+    """
+    tag = tdata.get("shadow_signals")
+    if isinstance(tag, list):
+        return sig_name in tag
+    return not is_consensus_eligible(sig_name, ticker)
+
+
 def _vote_correct(vote, change_pct, min_change_pct=None):
     """Check if a signal vote matches the price outcome.
 
@@ -202,7 +264,12 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
         entries = load_entries()
     stats = {s: {"correct": 0, "total": 0,
                  "correct_buy": 0, "total_buy": 0,
-                 "correct_sell": 0, "total_sell": 0} for s in SIGNAL_NAMES}
+                 "correct_sell": 0, "total_sell": 0,
+                 # 2026-06-10 (audit batch 2): shadow votes (force-HOLD in
+                 # consensus, logged for outcome research) tracked separately
+                 # so the headline accuracy reflects consensus-eligible
+                 # (ticker, signal) pairs only. See _vote_is_shadow.
+                 "shadow_correct": 0, "shadow_total": 0} for s in SIGNAL_NAMES}
     # 2026-04-22 follow-up: count outcomes we skip because change_pct is None.
     # Previously these crashed the report; now they're silently dropped, which
     # would let a data-quality regression (e.g. outcome_tracker writing nulls)
@@ -234,6 +301,14 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
                 result_val = _vote_correct(vote, change_pct)
                 if result_val is None:
                     continue  # neutral outcome — don't count
+                # 2026-06-10 (audit batch 2): shadow votes go to a separate
+                # bucket — NOT dropped (tag-at-write/filter-at-read rule).
+                # Headline accuracy/total below = consensus-eligible only.
+                if _vote_is_shadow(tdata, sig_name, ticker):
+                    stats[sig_name]["shadow_total"] += 1
+                    if result_val:
+                        stats[sig_name]["shadow_correct"] += 1
+                    continue
                 stats[sig_name]["total"] += 1
                 if vote == "BUY":
                     stats[sig_name]["total_buy"] += 1
@@ -267,7 +342,14 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
         else:
             directional_skew = 0.0
 
+        shadow_total = s["shadow_total"]
+        shadow_acc = s["shadow_correct"] / shadow_total if shadow_total > 0 else 0.0
+        all_total = s["total"] + shadow_total
+        all_correct = s["correct"] + s["shadow_correct"]
         result[sig_name] = {
+            # 2026-06-10 (audit batch 2): correct/total/accuracy are now
+            # consensus-eligible votes ONLY (the degradation-relevant view).
+            # all_*/shadow_* keep the full picture for shadow research.
             "correct": s["correct"],
             "total": s["total"],
             "samples": s["total"],
@@ -281,6 +363,12 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
             "total_sell": s["total_sell"],
             "sell_accuracy": round(sell_acc, 4),
             "directional_skew": round(directional_skew, 4),
+            "shadow_correct": s["shadow_correct"],
+            "shadow_total": shadow_total,
+            "shadow_accuracy": round(shadow_acc, 4),
+            "all_correct": all_correct,
+            "all_total": all_total,
+            "all_accuracy": round(all_correct / all_total, 4) if all_total > 0 else 0.0,
         }
     return result
 

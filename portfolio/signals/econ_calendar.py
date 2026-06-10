@@ -272,6 +272,30 @@ def compute_econ_calendar_signal(df: pd.DataFrame, context: dict = None) -> dict
         result["indicators"]["regime_gate_suppressed"] = True
         result["indicators"]["regime"] = regime
 
+    # 2026-06-10 (audit batch 2): the event_free_window BUY ("next event >72h
+    # away") additionally requires a CONFIRMED non-bearish regime
+    # (trending-up or ranging, the explicit non-bearish classifications from
+    # indicators.detect_regime). A calm calendar is absence of evidence, not
+    # bullish evidence — it emitted 100-215 identical BUYs/day for 19 straight
+    # days (May 14 - Jun 2), and the trending-down gate above only covers an
+    # explicitly classified downtrend; this closes the residual gap where the
+    # regime is unknown/unclassified (missing context) or high-vol (direction
+    # unreadable). Genuine post-event relief (4-24h after a high-impact event)
+    # is the documented anomaly and keeps its BUY in any non-trending-down
+    # regime.
+    _CONFIRMED_NON_BEARISH = ("trending-up", "ranging")
+    if (
+        result["action"] == "BUY"
+        and result["indicators"].get("relief_event_free_window")
+        and not result["indicators"].get("relief_post_event_relief")
+        and regime not in _CONFIRMED_NON_BEARISH
+    ):
+        result["action"] = "HOLD"
+        result["confidence"] *= 0.2
+        result["indicators"]["regime_gate_suppressed"] = True
+        result["indicators"]["regime_gate_reason"] = "event_free_window_unconfirmed_regime"
+        result["indicators"]["regime"] = regime
+
     # Pause-period dampener: when next high-impact event is >14 days away,
     # the signal has minimal predictive value (events produce round-trips
     # during extended Fed pause periods). Reduce confidence aggressively.

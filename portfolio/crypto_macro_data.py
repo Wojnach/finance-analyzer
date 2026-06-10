@@ -106,21 +106,57 @@ def _fetch_deribit_options(currency="BTC"):
             return None
 
     now = datetime.date.today()
-    nearest_expiry = None
-    nearest_date = None
+
+    def _chain_oi(exp_str):
+        e = expiry_data[exp_str]
+        return e["total_call_oi"] + e["total_put_oi"]
+
+    future = {}
     for exp_str in expiry_data:
         d = _parse_expiry(exp_str)
-        if d and d >= now and (nearest_date is None or d < nearest_date):
-            nearest_date = d
-            nearest_expiry = exp_str
+        if d and d >= now:
+            future[exp_str] = d
 
+    # Raw nearest expiry (any listing, including Deribit dailies). Kept ONLY
+    # for the expiry-proximity sub-signal in signals/crypto_macro.py, which
+    # needs to know whether the true nearest expiry is a genuine quarterly.
+    nearest_expiry = min(future, key=lambda s: future[s]) if future else None
+    nearest_date = future.get(nearest_expiry)
+
+    # 2026-06-10 (audit batch 2): max pain / PCR / OI metrics are now computed
+    # on the nearest MONTHLY/quarterly chain instead of the raw nearest expiry.
+    # Deribit lists daily expiries, so the raw nearest is a thin 0-1 DTE chain
+    # with unrepresentative OI — max pain and nearest_pcr were day-to-day noise
+    # and the "gravity weakens >7d from expiry" gate downstream could never
+    # trip. Monthly/quarterly expiries are the last Friday of the month, which
+    # always lands on day >= 22; among same-window candidates we take the chain
+    # with the largest OI so a thin late-month daily can't shadow the real
+    # monthly.
+    monthly_like = {s: d for s, d in future.items() if d.day >= 22}
+    metrics_expiry = None
+    if monthly_like:
+        first_monthly_date = min(monthly_like.values())
+        same_window = [s for s, d in monthly_like.items()
+                       if (d - first_monthly_date).days <= 7]
+        metrics_expiry = max(same_window, key=_chain_oi)
+    elif future:
+        # No monthly-like listing (sparse/odd API response) — most liquid
+        # future chain is the least-bad approximation.
+        metrics_expiry = max(future, key=_chain_oi)
+
+    if not metrics_expiry:
+        # Fall back to the expiry with most OI (all listings already expired —
+        # stale API data; matches pre-2026-06-10 fallback behavior).
+        metrics_expiry = max(expiry_data, key=_chain_oi)
     if not nearest_expiry:
-        # Fall back to first expiry with most OI
-        nearest_expiry = max(expiry_data,
-                             key=lambda e: expiry_data[e]["total_call_oi"] +
-                                           expiry_data[e]["total_put_oi"])
+        nearest_expiry = metrics_expiry
+        nearest_date = _parse_expiry(metrics_expiry)
+        if nearest_date and nearest_date < now:
+            nearest_date = None
 
-    ed = expiry_data[nearest_expiry]
+    metrics_date = future.get(metrics_expiry)
+
+    ed = expiry_data[metrics_expiry]
     all_strikes = sorted(set(list(ed["calls"].keys()) + list(ed["puts"].keys())))
 
     if not all_strikes:
@@ -174,11 +210,32 @@ def _fetch_deribit_options(currency="BTC"):
     grand_put_oi = sum(e["total_put_oi"] for e in expiry_data.values())
     grand_pcr = round(grand_put_oi / grand_call_oi, 3) if grand_call_oi > 0 else None
 
-    days_to_expiry = (nearest_date - now).days if nearest_date else None
+    # Metrics-chain DTE (monthly/quarterly chain — drives the options-gravity
+    # ">7d from expiry" gate downstream).
+    days_to_expiry = (metrics_date - now).days if metrics_date else None
+
+    # Raw nearest-expiry context for the expiry-proximity sub-signal:
+    # DTE, quarterly classification (last Friday of Mar/Jun/Sep/Dec always
+    # lands on day >= 22), and the chain's share of grand OI so a daily
+    # expiry can't masquerade as a meaningful quarterly.
+    nearest_days = (nearest_date - now).days if nearest_date else None
+    nearest_is_quarterly = bool(
+        nearest_date
+        and nearest_date.month in (3, 6, 9, 12)
+        and nearest_date.day >= 22
+    )
+    grand_oi = grand_call_oi + grand_put_oi
+    raw_ed = expiry_data[nearest_expiry]
+    raw_oi = raw_ed["total_call_oi"] + raw_ed["total_put_oi"]
+    nearest_oi_share = round(raw_oi / grand_oi, 4) if grand_oi > 0 else None
 
     return {
+        # 2026-06-10 (audit batch 2): max_pain / days_to_expiry / nearest_*_oi
+        # / nearest_pcr describe the monthly-or-quarterly metrics chain (see
+        # metrics_expiry selection above), NOT the raw nearest daily expiry.
+        # The nearest_expiry* fields below keep the raw nearest-listing info.
         "max_pain": max_pain_strike,
-        "nearest_expiry": nearest_expiry,
+        "metrics_expiry": metrics_expiry,
         "days_to_expiry": days_to_expiry,
         "nearest_call_oi": total_call_oi,
         "nearest_put_oi": total_put_oi,
@@ -186,6 +243,10 @@ def _fetch_deribit_options(currency="BTC"):
         "total_call_oi": grand_call_oi,
         "total_put_oi": grand_put_oi,
         "total_pcr": grand_pcr,
+        "nearest_expiry": nearest_expiry,
+        "nearest_expiry_days": nearest_days,
+        "nearest_is_quarterly": nearest_is_quarterly,
+        "nearest_expiry_oi_share": nearest_oi_share,
     }
 
 
@@ -316,6 +377,82 @@ def _append_ratio_history(ratio, gold_price, btc_price):
 
 NETFLOW_HISTORY_MAX_DAYS = 30
 
+# 2026-06-10 (audit batch 2): staleness contract for the netflow feed. The
+# BGeometrics /v1/exchange-netflow fetch died silently around 2026-04-10
+# (exchange_netflow_history.jsonl froze at one entry) and nothing alerted for
+# two months. When the newest history entry is older than this, we append a
+# critical_errors.jsonl row (category data_feed_stale), at most once per the
+# same window so the journal doesn't flood.
+NETFLOW_STALE_AFTER_DAYS = 7
+_NETFLOW_STALE_STATE_FILE = DATA_DIR / "netflow_staleness_state.json"
+
+
+def _maybe_alert_netflow_stale(history):
+    """Append a critical_errors row when netflow history is stale (>7d).
+
+    Called from get_exchange_netflow_trend (1h cache upstream, so roughly
+    hourly). Dedup: persists the last alert ts in a small state file and
+    re-alerts at most once per NETFLOW_STALE_AFTER_DAYS. Never raises.
+    """
+    try:
+        now = time.time()
+        latest_ts = max((e.get("ts", 0) for e in history), default=0)
+        age_days = (now - latest_ts) / 86400 if latest_ts else float("inf")
+        if age_days < NETFLOW_STALE_AFTER_DAYS:
+            return
+        from portfolio.file_utils import atomic_write_json, load_json
+        state = load_json(_NETFLOW_STALE_STATE_FILE, default={}) or {}
+        last_alert = float(state.get("last_alert_ts", 0) or 0)
+        if now - last_alert < NETFLOW_STALE_AFTER_DAYS * 86400:
+            return
+        from portfolio.claude_gate import record_critical_error
+        if latest_ts:
+            latest_str = (
+                f"{time.strftime('%Y-%m-%d', time.gmtime(latest_ts))} "
+                f"({age_days:.0f}d old, threshold {NETFLOW_STALE_AFTER_DAYS}d)"
+            )
+        else:
+            latest_str = "none — history file empty/missing"
+        record_critical_error(
+            category="data_feed_stale",
+            caller="crypto_macro_data.get_exchange_netflow_trend",
+            message=(
+                f"BGeometrics exchange-netflow feed stale: newest history "
+                f"entry {latest_str}. crypto_macro exchange_netflow "
+                f"sub-vote and onchain_btc netflow interp are silently HOLD."
+            ),
+            context={
+                "history_file": str(NETFLOW_HISTORY_FILE),
+                "latest_entry_ts": latest_ts,
+                "age_days": round(age_days, 1) if latest_ts else None,
+            },
+        )
+        state["last_alert_ts"] = now
+        atomic_write_json(_NETFLOW_STALE_STATE_FILE, state)
+    except Exception:
+        logger.warning("Netflow staleness alert failed", exc_info=True)
+
+
+def _daily_netflow_series(history):
+    """Collapse 6h-cadence history samples to one value per UTC day.
+
+    2026-06-10 (audit batch 2): BGeometrics netflow is a DAILY metric that
+    _append_netflow_history samples up to 4x/day, so counting raw samples as
+    "days" made the consecutive-negative BUY threshold fire ~4x too easily
+    (5 "days" = ~30h) and inflated the sum_7d thresholds by the same factor.
+    The last sample of each UTC day wins (latest revision of the daily value).
+
+    Returns a list of (date, netflow) tuples in ascending date order.
+    """
+    by_day = {}
+    for entry in history:
+        ts = entry.get("ts", 0)
+        if not ts:
+            continue
+        day = time.strftime("%Y-%m-%d", time.gmtime(ts))
+        by_day[day] = entry.get("netflow", 0)
+    return sorted(by_day.items())
+
 
 def get_exchange_netflow_trend():
     """Analyze exchange netflow trend from on-chain data.
@@ -337,6 +474,11 @@ def get_exchange_netflow_trend():
 
         # Load history and compute trend
         history = _load_netflow_history()
+
+        # Staleness contract — alert even on the insufficient-data path
+        # (a frozen one-entry history is exactly the failure mode).
+        _maybe_alert_netflow_stale(history)
+
         if not history or len(history) < 3:
             return {
                 "current_netflow": netflow,
@@ -345,22 +487,37 @@ def get_exchange_netflow_trend():
                 "sum_7d": None,
             }
 
-        now = time.time()
-        recent_7d = [e for e in history
-                     if now - e.get("ts", 0) < 7 * 86400]
-        recent_14d = [e for e in history
-                      if now - e.get("ts", 0) < 14 * 86400]
+        # 2026-06-10 (audit batch 2): aggregate to one sample per UTC day so
+        # "consecutive_negative" and the 7d/14d sums genuinely count DAYS —
+        # consumers (crypto_macro._exchange_netflow_signal, _NETFLOW_ACCUM_DAYS)
+        # always interpreted them as days.
+        daily = _daily_netflow_series(history)
+        cutoff_7d = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 7 * 86400))
+        cutoff_14d = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 14 * 86400))
+        recent_7d = [v for d, v in daily if d >= cutoff_7d]
+        recent_14d = [v for d, v in daily if d >= cutoff_14d]
 
-        # Count consecutive negative netflows (accumulation)
+        # Count consecutive negative netflow DAYS (accumulation), walking back
+        # from the most recent day. A calendar gap breaks the streak — missing
+        # data is not evidence of accumulation.
         consecutive_neg = 0
-        for entry in reversed(history):
-            if entry.get("netflow", 0) < 0:
+        prev_day = None
+        for day, value in reversed(daily):
+            if prev_day is not None:
+                gap = (
+                    time.mktime(time.strptime(prev_day, "%Y-%m-%d"))
+                    - time.mktime(time.strptime(day, "%Y-%m-%d"))
+                ) / 86400
+                if gap > 1.5:
+                    break
+            if value is not None and value < 0:
                 consecutive_neg += 1
+                prev_day = day
             else:
                 break
 
-        sum_7d = sum(e.get("netflow", 0) for e in recent_7d) if recent_7d else None
-        sum_14d = sum(e.get("netflow", 0) for e in recent_14d) if recent_14d else None
+        sum_7d = sum(v for v in recent_7d if v is not None) if recent_7d else None
+        sum_14d = sum(v for v in recent_14d if v is not None) if recent_14d else None
 
         # Determine trend
         trend = "neutral"

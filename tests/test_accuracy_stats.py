@@ -388,21 +388,31 @@ class TestSignalAccuracy:
             assert stats["total"] == 0
             assert stats["accuracy"] == 0.0
 
+    # 2026-06-10 (audit batch 2): macd/ema are in DISABLED_SIGNALS, so their
+    # untagged-row votes now land in the shadow_* bucket — headline
+    # total/accuracy is consensus-eligible only. The all-votes view is
+    # preserved in all_*/shadow_* keys.
+
     def test_single_correct_buy(self, monkeypatch):
         from portfolio.accuracy_stats import signal_accuracy
         entries = [_make_entry("BTC-USD", "macd", "BUY", 2.5)]
         result = signal_accuracy(horizon="1d", entries=entries)
-        assert result["macd"]["total"] == 1
-        assert result["macd"]["correct"] == 1
-        assert result["macd"]["accuracy"] == 1.0
+        assert result["macd"]["total"] == 0  # disabled => shadow-only
+        assert result["macd"]["shadow_total"] == 1
+        assert result["macd"]["shadow_correct"] == 1
+        assert result["macd"]["shadow_accuracy"] == 1.0
+        assert result["macd"]["all_total"] == 1
+        assert result["macd"]["all_accuracy"] == 1.0
 
     def test_single_wrong_sell(self, monkeypatch):
         from portfolio.accuracy_stats import signal_accuracy
         entries = [_make_entry("ETH-USD", "ema", "SELL", 3.0)]
         result = signal_accuracy(horizon="1d", entries=entries)
-        assert result["ema"]["total"] == 1
-        assert result["ema"]["correct"] == 0
-        assert result["ema"]["accuracy"] == 0.0
+        assert result["ema"]["total"] == 0  # disabled => shadow-only
+        assert result["ema"]["shadow_total"] == 1
+        assert result["ema"]["shadow_correct"] == 0
+        assert result["ema"]["shadow_accuracy"] == 0.0
+        assert result["ema"]["all_total"] == 1
 
     def test_multiple_signals_independent(self, monkeypatch):
         from portfolio.accuracy_stats import signal_accuracy
@@ -417,11 +427,13 @@ class TestSignalAccuracy:
             "outcomes": {"BTC-USD": {"1d": {"change_pct": 1.5}}},
         }
         result = signal_accuracy(horizon="1d", entries=[entry])
-        assert result["rsi"]["total"] == 1
+        assert result["rsi"]["total"] == 1  # active signal: headline counts it
         assert result["rsi"]["correct"] == 1
-        assert result["macd"]["total"] == 1
-        assert result["macd"]["correct"] == 0
+        assert result["macd"]["total"] == 0
+        assert result["macd"]["shadow_total"] == 1
+        assert result["macd"]["shadow_correct"] == 0
         assert result["ema"]["total"] == 0
+        assert result["ema"]["shadow_total"] == 0  # HOLD never counts
 
     def test_since_filter(self, monkeypatch):
         from portfolio.accuracy_stats import signal_accuracy
@@ -805,3 +817,115 @@ class TestApiAccuracyEnrichment:
         # and reason populated from the inline comment.
         assert sigs["hash_ribbons"]["enabled"] is False
         assert sigs["hash_ribbons"].get("disabled_reason")
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-10 (audit batch 2): consensus-eligible vs shadow-only separation
+# ---------------------------------------------------------------------------
+
+class TestShadowConsensusSeparation:
+    """signal_accuracy must not conflate shadow votes with consensus votes.
+    Row tag (shadow_signals) wins; untagged rows fall back to config."""
+
+    def test_config_fallback_per_ticker_override(self):
+        """realized_skewness: eligible on XAU-USD (override), shadow on XAG-USD."""
+        from portfolio.accuracy_stats import is_consensus_eligible, signal_accuracy
+
+        assert is_consensus_eligible("realized_skewness", "XAU-USD") is True
+        assert is_consensus_eligible("realized_skewness", "XAG-USD") is False
+
+        entries = [
+            _make_entry("XAU-USD", "realized_skewness", "BUY", 2.0),
+            _make_entry("XAG-USD", "realized_skewness", "BUY", 2.0),
+        ]
+        result = signal_accuracy(horizon="1d", entries=entries)
+        stats = result["realized_skewness"]
+        assert stats["total"] == 1          # XAU only (consensus-eligible)
+        assert stats["shadow_total"] == 1   # XAG (shadow scope)
+        assert stats["all_total"] == 2
+
+    def test_row_tag_overrides_config(self):
+        """A row tagging an ACTIVE signal as shadow is honored (write-time
+        truth beats config reconstruction)."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entry = _make_entry("BTC-USD", "rsi", "BUY", 2.0)
+        entry["tickers"]["BTC-USD"]["shadow_signals"] = ["rsi"]
+        result = signal_accuracy(horizon="1d", entries=[entry])
+        assert result["rsi"]["total"] == 0
+        assert result["rsi"]["shadow_total"] == 1
+
+    def test_empty_tag_means_consensus_vote(self):
+        """A tagged row with an empty shadow list counts a globally-disabled
+        signal as consensus — covers shadow-registry promotions, where the
+        signal votes in consensus while DISABLED_SIGNALS still lists it."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entry = _make_entry("BTC-USD", "macd", "BUY", 2.0)
+        entry["tickers"]["BTC-USD"]["shadow_signals"] = []
+        result = signal_accuracy(horizon="1d", entries=[entry])
+        assert result["macd"]["total"] == 1
+        assert result["macd"]["shadow_total"] == 0
+
+    def test_write_time_tag_from_extra_flags(self):
+        """outcome_tracker.log_signal_snapshot persists shadow_<name> flags
+        as the per-ticker shadow_signals list."""
+        from unittest.mock import patch as _patch
+
+        from portfolio.outcome_tracker import log_signal_snapshot
+
+        signals_dict = {
+            "BTC-USD": {
+                "indicators": {},
+                "extra": {
+                    "_raw_votes": {"rsi": "BUY", "crypto_evrp": "SELL"},
+                    "shadow_crypto_evrp": True,
+                },
+                "action": "BUY",
+            }
+        }
+        with _patch("portfolio.outcome_tracker.atomic_append_jsonl"), \
+             _patch("portfolio.outcome_tracker.SignalDB", create=True) as db:
+            db.side_effect = ImportError("no db")
+            entry = log_signal_snapshot(signals_dict, {"BTC-USD": 67000.0}, 10.5, ["t"])
+
+        assert entry["tickers"]["BTC-USD"]["shadow_signals"] == ["crypto_evrp"]
+
+    def test_signal_db_roundtrips_shadow_tag(self, tmp_path):
+        """SignalDB must persist and restore the shadow_signals tag; legacy
+        rows (no tag) come back without the key."""
+        from portfolio.signal_db import SignalDB
+
+        db = SignalDB(db_path=tmp_path / "t.db")
+        try:
+            tagged = {
+                "ts": "2026-06-10T10:00:00+00:00",
+                "trigger_reasons": [],
+                "fx_rate": 10.5,
+                "tickers": {"BTC-USD": {
+                    "price_usd": 67000.0, "consensus": "BUY",
+                    "buy_count": 1, "sell_count": 0, "total_voters": 1,
+                    "signals": {"rsi": "BUY"}, "regime": "ranging",
+                    "shadow_signals": ["crypto_evrp"],
+                }},
+                "outcomes": {},
+            }
+            legacy = {
+                "ts": "2026-06-10T11:00:00+00:00",
+                "trigger_reasons": [],
+                "fx_rate": 10.5,
+                "tickers": {"BTC-USD": {
+                    "price_usd": 67000.0, "consensus": "BUY",
+                    "buy_count": 1, "sell_count": 0, "total_voters": 1,
+                    "signals": {"rsi": "BUY"}, "regime": "ranging",
+                }},
+                "outcomes": {},
+            }
+            db.insert_snapshot(tagged)
+            db.insert_snapshot(legacy)
+            entries = db.load_entries()
+        finally:
+            db.close()
+
+        assert entries[0]["tickers"]["BTC-USD"]["shadow_signals"] == ["crypto_evrp"]
+        assert "shadow_signals" not in entries[1]["tickers"]["BTC-USD"]

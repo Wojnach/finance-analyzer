@@ -13,8 +13,11 @@ Usage:
 """
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
+
+logger = logging.getLogger("portfolio.signal_db")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -83,6 +86,14 @@ class SignalDB:
             conn.execute("ALTER TABLE ticker_signals ADD COLUMN regime TEXT DEFAULT 'unknown'")
             conn.commit()
 
+        # Migration 2026-06-10 (audit batch 2): shadow_signals — JSON list of
+        # signal names whose logged vote is a SHADOW vote (force-HOLD in
+        # consensus). NULL = legacy untagged row; accuracy_stats falls back to
+        # config-derived eligibility for those. See outcome_tracker.
+        if "shadow_signals" not in existing_cols:
+            conn.execute("ALTER TABLE ticker_signals ADD COLUMN shadow_signals TEXT")
+            conn.commit()
+
     def close(self):
         if self._conn:
             self._conn.close()
@@ -113,10 +124,13 @@ class SignalDB:
         try:
             tickers = entry.get("tickers", {})
             for ticker, tdata in tickers.items():
+                # shadow_signals: preserve the tagged/untagged distinction —
+                # NULL for legacy rows without the key, JSON list otherwise.
+                shadow_signals = tdata.get("shadow_signals")
                 conn.execute(
                     """INSERT INTO ticker_signals
-                       (snapshot_id, ticker, price_usd, consensus, buy_count, sell_count, total_voters, signals, regime)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (snapshot_id, ticker, price_usd, consensus, buy_count, sell_count, total_voters, signals, regime, shadow_signals)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         snapshot_id,
                         ticker,
@@ -127,6 +141,7 @@ class SignalDB:
                         tdata.get("total_voters"),
                         json.dumps(tdata.get("signals", {})),
                         tdata.get("regime", "unknown"),
+                        json.dumps(shadow_signals) if shadow_signals is not None else None,
                     ),
                 )
 
@@ -208,7 +223,7 @@ class SignalDB:
             entry = snap_by_id.get(row["snapshot_id"])
             if entry is None:
                 continue
-            entry["tickers"][row["ticker"]] = {
+            tdata = {
                 "price_usd": row["price_usd"],
                 "consensus": row["consensus"],
                 "buy_count": row["buy_count"],
@@ -217,6 +232,19 @@ class SignalDB:
                 "signals": json.loads(row["signals"]) if row["signals"] else {},
                 "regime": row["regime"] if row["regime"] is not None else "unknown",
             }
+            # 2026-06-10: only set the key for tagged rows — absence is the
+            # legacy marker accuracy_stats._vote_is_shadow falls back on.
+            # row.keys() guard: sqlite3.Row raises IndexError on missing
+            # columns, and a DB created pre-migration may lack the column
+            # in the same process that reads it.
+            row_keys = row.keys()
+            raw_shadow = row["shadow_signals"] if "shadow_signals" in row_keys else None
+            if raw_shadow is not None:
+                try:
+                    tdata["shadow_signals"] = json.loads(raw_shadow)
+                except (ValueError, TypeError):
+                    logger.debug("Unparseable shadow_signals column: %r", raw_shadow)
+            entry["tickers"][row["ticker"]] = tdata
 
         for row in conn.execute(
             "SELECT * FROM outcomes ORDER BY snapshot_id"

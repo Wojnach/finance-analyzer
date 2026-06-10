@@ -217,7 +217,9 @@ def _build_crypto_report(config):
         mp = btc_options.get("max_pain")
         pcr = btc_options.get("nearest_pcr")
         days_exp = btc_options.get("days_to_expiry")
-        exp_date = btc_options.get("nearest_expiry", "?")
+        # 2026-06-10: days_to_expiry now describes the monthly/quarterly
+        # metrics chain (metrics_expiry); nearest_expiry is the raw daily.
+        exp_date = btc_options.get("metrics_expiry") or btc_options.get("nearest_expiry", "?")
         if mp:
             dist = ((btc_price - mp) / mp * 100) if mp > 0 else 0
             pcr_signal = ""

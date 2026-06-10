@@ -15,10 +15,15 @@ The ``context`` parameter is a dict with keys: ticker, config, macro.
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 
 import pandas as pd
 
+# 2026-06-10 (audit batch 2): import the real constant instead of duplicating
+# it at the bottom of this module with a false "imported from data module"
+# comment. Changing the TTL in crypto_macro_data now propagates here.
+from portfolio.crypto_macro_data import OPTIONS_TTL
 from portfolio.shared_state import _cached
 from portfolio.signal_utils import majority_vote
 
@@ -33,6 +38,12 @@ _PCR_LOW = 0.6                # put/call < 0.6 = contrarian SELL (too many calls
 _GOLD_ROTATION_THRESHOLD = 0.02  # 2% ratio change = meaningful rotation
 _NETFLOW_ACCUM_DAYS = 5       # 5+ consecutive negative netflow = strong signal
 _EXPIRY_WARNING_DAYS = 3      # warn within 3 days of expiry
+# 2026-06-10 (audit batch 2): the post-expiry-relief BUY only fires when the
+# expiring chain carries a meaningful share of total open interest. Genuine
+# quarterly expiries hold 20-40% of grand OI in their final days; the daily
+# Deribit expiries that made this sub-signal a permanent BUY vote (primary
+# driver of the June 1-6 crypto_macro accuracy collapse, 41%->22%) hold ~0-2%.
+_QUARTERLY_MIN_OI_SHARE = 0.10
 
 
 def _options_gravity(options, current_price):
@@ -158,17 +169,49 @@ def _exchange_netflow_signal(netflow_data):
     return "HOLD", indicators
 
 
+def _is_quarterly_expiry(expiry: str) -> bool:
+    """Classify a Deribit expiry string ('26JUN26') as a genuine quarterly.
+
+    2026-06-10 (audit batch 2): the old month-substring check ('JUN' in
+    '11JUN26') classified every June daily expiry as quarterly. Genuine
+    quarterly expiries are the last Friday of Mar/Jun/Sep/Dec, which always
+    falls on day 22-31 of the month. We use day >= 22 rather than exact
+    last-Friday math so an off-by-one in Deribit's calendar can't silently
+    kill the sub-signal; the OI-share gate in _expiry_proximity catches the
+    thin late-month dailies this heuristic lets through.
+    """
+    try:
+        d = _dt.datetime.strptime(expiry.strip().upper(), "%d%b%y").date()
+    except (ValueError, AttributeError):
+        return False
+    return d.month in (3, 6, 9, 12) and d.day >= 22
+
+
 def _expiry_proximity(options):
     """Sub-5: Options expiry proximity — volatility warning.
 
     Within 3 days of quarterly expiry: expect increased volatility.
     This is informational — votes HOLD but flags the risk.
-    Very close to expiry (0-1 days): slight BUY bias (post-expiry relief rally).
+
+    2026-06-10 (audit batch 2): the post-expiry relief BUY (0-1 days) now
+    fires ONLY for genuine quarterly expiries carrying meaningful open
+    interest. Deribit lists DAILY expiries, so the raw nearest expiry is
+    virtually always 0-1 days out — the old code returned BUY on both the
+    quarterly and non-quarterly branches, making this a permanent BUY vote
+    (signal_log: BTC 2491 BUY / 218 SELL since May 26) and the primary
+    structural driver of the June 1-6 accuracy collapse. Non-quarterly
+    expiries now vote HOLD and only flag the risk, as the module docstring
+    always described.
     """
     if not options:
         return "HOLD", {}
 
-    days = options.get("days_to_expiry")
+    # Prefer the raw nearest-expiry fields (added 2026-06-10 in
+    # crypto_macro_data); fall back to the legacy keys for cached dicts
+    # written by the pre-fix data module.
+    days = options.get("nearest_expiry_days")
+    if days is None:
+        days = options.get("days_to_expiry")
     expiry = options.get("nearest_expiry", "")
 
     indicators = {
@@ -179,17 +222,31 @@ def _expiry_proximity(options):
     if days is None:
         return "HOLD", indicators
 
-    # Check if it's a quarterly expiry (MAR, JUN, SEP, DEC)
-    quarterly_months = {"MAR", "JUN", "SEP", "DEC"}
-    is_quarterly = any(m in expiry.upper() for m in quarterly_months)
+    is_quarterly = options.get("nearest_is_quarterly")
+    if is_quarterly is None:
+        is_quarterly = _is_quarterly_expiry(expiry)
     indicators["is_quarterly"] = is_quarterly
 
-    if days <= 1 and is_quarterly:
-        # Day of/after quarterly expiry — post-expiry relief often bullish
-        return "BUY", indicators
-    elif days <= 1:
-        # Day of regular expiry — slight bullish bias
-        return "BUY", indicators
+    oi_share = options.get("nearest_expiry_oi_share")
+    indicators["nearest_expiry_oi_share"] = oi_share
+
+    if days <= _EXPIRY_WARNING_DAYS and is_quarterly:
+        # Informational volatility warning window around quarterly expiry.
+        indicators["expiry_volatility_warning"] = True
+
+    if days <= 1:
+        if (
+            is_quarterly
+            and oi_share is not None
+            and oi_share >= _QUARTERLY_MIN_OI_SHARE
+        ):
+            # Day of/after a genuine quarterly expiry with meaningful OI —
+            # post-expiry relief often bullish.
+            return "BUY", indicators
+        # Daily/weekly expiry (or quarterly without OI evidence): flag the
+        # risk, vote HOLD.
+        indicators["expiry_risk_flag"] = True
+        return "HOLD", indicators
 
     return "HOLD", indicators
 
@@ -275,7 +332,3 @@ def compute_crypto_macro_signal(df: pd.DataFrame, context: dict = None) -> dict:
         "sub_signals": sub,
         "indicators": indicators,
     }
-
-
-# Cache TTL imported from data module
-OPTIONS_TTL = 900

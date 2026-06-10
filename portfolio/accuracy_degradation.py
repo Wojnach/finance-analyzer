@@ -519,6 +519,7 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
 
     # 2) Per-ticker per-signal — share entries to avoid 41x re-scan
     try:
+        from portfolio.accuracy_stats import is_consensus_eligible
         old_per = baseline.get("per_ticker_recent") or {}
         new_per = _per_ticker_recent(
             "1d", days=int(BASELINE_TARGET_DAYS), entries=recent_entries,
@@ -526,6 +527,16 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
         for ticker, sigs in new_per.items():
             old_for_ticker = old_per.get(ticker, {}) or {}
             for sig_name, new_data in sigs.items():
+                # 2026-06-10 (audit batch 2): degradation alerts only make
+                # sense for pairs that actually vote in consensus. Shadow-only
+                # pairs (e.g. BTC::williams_vix_fix — shadow votes on a ticker
+                # with no per-ticker override) were dominating "global"
+                # degradation alerts while contributing nothing to trading.
+                # The shadow numbers stay available for research via
+                # accuracy_by_signal_ticker / signal_accuracy shadow_* fields;
+                # they are only excluded from ALERTING here.
+                if not is_consensus_eligible(sig_name, ticker):
+                    continue
                 old_data = old_for_ticker.get(sig_name)
                 alert = _maybe_alert(
                     key=f"{ticker}::{sig_name}",
@@ -596,19 +607,55 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
     return alerts
 
 
-def _binomial_diff_se_pp(p1: float, n1: int, p2: float, n2: int) -> float:
-    """Standard error of the difference of two independent binomial proportions, in pp.
+# 2026-06-10 (audit batch 2): effective-sample-size correction for the SE
+# significance gate. The binomial SE formula assumes independent Bernoulli
+# trials, but signal-log rows are 60s snapshots of PERSISTENT votes — signals
+# emit identical votes in day-long blocks (econ_calendar: 200+ identical votes
+# per day for 3 straight weeks; crypto_macro and williams_vix_fix show the
+# same structure in signal_log.db). The effective number of independent
+# trials in a 14d window is roughly #days x #tickers (~14-30), not the
+# 200-1100 graded rows the gate was using, so se_pp was understated by
+# roughly sqrt(10-30)x and the "roughly 1 in 1000" noise-floor claim above
+# did not hold. _maybe_alert only sees aggregate (accuracy, total) pairs —
+# the baseline side comes from a snapshot with no raw rows — so a per-key
+# median run length cannot be computed at this call site; we use a fixed,
+# conservative divisor instead: n_eff = max(1, n / K). K=20 is the midpoint
+# of the n/10..n/30 range implied by observed day-block persistence (and of
+# the [1, 50] clamp a run-length estimate would get). Effect: SE roughly
+# sqrt(20) ≈ 4.5x wider, so the 2-SE gate demands much larger drops at the
+# same nominal sample counts — this deliberately WIDENS confidence intervals
+# and reduces false-positive degradation alerts from autocorrelated bursts
+# (e.g. the crypto_evrp "99.1% on 233 samples" all-SELL streak). The
+# min-samples gates stay on RAW counts; only the SE uses n_eff.
+AUTOCORR_EFFECTIVE_N_DIVISOR = 20
 
-    SE = sqrt( p1*(1-p1)/n1 + p2*(1-p2)/n2 ) * 100
+
+def _effective_n(n: int, divisor: int = AUTOCORR_EFFECTIVE_N_DIVISOR) -> int:
+    """Raw graded-row count -> effective independent-trial count."""
+    if n < 1:
+        return 0
+    return max(1, n // max(1, divisor))
+
+
+def _binomial_diff_se_pp(p1: float, n1: int, p2: float, n2: int) -> float:
+    """Standard error of the difference of two binomial proportions, in pp.
+
+    SE = sqrt( p1*(1-p1)/n_eff1 + p2*(1-p2)/n_eff2 ) * 100
+
+    2026-06-10: n1/n2 are converted to effective sample sizes first (see
+    AUTOCORR_EFFECTIVE_N_DIVISOR above) because raw snapshot rows are heavily
+    autocorrelated, not independent trials.
 
     Returns 0.0 when either sample is empty (the caller already gates on
     min_samples — this is a safety belt for the formula itself).
     """
     import math
 
-    if n1 < 1 or n2 < 1:
+    n1_eff = _effective_n(n1)
+    n2_eff = _effective_n(n2)
+    if n1_eff < 1 or n2_eff < 1:
         return 0.0
-    var = p1 * (1.0 - p1) / n1 + p2 * (1.0 - p2) / n2
+    var = p1 * (1.0 - p1) / n1_eff + p2 * (1.0 - p2) / n2_eff
     if var <= 0.0:
         return 0.0
     return math.sqrt(var) * 100.0

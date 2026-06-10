@@ -136,6 +136,21 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
 
         regime = extra.get("_regime", "unknown")
 
+        # 2026-06-10 (audit batch 2): tag-at-write for shadow votes. The
+        # `signals` dict above stores raw_votes, which include SHADOW votes
+        # for globally-disabled shadow-tracked signals (force-HOLD in
+        # consensus, graded for research). signal_engine marks those with
+        # extra["shadow_<name>"] = True per ticker; persisting the names lets
+        # accuracy_stats separate consensus-eligible from shadow-only rows
+        # without re-deriving historical config (feedback_log_everything:
+        # tag rows at write-time, filter at read-time). Always present on
+        # new rows — an empty list means "tagged row, no shadow votes",
+        # distinct from untagged legacy rows.
+        shadow_signals = sorted(
+            k[len("shadow_"):] for k, v in extra.items()
+            if k.startswith("shadow_") and v is True
+        )
+
         tickers[ticker] = {
             "price_usd": price,
             "consensus": consensus,
@@ -144,6 +159,7 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
             "total_voters": total_voters,
             "signals": signals,
             "regime": regime,
+            "shadow_signals": shadow_signals,
         }
 
     entry = {

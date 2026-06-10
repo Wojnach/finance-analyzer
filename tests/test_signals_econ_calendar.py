@@ -359,3 +359,95 @@ class TestCompositeWithRelief:
         )
         assert result["action"] == "BUY"
         assert result["indicators"].get("regime_gate_suppressed") is not True
+
+
+class TestEventFreeWindowRegimeGate:
+    """2026-06-10 (audit batch 2): the event_free_window BUY ("next event
+    >72h away") requires a CONFIRMED non-bearish regime. A quiet calendar in
+    an unknown/unclassified or high-vol regime is not bullish evidence — it
+    produced 19 straight days of perma-BUY (May 14 - Jun 2)."""
+
+    def _window_mocks(self, mock_next, mock_events_within, mock_recent):
+        # No recent high-impact events (no genuine relief), next event 200h out
+        # → the BUY can only come from the event_free_window path.
+        mock_next.return_value = {
+            "date": date(2026, 6, 20),
+            "type": "CPI",
+            "impact": "high",
+            "hours_until": 200.0,
+        }
+        mock_events_within.return_value = []
+        mock_recent.return_value = []
+
+    def _run(self, regime, mock_next, mock_events_within, mock_recent):
+        self._window_mocks(mock_next, mock_events_within, mock_recent)
+        df = _make_df()
+        ctx = {"ticker": "BTC-USD", "config": {}}
+        if regime is not None:
+            ctx["regime"] = regime
+        return compute_econ_calendar_signal(df, context=ctx)
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_window_buy_suppressed_when_regime_missing(self, mock_next, mock_events_within, mock_recent):
+        result = self._run(None, mock_next, mock_events_within, mock_recent)
+        assert result["sub_signals"]["post_event_relief"] == "BUY"
+        assert result["indicators"].get("relief_event_free_window") is True
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("regime_gate_reason") == "event_free_window_unconfirmed_regime"
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_window_buy_suppressed_in_unknown_regime(self, mock_next, mock_events_within, mock_recent):
+        result = self._run("unknown", mock_next, mock_events_within, mock_recent)
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("regime_gate_suppressed") is True
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_window_buy_suppressed_in_high_vol(self, mock_next, mock_events_within, mock_recent):
+        result = self._run("high-vol", mock_next, mock_events_within, mock_recent)
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("regime_gate_suppressed") is True
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_window_buy_allowed_in_trending_up(self, mock_next, mock_events_within, mock_recent):
+        result = self._run("trending-up", mock_next, mock_events_within, mock_recent)
+        assert result["action"] == "BUY"
+        assert result["indicators"].get("regime_gate_suppressed") is not True
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_window_buy_allowed_in_ranging(self, mock_next, mock_events_within, mock_recent):
+        result = self._run("ranging", mock_next, mock_events_within, mock_recent)
+        assert result["action"] == "BUY"
+
+    @mock.patch("portfolio.signals.econ_calendar.recent_high_impact_events")
+    @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
+    @mock.patch("portfolio.signals.econ_calendar.next_event")
+    def test_genuine_relief_buy_survives_unknown_regime(self, mock_next, mock_events_within, mock_recent):
+        """Post-event relief (the documented anomaly) is NOT gated by the
+        unconfirmed-regime rule — only trending-down suppresses it."""
+        mock_next.return_value = {
+            "date": date(2026, 6, 20),
+            "type": "CPI",
+            "impact": "high",
+            "hours_until": 200.0,
+        }
+        mock_events_within.return_value = []
+        mock_recent.return_value = [
+            {"type": "CPI", "impact": "high", "hours_since": 8.0,
+             "date": date(2026, 6, 9)}
+        ]
+        df = _make_df()
+        result = compute_econ_calendar_signal(
+            df, context={"ticker": "BTC-USD", "config": {}}
+        )
+        assert result["indicators"].get("relief_post_event_relief") is True
+        assert result["action"] == "BUY"

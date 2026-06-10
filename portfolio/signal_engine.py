@@ -1548,10 +1548,24 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "volume_flow": 0.7,
     },
     "1d": {  # Fallback weights — updated 2026-06-06 from 1d_recent accuracy
-        "crypto_evrp": 1.5,     # 99.1% at 1d_recent (233 sam) — massive jump from 40.2%
+        # 2026-06-10 (audit batch 2): crypto_evrp neutralized 1.5 → 1.0. The
+        # 2026-06-06 "99.1% at 1d_recent (233 sam)" was one uninterrupted
+        # all-SELL streak during the Jun 1-6 crash (BTC 0 BUY/266 SELL, ETH
+        # 0/244 since May 26) — a single directional bet repeated 233 times,
+        # not 233 independent wins. Same burst illusion that re-disabled
+        # crypto_evrp on 2026-05-26 ("the 80.5% was 77 samples", tickers.py).
+        # This table only applies when accuracy_cache.json is unavailable —
+        # i.e. exactly the cache-loss-after-crash window where a 1.5x boost
+        # on a contrarian-bear signal would fire into the recovery rally.
+        "crypto_evrp": 1.0,
         "news_event": 1.6,      # 78.4% at 1d_recent (208 sam) — still top performer
         "amihud_illiquidity_regime": 1.5, # 69.6% at 1d_recent (618 sam) — NEW
-        "sentiment": 1.3,       # 62.8% at 1d_recent (403 sam) — recovered from 45.9%
+        # 2026-06-10 (audit batch 2): sentiment neutralized 1.3 → 1.0. The
+        # signal is force-HOLD in DISABLED_SIGNALS; the "recovered to 62.8%"
+        # figure is shadow-vote accuracy from the same crash window. A >1.0
+        # fallback weight pre-boosts it if it is ever re-enabled without
+        # re-validation, and anchors future tuning sessions on burst stats.
+        "sentiment": 1.0,
         "ema": 1.1,             # 57.5% at 1d_recent (810 sam) — recovered from 46.6%
         "statistical_jump_regime": 1.1, # 56.4% at 1d_recent (495 sam) — recovered from 46.9%
         "momentum_factors": 1.1, # 55.6% at 1d_recent (689 sam) — recovered from 36.2%

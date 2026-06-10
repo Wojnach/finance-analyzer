@@ -73,6 +73,11 @@ CACHE_FILE = DATA_DIR / "onchain_cache.json"
 API_BASE = "https://bitcoin-data.com"
 ONCHAIN_TTL = 43200  # 12 hours
 
+# 2026-06-10 (audit batch 2): once-per-day throttle for the missing-netflow
+# WARNING in _fetch_all_onchain. Module-level is fine — resets on process
+# restart, which at worst re-warns once per restart.
+_last_netflow_missing_warn_ts = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -234,6 +239,26 @@ def _fetch_all_onchain(token):
                 any_success = True
         except Exception:
             logger.warning("BGeometrics %s fetch failed", name, exc_info=True)
+
+    # 2026-06-10 (audit batch 2): the exchange-netflow endpoint died silently
+    # around 2026-04-10 — _fetch_exchange_netflow returned None for two months
+    # while the rest of the metrics kept succeeding, so the merged cache just
+    # omitted the key and both crypto_macro's netflow sub-vote and the
+    # On-Chain BTC netflow interp degraded with zero surfacing. WARN (not
+    # debug) when the key is missing after a fetch round, at most once/day.
+    # The 7-day critical_errors escalation lives in crypto_macro_data
+    # (_maybe_alert_netflow_stale), keyed off the history file.
+    if any_success and result.get("netflow") is None:
+        global _last_netflow_missing_warn_ts
+        now = time.time()
+        if now - _last_netflow_missing_warn_ts > 86400:
+            _last_netflow_missing_warn_ts = now
+            logger.warning(
+                "BGeometrics netflow missing from fetch round — "
+                "/v1/exchange-netflow returned no data (feed dead since "
+                "~2026-04-10?). crypto_macro exchange_netflow sub-vote and "
+                "onchain netflow_signal will be silent HOLD."
+            )
 
     if not any_success:
         return None

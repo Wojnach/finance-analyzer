@@ -8,19 +8,55 @@ on p=0.5, the 95% CI on the difference is ±10pp — so spurious 15pp drops
 are 1-in-10 events.
 
 Fix: require ``drop_pp >= max(DROP_THRESHOLD_PP, 2*SE)`` where SE is the
-standard error of the difference of two independent binomial proportions.
-At N=200 each that's ≈7pp, so the original 15pp threshold dominates. At
-N=50 each it's ≈10pp, doubling to 20pp — and the 15pp threshold no longer
-fires on noise.
+standard error of the difference of two binomial proportions.
+
+2026-06-10 (audit batch 2): the SE now uses EFFECTIVE sample sizes
+(n_eff = n / AUTOCORR_EFFECTIVE_N_DIVISOR, K=20) because 60s snapshot rows
+of persistent votes are heavily autocorrelated — signals emit identical
+votes in day-long blocks, so 200 graded rows are nowhere near 200
+independent trials. This widens the CIs roughly sqrt(20) ≈ 4.5x: drops
+that used to fire at N≈200 (including the 2026-04-28 sentiment cliff,
+which WAS regression-to-mean noise) are now suppressed, and genuine
+collapses need either bigger drops or bigger windows. Expected values in
+this file are computed with n_eff = n // 20.
 
 Also raises ``MIN_SAMPLES_HISTORICAL`` / ``MIN_SAMPLES_CURRENT`` from
-100 → 200 so the SE gate has a healthy floor on input quality.
+100 → 200 so the SE gate has a healthy floor on input quality (the floors
+keep gating on RAW counts, not n_eff).
 """
 from __future__ import annotations
 
 import math
 
 from portfolio import accuracy_degradation as deg
+
+
+class TestEffectiveN:
+    """2026-06-10: raw graded-row count -> effective independent trials."""
+
+    def test_divisor_constant(self):
+        assert deg.AUTOCORR_EFFECTIVE_N_DIVISOR == 20
+
+    def test_basic_division(self):
+        assert deg._effective_n(400) == 20
+        assert deg._effective_n(200) == 10
+        assert deg._effective_n(1000) == 50
+
+    def test_floor_at_one(self):
+        # Any nonzero raw count yields at least one effective trial.
+        assert deg._effective_n(1) == 1
+        assert deg._effective_n(19) == 1
+        assert deg._effective_n(20) == 1
+        assert deg._effective_n(39) == 1
+
+    def test_zero_and_negative(self):
+        assert deg._effective_n(0) == 0
+        assert deg._effective_n(-5) == 0
+
+    def test_divisor_override(self):
+        assert deg._effective_n(100, divisor=10) == 10
+        # Degenerate divisor clamps to 1 (no inflation of n).
+        assert deg._effective_n(100, divisor=0) == 100
 
 
 class TestBinomialDiffSE:
@@ -31,27 +67,29 @@ class TestBinomialDiffSE:
         assert deg._binomial_diff_se_pp(0.5, 100, 0.5, 0) == 0.0
 
     def test_known_se_value(self):
-        # p1=0.5, n1=100, p2=0.5, n2=100
-        # var = 0.25/100 + 0.25/100 = 0.005
-        # SE = sqrt(0.005) ≈ 0.0707 → 7.07 pp
+        # p1=0.5, n1=100 → n_eff=5; p2=0.5, n2=100 → n_eff=5
+        # var = 0.25/5 + 0.25/5 = 0.1
+        # SE = sqrt(0.1) ≈ 0.3162 → 31.62 pp
         se_pp = deg._binomial_diff_se_pp(0.5, 100, 0.5, 100)
-        assert math.isclose(se_pp, 7.07, abs_tol=0.05)
+        assert math.isclose(se_pp, 31.62, abs_tol=0.05)
 
     def test_se_shrinks_with_larger_n(self):
-        small = deg._binomial_diff_se_pp(0.5, 50, 0.5, 50)
-        large = deg._binomial_diff_se_pp(0.5, 500, 0.5, 500)
+        small = deg._binomial_diff_se_pp(0.5, 50, 0.5, 50)    # n_eff = 2
+        large = deg._binomial_diff_se_pp(0.5, 500, 0.5, 500)  # n_eff = 25
         assert small > large
-        # SE scales with 1/sqrt(N), so 10x N → ~3.16x smaller SE
-        assert math.isclose(small / large, math.sqrt(10), rel_tol=0.05)
+        # SE scales with 1/sqrt(n_eff): sqrt(25/2) ≈ 3.54x
+        assert math.isclose(small / large, math.sqrt(25 / 2), rel_tol=0.05)
 
 
 class TestSignificanceGate:
     """`_maybe_alert` rejects drops that aren't 2*SE above the threshold."""
 
-    def test_small_sample_borderline_drop_suppressed(self):
-        """At N=200 vs N=200, p_old=0.5, p_new=0.35 → 15pp drop, SE ≈ 4.9pp.
-        2*SE = 9.8pp; 15pp > 9.8pp so it should fire on the SE gate.
-        But we still also need drop >= 15pp threshold — which it does.
+    def test_moderate_drop_at_min_samples_suppressed(self):
+        """2026-06-10: N=200 vs N=200 is only ~10 effective trials per side.
+        p_old=0.5 → p_new=0.35 (15pp) gives SE ≈ 21.9pp, 2*SE ≈ 43.7pp —
+        a 15pp drop at this window size is indistinguishable from one
+        autocorrelated day-block flipping, so it must NOT fire (it did
+        before the effective-n correction).
         """
         alert = deg._maybe_alert(
             key="signal_a", scope="signal",
@@ -60,10 +98,10 @@ class TestSignificanceGate:
             drop_threshold_pp=15.0, absolute_floor_pct=50.0,
             min_samples_historical=200, min_samples_current=200,
         )
-        assert alert is not None, "real 15pp drop with healthy N must fire"
+        assert alert is None, "15pp drop on ~10 effective trials is noise"
 
     def test_tiny_samples_drop_at_threshold_suppressed_by_se(self):
-        """N=50 vs N=50 — even a 15pp drop is only 1.5*SE → suppress."""
+        """N=50 vs N=50 — 15pp drop is far inside the widened noise band."""
         alert = deg._maybe_alert(
             key="noisy", scope="signal",
             old={"accuracy": 0.55, "total": 50},
@@ -71,13 +109,27 @@ class TestSignificanceGate:
             drop_threshold_pp=15.0, absolute_floor_pct=50.0,
             min_samples_historical=50, min_samples_current=50,
         )
-        # SE = sqrt(0.55*0.45/50 + 0.40*0.60/50)*100 ≈ 9.9 pp
-        # 2*SE ≈ 19.8 pp; drop=15pp < 19.8pp → suppressed
         assert alert is None, "drop within 2*SE noise must be suppressed"
 
-    def test_large_real_drop_passes_both_gates(self):
-        """Like the sentiment case: 75% N=223 → 43% N=187, drop=32pp.
-        SE ≈ 4.6pp; 2*SE ≈ 9.2pp. drop>>9.2 and drop>>15. Must fire.
+    def test_large_real_drop_with_large_window_fires(self):
+        """A genuine multi-week collapse: 62% → 30% (32pp) on N=1400 per
+        side. n_eff=70 each → SE ≈ 8.0pp, 2*SE ≈ 16pp < 32pp. Must fire.
+        """
+        alert = deg._maybe_alert(
+            key="collapsed", scope="signal",
+            old={"accuracy": 0.62, "total": 1400},
+            new={"accuracy": 0.30, "total": 1400},
+            drop_threshold_pp=15.0, absolute_floor_pct=50.0,
+            min_samples_historical=200, min_samples_current=200,
+        )
+        assert alert is not None
+        assert alert["drop_pp"] > 30.0
+
+    def test_sentiment_2026_04_28_cliff_now_suppressed(self):
+        """The original sentiment 75.3% (N=223) → 43.3% (N=187) incident was
+        regression-to-mean from an autocorrelated one-week spike. Under
+        n_eff (11 vs 9 effective trials, SE ≈ 21pp, 2*SE ≈ 42pp) even this
+        32pp drop is within the noise band — correctly suppressed.
         """
         alert = deg._maybe_alert(
             key="sentiment", scope="signal",
@@ -86,11 +138,10 @@ class TestSignificanceGate:
             drop_threshold_pp=15.0, absolute_floor_pct=50.0,
             min_samples_historical=200, min_samples_current=187,
         )
-        assert alert is not None
-        assert alert["drop_pp"] > 30.0
+        assert alert is None
 
     def test_drop_above_threshold_but_below_2se_suppressed(self):
-        """20pp drop on N=80 each — SE ≈ 7.9pp, 2*SE ≈ 15.8pp."""
+        """20pp drop on N=80 each — n_eff=4, SE ≈ 34.6pp, 2*SE ≈ 69pp."""
         alert = deg._maybe_alert(
             key="borderline", scope="signal",
             old={"accuracy": 0.60, "total": 80},
@@ -98,13 +149,10 @@ class TestSignificanceGate:
             drop_threshold_pp=15.0, absolute_floor_pct=50.0,
             min_samples_historical=80, min_samples_current=80,
         )
-        # drop=20pp >= 15pp threshold gate → would have passed old check
-        # SE = sqrt(0.6*0.4/80 + 0.4*0.6/80)*100 ≈ 7.75 pp
-        # 2*SE ≈ 15.5 pp; drop=20pp > 15.5pp → fires
-        assert alert is not None, "20pp drop on N=80 IS significant (>2*SE)"
+        assert alert is None, "20pp on 4 effective trials must be suppressed"
 
     def test_low_n_drop_below_2se_suppressed(self):
-        """16pp drop on N=40 each — SE ≈ 11pp, 2*SE ≈ 22pp; drop suppressed."""
+        """16pp drop on N=40 each — drop suppressed by the SE gate."""
         alert = deg._maybe_alert(
             key="too_noisy", scope="signal",
             old={"accuracy": 0.55, "total": 40},
@@ -116,7 +164,7 @@ class TestSignificanceGate:
 
 
 class TestRaisedMinSamples:
-    """The min-samples floor is bumped to 200."""
+    """The min-samples floor is bumped to 200 (raw counts, not n_eff)."""
 
     def test_min_samples_constant_is_200(self):
         assert deg.MIN_SAMPLES_HISTORICAL == 200
@@ -133,11 +181,15 @@ class TestRaisedMinSamples:
         )
         assert alert is None
 
-    def test_at_floor_passes(self):
+    def test_at_floor_with_big_window_passes(self):
+        """30pp drop fires once the window is big enough for the n_eff SE
+        (2026-06-10: N=200 alone no longer clears 2*SE ≈ 42pp; N=1000 does:
+        n_eff=50 each, SE ≈ 9.5pp, 2*SE ≈ 19pp < 30pp).
+        """
         alert = deg._maybe_alert(
             key="at_floor", scope="signal",
-            old={"accuracy": 0.70, "total": 200},
-            new={"accuracy": 0.40, "total": 200},
+            old={"accuracy": 0.70, "total": 1000},
+            new={"accuracy": 0.40, "total": 1000},
             drop_threshold_pp=15.0, absolute_floor_pct=50.0,
             min_samples_historical=200, min_samples_current=200,
         )

@@ -1,6 +1,13 @@
 """Unit tests for portfolio.accuracy_degradation.
 
 All file paths are monkeypatched to tmp_path so the suite stays xdist-safe.
+
+2026-06-10 (audit batch 2): sample counts were scaled 10x (200->2000,
+280->2800). The SE significance gate now divides raw counts by
+AUTOCORR_EFFECTIVE_N_DIVISOR=20 (autocorrelated 60s snapshots are not
+independent trials), so the old N=200-280 fixtures fell inside the widened
+2*SE noise band and stopped alerting. The scaled counts represent the same
+scenarios with windows large enough to be significant under n_eff.
 """
 
 from __future__ import annotations
@@ -130,7 +137,7 @@ class TestSaveFullAccuracySnapshot:
         def _stub_signal_accuracy(horizon="1d", since=None, entries=None):
             if entries is None:
                 return lifetime_sigs
-            return {"rsi": {"accuracy": 0.49, "total": 280,
+            return {"rsi": {"accuracy": 0.49, "total": 2800,
                             "correct": 0, "pct": 49.0,
                             "correct_buy": 0, "total_buy": 0,
                             "buy_accuracy": 0.0,
@@ -223,7 +230,7 @@ class TestComparisonSource:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
 
@@ -236,7 +243,7 @@ class TestComparisonSource:
                                     "correct": 30000}},
         )
         _stub_current(monkeypatch,
-                      signals={"rsi": {"accuracy": 0.42, "total": 280}})
+                      signals={"rsi": {"accuracy": 0.42, "total": 2800}})
 
         violations = deg.check_degradation()
         assert len(violations) == 1
@@ -252,7 +259,7 @@ class TestThresholdGates:
     def _basic_baseline(self, monkeypatch, tmp_path):
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
 
@@ -262,7 +269,7 @@ class TestThresholdGates:
         self._basic_baseline(monkeypatch, tmp_path)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.55, "total": 280}},  # 7pp drop
+            signals={"rsi": {"accuracy": 0.55, "total": 2800}},  # 7pp drop
         )
         violations = deg.check_degradation()
         assert violations == []
@@ -273,7 +280,7 @@ class TestThresholdGates:
         self._basic_baseline(monkeypatch, tmp_path)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},  # 20pp drop, <50%
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},  # 20pp drop, <50%
         )
         violations = deg.check_degradation()
         assert len(violations) == 1
@@ -285,12 +292,12 @@ class TestThresholdGates:
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.75, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.75, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.55, "total": 280}},
+            signals={"rsi": {"accuracy": 0.55, "total": 2800}},
         )
         violations = deg.check_degradation()
         assert violations == []
@@ -306,7 +313,7 @@ class TestSeverity:
         _isolate_state(monkeypatch, tmp_path)
         _stub_econ_safe(monkeypatch)
         baseline_signals = {
-            f"sig_{i}": {"accuracy": 0.62, "total": 200} for i in range(3)
+            f"sig_{i}": {"accuracy": 0.62, "total": 2000} for i in range(3)
         }
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
@@ -315,7 +322,7 @@ class TestSeverity:
         _write_baseline(monkeypatch, tmp_path, baseline)
 
         current_signals = {
-            f"sig_{i}": {"accuracy": 0.42, "total": 280} for i in range(3)
+            f"sig_{i}": {"accuracy": 0.42, "total": 2800} for i in range(3)
         }
         _stub_current(monkeypatch, signals=current_signals)
 
@@ -372,12 +379,12 @@ class TestAntiNoise:
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=4),  # too young
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
         violations = deg.check_degradation()
         assert violations == []
@@ -399,12 +406,12 @@ class TestAntiNoise:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
 
         violations = deg.check_degradation()
@@ -426,12 +433,12 @@ class TestAntiNoise:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
         violations = deg.check_degradation()
         assert violations == []
@@ -479,12 +486,12 @@ class TestThrottleReplay:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
 
         # First call: full check, populates cache
@@ -505,7 +512,7 @@ class TestThrottleReplay:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
 
@@ -515,7 +522,7 @@ class TestThrottleReplay:
         # source (called with entries=recent_entries from the diff).
         def stub_signal(horizon="1d", since=None, entries=None):
             calls["n"] += 1
-            return {"rsi": {"accuracy": 0.42, "total": 280,
+            return {"rsi": {"accuracy": 0.42, "total": 2800,
                             "correct": 0, "pct": 42.0,
                             "correct_buy": 0, "total_buy": 0,
                             "buy_accuracy": 0.0,
@@ -542,12 +549,12 @@ class TestScopeKeys:
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            per_ticker_recent={"BTC-USD": {"rsi": {"accuracy": 0.62, "total": 200}}},
+            per_ticker_recent={"BTC-USD": {"rsi": {"accuracy": 0.62, "total": 2000}}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            per_ticker={"BTC-USD": {"rsi": {"accuracy": 0.42, "total": 280}}},
+            per_ticker={"BTC-USD": {"rsi": {"accuracy": 0.42, "total": 2800}}},
         )
         violations = deg.check_degradation()
         assert len(violations) == 1
@@ -558,12 +565,12 @@ class TestScopeKeys:
         _stub_econ_safe(monkeypatch)
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            forecast_recent={"chronos_24h": {"accuracy": 0.62, "total": 200}},
+            forecast_recent={"chronos_24h": {"accuracy": 0.62, "total": 2000}},
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
         _stub_current(
             monkeypatch,
-            forecast={"chronos_24h": {"accuracy": 0.42, "total": 280, "correct": 117}},
+            forecast={"chronos_24h": {"accuracy": 0.42, "total": 2800, "correct": 117}},
         )
         violations = deg.check_degradation()
         assert len(violations) == 1
@@ -587,7 +594,7 @@ class TestPostReviewFixes:
         )
         old_snap = _make_snapshot(
             ts=yday,
-            signals_recent={"rsi": {"accuracy": 0.55, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.55, "total": 2000}},
             consensus_recent={"accuracy": 0.55, "total": 500},
         )
         _write_baseline(monkeypatch, tmp_path, old_snap)
@@ -699,8 +706,8 @@ class TestDailySummary:
                 "rsi": {"accuracy": 0.44, "total": 1240},
                 "macd": {"accuracy": 0.41, "total": 800},
                 "obv": {"accuracy": 0.61, "total": 980},
-                "ministral": {"accuracy": 0.53, "total": 200},
-                "qwen3": {"accuracy": 0.47, "total": 200},
+                "ministral": {"accuracy": 0.53, "total": 2000},
+                "qwen3": {"accuracy": 0.47, "total": 2000},
             },
         }
         baseline = {
@@ -763,7 +770,7 @@ class TestBaselineWindowFilter:
             "ts": (datetime.now(UTC)
                    - timedelta(days=14, hours=1)).isoformat(),
             "signals": {},
-            "signals_recent": {"rsi": {"accuracy": 0.62, "total": 200}},
+            "signals_recent": {"rsi": {"accuracy": 0.62, "total": 2000}},
         }
         from portfolio.file_utils import atomic_append_jsonl
         snap_path = tmp_path / "snapshots.jsonl"
@@ -772,7 +779,7 @@ class TestBaselineWindowFilter:
 
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
         violations = deg.check_degradation()
         # No matching baseline → no alert despite the synthetic 20pp drop.
@@ -786,14 +793,14 @@ class TestBaselineWindowFilter:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
             window_days=7,  # wrong window
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
 
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
         violations = deg.check_degradation()
         assert violations == []
@@ -806,14 +813,14 @@ class TestBaselineWindowFilter:
 
         baseline = _make_snapshot(
             ts=datetime.now(UTC) - timedelta(days=14, hours=1),
-            signals_recent={"rsi": {"accuracy": 0.62, "total": 200}},
+            signals_recent={"rsi": {"accuracy": 0.62, "total": 2000}},
             # window_days defaults to BASELINE_TARGET_DAYS via _make_snapshot
         )
         _write_baseline(monkeypatch, tmp_path, baseline)
 
         _stub_current(
             monkeypatch,
-            signals={"rsi": {"accuracy": 0.42, "total": 280}},
+            signals={"rsi": {"accuracy": 0.42, "total": 2800}},
         )
         violations = deg.check_degradation()
         assert len(violations) == 1
