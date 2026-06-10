@@ -101,8 +101,19 @@ def _auto_resolve_stale_categories(
             if existing is None or parsed > existing:
                 last_critical_by_cat[cat] = parsed
         if e.get("resolution") is not None or e.get("level") == "info":
-            fix_cat = category_by_ts.get(e.get("resolves_ts") or "", cat)
-            if not fix_cat:
+            rts = e.get("resolves_ts")
+            if rts:
+                fix_cat = category_by_ts.get(rts)
+            else:
+                # Legacy fix rows (pre-CLAUDE.md format) were written with
+                # the original failing category — credit that directly.
+                fix_cat = cat
+            # 2026-06-11 (B1 retro review): if resolves_ts points outside the
+            # scanned window, or at another resolution row, we cannot
+            # attribute the fix to a failing category — skip rather than
+            # credit the 'resolution' bucket (which would silently corrupt
+            # stale-category detection).
+            if not fix_cat or fix_cat == "resolution":
                 continue
             existing_fix = latest_fix_by_cat.get(fix_cat)
             if existing_fix is None or parsed > existing_fix:

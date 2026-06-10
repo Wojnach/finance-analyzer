@@ -188,4 +188,74 @@ on the batch diff → fix P1/P2 findings → commit → merge.
 
 ## Premortem
 
-(to be filled by fresh-context premortem agent, then edited — /fgl step 3)
+Fresh-context agent, 2026-06-11. 14 narratives; all accepted with hooks except where
+noted. Each hook is BINDING on the owning batch.
+
+1. **Naked-stop window (B4).** Cancel-old-stop succeeds, place-new fails (session death
+   mid-replace) → 5x position unprotected through a wick. HOOK (B4): place-failure after
+   successful cancel → `stop_replace_naked` critical entry + Telegram + immediate
+   re-place-or-exit path.
+2. **Single-thread executor serializes every Avanza consumer (B4).** One hung Playwright
+   call (BankID wait) blocks the only worker; EOD sweep queues behind it. Re-entrant
+   `submit()` from the executor thread = deadlock. HOOK (B4): log queue-wait + per-call
+   duration; critical at wait >30s; hard error if submitted from executor thread; per-call
+   timeout.
+3. **get_open_orders contract change breaks unswept callers (B4).** metals_loop:5497,
+   dashboard app.py:2142 iterate the result; grid_fisher `_safe(default=None)` may
+   convert a sentinel back to "no orders". HOOK (B4): grep-enumerate ALL call sites,
+   handle each; test asserting every call site handles the failure value.
+4. **Oil bar-ts restamp kills cache (B8).** `get_cached_or_refresh` computes freshness
+   from the same `ts` field; bar lag 10-15 min > 5-min TTL → permanent cache miss →
+   yfinance hammering → neutral fallback, oil leg silently dead. PLAN CHANGED: split into
+   `bar_ts` (data age) + `fetched_ts` (cache freshness); test cache-hit with lagged bar.
+5. **Sidecar lock held across backfill rewrite stalls loop (B6×B9).** B6 holds the lock
+   across read-process-rewrite while B9 makes atomic_write_jsonl take the same lock →
+   appends block → heartbeat stale → watchdog restart mid-rewrite. HOOK (B6/B9): chunked
+   bounded rewrite; file_utils logs lock-hold >5s; verify no lock-order inversion with
+   the msvcrt file lock.
+6. **Unfreeze latency bomb (B3/B5).** Fail-closed flips ship while Claude paths are
+   frozen — zero production validation; at unfreeze a missing sentinel dir or transient
+   config read error keeps everything dead while autonomous fallback looks green.
+   HOOK: end-of-campaign ops adds post-unfreeze smoke (one `claude -p` per path) +
+   digest line "layer2 invocations last 24h: N", alert at 0.
+7. **Startup reap kills wrong PID (B5).** Windows PID reuse after reboot → persisted pid
+   now belongs to metals_loop/dashboard; reap terminates production process. HOOK (B5):
+   verify process cmdline contains `claude` (psutil) before terminate; else only mark
+   completion-unobserved.
+8. **msvcrt retry untested on POSIX dev (B9).** Note: tests run via Windows venv
+   (.venv/Scripts/python.exe) so os.name=='nt' — partially mitigated. HOOK (B9): add an
+   explicit Windows contention test (two processes, one holding the lock) in
+   tests/test_file_utils*.
+9. **B12 test relocation runs live-path test in suite.** data/test_metals_swing_trader.py
+   may write live data/ files (metals_swing_state.json already dirty). HOOK (B12): audit
+   for data/ writes + network before move; patch to tmp_path; do NOT move as-is.
+10. **Double measurement change masks real regression (B2+B6).** blend_accuracy fix +
+    consensus/shadow split shift all accuracy numbers in one campaign; gate flips look
+    like "expected metric steps". HOOK (B6): snapshot accuracy_cache.json pre/post merge;
+    diff script listing 47%/50% gate-status flips; alert if >3 flip or any metals signal
+    flips.
+11. **Metals MIN_VOTERS 3→2 churns real-money ladders (B6).** Weaker consensus passes;
+    grid re-ladders on flips; cost invisible during #10's metric churn. HOOK (B6): log
+    voter_count on metals consensus rows; documented revert trigger: 2-voter hit-rate
+    <50% over 100 samples.
+12. **Poller skip-after-3 drops a halt command silently (B9).** Previously failed /mode
+    commands re-delivered forever; new design acks+drops after 3. HOOK (B9): on drop,
+    send explicit Telegram reply "command dropped after 3 failed attempts: <cmd>".
+13. **Prophecy level flip floods criticals (B3).** 8/13 unscoreable instruments + level
+    "critical" = daily spam; burns fix-agent backoff to disabled-on-noise. HOOK (B3):
+    internal ordering — coverage reconcile lands BEFORE level flip; rate-limit prophecy
+    criticals 1/day/category in prophecy/alerts.py.
+14. **todayClosingTime fetch fails on the worst day (B4).** Auth-degraded day = fetch
+    fails = EOD time undefined = missed flat. HOOK (B4): fallback to hardcoded 21:55
+    minus margin + `eod_close_time_fallback` structured log.
+
+### Retro adversarial review of B1+B2 (cavecrew-reviewer, 2026-06-11)
+
+- loop_contract.py ts-"" comparison: FALSE POSITIVE — candidates list pre-filters
+  `not ts` at the lookback gate, "" unreachable at line 1586. No change.
+- check_critical_errors fix_cat fallback mis-credits 'resolution' bucket when
+  resolves_ts unresolvable: FIXED (skip instead of mis-credit).
+- crypto_macro_data metrics_date None on all-expired fallback: INTENTIONAL — comment
+  added (None = honest unknown; negative DTE would trip gravity gate).
+- pickups attempts coercion + outcome_tracker `v is True` strictness: P3, equivalent
+  semantics / intentional strictness — documented here, no change.

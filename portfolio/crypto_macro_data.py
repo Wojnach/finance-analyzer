@@ -154,6 +154,9 @@ def _fetch_deribit_options(currency="BTC"):
         if nearest_date and nearest_date < now:
             nearest_date = None
 
+    # Intentionally None when metrics_expiry came from the all-expired
+    # fallback above: days_to_expiry=None is honest "unknown" for stale API
+    # data; a negative DTE would wrongly trip the gravity gate downstream.
     metrics_date = future.get(metrics_expiry)
 
     ed = expiry_data[metrics_expiry]
