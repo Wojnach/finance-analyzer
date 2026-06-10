@@ -65,6 +65,7 @@ def main() -> int:
         now = _dt.datetime.now(_dt.UTC)
         lines: list[str] = []
         recent_completions: list[str] = []
+        errored: list[str] = []
         for p in rows:
             if not isinstance(p, dict):
                 continue
@@ -118,8 +119,23 @@ def main() -> int:
                     recent_completions.append(
                         f"  - {pid}: verdict={last_verdict} -- {summary}"
                     )
+            elif status == "error":
+                # 2026-06-10: errored pickups used to be invisible here —
+                # the exact "work scheduled for a future session" this hook
+                # exists to never forget vanished silently after the handler
+                # exhausted its retries. Surface them until a human acts.
+                history = p.get("history") or []
+                last_summary = ""
+                if history and isinstance(history[-1], dict):
+                    last_summary = (history[-1].get("summary") or "")[:120]
+                attempts = p.get("attempts")
+                errored.append(
+                    f"  - [ERRORED] {pid}: {title} -- handler failed"
+                    f"{f' {attempts}x' if attempts else ''}; "
+                    f"last: {last_summary}"
+                )
 
-        if not lines and not recent_completions:
+        if not lines and not recent_completions and not errored:
             return 0
 
         parts = [
@@ -132,6 +148,12 @@ def main() -> int:
                 "Force-run a pickup now: "
                 "`.venv/Scripts/python.exe scripts/process_pending_pickups.py --force <ID>`"
             )
+        if errored:
+            parts.append(
+                "Errored pickups (handler gave up after retries -- needs human "
+                "attention; history in data/pending_pickups.json):"
+            )
+            parts.extend(errored)
         if recent_completions:
             parts.append("Recently completed (last 48h -- read history before next action):")
             parts.extend(recent_completions)

@@ -445,6 +445,19 @@ def run(
 
         any_spawned = True
         state = update_state_after_attempt(state, category, success)
+        # 2026-06-10: persist state immediately after EACH category's
+        # dispatch decision, not only at run() end. A multi-category run
+        # takes >15 min (900s timeout per category) while the trigger fires
+        # every 10 min, and run-hidden.vbs detaches so MultipleInstances=
+        # IgnoreNew can't prevent overlap — a second dispatcher process
+        # would load the state file before this run saved, see no cooldown,
+        # and double-spawn a concurrent Opus agent for a category this run
+        # already handled. A mid-run crash likewise used to discard every
+        # cooldown/backoff bump accumulated in memory.
+        try:
+            _save_state(state)
+        except OSError as e:
+            logger.warning("per-category state save failed for %s: %s", category, e)
         _append_critical({
             "ts": _now().isoformat(),
             "level": "info" if success else "critical",

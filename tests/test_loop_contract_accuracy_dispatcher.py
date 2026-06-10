@@ -533,6 +533,115 @@ class TestVerifyAndActDispatchAfterTracker:
         )
 
 
+def _make_alert_violation(keys, message="degradation"):
+    return Violation(
+        invariant="accuracy_degradation",
+        severity="CRITICAL",
+        message=message,
+        details={"alert_count": len(keys), "alerts": [
+            {"key": k, "scope": "signal"} for k in keys
+        ]},
+    )
+
+
+class TestAccuracyDegradationChurnSuppression:
+    """2026-06-10: alert-set membership churn at the >15pp/<50% threshold
+    boundary produced 16 duplicate unresolved rows in 4 days — every
+    distinct membership combination was a new identity hash, so the
+    exact-set dedup never matched. While an unresolved row younger than
+    24h exists, a new row is suppressed unless it carries a signal absent
+    from every unresolved row of the last 7 days."""
+
+    def test_subset_churn_suppressed(self, critical_errors_paths):
+        """Signals leaving the alert set (10 → 9 → 8 ...) is boundary
+        churn, not new information: one row, not one per combination."""
+        crit_file, _state_file = critical_errors_paths
+
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "momentum", "structure"],
+                                   "3 signal(s) dropped")])
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "momentum"],
+                                   "2 signal(s) dropped")])
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "structure"],
+                                   "2 signal(s) dropped")])
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 1, (
+            f"Expected 1 row across 3 churn permutations of known signals; "
+            f"got {len(rows)} — the 24h suppression window is not applied"
+        )
+
+    def test_new_signal_still_surfaces(self, critical_errors_paths):
+        """Genuinely new degradation (a signal absent from every unresolved
+        row of the last 7 days) must NOT be suppressed."""
+        crit_file, _state_file = critical_errors_paths
+
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "momentum"],
+                                   "2 signal(s) dropped")])
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "rsi"],
+                                   "2 signal(s) dropped")])
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 2, (
+            f"Expected 2 rows when a genuinely new signal (rsi) degrades; "
+            f"got {len(rows)} — new degradation suppressed as churn"
+        )
+
+    def test_resolved_rows_do_not_suppress(self, critical_errors_paths):
+        """Suppression only counts UNRESOLVED rows: once the prior incident
+        is resolved, a recurring subset must produce a fresh row so the
+        fix-agent dispatcher re-engages."""
+        from datetime import UTC, datetime
+
+        from portfolio.file_utils import atomic_append_jsonl
+
+        crit_file, _state_file = critical_errors_paths
+
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "momentum", "structure"],
+                                   "3 signal(s) dropped")])
+        rows1 = _read_jsonl(crit_file)
+        assert len(rows1) == 1
+        atomic_append_jsonl(crit_file, {
+            "ts": datetime.now(UTC).isoformat(),
+            "level": "info",
+            "category": "resolution",
+            "caller": "manual",
+            "resolution": "baseline rebuilt",
+            "resolves_ts": rows1[0]["ts"],
+            "message": "resolved",
+            "context": {},
+        })
+
+        _dispatch_critical_errors_for_degradation(
+            [_make_alert_violation(["sentiment", "momentum"],
+                                   "2 signal(s) dropped")])
+
+        rows = _read_jsonl(crit_file)
+        critical_only = [r for r in rows if r.get("level") == "critical"]
+        assert len(critical_only) == 2, (
+            "Recurrence after resolution suppressed — dispatcher would see "
+            "no unresolved row for an active incident"
+        )
+
+    def test_empty_alerts_fall_through_to_hash_dedup(self, critical_errors_paths):
+        """Violations without alert keys (legacy/empty details) keep the
+        pre-2026-06-10 behavior: exact-hash dedup only."""
+        crit_file, _state_file = critical_errors_paths
+        v_a = _make_critical_violation("12 signal(s) dropped...")
+        v_b = _make_critical_violation("13 signal(s) dropped...")
+
+        _dispatch_critical_errors_for_degradation([v_a])
+        _dispatch_critical_errors_for_degradation([v_b])
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 2
+
+
 class TestGlobalInvariantsMainOnly:
     """Cross-loop dedup for globally-scoped invariants (added 2026-05-04).
 

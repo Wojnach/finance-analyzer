@@ -9,9 +9,18 @@ sent, and a brief entry is appended to ``docs/SESSION_PROGRESS.md`` so
 the next interactive Claude session sees the verdict.
 
 Idempotent: re-running on the same day is a no-op once a pickup is
-completed. Pickups created with ``status="recurring"`` are flipped
-back to ``status="pending"`` immediately after completion -- not used
-by any pickup today, kept as a knob for future use.
+completed. Every pickup is a one-shot job — there is no recurrence
+mechanism. (2026-06-10: this docstring used to claim status="recurring"
+pickups were flipped back to pending after completion; no such code ever
+existed and no pickup uses the field, so the claim was removed rather
+than implementing a dead feature.)
+
+Failure handling (2026-06-10): a handler error keeps the pickup at
+status="pending" with an ``attempts`` counter so the next daily run
+retries transient failures. After ``_MAX_ATTEMPTS`` (3) failed attempts
+the pickup is parked at status="error" and a critical_errors.jsonl
+entry (category="pickup_failed") is appended so the session-start check
+and the fix-agent dispatcher see it.
 
 CLI:
     python scripts/process_pending_pickups.py            # process due
@@ -19,7 +28,8 @@ CLI:
     python scripts/process_pending_pickups.py --force ID # ignore due_ts
 
 Exit code 0 if any work happened OR no work was due. Exit code 1 if a
-handler returned verdict=error so the cron logs surface it.
+handler returned verdict=error so the cron logs surface it. Exit code 2
+if --force names an unknown pickup id.
 """
 
 from __future__ import annotations
@@ -48,6 +58,13 @@ _HANDLERS = {
 
 _PICKUPS_PATH = _REPO_ROOT / "data" / "pending_pickups.json"
 _SESSION_PROGRESS = _REPO_ROOT / "docs" / "SESSION_PROGRESS.md"
+
+# 2026-06-10: bounded retry for failed handlers. A single transient error
+# (data file briefly missing, backfill behind) used to park the pickup at
+# status="error" forever — never retried, invisible to the session-start
+# bottle. We retry up to this many attempts, then park permanently and
+# escalate via critical_errors.jsonl.
+_MAX_ATTEMPTS = 3
 
 
 def _now_utc() -> _dt.datetime:
@@ -82,14 +99,20 @@ def _send_telegram(lines: list[str]) -> None:
     if not lines:
         return
     try:
-        from portfolio import config as cfg_mod  # type: ignore[attr-defined]
+        # 2026-06-10: was `from portfolio import config` — a module that has
+        # never existed, so the ImportError was swallowed below and every
+        # verdict alert silently no-oped since this script shipped. The real
+        # loader is portfolio.api_utils.load_config (same pattern as
+        # portfolio/main.py).
+        from portfolio.api_utils import load_config
         from portfolio.telegram_notifications import send_telegram
 
-        config = cfg_mod.load_config() if hasattr(cfg_mod, "load_config") else {}
-        send_telegram("\n".join(lines), config)
-    except Exception:
-        # Telegram failures must never abort the pickup pipeline.
-        pass
+        send_telegram("\n".join(lines), load_config())
+    except Exception as e:
+        # Telegram failures must never abort the pickup pipeline, but print
+        # the cause so a future regression is visible in the task log
+        # (2026-06-10 — the old bare `pass` hid the broken import above).
+        print(f"[pickup] telegram send failed: {e!r}")
 
 
 def _append_session_progress(pickup: dict, result: dict) -> None:
@@ -154,7 +177,43 @@ def _dispatch(pickup: dict) -> dict:
             "details": {},
             "telegram_lines": [],
         }
-    return mod.run(pickup, _REPO_ROOT)
+    # 2026-06-10: a raising handler used to propagate out of main() — the
+    # script crashed mid-loop, _save_pickups never ran, and the scheduled
+    # task surfaced nothing. Convert to a verdict=error result so the
+    # bounded-retry logic in main() handles it like any other failure.
+    try:
+        return mod.run(pickup, _REPO_ROOT)
+    except Exception as e:  # noqa: BLE001 — handler code is arbitrary
+        return {
+            "verdict": "error",
+            "summary": f"Handler {handler_name} raised {type(e).__name__}: {e}",
+            "details": {"exception_type": type(e).__name__},
+            "telegram_lines": [],
+        }
+
+
+def _record_pickup_failure(pickup: dict, result: dict) -> None:
+    """Append a critical_errors.jsonl entry when a pickup is parked at
+    status="error" after exhausting retries. Best-effort: journaling
+    failures must never abort the pickup pipeline."""
+    try:
+        from portfolio.claude_gate import record_critical_error
+
+        record_critical_error(
+            category="pickup_failed",
+            caller="process_pending_pickups",
+            message=(
+                f"Pickup {pickup.get('id')} failed {_MAX_ATTEMPTS} attempts; "
+                f"parked at status=error. Last: {result.get('summary', '')[:200]}"
+            ),
+            context={
+                "pickup_id": pickup.get("id"),
+                "handler": pickup.get("handler"),
+                "attempts": pickup.get("attempts"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[pickup] could not record pickup_failed critical entry: {e!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -208,7 +267,25 @@ def main(argv: list[str] | None = None) -> int:
             "summary": result.get("summary", ""),
             "details": result.get("details", {}),
         })
-        pickup["status"] = "completed" if verdict != "error" else "error"
+        if verdict != "error":
+            pickup["status"] = "completed"
+        else:
+            # 2026-06-10: bounded retry. status="error" used to be terminal
+            # after a single failure AND invisible to session_start_bottle —
+            # a transient failure silently killed the pickup forever. Keep
+            # it pending (the daily task retries) until _MAX_ATTEMPTS, then
+            # park at error and escalate via critical_errors.jsonl.
+            attempts = int(pickup.get("attempts", 0) or 0) + 1
+            pickup["attempts"] = attempts
+            if attempts >= _MAX_ATTEMPTS:
+                pickup["status"] = "error"
+                _record_pickup_failure(pickup, result)
+            else:
+                pickup["status"] = "pending"
+                print(
+                    f"  attempt {attempts}/{_MAX_ATTEMPTS} failed -- "
+                    "left pending for retry on next run"
+                )
         pickup["last_run_ts"] = now.isoformat()
 
         _send_telegram(result.get("telegram_lines") or [])
@@ -218,6 +295,16 @@ def main(argv: list[str] | None = None) -> int:
             exit_code = 1
 
     if not any_due:
+        if args.force:
+            # 2026-06-10: a typo'd --force ID used to print the routine
+            # "no due pickups" and exit 0 — a success-looking no-op on the
+            # documented manual recovery path (CLAUDE.md / bottle hook).
+            valid = sorted(str(p.get("id")) for p in pickups if p.get("id"))
+            print(
+                f"[pickup] ERROR: no pickup with id {args.force!r}. "
+                f"Known ids: {', '.join(valid) if valid else '(none)'}"
+            )
+            return 2
         print("[pickup] no due pickups")
 
     if not args.dry_run:

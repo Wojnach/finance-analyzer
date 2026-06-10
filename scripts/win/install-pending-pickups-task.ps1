@@ -10,22 +10,27 @@
 
 $taskName  = "PF-PendingPickups"
 $repoRoot  = "Q:\finance-analyzer"
-$python    = "$repoRoot\.venv\Scripts\python.exe"
-$script    = "$repoRoot\scripts\process_pending_pickups.py"
-$logDir    = "$repoRoot\data"
-$logFile   = "$logDir\pending_pickups_task.log"
+$bat       = "$repoRoot\scripts\win\pending-pickups.bat"
+$logFile   = "$repoRoot\data\pending_pickups_task.log"
 
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
 # Hide the console window via the standard run-hidden.vbs shim
-# (see docs/HIDDEN_TASKS.md). Output captured to a log so failures
-# can be diagnosed without an interactive console.
+# (see docs/HIDDEN_TASKS.md), in "wait" mode so the child's exit code
+# propagates to Task Scheduler "Last Result".
+#
+# 2026-06-10: the previous action passed ">>" and "2>&1" as quoted argv
+# tokens through run-hidden.vbs; cmd.exe only honors redirection when
+# UNQUOTED, so python received them as literal arguments and argparse
+# exited 2 on every scheduled run for ~20 days while the detached vbs
+# made Last Result show 0 (audit docs/IMPROVEMENT_AUDIT_2026-06-10.md).
+# Redirection now lives inside pending-pickups.bat, where it works.
+# (The old dead $cmd/$args variables that suggested working redirection
+# are gone — $args also shadowed PowerShell's automatic variable.)
 $vbs = "$repoRoot\scripts\win\run-hidden.vbs"
-$cmd = "cmd.exe"
-$args = "/c `"$python`" -u `"$script`" >> `"$logFile`" 2>&1"
 
 $action = New-ScheduledTaskAction -Execute "wscript.exe" `
-    -Argument "`"$vbs`" `"$cmd`" `"/c`" `"$python`" `"-u`" `"$script`" `">>`" `"$logFile`" `"2>&1`"" `
+    -Argument "`"$vbs`" `"wait`" `"cmd.exe`" `"/c`" `"$bat`"" `
     -WorkingDirectory $repoRoot
 
 # Daily 08:00 CET. Pickups whose due_ts > now stay pending until their

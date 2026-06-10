@@ -179,3 +179,50 @@ class TestAutoResolveStaleCategories:
         unresolved = cce.find_unresolved(entries, days=7, now=now)
         assert len(unresolved) == 1
         assert unresolved[0]["category"] == "accuracy_degradation"
+
+    def test_canonical_resolution_entry_credits_original_category(self):
+        """2026-06-10 fix: resolution lines follow the CLAUDE.md format —
+        category='resolution' + resolves_ts pointing at the original entry.
+        The old logic keyed fixes on the entry's own category, so the fix
+        was credited to 'resolution' and the failing category never
+        auto-resolved (dead code in practice). Two stale criticals in a
+        category, one explicitly resolved via resolves_ts after the LAST
+        critical fired: the other must now auto-resolve too."""
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        t_first = _iso(now - timedelta(days=5))
+        t_last = _iso(now - timedelta(days=4))
+        entries = [
+            {"ts": t_first, "level": "critical",
+             "category": "accuracy_degradation", "resolution": None},
+            {"ts": t_last, "level": "critical",
+             "category": "accuracy_degradation", "resolution": None},
+            # Canonical resolution row: resolves only the LAST critical.
+            {"ts": _iso(now - timedelta(days=3, hours=12)), "level": "info",
+             "category": "resolution", "resolution": "config fix applied",
+             "resolves_ts": t_last},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        # t_last resolved directly via resolves_ts; t_first auto-resolved
+        # because the category is stale (4+ days quiet) and the resolution
+        # postdates the last critical fire.
+        assert unresolved == []
+
+    def test_resolution_category_does_not_credit_wrong_category(self):
+        """A resolution row whose resolves_ts points at category X must not
+        auto-resolve an unrelated stale category Y."""
+        now = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+        t_x = _iso(now - timedelta(days=5))
+        entries = [
+            {"ts": t_x, "level": "critical",
+             "category": "cat_x", "resolution": None},
+            {"ts": _iso(now - timedelta(days=4)), "level": "critical",
+             "category": "cat_y", "resolution": None},
+            {"ts": _iso(now - timedelta(days=3)), "level": "info",
+             "category": "resolution", "resolution": "fixed x",
+             "resolves_ts": t_x},
+        ]
+        unresolved = cce.find_unresolved(entries, days=7, now=now)
+        # cat_x: directly resolved (resolves_ts) — and stale+credited anyway.
+        # cat_y: stale but has NO fix credited — must still surface.
+        assert len(unresolved) == 1
+        assert unresolved[0]["category"] == "cat_y"

@@ -65,6 +65,13 @@ touch data/fix_agent.disabled
 Remove the file to re-enable. See
 `docs/plans/2026-04-13-auto-spawn-fix-agent.md` for the full design.
 
+> **Status 2026-06-10:** the audit (`docs/IMPROVEMENT_AUDIT_2026-06-10.md`)
+> found the `PF-FixAgentDispatcher` scheduled task is NOT installed in
+> production — auto-spawn as described above has never been live on this
+> machine. Additionally, `data/fix_agent.disabled` is in place during the
+> Claude token freeze (see memory, 2026-06-06). To re-enable: remove the
+> flag file AND run `scripts/win/install-fix-agent-task.ps1` as admin.
+
 ## ⚠ STARTUP CHECK 2 — read the bottle (pending pickups)
 
 Run this immediately after the critical-errors check:

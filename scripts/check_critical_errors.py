@@ -75,21 +75,38 @@ def _auto_resolve_stale_categories(
     last_critical_by_cat: dict[str, datetime] = {}
     latest_fix_by_cat: dict[str, datetime] = {}
 
+    # 2026-06-10: resolution lines follow the CLAUDE.md format — they carry
+    # category="resolution" plus a resolves_ts pointing at the original
+    # entry. Keying fixes on e["category"] credited everything to the
+    # 'resolution' bucket, never the failing category, so the fix_ts
+    # condition below almost never held and this auto-resolve was dead
+    # code: stale categories lingered the full lookback window. Build a
+    # ts→category index so resolves_ts entries credit the category of the
+    # entry they resolve (falling back to the fix entry's own category for
+    # legacy info-level rows written with the original category).
+    category_by_ts: dict[str, str] = {}
+    for e in entries:
+        ts = e.get("ts")
+        cat = e.get("category")
+        if ts and cat:
+            category_by_ts[ts] = cat
+
     for e in entries:
         cat = e.get("category", "")
-        if not cat:
-            continue
         parsed = _parse_ts(e.get("ts", ""))
         if parsed is None:
             continue
-        if e.get("level") == "critical" and e.get("resolution") is None:
+        if cat and e.get("level") == "critical" and e.get("resolution") is None:
             existing = last_critical_by_cat.get(cat)
             if existing is None or parsed > existing:
                 last_critical_by_cat[cat] = parsed
         if e.get("resolution") is not None or e.get("level") == "info":
-            existing_fix = latest_fix_by_cat.get(cat)
+            fix_cat = category_by_ts.get(e.get("resolves_ts") or "", cat)
+            if not fix_cat:
+                continue
+            existing_fix = latest_fix_by_cat.get(fix_cat)
             if existing_fix is None or parsed > existing_fix:
-                latest_fix_by_cat[cat] = parsed
+                latest_fix_by_cat[fix_cat] = parsed
 
     stale_cats = set()
     for cat, last_ts in last_critical_by_cat.items():

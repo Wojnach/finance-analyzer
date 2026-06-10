@@ -57,6 +57,18 @@ DEFAULT_CONTRACT_ALERT_COOLDOWN_S = 4 * 3600
 # vs the per-cycle pattern that prompted this fix.
 DEFAULT_CRITICAL_ERRORS_DEDUP_TTL_S = 6 * 3600
 
+# 2026-06-10: accuracy_degradation identity keys on the exact alert-set
+# membership (see violation_identity_payload), but the SET itself churns —
+# signals near the ">15pp drop AND <50% absolute" threshold enter and
+# leave hourly, and every distinct membership combination is a new
+# identity hash. 16 duplicate unresolved rows landed in 4 days (Jun 6-9).
+# While ANY unresolved accuracy_degradation row younger than this window
+# exists, a new row is suppressed UNLESS it carries a signal absent from
+# every unresolved row of the last NEW_SIGNAL_LOOKBACK — genuinely new
+# degradation must still surface immediately.
+ACCURACY_DEGRADATION_SUPPRESS_WINDOW_S = 24 * 3600
+ACCURACY_DEGRADATION_NEW_SIGNAL_LOOKBACK_S = 7 * 24 * 3600
+
 # 2026-04-28 (Codex P2): invariants whose CRITICAL violations get routed
 # to critical_errors.jsonl after ViolationTracker has had a chance to
 # escalate. Kept as a set rather than a hard-coded "if accuracy_degradation"
@@ -1477,6 +1489,106 @@ def _has_unresolved_critical_entry(
     return False
 
 
+def _alert_keys_from_details(details: dict | None) -> set[str]:
+    """Extract the ``scope::key`` alert-identity set used by
+    ``violation_identity_payload`` for accuracy_degradation. Works on both
+    a Violation's ``details`` and a journal row's ``context`` (the writer
+    copies details into context verbatim)."""
+    alerts = (details or {}).get("alerts") or []
+    return {
+        f"{a.get('scope', '?')}::{a.get('key', '?')}"
+        for a in alerts
+        if isinstance(a, dict)
+    }
+
+
+def _should_suppress_accuracy_degradation(
+    violation: "Violation",
+    *,
+    now: float,
+    suppress_window_s: float = ACCURACY_DEGRADATION_SUPPRESS_WINDOW_S,
+    new_signal_lookback_s: float = ACCURACY_DEGRADATION_NEW_SIGNAL_LOOKBACK_S,
+) -> bool:
+    """Return True when a new accuracy_degradation critical row should be
+    suppressed as boundary churn.
+
+    2026-06-10: identity hashes on exact alert-set membership, so signals
+    flapping across the degradation threshold ("10 signals" → "9" → "8" →
+    "7" → "8" ...) created a distinct hash — and a fresh unresolved journal
+    row — for every membership combination: 16 duplicate rows in 4 days,
+    each needing its own resolution line, printed individually at every
+    session start. Suppress when BOTH:
+
+    * an unresolved accuracy_degradation row younger than
+      ``suppress_window_s`` (24h) already exists, AND
+    * every signal in the new alert already appears in some unresolved row
+      from the last ``new_signal_lookback_s`` (7d) — i.e. nothing genuinely
+      new is degrading; this is a re-shuffle of known offenders.
+
+    A violation with no alert keys (legacy/empty details) is never
+    suppressed here — it falls through to the exact-hash dedup. Any read
+    failure returns False so we err on the side of writing the row.
+    """
+    new_keys = _alert_keys_from_details(violation.details)
+    if not new_keys:
+        return False
+    try:
+        from portfolio.claude_gate import CRITICAL_ERRORS_LOG
+    except Exception:
+        return False
+    if not CRITICAL_ERRORS_LOG.exists():
+        return False
+
+    recent_cutoff = datetime.fromtimestamp(
+        now - suppress_window_s, tz=UTC).isoformat()
+    lookback_cutoff = datetime.fromtimestamp(
+        now - new_signal_lookback_s, tz=UTC).isoformat()
+
+    resolved_ts: set[str] = set()
+    candidates: list[dict] = []
+    try:
+        import json
+        with open(CRITICAL_ERRORS_LOG, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                rts = entry.get("resolves_ts")
+                if rts:
+                    resolved_ts.add(rts)
+                if entry.get("category") != "accuracy_degradation":
+                    continue
+                if entry.get("level") != "critical":
+                    continue
+                if entry.get("resolution") is not None:
+                    continue
+                ts = entry.get("ts")
+                if not ts or ts < lookback_cutoff:
+                    continue
+                candidates.append(entry)
+    except Exception as e:
+        logger.debug(
+            "could not scan critical_errors.jsonl for degradation "
+            "suppression (%s); writing the row", e,
+        )
+        return False
+
+    has_recent_unresolved = False
+    known_keys: set[str] = set()
+    for entry in candidates:
+        if entry.get("ts") in resolved_ts:
+            continue
+        known_keys |= _alert_keys_from_details(entry.get("context"))
+        if entry.get("ts", "") >= recent_cutoff:
+            has_recent_unresolved = True
+
+    return has_recent_unresolved and new_keys <= known_keys
+
+
 def _dispatch_critical_errors_for_degradation(
     violations: list[Violation],
     *,
@@ -1529,6 +1641,20 @@ def _dispatch_critical_errors_for_degradation(
     state_updates: dict[str, dict] = {}
     pending_recent: dict[str, list[dict]] = {}
     for v in critical:
+        # 2026-06-10: alert-set membership churn at the degradation
+        # threshold made every set combination a new identity hash (16
+        # duplicate unresolved rows Jun 6-9). Suppress while an unresolved
+        # row <24h old exists, unless a genuinely new signal degraded —
+        # see _should_suppress_accuracy_degradation.
+        if (v.invariant == "accuracy_degradation"
+                and _should_suppress_accuracy_degradation(v, now=now)):
+            logger.debug(
+                "suppressing accuracy_degradation critical row (boundary "
+                "churn): unresolved row <24h exists and no new signal vs "
+                "unresolved rows of last 7d; alerts=%s",
+                sorted(_alert_keys_from_details(v.details)),
+            )
+            continue
         msg_hash = _hash_violation_identity(v)
         prior = dispatch_state.get(v.invariant) or {}
         recent = pending_recent.get(v.invariant)
