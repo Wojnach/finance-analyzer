@@ -153,15 +153,17 @@ def record_cost(date: str | None = None) -> int:
     if is_error:
         log_critical("prophecy_cost", f"claude run reported error: {result.get('subtype')}",
                      caller="cost.run_error", context={"date": date})
+    # The soft-cap alert below uses level="warning" INTENTIONALLY — i.e. it is
+    # intentionally NON-surfacing: check_critical_errors.py + the fix-agent
+    # dispatcher only act on level == "critical". The soft cap is a "measure,
+    # don't block" budget tripwire ("go unhinged to begin with") — it lands in
+    # the journal for cost archaeology but must not page the session-start
+    # check or spawn fix agents. Escalate to the default (critical) only when
+    # a HARD budget policy is decided. (audit batch 3, 2026-06-11; comment
+    # hoisted above the guard per review of 68546e7d so maintainers see it
+    # even while no cap is configured and the branch never runs.)
     soft_cap = pcfg.budget_soft_cap()
     if soft_cap is not None and isinstance(total_usd, (int, float)) and total_usd > soft_cap:
-        # level="warning" is INTENTIONAL and intentionally non-surfacing:
-        # check_critical_errors.py + the fix-agent dispatcher only act on
-        # level == "critical". The soft cap is a "measure, don't block" budget
-        # tripwire ("go unhinged to begin with") — it lands in the journal for
-        # cost archaeology but must not page the session-start check or spawn
-        # fix agents. Escalate to the default (critical) only when a HARD
-        # budget policy is decided. (audit batch 3, 2026-06-11)
         log_critical("prophecy_cost",
                      f"run cost ${total_usd:.2f} exceeded soft cap ${soft_cap:.2f}",
                      caller="cost.over_budget", level="warning",

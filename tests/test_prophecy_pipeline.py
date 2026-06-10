@@ -405,7 +405,10 @@ def test_publish_flags_missing_instruments(ptmp):
     assert publish.publish(DATE) == 0
     latest = load_json(pcfg.LATEST_FILE)
     missing = latest["coverage_summary"]["missing_instruments"]
-    assert "ETH-USD" in missing and "XAG-USD" in missing and len(missing) == 12
+    # count derived from config so instrument-set drift can't silently rot
+    # this assertion (review of 68546e7d)
+    assert "ETH-USD" in missing and "XAG-USD" in missing
+    assert len(missing) == len(pcfg.enabled_instruments()) - 1  # all but BTC-USD
     assert latest["stale"] is False  # partial run publishes, but flagged
     assert any(r["category"] == "prophecy_publish_missing_instruments" for r in _crit_lines())
 
@@ -500,3 +503,79 @@ def test_cost_records_result_model_when_present(ptmp):
     assert cost.record_cost(DATE) == 0
     rows = [json.loads(line) for line in pcfg.COST_LOG.read_text().splitlines()]
     assert rows[-1]["model"] == "claude-opus-4-9"
+
+
+# --- review of 68546e7d: write_guard (post-claude integrity check) -----------
+def test_write_guard_pre_writes_snapshot(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: [" M portfolio/main.py", "?? data/foo.json"])
+    snap = tmp_path / "snap.txt"
+    assert write_guard.snapshot(str(snap)) == 0
+    assert " M portfolio/main.py" in snap.read_text()
+
+
+def test_write_guard_clean_when_unchanged(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    lines = [" M data/metals_swing_state.json", " M portfolio/main.py"]
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: list(lines))
+    snap = tmp_path / "snap.txt"
+    assert write_guard.snapshot(str(snap)) == 0
+    # identical state after run -> clean, even though a non-data file was
+    # already dirty pre-run (pre-existing churn is not a breach)
+    assert write_guard.check(str(snap)) == 0
+    assert not any(r["category"] == "prophecy_write_breach" for r in _crit_lines())
+
+
+def test_write_guard_breach_on_new_code_write(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    snap = tmp_path / "snap.txt"
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.snapshot(str(snap)) == 0
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: ["?? scripts/evil.py", " M portfolio/main.py"])
+    assert write_guard.check(str(snap)) == 2
+    breach = [r for r in _crit_lines() if r["category"] == "prophecy_write_breach"]
+    assert breach and "scripts/evil.py" in breach[0]["message"]
+
+
+def test_write_guard_ignores_data_churn(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    snap = tmp_path / "snap.txt"
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.snapshot(str(snap)) == 0
+    # loop-churned tracked data files + prophecy's own outputs: expected
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: [" M data/metals_swing_state.json",
+                                 "?? data/prophecy_runs/raw_2026-06-11.json"])
+    assert write_guard.check(str(snap)) == 0
+    assert not any(r["category"] == "prophecy_write_breach" for r in _crit_lines())
+
+
+def test_write_guard_rename_uses_new_path(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    snap = tmp_path / "snap.txt"
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.snapshot(str(snap)) == 0
+    monkeypatch.setattr(write_guard, "_git_status_lines",
+                        lambda: ["R  data/old.json -> portfolio/hijacked.py"])
+    assert write_guard.check(str(snap)) == 2  # renamed INTO code = breach
+
+
+def test_write_guard_pre_failure_is_blocking(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+
+    def boom():
+        raise RuntimeError("git unavailable")
+
+    monkeypatch.setattr(write_guard, "_git_status_lines", boom)
+    snap = tmp_path / "snap.txt"
+    assert write_guard.snapshot(str(snap)) == 1  # .bat skips the claude run
+    assert any(r["category"] == "prophecy_write_guard_error" for r in _crit_lines())
+
+
+def test_write_guard_check_missing_snapshot_quarantines(ptmp, tmp_path, monkeypatch):
+    from prophecy import write_guard
+    monkeypatch.setattr(write_guard, "_git_status_lines", lambda: [])
+    assert write_guard.check(str(tmp_path / "never_written.txt")) == 1
+    assert any(r["category"] == "prophecy_write_guard_error" for r in _crit_lines())

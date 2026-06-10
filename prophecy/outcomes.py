@@ -297,6 +297,15 @@ def score(max_records: int | None = None) -> int:
                         unscorable += 1
                         continue
                 else:  # daily_bar — next-session-close semantics (weekend fix)
+                    # Expected scoring LATENCY here (2026-06-11 review of
+                    # 68546e7d): MSTR/oil horizons targeting Friday evening or
+                    # the weekend resolve at the NEXT session close (Monday),
+                    # and that bar only appears in yfinance after Monday's
+                    # close — so such horizons sit in "pending" up to ~2
+                    # calendar days past nominal maturity, longer over holiday
+                    # weekends. Working as intended; a persistent pending_bar
+                    # count is NOT an outage signal unless it grows without
+                    # ever draining.
                     realized, realized_bar_ts = _fetch_daily_bar_close(inst, target_dt)
                     if realized is None:
                         pending_bar += 1  # session not printed yet; retry next run

@@ -18,10 +18,17 @@ REM
 REM  UNFREEZE CHECKLIST (premortem hook 6 — unfreeze latency bomb): the
 REM  fail-closed flip and tool restrictions below shipped while the system was
 REM  frozen, i.e. with ZERO production validation. After deleting
-REM  SYSTEM_DISABLED, run ONE manual smoke invocation of this .bat and verify
-REM  raw_<date>.json + publish/outcomes/cost all succeed BEFORE trusting the
-REM  schedule. Do not assume the scheduled run works just because this file
-REM  parses.
+REM  SYSTEM_DISABLED, run ONE manual smoke invocation of this .bat and verify:
+REM    1. raw_<date>.json + publish/outcomes/cost all succeed,
+REM    2. write_guard reports "clean" (post-run integrity check below),
+REM    3. Write DENIAL outside data\prophecy_runs\ actually holds during the
+REM       smoke run: check run_<date>.log for permission-denied tool results,
+REM       and/or one-off prompt the agent to write a canary file at repo root
+REM       and confirm refusal (the --allowedTools path-scope and
+REM       --setting-sources "" combination is parse-validated but was never
+REM       runtime-verified while frozen).
+REM  Only then trust the schedule. Do not assume the scheduled run works just
+REM  because this file parses.
 REM
 REM  Prompt:   docs\prophecy-prompt.md
 REM  Pipeline: prep.py (0 tok) -> claude -p (spend) -> publish/outcomes/cost (0 tok)
@@ -48,12 +55,17 @@ for /f "tokens=*" %%T in ('powershell -NoProfile -Command "[datetime]::UtcNow.To
 for /f "tokens=*" %%T in ('powershell -NoProfile -Command "[datetime]::UtcNow.ToString('o')"') do set TS_START=%%T
 
 REM --- guard 2a: kill switch FAIL-CLOSED (audit batch 3, 2026-06-11) ---
-REM     If the sentinel's parent dir is gone we cannot know the freeze state.
-REM     Recreate it WITH the sentinel so the next run is still frozen, alert,
-REM     and exit non-zero. (prophecy.alerts also recreates the dir as a side
-REM     effect of its rate-limit state write — that is why the sentinel is
-REM     recreated FIRST: an empty recreated dir without the sentinel would
-REM     silently flip the system back on at the next scheduled run.)
+REM     If the sentinel's parent dir is gone we cannot know the freeze state,
+REM     so treat it as DISABLED: THIS RUN is killed by the unconditional
+REM     `exit /b 4` at the end of the branch — that exit, not the sentinel,
+REM     is what prevents token spend today. The mkdir + sentinel rewrite is
+REM     belt-and-braces protection for FUTURE runs, with one real ordering
+REM     constraint: the sentinel line must precede the log_critical python
+REM     call, because alerts.py's rate-limit state write recreates
+REM     data\prophecy_runs\ as a side effect — if we logged first and died
+REM     before rewriting the sentinel, tomorrow's run would find an existing
+REM     dir with no sentinel and silently re-enable. (Comment clarified
+REM     2026-06-11, review of 68546e7d.)
 if exist %PDIR%\ goto :dir_ok
 echo [prophecy] %PDIR% MISSING or unreadable - kill-switch state unknown, failing CLOSED
 mkdir %PDIR% 2>nul
@@ -115,11 +127,26 @@ REM     inherit the repo's interactive .claude/settings.json permissions —
 REM     Bash(*), Write(*), Edit(*) — so an injection payload in any fetched
 REM     page was one tool call away from arbitrary shell on the box holding
 REM     the live Avanza session and config.json API keys. Layered restriction:
-REM       --setting-sources user  : do NOT load the project allow-all rules
+REM       --setting-sources ""    : load NO settings sources at all. "user"
+REM                                 was not enough — review of 68546e7d found
+REM                                 C:\Users\Herc2\.claude\settings.json also
+REM                                 allows Write(*)/Bash(*), which would have
+REM                                 defeated the Write path-scope below. Empty
+REM                                 value parse-validated on claude.exe 2.1.168
+REM                                 (exit 0; invalid values are rejected with
+REM                                 "Valid options are: user, project, local").
 REM       --strict-mcp-config     : no MCP servers (no avanza-mcp etc.)
 REM       --tools                 : hard-removes Bash/Edit from the toolset
 REM       --allowedTools          : auto-approves ONLY what the job needs;
-REM                                 Write is path-scoped to data/prophecy_runs/**
+REM                                 Write is path-scoped to data/prophecy_runs/**.
+REM                                 Rule-with-specifier syntax is what this flag
+REM                                 expects — its own --help example is
+REM                                 "Bash(git *) Edit", same grammar as the
+REM                                 settings.json rules already active on this
+REM                                 box (e.g. the Write(**/config.json) deny
+REM                                 block). Runtime enforcement of the path
+REM                                 pattern is additionally backstopped by the
+REM                                 write_guard below + smoke-run check #3.
 REM       --disallowedTools       : belt-and-braces deny on Bash/Edit
 REM     Task is included because the prompt fans instruments out to
 REM     sub-agents; sub-agents inherit this session's restricted toolset, but
@@ -127,8 +154,38 @@ REM     note they still read the same untrusted web content — the Write scope
 REM     is what keeps an injected sub-agent contained. Verified against
 REM     claude.exe 2.1.168 --help (flags: --tools, --setting-sources,
 REM     --allowedTools, --disallowedTools). ---
-type Q:\finance-analyzer\docs\prophecy-prompt.md | claude -p --model %PMODEL% --output-format json --max-turns 600 --setting-sources user --strict-mcp-config --tools "Read,Write,Glob,Grep,WebSearch,WebFetch,Task,TodoWrite" --allowedTools "Read,Glob,Grep,WebSearch,WebFetch,Task,TodoWrite,Write(data/prophecy_runs/**)" --disallowedTools "Bash,Edit,NotebookEdit" > %PDIR%\run_%PDATE%.json 2> %PDIR%\run_%PDATE%.log
+
+REM --- write guard PRE: snapshot git state immediately before the claude run
+REM     (review of 68546e7d). Defense-in-depth: catches prompt-injection
+REM     writes REGARDLESS of permission-rule semantics. If the snapshot
+REM     itself fails we cannot verify integrity afterwards, so fail closed
+REM     (no claude run, no spend). Snapshot lives in %TEMP% — outside the
+REM     repo, so it never pollutes its own diff. ---
+set GUARD_SNAP=%TEMP%\prophecy_git_pre_%PDATE%.txt
+"%PY%" -m prophecy.write_guard pre "%GUARD_SNAP%"
+if not errorlevel 1 goto :guard_pre_ok
+echo [prophecy] write_guard pre-snapshot FAILED - skipping claude invocation (no token spend)
+powershell -NoProfile -Command ^
+  "Add-Content -Path '%PDIR%\prophecy-log.jsonl' -Value ('{\"ts\":\"%TS_START%\",\"event\":\"guard_pre_failed\",\"date\":\"%PDATE%\"}')"
+exit /b 6
+:guard_pre_ok
+
+type Q:\finance-analyzer\docs\prophecy-prompt.md | claude -p --model %PMODEL% --output-format json --max-turns 600 --setting-sources "" --strict-mcp-config --tools "Read,Write,Glob,Grep,WebSearch,WebFetch,Task,TodoWrite" --allowedTools "Read,Glob,Grep,WebSearch,WebFetch,Task,TodoWrite,Write(data/prophecy_runs/**)" --disallowedTools "Bash,Edit,NotebookEdit" > %PDIR%\run_%PDATE%.json 2> %PDIR%\run_%PDATE%.log
 set EXIT_CODE=%ERRORLEVEL%
+
+REM --- write guard CHECK: any NEW modified/untracked path outside data/
+REM     (vs the pre-run snapshot; data/ is excluded because the 60s loops
+REM     churn tracked data files during the run) = possible prompt-injection
+REM     write -> rate-limited critical (prophecy_write_breach) + quarantine:
+REM     exit non-zero WITHOUT publishing. This guard works regardless of how
+REM     the permission layer interprets the Write path-scope above. ---
+"%PY%" -m prophecy.write_guard check "%GUARD_SNAP%"
+if not errorlevel 1 goto :guard_ok
+echo [prophecy] write_guard BREACH or check failure - run quarantined, publish SKIPPED
+powershell -NoProfile -Command ^
+  "Add-Content -Path '%PDIR%\prophecy-log.jsonl' -Value ('{\"ts\":\"%TS_START%\",\"event\":\"write_breach_quarantine\",\"claude_exit\":%EXIT_CODE%,\"date\":\"%PDATE%\"}')"
+exit /b 7
+:guard_ok
 
 REM --- steps 3-5 (zero tokens). Run EVEN IF claude failed so anti-stale guard +
 REM     cost/error alerts fire on a bad run instead of failing silently. ---
