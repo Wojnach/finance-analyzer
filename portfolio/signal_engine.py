@@ -2196,7 +2196,7 @@ def _dynamic_min_voters_for_regime(regime, ticker=None):
 
 
 def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate,
-                              regime=None):
+                              regime=None, ticker=None):
     """Compute circuit-breaker relaxation to preserve voter diversity.
 
     Progressively tests relaxation values 0, step, 2*step, ..., up to
@@ -2240,28 +2240,41 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     #   Guard B (post-exclusion slate viability):
     #     Downstream's raw `_voters` doesn't account for top-N or
     #     correlation-group exclusions. If the POST-exclusion slate is
-    #     below MIN_VOTERS_BASE (3) — the floor across all asset classes —
-    #     a relaxed consensus would be built from a too-thin slate even
-    #     though downstream would accept the raw count. Codex round 9
-    #     (2026-04-17) caught this with a 3-signal correlation cluster
-    #     gated out, leaving only 2 voters to drive consensus.
+    #     below the asset's base quorum (3 for crypto/stocks, 2 for metals
+    #     since 2026-05-11 — see MIN_VOTERS_METALS) a relaxed consensus
+    #     would be built from a too-thin slate even though downstream would
+    #     accept the raw count. Codex round 9 (2026-04-17) caught this with
+    #     a 3-signal correlation cluster gated out, leaving only 2 voters
+    #     to drive consensus.
     #
     #   Guard C (lone-signal escape):
     #     Even with a large post-exclusion slate, directional gating can
     #     leave a single accuracy-passing signal. `best_possible >= 2`
     #     catches this case.
-    min_regime_quorum = _dynamic_min_voters_for_regime(regime)
+    #
+    # 2026-06-11 (review of 12f65ded): all three guards now take the SAME
+    # ticker-aware quorum as Stage 4 (apply_confidence_penalties). Previously
+    # this path used the asset-blind floor of 3, so the circuit breaker
+    # refused to relax for the exact 2-voter metals slates Stage 4 accepts —
+    # the two gates disagreed. For metals the slate floor is
+    # MIN_VOTERS_METALS (2); non-metals keep _POST_EXCLUSION_MIN /
+    # _LONE_SIGNAL_FLOOR (3).
+    min_regime_quorum = _dynamic_min_voters_for_regime(regime, ticker=ticker)
     raw_candidates = sum(1 for v in votes.values() if v != "HOLD")
     if raw_candidates < min_regime_quorum:
         return 0.0
 
     # P2-F (2026-04-17): derived from MIN_VOTERS_CRYPTO/STOCK rather than
     # hardcoded. If the base quorum changes, this follows automatically.
+    if ticker in METALS_SYMBOLS:
+        slate_floor = MIN_VOTERS_METALS
+    else:
+        slate_floor = _POST_EXCLUSION_MIN
     post_exclusion_candidates = sum(
         1 for sn, v in votes.items()
         if v != "HOLD" and sn not in excluded and sn not in group_gated
     )
-    if post_exclusion_candidates < _POST_EXCLUSION_MIN:
+    if post_exclusion_candidates < slate_floor:
         return 0.0
 
     baseline = _count_active_voters_at_gate(
@@ -2283,7 +2296,12 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     # large slate is catching signals that the downstream quorum would
     # accept as a weak consensus. Require at least as many as the base
     # MIN_VOTERS_* to avoid creating "relaxed" sub-quorum consensuses.
-    if best_possible < _LONE_SIGNAL_FLOOR:
+    # 2026-06-11 (review of 12f65ded): metals floor is the same ticker-aware
+    # slate_floor (2) as Guard B — a 2-voter metals consensus IS within the
+    # metals quorum, so relaxation recovering exactly 2 metals voters is
+    # legitimate, not a lone-signal escape.
+    lone_floor = slate_floor if ticker in METALS_SYMBOLS else _LONE_SIGNAL_FLOOR
+    if best_possible < lone_floor:
         return 0.0
 
     # Regime break: relaxation recovers nothing beyond baseline. Keep the
@@ -2744,6 +2762,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         group_gated=group_gated_signals,
         base_gate=gate,
         regime=regime,
+        # 2026-06-11 (review of 12f65ded): ticker-aware so the circuit
+        # breaker uses the same metals quorum (2) as Stage 4.
+        ticker=ticker,
     )
     if relaxation > 0:
         logger.debug(

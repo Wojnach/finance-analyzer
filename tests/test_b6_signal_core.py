@@ -172,6 +172,44 @@ class TestDynamicMinVotersMetals:
 
 
 # --------------------------------------------------------------------------
+# Review of 12f65ded: circuit-breaker relaxation path agrees with Stage 4
+# on the metals quorum (guards A/B/C all ticker-aware)
+# --------------------------------------------------------------------------
+class TestRelaxationMetalsQuorum:
+    # 2 voters, accuracy 0.46: gated at the strict 0.47 gate, recoverable
+    # at the 2pp-relaxed 0.45 gate. No exclusions, trending regime.
+    _VOTES = {"rsi": "BUY", "bb": "BUY"}
+    _ACC = {
+        "rsi": {"accuracy": 0.46, "total": 500},
+        "bb": {"accuracy": 0.46, "total": 500},
+    }
+
+    def test_metals_two_voter_slate_can_relax(self):
+        from portfolio.signal_engine import _compute_gate_relaxation
+        rel = _compute_gate_relaxation(
+            self._VOTES, self._ACC, set(), set(), 0.47,
+            regime="trending-up", ticker="XAG-USD",
+        )
+        # Guards A (quorum 2), B (slate floor 2) and C (lone floor 2) must
+        # all pass for metals; relaxation recovers both voters.
+        assert rel > 0.0, "circuit breaker refused to relax a 2-voter metals slate"
+
+    def test_non_metals_two_voter_slate_still_floored_at_three(self):
+        from portfolio.signal_engine import _compute_gate_relaxation
+        for tkr in ("BTC-USD", "MSTR"):
+            rel = _compute_gate_relaxation(
+                self._VOTES, self._ACC, set(), set(), 0.47,
+                regime="trending-up", ticker=tkr,
+            )
+            assert rel == 0.0, f"2-voter {tkr} slate must not relax (floor 3)"
+        # no ticker == old asset-blind behavior (floor 3)
+        rel = _compute_gate_relaxation(
+            self._VOTES, self._ACC, set(), set(), 0.47, regime="trending-up",
+        )
+        assert rel == 0.0
+
+
+# --------------------------------------------------------------------------
 # Fix 4: applicable count includes ministral on non-crypto
 # --------------------------------------------------------------------------
 class TestApplicableCountMinistral:
