@@ -1019,3 +1019,76 @@ class TestGlobalHaltLifecycle:
         assert gf.roll_session_if_new_day(state) is True
         assert state.halted is False
         assert state.halt_reason is None
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (review fixes for 18d9d0cc): halted-tick cancel retry +
+# stale ARMED carryover cancellation at session roll.
+# ---------------------------------------------------------------------------
+
+
+class TestHaltAndRollReviewFixes:
+    def test_halted_tick_retries_failed_cancels(self, fisher, fake_session):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY9", price=39.0, qty=30,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        fake_session.open_orders.append({"orderId": "BUY9"})
+        # Already-halted session (e.g. the cancel timed out during the
+        # halt transition and the tier stayed ARMED at the broker).
+        fisher.state.halted = True
+        fisher.state.halt_reason = "test_halt"
+        report = fisher.tick(signal_data={}, prices={})
+        assert report["halted"] is True
+        # Countdown starts at 0 → first halted tick re-attempts the cancel.
+        assert "BUY9" in fake_session.cancelled
+        assert inst.armed_buy_tiers() == []
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert "halt_cancel_retry" in log_text
+
+    def test_halted_retry_throttled_between_attempts(
+        self, fisher, fake_session, monkeypatch,
+    ):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY9", price=39.0, qty=30,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        fake_session.open_orders.append({"orderId": "BUY9"})
+        fisher.state.halted = True
+        fisher.state.halt_reason = "test_halt"
+        # Cancel keeps failing — tier must stay ARMED, and the retry must
+        # NOT fire again on the immediately following tick.
+        monkeypatch.setattr(
+            fake_session, "cancel_order",
+            lambda order_id: {"orderRequestStatus": "ERROR"},
+        )
+        fisher.tick(signal_data={}, prices={})
+        assert inst.armed_buy_tiers()  # still armed after failed retry
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert log_text.count("halt_cancel_retry") == 1
+        fisher.tick(signal_data={}, prices={})  # tick 2: countdown holds
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert log_text.count("halt_cancel_retry") == 1
+
+    def test_session_roll_cancels_stale_armed_carryover(
+        self, fisher, fake_session,
+    ):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="OLD1", price=39.0, qty=30,
+            placed_ts="2020-01-01T08:00:00Z",
+        ))
+        inst.sell_ladder.append(TierOrder(
+            tier=0, order_id="OLDSELL1", price=41.0, qty=30,
+            placed_ts="2020-01-01T08:00:00Z",
+        ))
+        fisher.state.session_id = "2020-01-01"  # force a roll
+        fisher.tick(signal_data={}, prices={})
+        # Carried BUY cancelled via the verified path; sell only logged.
+        assert "OLD1" in fake_session.cancelled
+        assert "OLDSELL1" not in fake_session.cancelled
+        assert inst.armed_buy_tiers() == []
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert "stale_armed_carryover" in log_text

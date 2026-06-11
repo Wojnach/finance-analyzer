@@ -446,3 +446,28 @@ class TestEodCloseTimeResolver:
         now = _dt.datetime(2026, 6, 12, 10, 0, tzinfo=_dt.timezone.utc)
         mins = gf.minutes_until_eod(now)
         assert abs(mins - 595.0) < 0.01
+
+
+class TestEodCloseTimePlausibilityBand:
+    """2026-06-12 (review fix 18d9d0cc #3): early-close accepted only in
+    [12:00, 17:00) — garbage like 09:00 must NOT gate the grid all day."""
+
+    def test_implausibly_early_close_treated_as_fetch_failure(
+        self, _reset_close_cache, tmp_path,
+    ):
+        log_file = tmp_path / "decisions.jsonl"
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"marketPlace": {"todayClosingTime": "09:00"}},
+            log_path=log_file,
+        )
+        assert cutoff == (21, 50)  # fallback, not 08:55
+        entries = log_file.read_text(encoding="utf-8")
+        assert "eod_close_time_fallback" in entries
+        assert "implausible" in entries
+
+    def test_boundary_noon_close_accepted(self, _reset_close_cache, tmp_path):
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"marketPlace": {"todayClosingTime": "12:00"}},
+            log_path=tmp_path / "decisions.jsonl",
+        )
+        assert cutoff == (11, 55)

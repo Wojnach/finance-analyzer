@@ -304,12 +304,25 @@ _EOD_CLOSE_MARGIN_MIN = 5
 _EOD_FALLBACK_HOUR = 21
 _EOD_FALLBACK_MINUTE = 50  # 21:55 default minus the 5-min safety margin
 _EOD_EARLY_CLOSE_THRESHOLD_MIN = 17 * 60  # < 17:00 → treat as half-day
+# 2026-06-12 (review fix 18d9d0cc #3): plausibility floor for the early-
+# close detector. Swedish half-days close at 13:00; a garbage
+# todayClosingTime like 09:00 would otherwise set the cutoff to 08:55 and
+# kill the grid for the whole day. Only [12:00, 17:00) is accepted as a
+# genuine early close — anything below the floor is treated as a fetch
+# failure (21:50 fallback + eod_close_time_fallback log).
+_EOD_EARLY_CLOSE_MIN_PLAUSIBLE_MIN = 12 * 60
 _EOD_CLOSE_FETCH_RETRY_S = 1800.0  # re-try a failed fetch after 30 min
 
 _close_time_lock = threading.Lock()
 _close_time_cache: dict[str, tuple[int, int]] = {}  # local date -> cutoff
 _close_fetch_failed_mono: dict[str, float] = {}  # local date -> last fail ts
 _close_fallback_logged: set[str] = set()  # dates where fallback was logged
+
+# 2026-06-12 (review fix 18d9d0cc #1): while halted, re-attempt cancelling
+# any still-ARMED buy tier every N ticks (~N minutes on the 60s loop). A
+# cancel that timed out during the halt transition would otherwise rest at
+# the broker until the EOD window.
+_HALT_CANCEL_RETRY_TICKS = 5
 
 
 def _parse_hhmm(raw: Any) -> Optional[tuple[int, int]]:
@@ -406,6 +419,15 @@ def resolve_eod_cutoff_hm(
         close_hm = _extract_today_closing_time(fetch())
         if close_hm is None:
             fetch_error = "todayClosingTime missing/unparseable in payload"
+        elif (close_hm[0] * 60 + close_hm[1]) < _EOD_EARLY_CLOSE_MIN_PLAUSIBLE_MIN:
+            # 2026-06-12 (review fix 18d9d0cc #3): implausibly early close
+            # (Swedish half-days close 13:00) — treat as a fetch failure
+            # rather than letting a garbage value gate the grid all day.
+            fetch_error = (
+                f"implausible todayClosingTime "
+                f"{close_hm[0]:02d}:{close_hm[1]:02d} (< 12:00)"
+            )
+            close_hm = None
     except Exception as exc:  # noqa: BLE001 — any fetch failure → fallback
         fetch_error = f"{type(exc).__name__}: {exc}"
 
@@ -1109,6 +1131,12 @@ class GridFisher:
 
         # Rate-limit state — sliding window of last placement timestamps.
         self._recent_places: list[float] = []
+
+        # 2026-06-12 (review fix 18d9d0cc #1): countdown for re-attempting
+        # cancellation of buy tiers still ARMED while the session is halted
+        # (a cancel that timed out during the halt transition). 0 → retry
+        # on the next halted tick, then every _HALT_CANCEL_RETRY_TICKS.
+        self._halt_cancel_retry_countdown = 0
 
         # Live-cash gate. When ``account_id`` is provided the tick consults
         # ``session.get_buying_power(account_id)`` and clamps the effective
@@ -1856,6 +1884,27 @@ class GridFisher:
         # don't get clobbered mid-cycle.
         if roll_session_if_new_day(self.state):
             self._log("session_roll", session_id=self.state.session_id)
+            # 2026-06-12 (review fix 18d9d0cc #4): tiers carried over ARMED
+            # into a new session (e.g. a halted session that crashed before
+            # the EOD sweep) reference yesterday's day orders at the broker.
+            # Don't leave them for the heuristic reconcile to guess at —
+            # log the carryover and cancel carried BUY tiers via the
+            # verified-cancel path (only flips to CANCELLED on confirmed
+            # broker SUCCESS). Sell tiers are logged but not state-cancelled
+            # here: their day orders expired overnight and reconcile settles
+            # them against live volume; blindly dropping them would lose the
+            # exit-tracking for carried inventory.
+            for inst in self.state.by_instrument.values():
+                carried_buys = inst.armed_buy_tiers()
+                carried_sells = inst.armed_sell_tiers()
+                if not carried_buys and not carried_sells:
+                    continue
+                self._log("stale_armed_carryover", ob_id=inst.ob_id,
+                          ticker=inst.ticker,
+                          armed_buys=len(carried_buys),
+                          armed_sells=len(carried_sells))
+                if carried_buys:
+                    report["cancels"] += self.cancel_armed_buys(inst)
 
         # Reconcile state with live Avanza before deciding new actions.
         # Wrapping the read calls in _safe_session_call moves the sync
@@ -1983,6 +2032,26 @@ class GridFisher:
         report["halted"] = self.state.halted
         if self.state.halted:
             report["halt_reason"] = self.state.halt_reason
+            # 2026-06-12 (review fix 18d9d0cc #1): a cancel that timed out
+            # during the halt transition leaves its tier ARMED at the broker
+            # — and the `if not state.halted` guard above never re-enters.
+            # Re-attempt cancellation of any still-ARMED buy tier while
+            # halted. Idempotent; throttled to every
+            # _HALT_CANCEL_RETRY_TICKS ticks so the per-tier cancel_failed
+            # logging inside cancel_armed_buys doesn't fire every 60s for
+            # the rest of the session.
+            if any(inst.armed_buy_tiers()
+                   for inst in self.state.by_instrument.values()):
+                self._halt_cancel_retry_countdown -= 1
+                if self._halt_cancel_retry_countdown <= 0:
+                    self._halt_cancel_retry_countdown = _HALT_CANCEL_RETRY_TICKS
+                    retry_cancelled = 0
+                    for inst in self.state.by_instrument.values():
+                        if inst.armed_buy_tiers():
+                            retry_cancelled += self.cancel_armed_buys(inst)
+                    report["cancels"] += retry_cancelled
+                    self._log("halt_cancel_retry",
+                              cancelled_buys=retry_cancelled)
 
         # EOD handling — only sweep if we have a remaining-minutes value.
         # 2026-06-12 (audit B4 fix 3): runs BEFORE the halt early-return.

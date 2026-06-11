@@ -1118,3 +1118,67 @@ class TestClosingSellMinimumExemption:
         with pytest.raises(ValueError, match="below minimum 1000"):
             place_sell_order("123456", 5.0, 10)
         assert not mock_post.called
+
+
+class TestMutationTimeoutEscalation:
+    """2026-06-12 (review fix 18d9d0cc #2): a timed-out mutating call may
+    still have succeeded at the broker — must surface a critical entry."""
+
+    def test_api_post_timeout_records_mutation_critical(
+        self, _reset_executor_stats, monkeypatch,
+    ):
+        import portfolio.claude_gate as cg
+
+        events: list[tuple] = []
+        monkeypatch.setattr(
+            cg, "record_critical_error",
+            lambda *a, **k: events.append(a) or True,
+        )
+        avz._last_mutation_timeout_escalation_mono = 0.0
+
+        def _timeout(op, *, op_name):
+            raise avz.AvanzaSessionTimeout(f"{op_name} timed out")
+
+        monkeypatch.setattr(avz, "_with_browser_recovery", _timeout)
+        with pytest.raises(avz.AvanzaSessionTimeout):
+            avz.api_post("/_api/trading-critical/rest/order/new", {"x": 1})
+        assert any(a[0] == "avanza_mutation_timeout" for a in events)
+
+    def test_api_delete_timeout_records_mutation_critical(
+        self, _reset_executor_stats, monkeypatch,
+    ):
+        import portfolio.claude_gate as cg
+
+        events: list[tuple] = []
+        monkeypatch.setattr(
+            cg, "record_critical_error",
+            lambda *a, **k: events.append(a) or True,
+        )
+        avz._last_mutation_timeout_escalation_mono = 0.0
+
+        def _timeout(op, *, op_name):
+            raise avz.AvanzaSessionTimeout(f"{op_name} timed out")
+
+        monkeypatch.setattr(avz, "_with_browser_recovery", _timeout)
+        with pytest.raises(avz.AvanzaSessionTimeout):
+            avz.api_delete("/_api/trading/stoploss/1/2")
+        assert any(a[0] == "avanza_mutation_timeout" for a in events)
+
+    def test_get_timeout_does_not_record_mutation_critical(
+        self, _reset_executor_stats, monkeypatch,
+    ):
+        import portfolio.claude_gate as cg
+
+        events: list[tuple] = []
+        monkeypatch.setattr(
+            cg, "record_critical_error",
+            lambda *a, **k: events.append(a) or True,
+        )
+
+        def _timeout(op, *, op_name):
+            raise avz.AvanzaSessionTimeout(f"{op_name} timed out")
+
+        monkeypatch.setattr(avz, "_with_browser_recovery", _timeout)
+        with pytest.raises(avz.AvanzaSessionTimeout):
+            avz.api_get("/_api/position-data/positions")
+        assert not any(a[0] == "avanza_mutation_timeout" for a in events)

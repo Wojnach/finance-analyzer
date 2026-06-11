@@ -108,6 +108,35 @@ _last_call_stats: dict[str, Any] = {}
 _consecutive_failures = 0
 _last_queue_stall_escalation_mono = 0.0
 _last_failure_escalation_mono = 0.0
+_last_mutation_timeout_escalation_mono = 0.0
+
+
+def _record_mutation_timeout(verb: str, path: str) -> None:
+    """2026-06-12 (review fix 18d9d0cc #2): a timed-out MUTATING call
+    (POST/DELETE) may STILL succeed at the broker — the worker thread
+    cannot be interrupted mid-request, so the order/cancel can land after
+    we stopped waiting. Local state then doesn't know about a live broker
+    order until the next reconcile pass picks reality up. This entry makes
+    that residual risk visible in critical_errors.jsonl instead of silent.
+    Critical entries are cooled down (warning log always fires)."""
+    global _last_mutation_timeout_escalation_mono
+    logger.warning(
+        "avanza_session: %s %s timed out — the mutation may still have "
+        "been applied at the broker; reconcile next tick", verb, path,
+    )
+    now_mono = time.monotonic()
+    with _stats_lock:
+        if (now_mono - _last_mutation_timeout_escalation_mono
+                <= _ESCALATION_COOLDOWN_S):
+            return
+        _last_mutation_timeout_escalation_mono = now_mono
+    _record_critical(
+        "avanza_mutation_timeout",
+        f"{verb} {path} timed out after {_SESSION_CALL_TIMEOUT_S:.0f}s — "
+        "the order/cancel may still exist at the broker; verify via "
+        "reconcile / open-orders before re-issuing",
+        {"verb": verb, "path": path},
+    )
 
 
 def _ensure_session_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -606,7 +635,13 @@ def api_post(path: str, payload: dict) -> Any:
                 raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
             return {"raw": body}
 
-    return _with_browser_recovery(_op, op_name=f"POST {path}")
+    try:
+        return _with_browser_recovery(_op, op_name=f"POST {path}")
+    except AvanzaSessionTimeout:
+        # 2026-06-12 (review fix 18d9d0cc #2): POST is mutating — see
+        # _record_mutation_timeout for the residual broker-side risk.
+        _record_mutation_timeout("POST", path)
+        raise
 
 
 def api_delete(path: str) -> Any:
@@ -641,7 +676,13 @@ def api_delete(path: str) -> Any:
             )
         return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
 
-    return _with_browser_recovery(_op, op_name=f"DELETE {path}")
+    try:
+        return _with_browser_recovery(_op, op_name=f"DELETE {path}")
+    except AvanzaSessionTimeout:
+        # 2026-06-12 (review fix 18d9d0cc #2): DELETE is mutating — see
+        # _record_mutation_timeout for the residual broker-side risk.
+        _record_mutation_timeout("DELETE", path)
+        raise
 
 
 # --- Trading convenience functions ---
