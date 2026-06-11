@@ -25,7 +25,9 @@ implementing any batch.
 | B2 live-incident signals | DONE, merged `0d0d2e94`, retro-reviewed, **pushed** |
 | plan + premortem + retro fixes | DONE, merged `bb72e445`, **pushed** |
 | B3 prophecy | DONE — `68546e7d` + review fixes `30d38f95`, merged to main `aa667166`, reviewed, **pushed** |
-| B4-B12 | Not started — specs in PLAN.md |
+| B4 metals | DONE — `18d9d0cc` + `f1e6384c`, merged, reviewed, **pushed** |
+| B5 orchestration | DONE — `1c93e174`, merged, self-reviewed, **pushed** |
+| B6-B12 | Not started — B6 findings pre-extracted (re-extract via awk if /tmp cleared) |
 
 Both `main` and the branch are pushed to origin. **Next session starts directly at B4.**
 
