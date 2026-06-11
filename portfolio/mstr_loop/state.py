@@ -101,13 +101,29 @@ class BotState:
 
 
 def default_state() -> BotState:
-    """Return a fresh state with the configured starting cash per phase."""
-    cash = 0.0
+    """Return a fresh state with the configured starting cash per phase.
+
+    2026-06-11 (audit B8 fix 2): live cash sync was claimed in comments but
+    never implemented anywhere in portfolio/mstr_loop/. A live phase that
+    silently started at cash_sek=0.0 would refuse every BUY forever
+    (_notional_for_entry returns 0), i.e. a dead bot masquerading as a
+    running one. Real sync from Avanza buying power is out of scope (shadow
+    phase has 90d to go), so we fail LOUD instead of failing silent: refuse
+    to construct a fresh live state until the sync is implemented. A
+    pre-seeded state file is the explicit escape hatch (load_state reads it
+    directly and never calls default_state()).
+    """
     if config.PHASE == "paper":
         cash = float(config.INITIAL_PAPER_CASH_SEK)
     elif config.PHASE == "live":
-        # Live cash is synced from Avanza at loop startup; default to 0 here
-        # so a pre-sync entry attempt is blocked by the Kelly cash-check.
+        raise RuntimeError(
+            "mstr_loop PHASE=live has no implemented Avanza cash sync. "
+            "A fresh live state would start at 0 SEK and refuse every BUY "
+            "silently. Implement startup cash sync from Avanza buying power "
+            "(or seed data/mstr_loop_state.json with a real cash_sek before "
+            "starting) before flipping MSTR_LOOP_PHASE=live."
+        )
+    else:  # shadow
         cash = 0.0
     return BotState(
         cash_sek=cash,

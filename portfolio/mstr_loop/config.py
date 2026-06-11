@@ -16,7 +16,18 @@ Phase = Literal["shadow", "paper", "live"]
 # ---------------------------------------------------------------------------
 # Phase switch (override with MSTR_LOOP_PHASE env var)
 # ---------------------------------------------------------------------------
+_VALID_PHASES = ("shadow", "paper", "live")
 PHASE: Phase = (os.environ.get("MSTR_LOOP_PHASE") or "shadow").strip()  # type: ignore[assignment]
+# 2026-06-11 (audit B8 fix 4): validate at import. An unknown/typo'd phase
+# (e.g. 'Paper', 'prod', trailing junk) previously slipped past every
+# execution branch — _handle_partial_sell in particular had no else and
+# would mutate position + P&L state with no order placed and no journal
+# record. Fail loud at startup instead of silently corrupting state.
+if PHASE not in _VALID_PHASES:
+    raise ValueError(
+        f"MSTR_LOOP_PHASE={PHASE!r} is not a valid phase. "
+        f"Expected one of {_VALID_PHASES}."
+    )
 
 # ---------------------------------------------------------------------------
 # Instruments (live-verified 2026-04-17)

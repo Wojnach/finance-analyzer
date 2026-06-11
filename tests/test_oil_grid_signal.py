@@ -275,3 +275,75 @@ class TestCachedOrRefresh:
         with patch.object(feed, "compute_signal", return_value=fresh):
             result = feed.get_cached_or_refresh()
         assert result["direction"] == "SHORT"
+
+
+# ---------------------------------------------------------------------------
+# bar_ts / fetched_ts split (audit B8 premortem hook 4)
+# ---------------------------------------------------------------------------
+class TestTimestampSplit:
+    def test_compute_signal_emits_both_timestamps(self):
+        df = _make_uptrending_df(n=100)
+        with patch.object(feed, "fetch_klines", return_value=df):
+            record = feed.compute_signal()
+        assert "fetched_ts" in record
+        assert "bar_ts" in record
+        # ts retained as a back-compat alias of fetched_ts
+        assert record["ts"] == record["fetched_ts"]
+        # bar_ts reflects the LAST bar of the frame, not "now".
+        last_idx = df.index[-1].strftime("%Y-%m-%dT%H:%M:%SZ")
+        assert record["bar_ts"] == last_idx
+
+    def test_bar_ts_differs_from_fetched_ts_on_lagged_feed(self):
+        # Frame ends well in the past => bar_ts (data age) is old even though
+        # fetched_ts (cache freshness) is now.
+        df = _make_uptrending_df(n=100)  # indexed from 2026-05-11
+        with patch.object(feed, "fetch_klines", return_value=df):
+            record = feed.compute_signal()
+        assert record["bar_ts"].startswith("2026-05")
+        assert record["fetched_ts"] != record["bar_ts"]
+
+    def test_fetch_failure_has_null_bar_ts(self):
+        with patch.object(feed, "fetch_klines",
+                          side_effect=SourceUnavailableError("down")):
+            record = feed.compute_signal()
+        assert record["bar_ts"] is None
+        assert "fetched_ts" in record
+
+    def test_cache_hits_when_bar_lags_but_fetch_is_fresh(self, tmp_path, monkeypatch):
+        """Cache TTL keys off fetched_ts, NOT bar_ts. A bar that is >5 min
+        old must still serve from cache as long as the FETCH is fresh —
+        otherwise the 5-min cache permanently expires against the
+        10-15-min-lagging yfinance feed and the oil leg hammers Yahoo."""
+        cache_file = tmp_path / "oil_grid_signal.json"
+        fresh_fetch = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        cache_file.write_text(json.dumps({
+            "ts": fresh_fetch,
+            "fetched_ts": fresh_fetch,          # fetched just now
+            "bar_ts": "2020-01-01T00:00:00Z",   # ancient bar (>5 min lag)
+            "underlying": "BZ=F",
+            "direction": "LONG",
+            "confidence": 0.7,
+            "meta": {},
+        }))
+        monkeypatch.setattr(feed, "SIGNAL_FILE", str(cache_file))
+        with patch.object(feed, "compute_signal") as mock_compute:
+            result = feed.get_cached_or_refresh()
+        mock_compute.assert_not_called()       # served from cache
+        assert result["direction"] == "LONG"
+
+    def test_legacy_ts_only_cache_still_keys_off_fetch(self, tmp_path, monkeypatch):
+        """Old cache files (pre-split) have only `ts` — TTL must fall back
+        to it so they keep working."""
+        cache_file = tmp_path / "oil_grid_signal.json"
+        fresh = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        cache_file.write_text(json.dumps({
+            "ts": fresh, "underlying": "BZ=F",
+            "direction": "SHORT", "confidence": 0.6, "meta": {},
+        }))
+        monkeypatch.setattr(feed, "SIGNAL_FILE", str(cache_file))
+        with patch.object(feed, "compute_signal") as mock_compute:
+            result = feed.get_cached_or_refresh()
+        mock_compute.assert_not_called()
+        assert result["direction"] == "SHORT"

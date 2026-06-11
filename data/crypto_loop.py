@@ -146,7 +146,19 @@ def fetch_live_prices() -> dict[str, float]:
             try:
                 r = requests.get(_BINANCE_24HR, params={"symbol": sym}, timeout=10)
                 if r.status_code == 200:
-                    out[ticker] = float(r.json().get("lastPrice", 0))
+                    last = float(r.json().get("lastPrice", 0))
+                    # 2026-06-11 (audit B8 fix 5): mirror the oil_loop guard
+                    # (oil_loop.py `if last > 0`). A missing/zero lastPrice in
+                    # a 200 response previously fed price 0.0 into the swing
+                    # trader (stop/TP/P&L sees -100% on open positions) and
+                    # into fast_tick_check as the reference (ZeroDivisionError
+                    # next tick). Treat 0/negative as a fetch failure: skip the
+                    # ticker so the caller leaves it untouched.
+                    if last > 0:
+                        out[ticker] = last
+                    else:
+                        logger.warning("price fetch %s: non-positive lastPrice "
+                                       "%r — treating as failure", ticker, last)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("price fetch %s: %s", ticker, exc)
     except ImportError:

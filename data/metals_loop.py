@@ -7658,11 +7658,16 @@ Positions: {pos_summary}{prob_summary}""")
                             from portfolio.oil_grid_signal import get_cached_or_refresh
                             _oil_sig = get_cached_or_refresh()
                             if _oil_sig and _oil_sig.get("direction"):
+                                # 2026-06-11 (audit B8 premortem hook 4):
+                                # surface bar_ts (the underlying bar's age, not
+                                # the fetch/cache time) so grid_fisher can judge
+                                # data freshness on the real-money oil leg.
                                 _grid_sigs["OIL-USD"] = {
                                     "direction": _oil_sig.get("direction"),
                                     "confidence": float(
                                         _oil_sig.get("confidence") or 0.0
                                     ),
+                                    "bar_ts": _oil_sig.get("bar_ts"),
                                 }
                         except Exception:
                             logger.debug(

@@ -166,7 +166,12 @@ def _handle_buy(decision: Decision, bundle: MstrBundle, state: BotState) -> bool
         ok = _live_place_buy(decision, cert_ask, units)
         if not ok:
             return False
-        state.cash_sek -= total_cost  # live cash will re-sync next cycle
+        # 2026-06-11 (audit B8 fix 2): deduct the estimated cost locally.
+        # There is NO Avanza cash re-sync (the old comment claiming one was
+        # false — see state.default_state). Live cash therefore drifts from
+        # broker truth on fills/courtage until a real sync is implemented;
+        # this is documented as out-of-scope while shadow phase runs.
+        state.cash_sek -= total_cost
         _record_trade("BUY", decision, bundle, cert_ask, units, total_cost)
     else:
         logger.error("execution: unknown PHASE %r", config.PHASE)
@@ -315,6 +320,13 @@ def _handle_partial_sell(
         state.cash_sek += proceeds
         _record_trade("PARTIAL_SELL", d, bundle, cert_bid, units_to_sell, proceeds,
                       extra={"pnl_sek": pnl_sek, "tranche_pct": tranche_pct})
+    else:
+        # 2026-06-11 (audit B8 fix 4): defence-in-depth. config.PHASE is now
+        # validated at import, but never fall through to mutate position +
+        # P&L state without an execution branch having fired.
+        logger.error("execution: unknown PHASE %r in partial sell — no-op",
+                     config.PHASE)
+        return False
 
     pos.units -= units_to_sell
     pos.units_sold += units_to_sell
@@ -460,13 +472,33 @@ def _estimate_cert_bid(bundle: MstrBundle, pos: Position) -> float:
 # ----------------------------------------------------------------------
 # Live-mode Avanza API — lazy import so shadow/paper has no Playwright dep
 # ----------------------------------------------------------------------
+def _resolve_cert_ob_id(direction: str) -> str | None:
+    """Map a trade direction to its Avanza cert ob_id.
+
+    2026-06-11 (audit B8 fix 1): live SHORT entries previously priced and
+    sized off BULL_MSTR_OB_ID because _live_fetch_cert_ask ignored its
+    `direction` arg ('v1 LONG-only'). mean_reversion opens SHORTs on the
+    BEAR cert, so a live SHORT placed a limit on the BEAR instrument at the
+    BULL ask with units derived from the BULL price — wrong notional and
+    wrong limit. Resolve the ob_id at the source so quote/price/size all
+    agree, mirroring _compute_shadow_cert_price.
+    """
+    if direction == "LONG":
+        return config.BULL_MSTR_OB_ID
+    return config.BEAR_MSTR_OB_ID  # None until resolved live (fail-safe)
+
+
 def _live_fetch_cert_ask(direction: str) -> float:
     try:
         from portfolio.avanza_session import get_quote
     except ImportError:
         logger.exception("execution: avanza_session unavailable in live mode")
         return 0.0
-    ob_id = config.BULL_MSTR_OB_ID  # v1 LONG-only
+    ob_id = _resolve_cert_ob_id(direction)
+    if not ob_id:
+        logger.error("execution: no cert ob_id for direction %r (BEAR cert "
+                     "unresolved?) — refusing live quote", direction)
+        return 0.0
     try:
         q = get_quote(ob_id)
         return float(q.get("sell") or 0)  # "sell" = ask at Avanza

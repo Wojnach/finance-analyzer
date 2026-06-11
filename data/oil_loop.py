@@ -3,8 +3,11 @@
 Mirrors `data/crypto_loop.py` (which itself mirrors `data/metals_loop.py`)
 for the oil subsystem. 60-second cycle:
   1. Acquire singleton lock (one process at a time).
-  2. Fetch live WTI price via portfolio.price_source (CL=F → Binance FAPI
-     real-time, with yfinance fallback).
+  2. Fetch WTI price via portfolio.price_source. NOTE (2026-06-11, audit B8
+     fix 8): CL=F/BZ=F route to yfinance only — Binance has NO oil perpetual
+     (see price_source._YFINANCE_LAST_RESORT). The feed lags ~10-15 min; it
+     is NOT real-time. Earlier headers wrongly claimed "Binance FAPI
+     real-time"; freshness reasoning must assume the lag.
   3. Read the latest Layer 1 signal snapshot from data/agent_summary*.json.
   4. Run OilSwingTrader.evaluate_and_execute(prices, signal_data).
   5. Sleep CYCLE_SECONDS, with embedded fast-tick monitor every 10s for

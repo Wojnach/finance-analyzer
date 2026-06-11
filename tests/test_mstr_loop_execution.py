@@ -213,3 +213,103 @@ def test_notional_paper_insufficient_cash_returns_zero(monkeypatch):
     monkeypatch.setattr(config, "MIN_TRADE_SEK", 1000)
     # cash*0.95 = 855 < 1000 floor → infeasible
     assert execution._notional_for_entry(BotState(cash_sek=900)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Cert selection — SHORT must quote/price/size the BEAR cert (audit B8 fix 1)
+# ---------------------------------------------------------------------------
+def test_resolve_cert_ob_id_long_is_bull(monkeypatch):
+    monkeypatch.setattr(config, "BULL_MSTR_OB_ID", "BULL123")
+    monkeypatch.setattr(config, "BEAR_MSTR_OB_ID", "BEAR456")
+    assert execution._resolve_cert_ob_id("LONG") == "BULL123"
+
+
+def test_resolve_cert_ob_id_short_is_bear(monkeypatch):
+    monkeypatch.setattr(config, "BULL_MSTR_OB_ID", "BULL123")
+    monkeypatch.setattr(config, "BEAR_MSTR_OB_ID", "BEAR456")
+    assert execution._resolve_cert_ob_id("SHORT") == "BEAR456"
+
+
+def test_live_short_quotes_bear_cert(monkeypatch):
+    """Live SHORT ask must be pulled from the BEAR cert, not the BULL cert."""
+    monkeypatch.setattr(config, "PHASE", "live")
+    monkeypatch.setattr(config, "BULL_MSTR_OB_ID", "BULL123")
+    monkeypatch.setattr(config, "BEAR_MSTR_OB_ID", "BEAR456")
+
+    quotes = {"BULL123": {"sell": 80.0}, "BEAR456": {"sell": 25.0}}
+    seen = {}
+
+    def _fake_get_quote(ob_id):
+        seen["ob_id"] = ob_id
+        return quotes[ob_id]
+
+    import portfolio.avanza_session as av
+    monkeypatch.setattr(av, "get_quote", _fake_get_quote, raising=False)
+
+    ask = execution._live_fetch_cert_ask("SHORT")
+    assert seen["ob_id"] == "BEAR456"   # quoted the BEAR instrument
+    assert ask == 25.0                  # BEAR price, not the 80.0 BULL price
+
+
+def test_live_short_sizes_off_bear_price(monkeypatch):
+    """Units for a SHORT entry derive from the BEAR ask, not the BULL ask."""
+    monkeypatch.setattr(config, "PHASE", "live")
+    monkeypatch.setattr(config, "BULL_MSTR_OB_ID", "BULL123")
+    monkeypatch.setattr(config, "BEAR_MSTR_OB_ID", "BEAR456")
+    monkeypatch.setattr(config, "MIN_TRADE_SEK", 1000)
+    monkeypatch.setattr(config, "LOW_CASH_THRESHOLD_SEK", 5000)
+    monkeypatch.setattr(config, "POSITION_SIZE_PCT", 30)
+
+    quotes = {"BULL123": {"sell": 80.0}, "BEAR456": {"sell": 25.0}}
+    placed = {}
+
+    def _fake_get_quote(ob_id):
+        return quotes[ob_id]
+
+    def _fake_place_buy(ob_id, price, volume):
+        placed.update({"ob_id": ob_id, "price": price, "volume": volume})
+        return {"orderRequestStatus": "SUCCESS"}
+
+    import portfolio.avanza_session as av
+    monkeypatch.setattr(av, "get_quote", _fake_get_quote, raising=False)
+    monkeypatch.setattr(av, "place_buy_order", _fake_place_buy, raising=False)
+
+    state = BotState(cash_sek=10_000)
+    decision = Decision(
+        strategy_key="mean_reversion", action="BUY", direction="SHORT",
+        cert_ob_id="BEAR456", rationale="short test",
+        notional_sek_hint=2500.0,
+    )
+    ok = execution._handle_buy(decision, _mk_bundle(), state)
+    assert ok is True
+    # 2500 / 25.0 (BEAR) = 100 units; would be 2500/80=31 if BULL-priced.
+    assert placed["ob_id"] == "BEAR456"
+    assert placed["price"] == 25.0
+    assert placed["volume"] == 100
+
+
+def test_live_short_refuses_when_bear_unresolved(monkeypatch):
+    """No BEAR ob_id => live SHORT quote returns 0 (fail-safe), no order."""
+    monkeypatch.setattr(config, "PHASE", "live")
+    monkeypatch.setattr(config, "BULL_MSTR_OB_ID", "BULL123")
+    monkeypatch.setattr(config, "BEAR_MSTR_OB_ID", None)
+    assert execution._live_fetch_cert_ask("SHORT") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# PHASE defence-in-depth in partial-sell (audit B8 fix 4)
+# ---------------------------------------------------------------------------
+def test_partial_sell_unknown_phase_is_noop(monkeypatch):
+    from portfolio.mstr_loop.state import Position
+    monkeypatch.setattr(config, "PHASE", "bogus")  # bypass import validation
+    state = BotState(cash_sek=0)
+    pos = Position(
+        strategy_key="momentum_rider", direction="LONG", cert_ob_id="X",
+        entry_underlying_price=160.0, entry_cert_price=100.0,
+        units=9, entry_units=9, entry_ts="2026-04-18T16:00:00+00:00",
+    )
+    state.add_position(pos)
+    ok = execution._handle_partial_sell(pos, 3, 2.0, _mk_bundle(), state)
+    assert ok is False
+    assert pos.units == 9            # NOT mutated
+    assert state.total_pnl_sek == 0  # NOT mutated
