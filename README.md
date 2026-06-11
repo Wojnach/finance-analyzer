@@ -1,17 +1,21 @@
 # Portfolio Intelligence — Trading Agent
 
-Two-layer automated trading intelligence system. Layer 1 (Python) collects market data and computes 30 signals every 60 seconds. Layer 2 (Claude Code) makes trading decisions when meaningful changes are detected.
+> Facts last reconciled to code 2026-06-11. For the authoritative,
+> continuously-maintained system description see `CLAUDE.md` and
+> `docs/SYSTEM_OVERVIEW.md`.
+
+Two-layer automated trading intelligence system. Layer 1 (Python) collects market data and computes 15 active signals every 600 seconds. Layer 2 (Claude Code) makes trading decisions when meaningful changes are detected.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  LAYER 1: PYTHON FAST LOOP (every 60s)                          │
+│  LAYER 1: PYTHON LOOP (every 600s)                              │
 │                                                                   │
-│  Fetch prices → Compute 30 signals → Detect triggers             │
+│  Fetch prices → Compute 15 active signals → Detect triggers      │
 │  Binance (crypto) · Alpaca (stocks) · Avanza (Nordic)            │
 │                                                                   │
-│  NEVER trades. NEVER sends Telegram. Data collection only.       │
+│  NEVER trades. Sends error alerts + 4h/morning digests only.     │
 └──────────────┬───────────────────────────────────────────────────┘
                │ (only when something meaningful changes)
                ▼
@@ -20,34 +24,36 @@ Two-layer automated trading intelligence system. Layer 1 (Python) collects marke
 │                                                                   │
 │  Reads all signals + portfolio state → Analyzes → Decides        │
 │  Manages two portfolios: Patient (conservative) & Bold (aggro)   │
-│  Sends Telegram notifications. Sole authority on trades.         │
+│  Sole authority on TRADE notifications. Layer 1 sends ops alerts. │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Instruments (19 Tier 1 + 3 Tier 2 + 4 Tier 3)
+## Instruments (5 Tier 1 + 3 Tier 2 + 3 Tier 3)
 
-- **Crypto**: BTC-USD, ETH-USD (Binance, 30 signals, 24/7)
-- **Metals**: XAU-USD, XAG-USD (Binance FAPI, 30 signals)
-- **US Stocks**: 15 tickers via Alpaca IEX (NVDA, AMD, AAPL, GOOGL, META, TSM, PLTR, AMZN, AVGO, MU, SOUN, SMCI, TTWO, VRT, LMT)
+- **Crypto**: BTC-USD, ETH-USD (Binance spot, 24/7)
+- **Metals**: XAU-USD, XAG-USD (Binance FAPI, 24/7)
+- **US Stocks**: MSTR (Alpaca)
 - **Nordic**: SAAB-B, SEB-C, INVE-B (Avanza, price-only)
-- **Warrants**: XBT-TRACKER, ETH-TRACKER, MINI-SILVER, MINI-TSMC (Avanza price + underlying's signals)
+- **Warrants**: XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x) (Avanza price + underlying's signals)
 
-## 30 Signals (8 Core + 19 Enhanced + 3 AI)
+(All US stocks except MSTR removed Mar 15 / Apr 09 2026; MINI-TSMC retired with TSM.)
 
-| # | Signal | Type | Notes |
-|---|--------|------|-------|
-| 1-4 | RSI, MACD, EMA, BB | Core TA | Classic indicators |
-| 5 | Fear & Greed | Core | alternative.me (crypto), VIX (stocks) |
-| 6 | Sentiment | Core | CryptoBERT / Trading-Hero-LLM |
-| 7 | ML Classifier | Core | **DISABLED** (28.2% accuracy) |
-| 8 | Funding Rate | Core | **DISABLED** (27.0% accuracy) |
-| 9 | Volume | Core | Spike >1.5x + direction |
-| 10 | Ministral-8B | Core | LLM reasoning, crypto only |
-| 11 | Custom LoRA | Core | **DISABLED** (20.9% accuracy) |
-| 12-27 | Enhanced Composite | 16 modules | Trend, Momentum, Smart Money, News, Econ Calendar, etc. |
-| 28 | Forecast | AI | Kronos + Chronos time-series models |
-| 29 | Claude Fundamental | AI | Three-tier LLM cascade (Haiku/Sonnet/Opus) |
-| 30 | Futures Flow | AI | Binance FAPI futures structure (crypto only) |
+## Signals (15 active of 89 tracked; reconciled 2026-06-11)
+
+89 signal names are tracked, 76 are force-HOLD via `DISABLED_SIGNALS`, leaving
+15 active globally (plus 2 per-ticker overrides). The active set as of
+2026-06-11: RSI, BB, Fear & Greed, Ministral-8B, Qwen3-8B, Momentum, Mean
+Reversion, News Event, Econ Calendar, Crypto Macro, COT Positioning, On-Chain
+BTC, Statistical Jump Regime, Drift Regime Gate, Amihud Illiquidity Regime.
+
+The active roster changes as accuracy gates promote/disable signals — see the
+**Signal System** section of `CLAUDE.md` for the live list and derive it with:
+
+```bash
+python -c "from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS; print([s for s in SIGNAL_NAMES if s not in DISABLED_SIGNALS])"
+```
+
+Forecast (Chronos) was fully disabled 2026-05-12 and Kronos retired 2026-04-21.
 
 ## Dual Portfolio Strategy
 
@@ -117,7 +123,7 @@ finance-analyzer/
 ├── portfolio/                 # Layer 1 core code
 │   ├── main.py                # Orchestrator (data + signals + triggers)
 │   ├── trigger.py             # Change detection (7 trigger types)
-│   ├── signals/               # 14 enhanced composite signal modules
+│   ├── signals/               # 79 enhanced signal modules (70 registered)
 │   ├── accuracy_stats.py      # Signal accuracy tracking + weighting
 │   ├── health.py              # Health monitoring
 │   ├── http_retry.py          # HTTP retry with exponential backoff
@@ -127,7 +133,7 @@ finance-analyzer/
 ├── scripts/win/               # Windows batch scripts
 │   ├── pf-loop.bat            # Layer 1 launcher (auto-restart)
 │   └── pf-agent.bat           # Layer 2 invocation (claude -p)
-├── tests/                     # pytest test suite (~720 tests)
+├── tests/                     # pytest test suite (~11,100 tests, ~446 files; 2026-06-11)
 ├── docs/                      # Architecture + design documents
 │   ├── architecture-plan.md   # Canonical architecture reference
 │   ├── system-design.md       # Engineering design document

@@ -123,10 +123,11 @@ Backlog reference: `docs/IMPROVEMENT_BACKLOG.md`.
 
 ## Overview
 
-Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-21 active signals (80 modules registered, 59 disabled) across 7 timeframes for 5 Tier-1
-instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
-triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
+Autonomous two-layer trading system. Layer 1 (Python, 600s loop) collects market data, computes
+15 active signals (89 tracked names, 76 disabled, 79 modules in portfolio/signals/) across 7
+timeframes for 5 Tier-1 instruments, and detects meaningful triggers. Layer 2 (Claude CLI
+subprocess) is invoked on triggers to make trade decisions for two simulated portfolios
+(Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
 
 The system tracks crypto (BTC, ETH), metals (XAU, XAG), and MSTR via Binance, Alpaca,
@@ -136,7 +137,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 21 active signals (65 modules) → detect triggers → write summaries
+- 600s cycle (bumped from 60s on 2026-04-09): fetch OHLCV → compute indicators → run 15 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -169,8 +170,8 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - Flask REST API on port 5055, dual-stack IPv4+IPv6 bind (token-cookie auth)
 - Auth: `?token=<dashboard_token>` once, then 1-year rolling cookie. Bearer
   header for CLI clients. Cloudflare Access header bypasses local auth.
-- 45 routes in app.py + 10 in house_blueprint.py (55 total). Last reconciled
-  2026-06-01 — re-grep `@app.route` / `@bp.route` if this list looks stale.
+- 50 routes in app.py + 11 in house_blueprint.py (61 total). Last reconciled
+  2026-06-11 — re-grep `@app.route` / `@bp.route` if this list looks stale.
 
   **Health & ops:** `/api/health`, `/api/loop_health`, `/api/lora-status`,
   `/api/market-health`
@@ -200,15 +201,21 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **Oil loop** (`data/oil_loop.py`): WTI 60s cycle, DRY_RUN=True. Install:
   `scripts/win/install-oil-loop-task.ps1` → `PF-OilLoop`. Notes:
   `docs/OIL_LOOP_NOTES.md`. Routes prices via `portfolio.price_source`
-  (CL=F → Binance FAPI real-time with yfinance fallback).
+  (CL=F/BZ=F → yfinance; oil has no Binance FAPI perp in the symbol map,
+  so it falls through to the yfinance last-resort path — reconciled 2026-06-11).
 
 ### Trading Bots
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (80 Modules · 21 Active · 59 Disabled)
+## Signal System (89 Tracked · 15 Active · 76 Disabled)
 
-### Active (21 globally + per-ticker overrides)
+> Counts reconciled to code 2026-06-11: `SIGNAL_NAMES`=89, `DISABLED_SIGNALS`=76,
+> active=15, 79 files in `portfolio/signals/`, 70 `register_enhanced()` calls in
+> `signal_registry.py`. Derive the live active set with:
+> `python -c "from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS; print([s for s in SIGNAL_NAMES if s not in DISABLED_SIGNALS])"`
+
+### Active (15 globally + per-ticker overrides)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL (52.4% 1d, 34K sam)
 2. BB(20,2) — Bollinger Band breakout (54.9% 1d, 9K sam)
 3. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL) (58.6% 1d, 10K sam)
@@ -219,27 +226,30 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 8. News Event — Headline velocity, keyword severity, source credibility (50.6% 1d)
 9. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY (57.2% 1d)
 10. Crypto Macro — DeFi TVL, staking yields, protocol revenue (54.5% 1d, crypto only)
-11. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
-12. COT Positioning — CFTC speculative/commercial positioning (100% 1d, 5 sam)
-13. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (60.0% 1d, BTC-only)
-14. Statistical Jump Regime — Jump detection for regime changes (54.3% 1d, 3K sam)
-15. Crypto EVRP — Crypto equity variance risk premium (55.5% 1d, 366 sam)
-16. Drift Regime Gate — Regime detection via drift analysis (58.1% 1d, 1.5K sam, 68.1% recent)
-17. ADX Regime Switch — ADX dual regime meta-signal, trend/range transitions (67.0% 1d, 182 sam)
-18. Amihud Illiquidity Regime — Illiquidity ratio regime detection (68.0% 1d, 225 sam)
-19. Choppiness Regime Gate — CHOP index regime suppression (67.7% 1d, 158 sam)
-20. BOCPD Regime Switch — Bayesian Online Changepoint Detection (58.5% 1d, 207 sam)
-21. Vol Ratio Regime — Volatility ratio regime detection (57.2% 1d, 586 sam)
+11. COT Positioning — CFTC speculative/commercial positioning (100% 1d, 5 sam)
+12. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (60.0% 1d, BTC-only)
+13. Statistical Jump Regime — Jump detection for regime changes (54.3% 1d, 3K sam)
+14. Drift Regime Gate — Regime detection via drift analysis (58.1% 1d, 1.5K sam, 68.1% recent)
+15. Amihud Illiquidity Regime — Illiquidity ratio regime detection (68.0% 1d, 225 sam)
 
-Per-ticker overrides (disabled globally, active for specific tickers):
-- Williams VIX Fix → XAU (76.5%, 68 sam), XAG (60.9%, 92 sam)
+Per-ticker overrides (globally disabled, re-enabled for one ticker via
+`_DISABLED_SIGNAL_OVERRIDES` in signal_engine.py):
 - Realized Skewness → XAU (60.3%, 572 sam)
-- Credit Spread Risk → BTC (57.4%, 652 sam), ETH (57.4%, 652 sam)
 - ML Classifier → ETH (55.1% 3h, 1206 sam)
 
-### Disabled (44 — force-HOLD via DISABLED_SIGNALS)
+(Williams VIX Fix override removed 2026-05-31 — recent accuracy collapsed to
+30.5%; Credit Spread Risk override removed 2026-05-26 — was re-enabling a
+broken signal.)
+
+### Disabled (76 — force-HOLD via DISABLED_SIGNALS)
 Core disabled: ML Classifier, MACD, EMA, Volume Confirmation, Funding Rate,
-Sentiment, Forecast (Chronos), Claude Fundamental, Fibonacci
+Sentiment, Forecast (Chronos — fully disabled 2026-05-12), Kronos (retired
+2026-04-21), Claude Fundamental, Fibonacci
+
+Recently disabled (collapsed accuracy, 2026-05/06): Metals Cross-Asset
+(disabled 2026-06-06), Crypto EVRP (re-disabled 2026-05-26), ADX Regime
+Switch (re-disabled 2026-06-01, 49.0% on 492 sam), Choppiness Regime Gate,
+BOCPD Regime Switch, Vol Ratio Regime
 
 Enhanced disabled: Trend, Volume Flow, Volatility, Candlestick, Structure,
 Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow,
@@ -255,17 +265,17 @@ Persistence, VWAP Z-Score MR, Gold Overnight Bias, Metals VRP, Breakeven
 Inflation Momentum, Trend Slope Momentum
 
 ### Signal Mechanics
-- **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
+- **MIN_VOTERS = 3** (crypto/stocks), **2** (metals, since 2026-05-11 — MIN_VOTERS=3 produced 0 metals trades in 20 days). Consensus = active voters (BUY+SELL), not total.
 - **Accuracy gate**: signals below 47% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash). Tiered: 50% for 7K+ sample signals.
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
 - **Volume/ADX gates**: RVOL <0.5 forces HOLD
 - **Accuracy tier boost**: 1.25x for 65%+ accuracy, 1.15x for 60%+, 1.05x for 55%+
-- **Applicable signals**: crypto=19, stocks=15, metals=17
+- **Applicable signals** (via `_compute_applicable_count`, reconciled 2026-06-11): crypto=15 (BTC-USD), stocks=12 (MSTR), metals=12 (XAU-USD)
 
 ## Instruments
 
-### Tier 1: Full signals (21 active × 7 timeframes)
+### Tier 1: Full signals (15 active × 7 timeframes)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
@@ -288,8 +298,8 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (65-signal voting, 21 active), `signal_registry.py` (plugin discovery),
-`signals/*.py` (38 enhanced modules), `accuracy_stats.py` (hit rates),
+`signal_engine.py` (consensus voting, 15 active), `signal_registry.py` (plugin discovery),
+`signals/*.py` (79 enhanced modules, 70 register_enhanced calls), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
 ### Data & External
@@ -325,7 +335,7 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `health.py` (heartbeat, module failures), `claude_gate.py` (CLI gate),
 `gpu_gate.py` (GPU lock), `shared_state.py` (thread-safe cache, rate limiters)
 
-Full module map (142 modules): `docs/SYSTEM_OVERVIEW.md`
+Full module map (167 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/SYSTEM_OVERVIEW.md`
 
 ## Key Data Files
 
@@ -378,7 +388,7 @@ Full module map (142 modules): `docs/SYSTEM_OVERVIEW.md`
 ## Testing
 
 ```bash
-# All tests (~5,994 tests across 242 files, ~16 min sequential)
+# All tests (~11,100 tests across ~446 files; reconciled 2026-06-11 via pytest --collect-only -q)
 .venv/Scripts/python.exe -m pytest tests/
 
 # Parallel (~5.5 min, 8 workers)
@@ -389,7 +399,8 @@ Full module map (142 modules): `docs/SYSTEM_OVERVIEW.md`
 ```
 
 Tests using module-level file paths must patch to `tmp_path` for xdist safety.
-26 pre-existing failures (integration, config, state isolation). See `docs/TESTING.md`.
+Pre-existing failures (integration, config, state isolation) exist — see `docs/TESTING.md`
+for the current count and triage.
 
 ## Environment
 
