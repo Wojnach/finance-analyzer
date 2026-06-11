@@ -508,3 +508,122 @@ class TestModeCommandAtomicIO:
         missing = tmp_path / "doesnotexist.json"
         result = load_json(missing, default={})
         assert result == {}
+
+
+class TestPollerAckAfterSuccess:
+    """2026-06-11 audit batch 9: ack-after-success with bounded retry.
+
+    A dispatch that raises must NOT durably ack the offset until either it
+    succeeds or MAX_DISPATCH_ATTEMPTS is reached; on give-up the user gets an
+    explicit 'command dropped' reply (premortem hook 12 — never silent)."""
+
+    def test_failed_dispatch_does_not_advance_persisted_offset(
+        self, poller_paths, fake_config,
+    ):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _ = poller_paths
+
+        def boom(cmd, args, _config):
+            raise RuntimeError("avanza session hiccup")
+
+        poller = TelegramPoller(fake_config, on_command=boom)
+        poller._startup_time = 0  # avoid stale filter (msg_date in past is fine)
+        update = _build_update(update_id=50, msg_date=int(time.time()))
+
+        # Simulate a single poll: offset resets to the durable watermark first.
+        poller.offset = poller._persisted_offset
+        poller._handle_update(update)
+
+        # Durable offset must NOT advance past the failed update — next poll
+        # re-fetches it. Attempt counter persisted.
+        assert poller._persisted_offset == 0
+        on_disk = json.loads(state_file.read_text())
+        assert on_disk["offset"] == 0
+        assert on_disk["attempts"]["50"] == 1
+
+    def test_dropped_after_three_attempts_with_explicit_reply(
+        self, poller_paths, fake_config, monkeypatch,
+    ):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _ = poller_paths
+
+        def boom(cmd, args, _config):
+            raise RuntimeError("persistent failure")
+
+        poller = TelegramPoller(fake_config, on_command=boom)
+        poller._startup_time = 0
+
+        replies = []
+        monkeypatch.setattr(poller, "_send_reply", lambda text: replies.append(text))
+
+        update = _build_update(update_id=60, msg_date=int(time.time()),
+                               text="bought MSTR 130 100000")
+
+        # Three polls, each re-fetching the same failing update.
+        for _ in range(3):
+            poller.offset = poller._persisted_offset
+            poller._handle_update(update)
+
+        # After the 3rd failed attempt: give up -> durable offset advances
+        # (so it stops blocking the queue) and the counter is cleared.
+        assert poller._persisted_offset == 61
+        on_disk = json.loads(state_file.read_text())
+        assert on_disk["offset"] == 61
+        assert "60" not in on_disk.get("attempts", {})
+
+        # And the user was told — never a silent drop (hook 12).
+        assert len(replies) == 1
+        assert "dropped" in replies[0].lower()
+        assert "bought" in replies[0].lower()
+
+    def test_attempt_counter_survives_restart(self, poller_paths, fake_config):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _ = poller_paths
+        # Pre-seed: update 70 already failed twice in a prior process.
+        state_file.write_text(json.dumps(
+            {"offset": 0, "attempts": {"70": 2}, "updated_ts": "x"}
+        ))
+
+        replies = []
+
+        def boom(cmd, args, _config):
+            raise RuntimeError("still failing")
+
+        poller = TelegramPoller(fake_config, on_command=boom)
+        poller._startup_time = 0
+        poller._send_reply = lambda text: replies.append(text)
+        assert poller._attempts == {"70": 2}
+
+        update = _build_update(update_id=70, msg_date=int(time.time()))
+        poller.offset = poller._persisted_offset
+        poller._handle_update(update)
+
+        # Third cumulative attempt -> give up immediately, reply sent.
+        assert poller._persisted_offset == 71
+        assert len(replies) == 1
+
+    def test_successful_dispatch_clears_attempt_counter(
+        self, poller_paths, fake_config,
+    ):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _ = poller_paths
+        state_file.write_text(json.dumps(
+            {"offset": 0, "attempts": {"80": 1}, "updated_ts": "x"}
+        ))
+
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        poller._startup_time = 0
+        assert poller._attempts == {"80": 1}
+
+        update = _build_update(update_id=80, msg_date=int(time.time()))
+        poller.offset = poller._persisted_offset
+        poller._handle_update(update)
+
+        assert poller._persisted_offset == 81
+        on_disk = json.loads(state_file.read_text())
+        assert on_disk["offset"] == 81
+        assert "80" not in on_disk.get("attempts", {})

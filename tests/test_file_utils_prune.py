@@ -151,3 +151,46 @@ class TestPruneJsonl:
 
         removed = prune_jsonl(path, max_entries=10)
         assert removed == 0  # 0 valid lines <= max_entries
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-11 audit batch 9: prune must reuse the recovery decoder so it keeps
+# legacy concatenated-object lines (}{ with no newline) instead of dropping
+# them — they carry real data the recovery decoder was added to preserve.
+# ---------------------------------------------------------------------------
+
+class TestPruneKeepsRecoverableLines:
+    def test_concatenated_object_line_is_kept_and_healed(self, tmp_path):
+        path = tmp_path / "concat.jsonl"
+        # Two normal lines + one legacy line with two objects concatenated.
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"i": 0}) + "\n")
+            f.write(json.dumps({"i": 1}) + json.dumps({"i": 2}) + "\n")
+            f.write(json.dumps({"i": 3}) + "\n")
+
+        # 4 logical objects total; prune to 3 -> drop the oldest 1.
+        removed = prune_jsonl(path, max_entries=3)
+        assert removed == 1
+
+        kept = _read_jsonl(path)
+        # The concatenated objects survived AND were split onto their own
+        # physical lines (file healed). Oldest ({"i":0}) dropped.
+        assert {"i": 1} in kept
+        assert {"i": 2} in kept
+        assert {"i": 3} in kept
+        assert {"i": 0} not in kept
+        # Every kept line is now individually parseable (healed).
+        assert len(kept) == 3
+
+    def test_concatenated_lines_not_dropped_when_under_limit(self, tmp_path):
+        path = tmp_path / "concat2.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"a": 1}) + json.dumps({"a": 2}) + "\n")
+
+        # 2 objects, under limit -> no-op, file untouched, no data loss.
+        removed = prune_jsonl(path, max_entries=5000)
+        assert removed == 0
+        # Original line still recoverable via load_jsonl.
+        from portfolio.file_utils import load_jsonl
+        objs = load_jsonl(path)
+        assert {"a": 1} in objs and {"a": 2} in objs

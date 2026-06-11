@@ -946,3 +946,68 @@ class TestRedactUrl:
         logged_args = mock_logger.warning.call_args[0]
         assert "123:SECRET" not in str(logged_args)
         assert "bot***" in str(logged_args)
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-11 audit batch 9: 429 sleep cap + fetch_json unknown-kwarg rejection
+# ---------------------------------------------------------------------------
+
+class TestRetryAfterCap:
+    def test_429_retry_after_sleep_capped(self):
+        """A huge Telegram flood-wait must be clamped to MAX_RETRY_SLEEP_S
+        so the synchronous caller (Layer-1 cycle path) is not stalled past
+        the heartbeat staleness threshold."""
+        import portfolio.http_retry as hr
+
+        fail_resp = _mock_response(429)
+        fail_resp.json.return_value = {"parameters": {"retry_after": 5000}}
+        ok_resp = _mock_response(200)
+
+        slept = []
+        with patch("portfolio.http_retry.requests") as mock_req, \
+             patch("portfolio.http_retry.time.sleep", side_effect=slept.append):
+            mock_req.get.side_effect = [fail_resp, ok_resp]
+            result = fetch_with_retry("https://api.example.com/data", retries=1)
+
+        assert result.status_code == 200
+        assert slept, "expected one sleep"
+        # 5000s flood-wait (+jitter) clamped to the 90s cap.
+        assert max(slept) <= hr.MAX_RETRY_SLEEP_S
+        assert max(slept) >= hr.MAX_RETRY_SLEEP_S - 0.001
+
+    def test_total_deadline_stops_retrying(self):
+        """Once the total wall-clock deadline is exhausted, no sleep is taken
+        and the call returns None."""
+        fail_resp = _mock_response(503)
+
+        with patch("portfolio.http_retry.requests") as mock_req, \
+             patch("portfolio.http_retry.time.sleep"):
+            mock_req.get.return_value = fail_resp
+            result = fetch_with_retry(
+                "https://api.example.com/data", retries=5, backoff=0.01,
+                total_deadline=0.0,
+            )
+
+        # Deadline already exhausted -> bail on first retry decision.
+        assert result is None
+
+
+class TestFetchJsonKwargs:
+    def test_unknown_kwarg_raises_typeerror(self):
+        """Silent-failure trap: a typo'd kwarg must raise, not be swallowed."""
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            fetch_json("https://api.example.com/data", jsonbody={"x": 1})
+
+    def test_json_body_is_forwarded(self):
+        """The (previously swallowed) json_body must reach fetch_with_retry."""
+        captured = {}
+
+        def fake_fetch(url, **kw):
+            captured.update(kw)
+            return None
+
+        with patch("portfolio.http_retry.fetch_with_retry", side_effect=fake_fetch):
+            fetch_json("https://api.example.com/data", method="POST",
+                       json_body={"hello": "world"})
+
+        assert captured.get("json_body") == {"hello": "world"}

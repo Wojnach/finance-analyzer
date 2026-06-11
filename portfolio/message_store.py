@@ -1,21 +1,25 @@
 """Central message routing — save all messages to JSONL, send only selected categories to Telegram.
 
-Categories that are ALWAYS sent to Telegram:
-  - trade:   simulated BUY/SELL executions (Layer 2)
-  - iskbets: intraday entry/exit alerts
-  - bigbet:  mean-reversion BIG BET alerts
-  - digest:  4-hourly activity report
+The authoritative send/save-only split is the ``SEND_CATEGORIES`` constant
+below — any category in it is sent to Telegram AND saved; everything else is
+saved-only. Keep this docstring in sync with that constant (synced 2026-06-11).
 
-Categories that are SENT to Telegram:
-  - analysis:   HOLD analysis, market commentary (Layer 2 — sole Telegram sender)
+Categories SENT to Telegram (in SEND_CATEGORIES):
+  - trade:         simulated BUY/SELL executions (Layer 2)
+  - iskbets:       intraday entry/exit alerts
+  - bigbet:        mean-reversion BIG BET alerts
+  - digest:        4-hourly activity report
+  - daily_digest:  morning digest
+  - analysis:      HOLD analysis, market commentary (Layer 2 — sole Telegram sender)
+  - invocation:    "Layer 2 Tx invoked" notifications
+  - regime:        regime shift alerts
+  - error:         loop crash notifications
+  - elongir:       Elongir equity bot alerts
+  - crypto_report: crypto swing-loop reports
 
-Categories that are ALSO SENT to Telegram:
-  - invocation:  "Layer 2 Tx invoked" notifications
-  - regime:      regime shift alerts
-  - error:       loop crash notifications
-
-Categories that are SAVED ONLY (viewable on dashboard / via file):
-  - fx_alert:    FX rate staleness warnings
+Categories SAVED ONLY (viewable on dashboard / via file) — any category not in
+SEND_CATEGORIES, e.g.:
+  - fx_alert:      FX rate staleness warnings
 """
 
 import logging
