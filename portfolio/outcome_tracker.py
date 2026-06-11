@@ -161,6 +161,14 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
             "regime": regime,
             "shadow_signals": shadow_signals,
         }
+        # 2026-06-11 (B6 audit, premortem hook 11): metals rows carry the
+        # post-persistence voter count Stage 4 actually gated on, so the
+        # 2-voter metals consensus hit-rate is measurable from signal_log.
+        # Revert trigger documented at _dynamic_min_voters_for_regime.
+        if extra.get("voter_count_post_persistence") is not None:
+            tickers[ticker]["voter_count_post_persistence"] = (
+                extra["voter_count_post_persistence"]
+            )
 
     entry = {
         "ts": ts,
@@ -428,6 +436,23 @@ def backfill_outcomes(max_entries=2000):
         # Anything appended past this offset during processing must be
         # preserved verbatim during the rewrite.
         snapshot_size = file_size
+        # 2026-06-11 (B6 audit, premortem hook 5): backfill-vs-rotate race.
+        # SC-P1-3 (2026-05-02) only handled append-vs-backfill. But
+        # log_rotation.rotate_jsonl (invoked hourly from main.py) holds the
+        # SAME sidecar lock and REPLACES signal_log.jsonl with a shorter
+        # tail-keep file. If rotation lands during the unlocked Phase-2 HTTP
+        # window, the stale head_end_offset/snapshot_size used in Phase 3
+        # would cut a head copy mid-line (malformed JSONL), resurrect
+        # rotated-away entries, and clamp concurrent_tail_bytes to 0 (dropping
+        # post-rotation appends). Cheaper + correct than a cross-process
+        # "rewrite in progress" flag: capture a lightweight identity marker
+        # under the lock now and re-verify it under the lock in Phase 3. If
+        # the file was rotated/replaced, abort the rewrite — the computed
+        # outcomes are simply recomputed on the next (idempotent) backfill
+        # run, which is strictly safer than corrupting the live log.
+        snapshot_first_line = b""
+        with open(SIGNAL_LOG, "rb") as _f_id:
+            snapshot_first_line = _f_id.readline()
         # ---- lock released here for the slow processing window ----
 
     now = datetime.now(UTC)
@@ -552,6 +577,29 @@ def backfill_outcomes(max_entries=2000):
             current_size = SIGNAL_LOG.stat().st_size
         except FileNotFoundError:
             current_size = snapshot_size  # nothing to preserve
+
+        # 2026-06-11 (B6 audit, premortem hook 5): rotation-race guard.
+        # rotate_jsonl REPLACES the file with a strictly shorter tail-keep
+        # version and rewrites its first line. If either changed, our
+        # snapshot_size/head_end_offset are stale and a rewrite would corrupt
+        # the log. Detect and abort: skip this rewrite (outcomes recompute
+        # next run). The bytes-only readline keeps the lock hold bounded.
+        try:
+            with open(SIGNAL_LOG, "rb") as _f_chk:
+                current_first_line = _f_chk.readline()
+        except FileNotFoundError:
+            current_first_line = b""
+        if current_size < snapshot_size or current_first_line != snapshot_first_line:
+            logger.warning(
+                "backfill_outcomes: signal_log rotated/replaced during "
+                "processing (snapshot_size=%d current_size=%d, first-line "
+                "changed=%s) — aborting rewrite to avoid corruption; "
+                "outcomes recompute on next run",
+                snapshot_size, current_size,
+                current_first_line != snapshot_first_line,
+            )
+            return 0
+
         concurrent_tail_bytes = max(0, current_size - snapshot_size)
 
         fd, tmp = tempfile.mkstemp(dir=SIGNAL_LOG.parent, suffix=".tmp")

@@ -441,9 +441,10 @@ ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 # 2026-04-16: raised high-sample min 5000 -> 10000. Investigation of W15/W16
 # consensus collapse found the 5000 threshold catching signals during regime
 # transitions where 5000 samples is too few to distinguish true coin-flip
-# from transient degradation. 10000 samples reduces false-positive gating
-# (e.g., a signal at 49.5% over 6000 samples may still have real edge in
-# specific regimes that the aggregate accuracy hides).
+# from transient degradation.
+# 2026-06-11 (B6 audit): comment synced to code — the constant below is 7000
+# (the 10000 figure above is historical; current tier: 7000+ samples gate at
+# 50%, below that the standard 47% gate applies). Code is authoritative.
 _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD = 0.50
 _ACCURACY_GATE_HIGH_SAMPLE_MIN = 7000
 
@@ -664,7 +665,9 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
         return votes
 
     # 2026-05-11: resolve the per-asset persistence threshold once per call.
-    # _persistence_cycles_for() returns 1 for metals+crypto, 2 for stocks,
+    # 2026-06-11 (B6 audit): comment synced to _PERSISTENCE_CYCLES_BY_ASSET —
+    # _persistence_cycles_for() returns 1 for metals, 2 for crypto (raised
+    # 2026-05-27 to debounce ETH BUY→HOLD flip noise), 2 for stocks,
     # 2 fallback for ticker=None.
     min_cycles = _persistence_cycles_for(ticker)
 
@@ -895,7 +898,10 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 #
 # Expected impact: kicks in during regime transitions where the 47% gate is
 # silencing several voters whose recent accuracy dipped to 45-47%. Keeps at
-# least 5 voters active by relaxing the gate by up to 6pp (to 41% floor).
+# least 5 voters active by relaxing the gate by up to 2pp (to 45% floor).
+# 2026-06-11 (B6 audit): prose synced to code — _GATE_RELAXATION_MAX was
+# tightened 0.06 -> 0.02 in commit f4da38b3 but this comment still said
+# "6pp (to 41% floor)". The constants below are authoritative.
 # Signals with directional or per-ticker gating are NOT un-gated by this —
 # only the overall accuracy gate is relaxed.
 _MIN_ACTIVE_VOTERS_SOFT = 5
@@ -1733,9 +1739,13 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
         # non-stock signals (orderbook_flow — metals + crypto only)
         if sig in _NON_STOCK_SIGNALS and is_stock:
             continue
-        # ministral (CryptoTrader-LM) only runs for crypto
-        if sig == "ministral" and not is_crypto:
-            continue
+        # 2026-06-11 (B6 audit): removed the "ministral only runs for crypto"
+        # special-case — the actual ministral vote block runs for ALL tickers
+        # (crypto, stocks, metals) when the GPU is available, so excluding it
+        # here undercounted _total_applicable by 1 for XAU/XAG/MSTR and biased
+        # the Stage-5b ensemble-entropy HOLD bucket. GPU availability is
+        # already handled by the skip_gpu branch below (ministral is in
+        # GPU_SIGNALS).
         # GPU signals skipped for stocks outside market hours
         if skip_gpu and sig in GPU_SIGNALS:
             continue
@@ -2085,7 +2095,8 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
     """
     gate_val = base_gate - relaxation
     # SC-P1-2 (2026-05-02 adversarial follow-ups): high-sample tier is NOT
-    # relaxed. A signal with 10K+ samples at sub-50% accuracy has measurable
+    # relaxed. A signal with 7K+ samples (_ACCURACY_GATE_HIGH_SAMPLE_MIN) at
+    # sub-50% accuracy has measurable
     # negative edge — circuit-breaker relaxation must not promote it back to
     # voting. Standard tier (under 10K samples) still relaxes so borderline
     # newer signals can be rescued during regime transitions. Must mirror
@@ -2147,7 +2158,7 @@ def _normalize_regime(regime):
     return normalized
 
 
-def _dynamic_min_voters_for_regime(regime):
+def _dynamic_min_voters_for_regime(regime, ticker=None):
     """Regime-dependent final quorum. Single source of truth - called by both
     the circuit breaker and apply_confidence_penalties.
 
@@ -2160,17 +2171,32 @@ def _dynamic_min_voters_for_regime(regime):
     previously had an inline copy at line ~1623 that had to stay in lockstep
     manually - now it calls this helper. Also accepts case/typo-variant
     regime strings via _normalize_regime.
+
+    2026-06-11 (B6 audit, premortem hook 11): asset-aware metals quorum.
+    MIN_VOTERS_METALS=2 (2026-05-11) was nullified here — this helper's
+    floor of 3 force-HELD every 2-voter metals slate at Stage 4, so the
+    documented intent ("XAG steady-state is 2 post-persistence voters; the
+    3-voter floor produced 0 trades in 20 days") was silently unmet. For
+    metals tickers the regime quorum is shifted down by 1 with a hard floor
+    at MIN_VOTERS_METALS: trending 2, high-vol 3, ranging/unknown 4.
+    REVERT TRIGGER: if 2-voter metals consensus hit-rate is <50% over 100
+    samples (filter signal_log rows on voter_count_post_persistence == 2,
+    metals tickers), revert the metals floor to 3 by removing this branch.
     """
     canonical = _normalize_regime(regime)
     if canonical in ("trending-up", "trending-down"):
-        return 3
-    if canonical == "high-vol":
-        return 4
-    return 5  # ranging, unknown, None
+        base = 3
+    elif canonical == "high-vol":
+        base = 4
+    else:
+        base = 5  # ranging, unknown, None
+    if ticker in METALS_SYMBOLS:
+        return max(MIN_VOTERS_METALS, base - 1)
+    return base
 
 
 def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate,
-                              regime=None):
+                              regime=None, ticker=None):
     """Compute circuit-breaker relaxation to preserve voter diversity.
 
     Progressively tests relaxation values 0, step, 2*step, ..., up to
@@ -2183,7 +2209,7 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
                                                 either a low-signal scenario
                                                 or a genuine regime break
                                                 where remaining signals are
-                                                below even the 41% relaxed
+                                                below even the 45% relaxed
                                                 gate — letting them vote
                                                 would be wrong)
       - best_possible >= floor               -> smallest step that meets floor
@@ -2214,28 +2240,41 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     #   Guard B (post-exclusion slate viability):
     #     Downstream's raw `_voters` doesn't account for top-N or
     #     correlation-group exclusions. If the POST-exclusion slate is
-    #     below MIN_VOTERS_BASE (3) — the floor across all asset classes —
-    #     a relaxed consensus would be built from a too-thin slate even
-    #     though downstream would accept the raw count. Codex round 9
-    #     (2026-04-17) caught this with a 3-signal correlation cluster
-    #     gated out, leaving only 2 voters to drive consensus.
+    #     below the asset's base quorum (3 for crypto/stocks, 2 for metals
+    #     since 2026-05-11 — see MIN_VOTERS_METALS) a relaxed consensus
+    #     would be built from a too-thin slate even though downstream would
+    #     accept the raw count. Codex round 9 (2026-04-17) caught this with
+    #     a 3-signal correlation cluster gated out, leaving only 2 voters
+    #     to drive consensus.
     #
     #   Guard C (lone-signal escape):
     #     Even with a large post-exclusion slate, directional gating can
     #     leave a single accuracy-passing signal. `best_possible >= 2`
     #     catches this case.
-    min_regime_quorum = _dynamic_min_voters_for_regime(regime)
+    #
+    # 2026-06-11 (review of 12f65ded): all three guards now take the SAME
+    # ticker-aware quorum as Stage 4 (apply_confidence_penalties). Previously
+    # this path used the asset-blind floor of 3, so the circuit breaker
+    # refused to relax for the exact 2-voter metals slates Stage 4 accepts —
+    # the two gates disagreed. For metals the slate floor is
+    # MIN_VOTERS_METALS (2); non-metals keep _POST_EXCLUSION_MIN /
+    # _LONE_SIGNAL_FLOOR (3).
+    min_regime_quorum = _dynamic_min_voters_for_regime(regime, ticker=ticker)
     raw_candidates = sum(1 for v in votes.values() if v != "HOLD")
     if raw_candidates < min_regime_quorum:
         return 0.0
 
     # P2-F (2026-04-17): derived from MIN_VOTERS_CRYPTO/STOCK rather than
     # hardcoded. If the base quorum changes, this follows automatically.
+    if ticker in METALS_SYMBOLS:
+        slate_floor = MIN_VOTERS_METALS
+    else:
+        slate_floor = _POST_EXCLUSION_MIN
     post_exclusion_candidates = sum(
         1 for sn, v in votes.items()
         if v != "HOLD" and sn not in excluded and sn not in group_gated
     )
-    if post_exclusion_candidates < _POST_EXCLUSION_MIN:
+    if post_exclusion_candidates < slate_floor:
         return 0.0
 
     baseline = _count_active_voters_at_gate(
@@ -2257,12 +2296,17 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     # large slate is catching signals that the downstream quorum would
     # accept as a weak consensus. Require at least as many as the base
     # MIN_VOTERS_* to avoid creating "relaxed" sub-quorum consensuses.
-    if best_possible < _LONE_SIGNAL_FLOOR:
+    # 2026-06-11 (review of 12f65ded): metals floor is the same ticker-aware
+    # slate_floor (2) as Guard B — a 2-voter metals consensus IS within the
+    # metals quorum, so relaxation recovering exactly 2 metals voters is
+    # legitimate, not a lone-signal escape.
+    lone_floor = slate_floor if ticker in METALS_SYMBOLS else _LONE_SIGNAL_FLOOR
+    if best_possible < lone_floor:
         return 0.0
 
     # Regime break: relaxation recovers nothing beyond baseline. Keep the
     # strict gate so the event shows up in logs rather than silently opening
-    # to sub-41% signals.
+    # to sub-45% signals.
     if best_possible <= baseline:
         return 0.0
 
@@ -2718,6 +2762,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         group_gated=group_gated_signals,
         base_gate=gate,
         regime=regime,
+        # 2026-06-11 (review of 12f65ded): ticker-aware so the circuit
+        # breaker uses the same metals quorum (2) as Stage 4.
+        ticker=ticker,
     )
     if relaxation > 0:
         logger.debug(
@@ -2755,10 +2802,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
         # Accuracy gate: skip signals that are below threshold with enough data.
-        # Tiered: established signals (10000+ samples) use a tighter 50% gate;
-        # newer signals use the standard 47% gate.
+        # Tiered: established signals (7000+ samples, _ACCURACY_GATE_HIGH_SAMPLE_MIN)
+        # use a tighter 50% gate; newer signals use the standard 47% gate.
         # SC-P1-2 (2026-05-02 adversarial follow-ups): the high-sample tier
-        # (10K+ samples, 0.50 gate) is NOT relaxed. A signal with 10K+ samples
+        # (7K+ samples, 0.50 gate) is NOT relaxed. A signal with 7K+ samples
         # at sub-50% accuracy has statistically demonstrated negative edge —
         # circuit-breaker relaxation must not let it back in. The standard
         # tier still relaxes uniformly so newer borderline signals can be
@@ -2908,6 +2955,28 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     total_weight = buy_weight + sell_weight
     if total_weight == 0:
         return "HOLD", 0.0
+    # 2026-06-11 (B6 audit, P2 design — ASSESSED, NOT CHANGED): the
+    # confidence below is scale-INVARIANT — buy_conf = buy_weight /
+    # (buy_weight+sell_weight). The 2026-05-11 "Codex Fix B" soft-vote
+    # dampening (each ema/bb/macd/candlestick/forecast dead-zone vote scaled
+    # by its small _soft_conf ~0.15-0.20 and capped at 0.30 above) therefore
+    # does NOT reduce the returned confidence for an all-soft SAME-direction
+    # slate: 3 soft BUY votes at 0.18 each yield buy_conf=1.0, identical to 3
+    # strong votes. The dampening only changes the OUTCOME when soft and
+    # strong votes OPPOSE each other (it shifts the buy/sell ratio); a pure
+    # dead-zone-drift slate still emits full directional confidence, pulled
+    # back only by the downstream unanimity penalty + calibration compression
+    # (to ~0.56 — above the metals trade floor). This was assessed during the
+    # B6 audit and deliberately NOT "fixed" here: a scale-aware fix (e.g.
+    # conf = winner_weight / max(total_weight, K) for a strong-vote scale K,
+    # or capping conf when every participating voter is soft) would require
+    # threading soft-vs-strong weight separately through this loop and would
+    # shift the returned confidence on the COMMON case (slates mixing soft +
+    # strong votes), not just the pathological all-soft case — broadly
+    # changing magnitudes that feed the >=0.5 trade gate, calibration Stage 7,
+    # the metals MIN_BUY_CONFIDENCE floor, dashboards and Layer 2 context.
+    # The factor K has no empirical anchor today. Documenting the known
+    # limitation here rather than shipping an unvalidated behavior change.
     buy_conf = buy_weight / total_weight
     sell_conf = sell_weight / total_weight
     if buy_conf > sell_conf and buy_conf >= 0.5:
@@ -3206,7 +3275,14 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     # reflects the actual participating voters after debounce filtering.
     active_voters = extra_info.get("_voters_post_filter",
                                     extra_info.get("_voters", 0))
-    dynamic_min = _dynamic_min_voters_for_regime(regime)
+    # 2026-06-11 (B6 audit, premortem hook 11): ticker-aware quorum so the
+    # MIN_VOTERS_METALS=2 floor survives Stage 4 (see helper docstring for
+    # the revert trigger). Also persist the voter count on every metals
+    # consensus row so the 2-voter hit-rate is auditable from signal_log.
+    dynamic_min = _dynamic_min_voters_for_regime(regime, ticker=ticker)
+    if ticker in METALS_SYMBOLS:
+        extra_info["voter_count_post_persistence"] = active_voters
+        extra_info["min_voters_dynamic"] = dynamic_min
 
     if action != "HOLD" and active_voters < dynamic_min:
         penalty_log.append({
@@ -4030,17 +4106,47 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # (818K BTC, 0.58 price correlation). Its per-ticker consensus accuracy is
     # 47.8% — worst of all Tier 1. Injecting BTC-USD's consensus as a synthetic
     # signal provides cross-asset information the signal system otherwise ignores.
-    # The vote goes through all normal gates (accuracy, regime, persistence).
+    #
+    # 2026-06-11 (B6 audit, P2 disabled-signal leak): btc_proxy was formally
+    # disabled 2026-05-24 (tickers.py, 44.6% 1d / BUY 31.1%) and added to
+    # _SHADOW_SAFE_SIGNALS, but this inline injection block — unlike the
+    # registry dispatch loop above — never honored DISABLED_SIGNALS, so a
+    # force-HOLD signal kept voting live on MSTR (quorum inflation, directional
+    # rescue of SELLs). It is NOT a registry-dispatched signal (no signals/
+    # module), so its _SHADOW_SAFE_SIGNALS membership was dead code. Route it
+    # through the SAME disabled-gate as every other signal: when disabled and
+    # not per-ticker-overridden / not promoted, record the action in
+    # shadow_votes (outcome tracking only) and force-HOLD the consensus vote,
+    # exactly mirroring the dispatch-loop shadow branch. The comment that this
+    # "goes through all normal gates" was false — DISABLED_SIGNALS is a gate.
     if ticker == "MSTR":
         with _cross_ticker_lock:
             btc_cons = _cross_ticker_consensus.get(("BTC-USD", horizon))
         if btc_cons is not None:
             btc_action = btc_cons.get("action", "HOLD")
             if btc_action in ("BUY", "SELL", "HOLD"):
-                votes["btc_proxy"] = btc_action
+                _bp_promoted = False
+                try:
+                    from portfolio.shadow_registry import is_promoted
+                    _bp_promoted = is_promoted("btc_proxy")
+                except Exception:
+                    logger.debug("shadow_registry import failed for btc_proxy", exc_info=True)
+                _bp_disabled = (
+                    "btc_proxy" in DISABLED_SIGNALS
+                    and ("btc_proxy", ticker) not in _DISABLED_SIGNAL_OVERRIDES
+                    and not _bp_promoted
+                )
                 extra_info["btc_proxy_action"] = btc_action
                 extra_info["btc_proxy_confidence"] = btc_cons.get("confidence", 0.0)
                 extra_info["btc_proxy_source"] = "cross_ticker_cache"
+                if _bp_disabled:
+                    # force-HOLD in consensus; real action only to outcome
+                    # tracker via shadow_votes -> raw_votes (line ~4179).
+                    extra_info["shadow_btc_proxy"] = True
+                    shadow_votes["btc_proxy"] = btc_action
+                    votes["btc_proxy"] = "HOLD"
+                else:
+                    votes["btc_proxy"] = btc_action
 
     # BUG-178 diagnostic phase marker (added 2026-04-10, see docstring above
     # at the __pre_dispatch__ writer). We made it through the enhanced-signal
@@ -4672,24 +4778,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         except Exception:
             logger.debug("Per-ticker consensus gate failed for %s", ticker, exc_info=True)
 
-    # Global confidence cap — calibration data shows >80% confidence is
-    # anti-correlated with accuracy at every horizon (70-80% bucket is the
-    # best performing at 57-59% actual accuracy)
-    conf = min(conf, 0.80)
-
-    # 3h horizon: cap confidence to prevent overconfident short-term predictions
-    if horizon in ("3h", "4h"):
-        from portfolio.short_horizon import CONFIDENCE_CAP_3H
-        conf = min(conf, CONFIDENCE_CAP_3H)
-
-    if ticker:
-        _record_phase(ticker, "consensus_gate", _phase_start)
-
     # Seasonal confidence modifier for metals (XAG, XAU)
     # 2026-05-29: Silver seasonality analysis shows June is historically the
     # worst month (73% win rate Jan-Apr inverts to weakness). COT divergence
     # (specs reducing longs while price holds) is a 2-4 week correction signal.
     # Scale BUY confidence down in weak months, up in strong months.
+    # 2026-06-11 (B6 audit, P2): moved ABOVE the 0.80 global cap. Previously
+    # this multiplier (up to 1.15 Jan-Mar) ran AFTER the cap, so capped XAG/XAU
+    # BUY confidence could be inflated back above the documented 0.80 invariant
+    # (~0.92 worst case), feeding Layer 2 + the metals swing-trader entry
+    # threshold real-money decisions in Jan-Apr. The cap is the invariant; the
+    # seasonal modifier must be subject to it, not exempt from it.
     if ticker in ("XAG-USD", "XAU-USD") and action == "BUY":
         import datetime as _dt
         month = _dt.datetime.now(_dt.timezone.utc).month
@@ -4703,6 +4802,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             conf = conf * seasonal_mult
             extra_info["seasonal_mult"] = seasonal_mult
             extra_info["seasonal_month"] = month
+
+    # Global confidence cap — calibration data shows >80% confidence is
+    # anti-correlated with accuracy at every horizon (70-80% bucket is the
+    # best performing at 57-59% actual accuracy). 2026-06-11: this cap is the
+    # invariant — every confidence-altering step (incl. the metals seasonal
+    # multiplier above) must run BEFORE it so nothing emits conf > 0.80.
+    conf = min(conf, 0.80)
+
+    # 3h horizon: cap confidence to prevent overconfident short-term predictions
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import CONFIDENCE_CAP_3H
+        conf = min(conf, CONFIDENCE_CAP_3H)
+
+    if ticker:
+        _record_phase(ticker, "consensus_gate", _phase_start)
 
     # Update cross-ticker consensus cache for synthetic cross-asset signals
     if ticker:

@@ -1053,28 +1053,49 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
             at_samples > 0 or rc_samples >= min_recent_samples
         )
         if _directionals_trustworthy:
-            # Merge directional keys from the larger-sample source per key.
-            # Prevents silent gate-bypass when a key exists only in `recent`.
+            # 2026-06-11 (B6 audit, P3 bug): directional blending must match
+            # the overall `accuracy`/`total` semantics. `recent` is a strict
+            # SUBSET of `alltime` (signal_accuracy_recent = signal_accuracy
+            # with a `since=` cutoff over the SAME log), so the previous
+            # sample-weighted merge `(at*at_side + rc*rc_side)/(at_side+rc_side)`
+            # double-counted the recent window and over-weighted the last 7d
+            # relative to the documented 70/30 scheme — and `total_buy/sell =
+            # at_v + rc_v` overstated directional sample counts by the size of
+            # the recent window, tripping the 30-sample directional gate +
+            # directional-rescue earlier than the real count justifies. Now we
+            # apply the SAME recency blend used for overall accuracy (70/30, or
+            # 90/10 fast-track on divergence) and report totals as max(at, rc).
             for key in ("buy_accuracy", "sell_accuracy"):
-                if key in at and key in rc:
-                    side_total = "total_buy" if key == "buy_accuracy" else "total_sell"
-                    at_side = at.get(side_total, 0) or 0
-                    rc_side = rc.get(side_total, 0) or 0
-                    if at_side + rc_side > 0:
-                        result[key] = (
-                            at[key] * at_side + rc[key] * rc_side
-                        ) / (at_side + rc_side)
+                side_total = "total_buy" if key == "buy_accuracy" else "total_sell"
+                at_side = at.get(side_total, 0) or 0
+                rc_side = rc.get(side_total, 0) or 0
+                at_dir = at.get(key)
+                rc_dir = rc.get(key)
+                at_dir_valid = isinstance(at_dir, (int, float))
+                rc_dir_valid = isinstance(rc_dir, (int, float))
+                if at_dir_valid and rc_dir_valid:
+                    # Mirror the overall blend: use recent when it has enough
+                    # samples AND all-time exists, else fall back the same way.
+                    if rc_side >= min_recent_samples and at_side > 0:
+                        divergence = abs(rc_dir - at_dir)
+                        w = fast_weight if divergence > divergence_threshold else normal_weight
+                        result[key] = w * rc_dir + (1 - w) * at_dir
+                    elif at_side > 0:
+                        result[key] = at_dir
+                    elif rc_side >= min_recent_samples:
+                        result[key] = rc_dir
                     else:
-                        result[key] = at[key] if at_side >= rc_side else rc[key]
-                elif key in at:
-                    result[key] = at[key]
-                elif key in rc:
-                    result[key] = rc[key]
+                        result[key] = at_dir
+                elif at_dir_valid:
+                    result[key] = at_dir
+                elif rc_dir_valid:
+                    result[key] = rc_dir
             for key in ("total_buy", "total_sell"):
                 at_v = at.get(key, 0) or 0
                 rc_v = rc.get(key, 0) or 0
                 if at_v or rc_v:
-                    result[key] = at_v + rc_v
+                    # recent ⊂ all-time → max, not sum (parallels overall `total`).
+                    result[key] = max(at_v, rc_v)
         accuracy_data[sig_name] = result
     return accuracy_data
 
