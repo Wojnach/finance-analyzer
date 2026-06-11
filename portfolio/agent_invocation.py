@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
-from portfolio.claude_gate import detect_auth_failure
+from portfolio.claude_gate import check_claude_gates, detect_auth_failure
 from portfolio.file_utils import (
     atomic_append_jsonl,
     count_jsonl_lines,
@@ -28,6 +28,13 @@ logger = logging.getLogger("portfolio.agent")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
+# 2026-06-11 (audit B5, premortem hook 7): on-disk record of the live Layer 2
+# subprocess ({pid, start_ts, tier}). _agent_proc is an in-process global, so
+# a loop restart mid-invocation (standard after every merge) orphaned the
+# 600-900s claude child — it kept editing portfolio_state.json while the new
+# loop could spawn a SECOND concurrent agent. main.loop() calls
+# reap_stale_agent() at startup to kill (cmdline-verified) orphans.
+AGENT_PROC_FILE = DATA_DIR / "layer2_agent_proc.json"
 JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 TELEGRAM_FILE = DATA_DIR / "telegram_messages.jsonl"
 PATIENT_PORTFOLIO = DATA_DIR / "portfolio_state.json"
@@ -662,6 +669,170 @@ def _detect_append(count_after, count_before, ts_after, ts_before):
     return ts_after is not None and ts_after != ts_before
 
 
+# ---------------------------------------------------------------------------
+# 2026-06-11 (audit B5, premortem hook 7): PID persistence + startup reap.
+# ---------------------------------------------------------------------------
+
+def _persist_agent_proc(pid, tier):
+    """Persist {pid, start_ts, tier} for the just-spawned agent. Best-effort —
+    never raises (a persistence failure must not break the invocation)."""
+    try:
+        from portfolio.file_utils import atomic_write_json
+        atomic_write_json(AGENT_PROC_FILE, {
+            "pid": pid,
+            "start_ts": datetime.now(UTC).isoformat(),
+            "tier": tier,
+        })
+    except Exception as e:
+        logger.warning("agent proc file persist failed: %s", e)
+
+
+def _clear_agent_proc_file():
+    """Remove the persisted agent PID file. Best-effort — never raises."""
+    try:
+        if AGENT_PROC_FILE.exists():
+            AGENT_PROC_FILE.unlink()
+    except Exception as e:
+        logger.warning("agent proc file clear failed: %s", e)
+
+
+def _pid_cmdline_is_claude(pid):
+    """Classify a persisted PID before any kill decision.
+
+    Returns:
+        True  — process is running AND its cmdline/name contains 'claude'
+                (genuinely our orphaned agent; safe to kill).
+        False — process is running but is NOT a claude process (PID reuse
+                after reboot/exit — must NOT be killed).
+        None  — no process with that PID is running.
+
+    psutil is the primary verifier (cmdline access). The tasklist fallback
+    only sees the image name; when it can't positively identify claude it
+    returns False (fail-safe: never kill what we can't verify).
+    """
+    try:
+        import psutil
+        try:
+            p = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return None
+        try:
+            cmdline = " ".join(p.cmdline()).lower()
+            name = (p.name() or "").lower()
+        except Exception:
+            # AccessDenied / zombie — can't verify, so never kill.
+            return False
+        return "claude" in cmdline or "claude" in name
+    except ImportError:
+        pass
+    # Fallback without psutil: tasklist (Windows). Image name only — the
+    # claude CLI runs as claude.exe or node.exe; only a literal 'claude'
+    # match is treated as killable.
+    if platform.system() != "Windows":
+        return False  # cannot verify on this platform — don't kill
+    try:
+        res = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        )
+        out = (res.stdout or "").strip()
+        if not out or "no tasks" in out.lower():
+            return None
+        return "claude" in out.lower()
+    except Exception as e:
+        logger.warning("tasklist PID verify failed for %s: %s", pid, e)
+        return False
+
+
+def _kill_pid_tree(pid):
+    """Kill a process tree by bare PID (no Popen handle — used by the
+    startup reap where the process belongs to a previous loop instance).
+    Returns True on success/already-gone."""
+    try:
+        if platform.system() == "Windows":
+            res = subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=10,
+            )
+            return res.returncode in (0, 128)  # 128 = already gone
+        try:
+            import psutil
+            try:
+                p = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                return True
+            for child in p.children(recursive=True):
+                with suppress(Exception):
+                    child.kill()
+            p.kill()
+            return True
+        except ImportError:
+            os.kill(pid, 9)  # SIGKILL; no psutil → no child enumeration
+            return True
+    except ProcessLookupError:
+        return True
+    except Exception as e:
+        logger.error("stale agent kill failed pid=%s: %s", pid, e)
+        return False
+
+
+def reap_stale_agent():
+    """Startup reap of a Layer 2 agent orphaned by a previous loop process.
+
+    Called from main.loop() before the first cycle. Reads AGENT_PROC_FILE;
+    if it names a live PID whose cmdline is verifiably the claude CLI, the
+    whole tree is killed (orphan + freshly spawned agent would otherwise do
+    concurrent read-modify-write on portfolio_state.json). A live PID that
+    is NOT a claude process (PID reuse) is never killed — the stale file is
+    just cleared. Best-effort: never raises.
+
+    Returns a dict {action, pid} for observability, or None when there was
+    nothing to do.
+    """
+    try:
+        from portfolio.file_utils import load_json
+        info = load_json(AGENT_PROC_FILE, default=None)
+    except Exception as e:
+        logger.warning("stale agent file read failed: %s", e)
+        return None
+    if not isinstance(info, dict) or not info.get("pid"):
+        return None
+    try:
+        pid = int(info["pid"])
+    except (TypeError, ValueError):
+        logger.warning("stale agent file has bogus pid=%r — clearing", info.get("pid"))
+        _clear_agent_proc_file()
+        return {"action": "cleared_bogus", "pid": info.get("pid")}
+
+    verdict = _pid_cmdline_is_claude(pid)
+    if verdict is None:
+        logger.info("stale agent file pid=%s no longer running — clearing", pid)
+        _clear_agent_proc_file()
+        return {"action": "cleared_dead", "pid": pid}
+    if verdict is False:
+        logger.warning(
+            "stale agent file pid=%s is NOT a claude process (PID reuse) — "
+            "clearing without kill", pid,
+        )
+        _clear_agent_proc_file()
+        return {"action": "cleared_pid_reuse", "pid": pid}
+
+    logger.warning(
+        "stale_agent_reaped: killing orphaned Layer 2 agent pid=%s "
+        "(tier=%s, started %s) left over from a previous loop process",
+        pid, info.get("tier"), info.get("start_ts"),
+    )
+    killed = _kill_pid_tree(pid)
+    with suppress(Exception):
+        _log_trigger(
+            [f"startup reap of orphaned agent pid={pid}"],
+            "stale_agent_reaped" if killed else "stale_agent_kill_failed",
+            tier=info.get("tier"),
+        )
+    _clear_agent_proc_file()
+    return {"action": "reaped" if killed else "kill_failed", "pid": pid}
+
+
 def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
     """Kill the running _agent_proc and clear module state.
 
@@ -787,6 +958,9 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
 
     if kill_ok:
         _agent_proc = None
+        # 2026-06-11 (audit B5): the agent is dead — drop the persisted PID
+        # so a later loop restart doesn't try to reap a recycled PID.
+        _clear_agent_proc_file()
     else:
         logger.error("Kill failed for pid=%s — keeping _agent_proc to block respawn", pid)
     return kill_ok
@@ -796,6 +970,26 @@ def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_start_wall, _agent_timeout
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
     global _journal_count_before, _telegram_count_before
+
+    # 2026-06-11 (audit B5): claude_gate.py declares itself the ONLY approved
+    # way to invoke Claude (claude_gate.py:3-9), yet this module Popens the
+    # CLI directly and historically bypassed the gate entirely — during the
+    # 2026-06-06 token freeze, Layer 2 was the one path the CLAUDE_ENABLED
+    # master switch did NOT govern. Check the gate first so one switch blocks
+    # all paths. NOTE: the spawn below still duplicates claude_gate's
+    # tree-kill Popen kwargs and claude_invocations.jsonl cost tracking
+    # rather than routing through invoke_claude(); consolidating that is a
+    # bigger refactor deliberately left out of this batch.
+    try:
+        _gate_ok, _gate_reason = check_claude_gates("layer2")
+    except Exception as e:
+        # A kill switch that can't be read must block (fail closed).
+        logger.warning("claude_gate check failed (%s) — failing closed", e)
+        _gate_ok, _gate_reason = False, f"gate check error: {e}"
+    if not _gate_ok:
+        logger.info("Layer 2 blocked by claude_gate: %s", _gate_reason)
+        _log_trigger(reasons, "blocked_claude_gate", tier=tier)
+        return False
 
     # Check if Layer 2 is auto-disabled due to consecutive stack overflows
     if _consecutive_stack_overflows >= _MAX_STACK_OVERFLOWS:
@@ -847,12 +1041,22 @@ def invoke_agent(reasons, tier=3):
     try:
         config = _load_config()
     except Exception as e:
-        logger.warning("Failed to load config: %s", e)
-        config = {}
+        # 2026-06-11 (audit B5): fail CLOSED. The old fallback (config = {})
+        # made l2_cfg.get('enabled', True) evaluate True on any transient
+        # config.json read failure (Windows file lock during an external
+        # edit, symlink target briefly missing) — silently un-freezing
+        # Layer 2 despite config.layer2.enabled=false being the runtime kill
+        # flag. A kill switch must fail closed; the next cycle re-checks.
+        logger.warning(
+            "Failed to load config: %s — failing closed (no Layer 2 spawn)", e
+        )
+        _log_trigger(reasons, "skipped_config_error", tier=tier)
+        return False
 
     l2_cfg = config.get("layer2", {})
     if not l2_cfg.get("enabled", True):
         logger.info("Layer 2 disabled (config.layer2.enabled=false), skipping")
+        _log_trigger(reasons, "skipped_layer2_disabled", tier=tier)
         return False
 
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
@@ -885,13 +1089,30 @@ def invoke_agent(reasons, tier=3):
                     logger.error(
                         "Not spawning new agent — old process may still be running"
                     )
+                    _log_trigger(reasons, "skipped_kill_failed", tier=tier)
                     return False
             else:
                 logger.info(
                     "Agent still running (pid %s, %.0fs), skipping",
                     _agent_proc.pid, elapsed,
                 )
+                # 2026-06-11 (audit B5): log the busy-skip here — main.py no
+                # longer re-logs every False return as 'skipped_busy' (most
+                # False paths already write their own accurate row).
+                _log_trigger(reasons, "skipped_busy", tier=tier)
                 return False
+        elif _agent_proc is not None:
+            # 2026-06-11 (audit B5): the previous agent has EXITED but its
+            # completion was not yet observed (the watchdog ticks every 30s;
+            # back-to-back triggers can land inside that window). Falling
+            # through to spawn used to overwrite all completion baselines —
+            # the finished run got NO completion row, NO auth-failure scan
+            # (the exact silent 'Not logged in' exit-0 class behind the
+            # Mar–Apr 2026 outage), NO journal/telegram verification, and no
+            # record_trade. Run the full completion accounting first; we
+            # already hold _completion_lock, so call the _locked body
+            # directly.
+            _check_agent_completion_locked()
 
     if _agent_log:
         _agent_log.close()
@@ -1101,7 +1322,9 @@ def invoke_agent(reasons, tier=3):
                         )
                     except Exception:
                         pass
-                    return
+                    # 2026-06-11 (audit B5): was a bare `return` (None) —
+                    # inconsistent with the documented bool contract.
+                    return False
                 prompt = build_synthesis_prompt(ticker, reasons)
             else:
                 logger.warning("No specialists launched, falling back to single-agent")
@@ -1231,6 +1454,10 @@ def invoke_agent(reasons, tier=3):
         )
         _agent_log = log_fh  # transfer ownership on success
         log_fh = None  # prevent cleanup below from closing it
+        # 2026-06-11 (audit B5, premortem hook 7): persist {pid, start_ts,
+        # tier} so a loop restart can find and reap this subprocess instead
+        # of orphaning it (see reap_stale_agent).
+        _persist_agent_proc(_agent_proc.pid, tier)
         # BUG-219: Snapshot transaction counts so check_agent_completion()
         # can detect new trades and call record_trade().
         global _patient_txn_count_before, _bold_txn_count_before
@@ -1295,6 +1522,10 @@ def invoke_agent(reasons, tier=3):
         logger.error("invoking agent: %s", e)
         if log_fh is not None:
             log_fh.close()
+        # 2026-06-11 (audit B5): own the failure row — main.py no longer
+        # mislabels every False return as 'skipped_busy'.
+        with suppress(Exception):
+            _log_trigger(reasons, "invoke_error", tier=tier)
         return False
 
 
@@ -1753,6 +1984,8 @@ def _check_agent_completion_locked():
     _telegram_ts_before = None
     _patient_txn_count_before = 0
     _bold_txn_count_before = 0
+    # 2026-06-11 (audit B5): completion observed — drop the persisted PID.
+    _clear_agent_proc_file()
 
     return result
 

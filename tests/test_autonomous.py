@@ -315,6 +315,26 @@ class TestDetectRegime:
         signals["BTC-USD"]["extra"]["regime"] = "high-vol"
         assert _detect_regime(signals) == "high-vol"
 
+    def test_underscore_regime_key_is_read(self):
+        """2026-06-11 (audit B5): signal_engine publishes extra['_regime']
+        (trigger.py reads the same key). _detect_regime read a bare 'regime'
+        key no producer writes, so production regimes were always the
+        'range-bound' fallback. '_regime' must be honored."""
+        from portfolio.autonomous import _detect_regime
+        signals = {
+            "BTC-USD": {"extra": {"_regime": "trending"}},
+            "ETH-USD": {"extra": {"_regime": "trending"}},
+            "XAU-USD": {"extra": {"_regime": "ranging"}},
+        }
+        assert _detect_regime(signals) == "trending"
+
+    def test_underscore_regime_preferred_over_legacy_key(self):
+        from portfolio.autonomous import _detect_regime
+        signals = {
+            "BTC-USD": {"extra": {"_regime": "high-vol", "regime": "range-bound"}},
+        }
+        assert _detect_regime(signals) == "high-vol"
+
 
 # ===========================================================================
 # _build_telegram — Mode A (signals)

@@ -418,7 +418,16 @@ def _detect_regime(signals):
     """Detect dominant market regime from signal extras."""
     regimes = []
     for sig in signals.values():
-        r = sig.get("extra", {}).get("regime")
+        extra = sig.get("extra", {}) or {}
+        # 2026-06-11 (audit B5): signal_engine publishes the regime under
+        # extra['_regime'] (trigger.py:303 reads the same key). This read
+        # used a bare 'regime' key that no producer ever writes, so the
+        # regimes list was always empty and every autonomous decision —
+        # the PRODUCTION decision path since the 2026-06-06 token freeze —
+        # logged the fabricated 'range-bound' fallback into journals,
+        # decisions, and Telegram. '_regime' is primary; bare 'regime' is
+        # kept as a legacy fallback for old snapshots.
+        r = extra.get("_regime") or extra.get("regime")
         if r:
             regimes.append(r)
     if not regimes:
