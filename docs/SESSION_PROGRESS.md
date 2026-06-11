@@ -1,3 +1,31 @@
+## 2026-06-11 (late) — shadow-LLM context fix + swing-test rot (post-campaign follow-ups)
+
+ROOT CAUSE of cryptotrader_lm 24d silence (pickup defer verdict): the _SHADOW_LLM_SIGNALS
+dispatch branch in signal_engine.py passed the MINIMAL context_data dict (ticker/config/
+macro/regime/seasonality) to LLM shadow compute fns, but their prompt builders expect the
+rich ministral-style context. cryptotrader_lm KeyError'd on context['price_usd'] on EVERY
+run since its 2026-05-17 wiring (zero llm_probability_log rows, only a WARNING log line +
+0.0s [SHADOW-LLM] latency as evidence). WORSE: finance_llama (1412 rows) + phi4_mini
+(32 rows) use .get() defaults, so they ran REAL inference over "RSI=?, MACD hist=?"
+placeholder prompts — their logged accuracy measures predictions from the ticker name
+alone. Fix (merge 606eead2, commit 86d7ce96): dispatch now merges _build_llm_context()
+(same builder the ministral/qwen3 voters use) over context_data, ticker restored to full
+"BTC-USD" form (builder strips -USD; cryptotrader's crypto-only guard needs full form).
+Also: off-rotation ticks now set {sig}_throttled so log_vote skips them silently (~600
+noise lines/day gone). Registry notes for all 3 shadows updated: EXCLUDE pre-fix rows
+(before 2026-06-11T21:47Z) from accuracy/promotion decisions. PF-DataLoop restarted
+(taskkill PID tree + schtasks /run, new procs 23:46:54 CET).
+VERIFY (next session if not done): grep cryptotrader_lm data/llm_probability_log.jsonl —
+rows with real probs should appear within ~1h of restart; [SHADOW-LLM] BTC/ETH lines
+should show seconds-scale latency, not 0.0s.
+
+Swing-test rot fixed (merge 5be8cd5c): 3 tests in test_metals_swing_trader.py — MACD
+decay gate (Gate B 2026-04-17) rejected make_signal's default macd_hist=0 vs seeded peak
+0.3, AND entry/exit paths read real wall clock via _cet_hour() so evening runs hit the
+EOD gates (test_hold_when_no_exit_condition sold the position via EOD_EXIT at -118min to
+close). Fixed: macd_hist=0.3 + _cet_hour pinned to 15:00 (existing TestExitLogic pattern).
+55/55 pass at any time of day.
+
 ## 2026-06-11 — AUDIT-FIX CAMPAIGN COMPLETE (sessions 2026-06-10 → 11)
 
 138-finding audit (docs/IMPROVEMENT_AUDIT_2026-06-10.md) fully executed, 12 batches:
