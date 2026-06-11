@@ -1666,6 +1666,23 @@ def _record_new_trades():
             txns = state.get("transactions", [])
             if len(txns) <= count_before:
                 continue
+            # 2026-06-11 (audit batch 7): determine per-BUY whether it OPENED a
+            # new position vs scaled into an existing one, so record_trade only
+            # arms the new-position rate limit on genuine opens. We can't read
+            # pre-trade holdings (state is post-trade), so reconstruct holding
+            # presence by replaying the transactions in order: a BUY is "new" iff
+            # the ticker had no live shares immediately before it.
+            held_before = {}
+            for txn in txns[:count_before]:
+                _tk = txn.get("ticker")
+                _ac = txn.get("action")
+                _sh = txn.get("shares") or 0
+                if not _tk:
+                    continue
+                if _ac == "BUY":
+                    held_before[_tk] = held_before.get(_tk, 0) + (_sh or 0)
+                elif _ac == "SELL":
+                    held_before[_tk] = max(0, held_before.get(_tk, 0) - (_sh or 0))
             # New transactions appeared — record each for guard tracking
             new_txns = txns[count_before:]
             for txn in new_txns:
@@ -1674,10 +1691,20 @@ def _record_new_trades():
                 if not ticker or direction not in ("BUY", "SELL"):
                     continue
                 pnl_pct = txn.get("pnl_pct")
-                record_trade(ticker, direction, strategy, pnl_pct=pnl_pct)
+                shares = txn.get("shares") or 0
+                is_new_position = direction == "BUY" and held_before.get(ticker, 0) <= 0
+                record_trade(
+                    ticker, direction, strategy, pnl_pct=pnl_pct,
+                    is_new_position=is_new_position,
+                )
+                # keep the running holdings view consistent for subsequent txns
+                if direction == "BUY":
+                    held_before[ticker] = held_before.get(ticker, 0) + (shares or 0)
+                elif direction == "SELL":
+                    held_before[ticker] = max(0, held_before.get(ticker, 0) - (shares or 0))
                 logger.info(
-                    "BUG-219: recorded %s %s %s pnl=%.2f%% for overtrading guards",
-                    strategy, direction, ticker, pnl_pct or 0.0,
+                    "BUG-219: recorded %s %s %s pnl=%.2f%% new_pos=%s for overtrading guards",
+                    strategy, direction, ticker, pnl_pct or 0.0, is_new_position,
                 )
     except Exception as e:
         logger.warning("BUG-219: record_trade wiring failed: %s", e)

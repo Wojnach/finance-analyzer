@@ -81,6 +81,7 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
             start_offset = 0
             peak = floor
 
+    skipped_nonnumeric = 0
     try:
         with open(history_path, encoding="utf-8") as f:
             if start_offset > 0:
@@ -94,9 +95,27 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
                 except json.JSONDecodeError:
                     continue
                 val = entry.get(value_key, 0)
+                # 2026-06-11 (audit batch 7): the docstring promised corruption
+                # tolerance but only covered JSON-level corruption. A row where
+                # value_key is null/a string raised TypeError on `val > peak`,
+                # which propagated out of check_drawdown; agent_invocation catches
+                # it per-portfolio and proceeds fail-OPEN, so one malformed row
+                # disabled the circuit breaker for that portfolio on every cycle
+                # forever. Skip non-numeric / non-finite rows (count + warn once)
+                # instead of crashing, mirroring the NaN guard in check_drawdown.
+                if not isinstance(val, (int, float)) or isinstance(val, bool) or not math.isfinite(val):
+                    skipped_nonnumeric += 1
+                    continue
                 if val > peak:
                     peak = val
             end_offset = f.tell()
+        if skipped_nonnumeric:
+            logger.warning(
+                "_streaming_max: skipped %d non-numeric/non-finite '%s' row(s) "
+                "in %s — circuit breaker tolerated corruption instead of "
+                "fail-opening. Inspect the history file.",
+                skipped_nonnumeric, value_key, history_path.name,
+            )
     except OSError as e:
         logger.warning("Could not stream history file %s: %s", history_path.name, e)
         with _peak_cache_lock:
@@ -112,6 +131,13 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
 INITIAL_VALUE_DEFAULT = 500_000  # SEK
+
+# 2026-06-11 (audit batch 7): drawdown peak plausibility multiplier. A streamed
+# peak above this × max(initial, current) is treated as a glitched history row
+# and capped, so one bad print can't permanently pin current_drawdown_pct above
+# the Layer 2 block threshold. 10× a 500K paper book = 5M SEK; loose enough to
+# never trip on a genuine winning streak, tight enough to catch a 2×+ glitch.
+_PEAK_PLAUSIBILITY_MULT = 10.0
 
 # Adversarial review 05-01 P1-15 (2026-05-02): persistent fallback for fx_rate.
 # FX constants imported from portfolio.fx_rates (single source of truth).
@@ -281,6 +307,32 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
     # any rally older than that fell off the back and the drawdown circuit
     # breaker became blind to multi-day peaks.
     peak_value = _streaming_max(history_path, value_key, floor=initial_value)
+
+    # 2026-06-11 (audit batch 7): plausibility bound on the streamed peak.
+    # The history is append-only and built from agent_summary price_usd × fx_rate;
+    # a single glitched row (exchange spike, fx briefly wrong-but-in-band, manual
+    # edit) writes an inflated value that becomes the peak forever — real values
+    # can never exceed it, so current_drawdown_pct stays pinned high and
+    # agent_invocation's _DRAWDOWN_BLOCK_PCT=50 hard-blocks every Layer 2
+    # invocation for that portfolio until someone hand-edits the file. The
+    # NaN/Inf guard below only catches non-finite, not finite-but-absurd.
+    # Conservative bound: a paper portfolio that 10×'d its 500K start (5M SEK)
+    # is already implausible; reject any peak above _PEAK_PLAUSIBILITY_MULT×
+    # the larger of initial_value and the live current value, and fall back to
+    # that ceiling so the breaker measures drawdown off a believable peak
+    # instead of a glitch. (10× is deliberately loose — it only ever trips on
+    # data corruption, never on a real winning streak.)
+    plausible_ceiling = _PEAK_PLAUSIBILITY_MULT * max(initial_value, current_value)
+    if math.isfinite(peak_value) and peak_value > plausible_ceiling:
+        logger.error(
+            "check_drawdown: streamed peak %.2f exceeds plausibility ceiling "
+            "%.2f (%.0f× max(initial=%.0f, current=%.0f)) for %s — likely a "
+            "glitched history row; capping peak to ceiling so the circuit "
+            "breaker isn't permanently pinned. Inspect %s.",
+            peak_value, plausible_ceiling, _PEAK_PLAUSIBILITY_MULT,
+            initial_value, current_value, value_key, history_path.name,
+        )
+        peak_value = plausible_ceiling
 
     # Also compare against current value in case it's a new peak
     if current_value > peak_value:
@@ -456,14 +508,29 @@ def compute_probabilistic_stops(holdings: dict, agent_summary: dict) -> dict:
         else:
             inst_type = "stock"
 
+        # 2026-06-11 (audit batch 7): map inst_type to a valid session_calendar
+        # key and the correct annualization basis.
+        #   - session key: SESSIONS only has warrant/stock_se/stock_us/crypto.
+        #     "stock" is NOT a key — session_calendar.get_session_info falls back
+        #     to SESSIONS["warrant"] (Avanza 08:15-21:55 CET), so MSTR's remaining
+        #     horizon was simulated over the warrant window, not US market hours.
+        #     The only stock in the Tier-1 book is MSTR (US) -> "stock_us".
+        #   - annualization: XAG/XAU trade ~24/7, so they need 365 trading days,
+        #     not 252. The old check `inst_type in ("crypto","metals")` had a dead
+        #     "metals" branch ("metals" is never assigned) so warrants fell to 252,
+        #     understating vol by ~sqrt(365/252) ≈ 20% and under-stating stop-hit
+        #     probability. Metals are classified as "warrant" here, so include it.
+        session_type = "stock_us" if inst_type == "stock" else inst_type
+
         # Get remaining session minutes
-        remaining = remaining_session_minutes(inst_type)
+        remaining = remaining_session_minutes(session_type)
         if remaining < 2:
             continue
 
         # Estimate volatility from ATR
         import math
-        trading_days = 365.0 if inst_type in ("crypto", "metals") else 252.0
+        # crypto + metals (classified as "warrant") trade ~24/7 -> 365-day basis.
+        trading_days = 365.0 if inst_type in ("crypto", "warrant") else 252.0
         vol = max(atr_pct / 100.0 * math.sqrt(trading_days / 14), 0.05)
 
         # ATR stop level

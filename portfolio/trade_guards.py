@@ -17,6 +17,17 @@ from portfolio.file_utils import atomic_write_json, load_json
 
 logger = logging.getLogger("portfolio.trade_guards")
 
+
+def _default_state():
+    """Fresh guard state. Factory (not a constant) so each load gets its own
+    mutable containers — never aliases a module global."""
+    return {
+        "ticker_trades": {},
+        "consecutive_losses": {"patient": 0, "bold": 0},
+        "last_loss_ts": {"patient": None, "bold": None},
+        "new_position_timestamps": {"patient": [], "bold": []},
+    }
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_FILE = DATA_DIR / "trade_guard_state.json"
 
@@ -33,13 +44,67 @@ _state_lock = threading.Lock()
 
 
 def _load_state():
-    """Load trade guard state from disk."""
-    return load_json(str(STATE_FILE), default={
-        "ticker_trades": {},
-        "consecutive_losses": {"patient": 0, "bold": 0},
-        "last_loss_ts": {"patient": None, "bold": None},
-        "new_position_timestamps": {"patient": [], "bold": []},
-    })
+    """Load trade guard state from disk.
+
+    2026-06-11 (audit batch 7): a corrupt trade_guard_state.json used to fall
+    through to a fresh default SILENTLY (only file_utils' generic "corrupt JSON"
+    WARNING). This guard exists specifically to throttle a strategy that is ON A
+    LOSING STREAK; a silent reset wipes consecutive_losses + the up-to-8× cooldown
+    escalation memory, and the very next record_trade() _save_state overwrites the
+    corrupt file with zeros — the escalation history is gone with no trace. Mirror
+    the portfolio_mgr 2026-06-01 hardening: when the file EXISTS but parses to None
+    (corruption, not just missing), quarantine the bytes to a .corrupt sidecar and
+    append a critical_errors row BEFORE starting fresh.
+    """
+    loaded = load_json(str(STATE_FILE), default=None)
+    if loaded is not None:
+        return loaded
+
+    # default=None came back: either the file is missing (normal first run) or
+    # it exists but is unparseable (corruption — surface + preserve loudly).
+    if STATE_FILE.exists():
+        try:
+            corrupt_bytes = STATE_FILE.read_bytes()
+        except OSError:
+            corrupt_bytes = b""
+        if corrupt_bytes.strip():
+            _quarantine_corrupt_state(corrupt_bytes)
+
+    return _default_state()
+
+
+def _quarantine_corrupt_state(corrupt_bytes: bytes) -> None:
+    """Preserve a corrupt guard-state file + surface it before fresh defaults
+    overwrite it. Never raises — evidence preservation must not crash the read
+    path (mirrors portfolio_mgr._quarantine_corrupt_state, 2026-06-01)."""
+    try:
+        qpath = STATE_FILE.with_name(f"{STATE_FILE.name}.corrupt")
+        try:
+            qpath.write_bytes(corrupt_bytes)
+        except OSError as e:
+            logger.warning("trade_guards: could not write quarantine %s: %s", qpath.name, e)
+        logger.warning(
+            "trade_guards: %s is corrupt — quarantined to %s and reset to fresh "
+            "state. Loss-escalation / cooldown memory was lost.",
+            STATE_FILE.name, qpath.name,
+        )
+        try:
+            from portfolio.claude_gate import record_critical_error
+            record_critical_error(
+                category="trade_guard_state_corrupt",
+                caller="portfolio.trade_guards",
+                message=(
+                    f"{STATE_FILE.name} unparseable — quarantined to {qpath.name} and "
+                    f"reset to fresh state. Consecutive-loss counts and the up-to-8× "
+                    f"cooldown escalation were wiped; overtrading guards restart from "
+                    f"zero until trades re-accumulate."
+                ),
+                context={"path": str(STATE_FILE), "quarantine": str(qpath), "bytes": len(corrupt_bytes)},
+            )
+        except Exception:  # noqa: BLE001 — surfacing is best-effort
+            logger.exception("trade_guards: failed to record critical_errors entry")
+    except Exception:  # noqa: BLE001
+        logger.exception("trade_guards: quarantine of corrupt state failed")
 
 
 def _save_state(state):
@@ -122,12 +187,36 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
     if cfg.get("enabled") is False:
         return []
 
+    # 2026-06-11 (audit batch 7): does the strategy currently hold this ticker?
+    # Used to (a) let SELLs that reduce/close an existing position bypass the
+    # cooldown + loss-escalation blocks, and (b) treat a BUY into an already-held
+    # ticker as a scale-in, not a "new position", for the rate limit. The
+    # `portfolio` arg was previously threaded through get_all_guard_warnings and
+    # never used — this wires it.
+    holdings = (portfolio or {}).get("holdings", {}) if isinstance(portfolio, dict) else {}
+    held_shares = 0
+    _h = holdings.get(ticker) if isinstance(holdings, dict) else None
+    if isinstance(_h, dict):
+        try:
+            held_shares = float(_h.get("shares", 0) or 0)
+        except (TypeError, ValueError):
+            held_shares = 0
+    currently_holds = held_shares > 0
+    # A SELL while holding is a position-reducing EXIT. Cooldown + loss-escalation
+    # exist to PREVENT OVERTRADING (re-entering), not to lock a strategy into a
+    # losing position: blocking exits hardest right after losses (the 8× / 240min
+    # escalation fires exactly when the position is underwater) inverts risk
+    # management. Exits therefore skip Guard 1 + Guard 2 entirely; entries (BUY,
+    # and any SELL with no position to reduce, e.g. a short — none today) keep the
+    # original block semantics unchanged.
+    is_exit = action == "SELL" and currently_holds
+
     warnings = []
     with _state_lock:
         state = _load_state()
     now = datetime.now(UTC)
 
-    # --- Guard 1: Per-ticker cooldown ---
+    # --- Guard 1: Per-ticker cooldown (ENTRIES only) ---
     base_cooldown = cfg.get("ticker_cooldown_minutes", DEFAULT_TICKER_COOLDOWN_MINUTES)
     consecutive = state.get("consecutive_losses", {}).get(strategy, 0)
     last_loss_ts = state.get("last_loss_ts", {}).get(strategy)
@@ -137,7 +226,7 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
     key = f"{strategy}:{ticker}"
     ticker_trades = state.get("ticker_trades", {})
     last_trade_str = ticker_trades.get(key)
-    if last_trade_str:
+    if last_trade_str and not is_exit:
         try:
             last_trade = datetime.fromisoformat(last_trade_str)
             # M8: ensure aware datetime before comparison with aware now
@@ -166,8 +255,8 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
         except (ValueError, TypeError) as e:
             logger.warning("trade_guards: corrupt timestamp in cooldown check for %s: %s", ticker, e)
 
-    # --- Guard 2: Consecutive-loss escalation (informational) ---
-    if consecutive >= 2:
+    # --- Guard 2: Consecutive-loss escalation (informational, ENTRIES only) ---
+    if consecutive >= 2 and not is_exit:
         base_mult = _get_cooldown_multiplier(consecutive, None)
         warnings.append({
             "guard": "consecutive_losses",
@@ -186,8 +275,13 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
             },
         })
 
-    # --- Guard 3: Position rate limit (BUY only) ---
-    if action == "BUY":
+    # --- Guard 3: New-position rate limit (BUY opening a NEW position only) ---
+    # 2026-06-11 (audit batch 7): a BUY into an already-held ticker is a scale-in,
+    # not a new position, so it must not consume the new-position budget (with
+    # patient_position_limit=1/8h a single add-on used to exhaust the window).
+    # `currently_holds` comes from the portfolio arg; record_trade is told the
+    # same so it only stamps new_position_timestamps for genuine opens.
+    if action == "BUY" and not currently_holds:
         is_bold = strategy == "bold"
         limit = cfg.get(
             f"{'bold' if is_bold else 'patient'}_position_limit",
@@ -234,7 +328,7 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
 _wiring_confirmed = False  # process-scoped flag — positive proof for C4
 
 
-def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
+def record_trade(ticker, direction, strategy, pnl_pct=None, config=None, is_new_position=True):
     """Record a completed trade for guard tracking.
 
     Call this after executing a trade to update cooldowns and loss streaks.
@@ -245,6 +339,11 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
         strategy: "patient" or "bold".
         pnl_pct: Realized P&L percentage (for SELL trades). None for BUY.
         config: Optional config dict.
+        is_new_position: 2026-06-11 (audit batch 7) — only stamp the
+            new-position rate-limit clock when this BUY genuinely OPENED a
+            position (ticker not already held before the buy). Scale-ins pass
+            False so they don't consume the new-position budget. Defaults True
+            for back-compat with callers that can't tell (treated as an open).
     """
     # 2026-04-22 follow-up: positive-proof wiring check. The previous C4
     # warning was *reactive* — it could only tell you after a trade had
@@ -305,8 +404,10 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
         for _k in _stale_keys:
             del _ticker_trades[_k]
 
-        # Track new position timestamps (BUY only)
-        if direction == "BUY":
+        # Track new position timestamps (BUY that OPENS a new position only —
+        # scale-ins into an already-held ticker pass is_new_position=False and
+        # must not consume the new-position rate-limit budget). 2026-06-11.
+        if direction == "BUY" and is_new_position:
             if "new_position_timestamps" not in state:
                 state["new_position_timestamps"] = {"patient": [], "bold": []}
             if strategy not in state["new_position_timestamps"]:

@@ -27,7 +27,6 @@ import numpy as np
 from scipy.stats import norm
 from scipy.stats import t as t_dist
 
-from portfolio.fx_rates import FX_RATE_FALLBACK
 from portfolio.monte_carlo import (
     MIN_VOLATILITY,
     drift_from_probability,
@@ -405,7 +404,15 @@ def compute_portfolio_var(
     """
     holdings = portfolio_state.get("holdings", {})
     signals = agent_summary.get("signals", {})
-    fx_rate = agent_summary.get("fx_rate", FX_RATE_FALLBACK)
+    # 2026-06-11 (audit batch 7): reuse the validated resolver instead of a raw
+    # .get(). The old `.get("fx_rate", FX_RATE_FALLBACK)` only covered a MISSING
+    # key — a present-but-bogus value (e.g. the stale fx_rate=1.0 case that
+    # adversarial review 05-01 P1-15 fixed) passed straight through, making every
+    # *_sek VaR/CVaR/exposure output ~10× understated. _resolve_fx_rate applies
+    # the same [7,15] sanity band + disk-cache + FX_RATE_FALLBACK fallback as the
+    # drawdown path, so both modules agree on a single source of truth.
+    from portfolio.risk_management import _resolve_fx_rate
+    fx_rate = _resolve_fx_rate(agent_summary)
 
     # Build positions dict
     positions = {}
