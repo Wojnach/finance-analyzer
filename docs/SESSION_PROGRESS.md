@@ -1,4 +1,75 @@
+## 2026-06-11 — AUDIT-FIX CAMPAIGN COMPLETE (sessions 2026-06-10 → 11)
+
+138-finding audit (docs/IMPROVEMENT_AUDIT_2026-06-10.md) fully executed, 12 batches:
+B1 ops (pickups task argv bug — root cause of 21d-overdue pickup; vbs wait mode; alert dedup),
+B2 live-incident (crypto_macro expiry permanent-BUY = June accuracy collapse driver; netflow
+staleness contract — BGeometrics 404), B3 prophecy (alert level, scoring coverage, .bat
+hardening + --setting-sources "" + write_guard.py vs prompt-injection), B4 metals REAL MONEY
+(Playwright single-thread executor — 16.7K thread-affinity errors / grid dead 9 days;
+halt/EOD ordering; closing-SELL min-order exemption; naked-stop critical), B5 orchestration
+(autonomous _regime key — every freeze-era decision logged fabricated regime; fail-closed
+gates; PID reap), B6 signal-core (btc_proxy disabled-vote leak; metals MIN_VOTERS=2 honored
+across ALL gates; blend double-count), B7 risk (exits bypass cooldown; deepcopy default
+state; peak bounds), B8 swing loops (MSTR SHORT was priced off BULL cert; oil bar_ts/
+fetched_ts split), B9 infra (bounded msvcrt locks; 429 cap; poller ack-after-success),
+B10 dashboard (nh3 XSS sanitize — NEW DEP in requirements; token log redaction; queue
+bounds), B11 docs fact sweep (15 active signals not 21; 600s not 60s; 61 routes),
+B12 hygiene (340MB debris+orphan worktrees; test_metals_swing_trader into suite — exposed
++ fixed real _migrate_orphans int-holding bug).
+
+Suite: 67 post-campaign failures triaged → 6 deterministic pre-existing + known xdist
+flake rotation (commit d501ef41). 16 accuracy_degradation criticals + netflow alert
+RESOLVED in journal (verdict: genuine June 1-6 regime crash; crypto_macro bias fixed).
+Pickup LLM-CRYPTOTRADER-72H force-ran: defer (0 directional rows — FOLLOW-UP: cryptotrader_lm
+may have never logged shadow rows in 24d). Loops restarted (schtasks /end does NOT kill
+the detached python — needed taskkill /F /T on the PID pairs; audit's run-hidden.vbs
+finding demonstrated live).
+
+PENDING USER ADMIN (elevated PowerShell):
+1. scripts/win/install-pending-pickups-task.ps1  (action line changed in B1 — current task
+   still broken until reinstalled)
+2. Decide PF-FixAgentDispatcher: install scripts/win/install-fix-agent-task.ps1 or leave
+   disabled (data/fix_agent.disabled in place during token freeze)
+AT UNFREEZE: smoke per scripts/prophecy-daily.bat header checklist + one claude -p layer2
+run; verify prophecy Write denial outside data/prophecy_runs/; run
+scripts/accuracy_gate_flip_diff.py data/accuracy_cache.pre_b6.json data/accuracy_cache.json
+after a few days of cycles.
+FOLLOW-UPS: telegram getUpdates dual-consumer (B4 finding 10, dormant flow, needs design);
+cryptotrader_lm shadow logging silence; metals_swing_trader 2 rotted tests (MACD decay gate).
+
 # Session Progress
+
+## 2026-06-11 -- Scheduled pickup auto-run: LLM-CRYPTOTRADER-72H (verdict: DEFER)
+
+**Title:** Verify cryptotrader_lm v2 LoRA after 72h shadow data
+
+**Summary:** Insufficient directional rows: 0 < 50. Extend window 7d and re-check.
+
+Stats:
+```json
+{
+  "accuracy": null,
+  "stats": {
+    "n_total": 0,
+    "n_directional": 0,
+    "n_matched": 0,
+    "correct": 0,
+    "buy_predictions": 0,
+    "sell_predictions": 0
+  },
+  "per_ticker": {},
+  "cutoff_iso": "2026-05-18T20:00:00+02:00",
+  "thresholds": {
+    "min_directional": 50,
+    "promote_bar": 0.6,
+    "retire_bar": 0.55
+  }
+}
+```
+
+Source: `scripts/process_pending_pickups.py` -- see `data/pending_pickups.json` for full history.
+
+---
 
 ## 2026-06-06 Dashboard Loop-Tile Fixes (00:30 CEST)
 
@@ -6726,3 +6797,42 @@ CLAUDE_ENABLED=False at next start).
 
 Freeze unchanged: still disabled, re-enable ONLY on explicit user request (user
 declined an end-of-week reminder). No auto-re-enable path exists.
+
+## 2026-06-06 Prophecy — daily AI price-prediction system (built + merged, FROZEN)
+
+NEW separate subsystem, package `prophecy/` (NOT `portfolio/prophecy.py` — that
+macro-beliefs file is untouched). Merged to main (HEAD `0ce8e9d9`), 10 commits
+UNPUSHED — needs `! git push`.
+
+**What:** daily 10:00 CET, `claude -p` Opus 4.8 + `/deep-research` + ultracode
+predicts direction+target+P+confidence for **13 instruments × 10 horizons**
+(1d–7d,1mo,2mo,6mo), unique playbook per instrument, fusing stored signals/equations
++ web + forum sentiment. Pipeline (all 0-token except the claude step):
+`prep.py` → `claude -p` → `publish.py`/`outcomes.py`/`cost.py`. Data dir
+`data/prophecy_runs/` (renamed off `data/prophecy/` to avoid collision). Dashboard
+`/api/prophecy` + `/prophecy` page (per-instrument horizon grid, ⚠ needs-work column,
+token cost, accuracy).
+
+**Per-instrument enable flags** in `data/prophecy_runs/prophecy_config.json` (all
+true). **Coverage/needs_work gap flag** surfaces where data/equations are missing
+(warrants/Tier-2/oil flag needs_work — no signal feed; visible on dashboard).
+**Token cost tracked** ("unhinged" — measured not capped). 43 tests pass.
+
+**SHIPS FROZEN — zero spend:** `data/prophecy_runs/SYSTEM_DISABLED` sentinel +
+`.bat` exits 0 if present + install task ships disabled. Existing freeze untouched.
+
+**Process:** /fgl — spec+plan+premortem (6 modes mitigated, incl. dir-collision +
+freeze-bypass + cost-blowup) → 4 batches → adversarial review (2 P1 fixed: inf→JSON
+poison, rerun double-scoring; + P2/P3) → 43 tests → rebased onto main → ff-merge.
+
+**STILL TODO (user-gated):**
+1. `! git push` (10 commits; classifier blocks my push to main).
+2. GO LIVE (starts daily Opus spend): run `scripts/win/install-prophecy-task.ps1`
+   (admin) → `git rm data/prophecy_runs/SYSTEM_DISABLED` + commit → `Enable-ScheduledTask
+   -TaskName PF-Prophecy`. Confirm `--model claude-opus-4-8` resolves on the Windows
+   claude install first.
+3. Phase 2 (DEFERRED): wire existing loops to read `data/prophecy_runs/latest.json`.
+
+Spec: `docs/superpowers/specs/2026-06-06-prophecy-design.md`. Plan+premortem:
+`docs/PLAN_PROPHECY.md`. Cleanup: orphan dir `Q:\finance-analyzer-prophecy.broken`
+(+ the older `Q:\finance-analyzer-review`) can be `rmdir /s /q`'d.
