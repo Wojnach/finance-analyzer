@@ -1569,9 +1569,20 @@ def cet_time_str():
     return ts
 
 def is_market_hours():
-    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 Stockholm time).
+    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15 to
+    the dynamic session close, Stockholm time).
 
     Returns False on weekends and Swedish public holidays.
+
+    2026-06-12 (audit B4 fix 5): the end-of-day boundary is no longer a
+    hardcoded 21.92 (≈21:55). It now comes from
+    ``grid_fisher.resolve_eod_cutoff_hm`` which consults Avanza's
+    todayClosingTime to detect Swedish half-days (~13:00 close) — on those
+    days the loop (and therefore the grid EOD flat) must stop hours before
+    the usual 21:55. On normal days the resolver keeps the 21:55 default
+    (todayClosingTime reports the exchange close, NOT the AVA market-maker
+    quoting window — memory reference_avanza_trading_hours), and on fetch
+    failure it falls back to 21:50 with an `eod_close_time_fallback` entry.
     """
     now = datetime.datetime.now(datetime.UTC)
     weekday = now.weekday()
@@ -1580,7 +1591,13 @@ def is_market_hours():
     if is_swedish_market_holiday(now):
         return False
     h = cet_hour()
-    return 8.25 <= h <= 21.92
+    try:
+        from portfolio.grid_fisher import resolve_eod_cutoff_hm
+        close_h, close_m = resolve_eod_cutoff_hm()
+        close_frac = close_h + close_m / 60.0
+    except Exception:
+        close_frac = 21.92  # pre-fix hardcoded boundary
+    return 8.25 <= h <= close_frac
 
 def is_avanza_open():
     """Check if Avanza warrant market is open for trading."""
@@ -4793,13 +4810,87 @@ def _handle_buy_fill(page, order, exec_price, price_data):
     if HARDWARE_TRAILING_ENABLED:
         vol = POSITIONS[pos_key]["units"]
         ob_id_str = POSITIONS[pos_key].get("ob_id", order.get("ob_id"))
-        try:
-            ok, result = place_trailing_stop_no_page(
-                ACCOUNT_ID, ob_id_str,
-                trail_percent=HARDWARE_TRAILING_PCT,
-                volume=vol,
-                valid_days=HARDWARE_TRAILING_VALID_DAYS,
-            )
+        # 2026-06-12 (audit B4 fix 7): when this BUY added to an existing
+        # position, the previous trailing stop (sized to the OLD units) is
+        # still live at the broker. Placing a full-volume replacement
+        # without cancelling it first stacks stops totalling old+new >
+        # position — violates "sell + stop-loss volume must not exceed
+        # position size" and double-fires sells on a trigger. So:
+        # cancel-before-place, and if the replacement placement then fails
+        # after a SUCCESSFUL cancel the position is NAKED (old stop gone) →
+        # stop_replace_naked critical_errors entry + Telegram + one
+        # immediate placement retry — never just a log line.
+        prev_stop_id = POSITIONS[pos_key].get("hw_trailing_stop_id")
+        prev_cancel_ok = True
+        if prev_stop_id:
+            try:
+                from portfolio.avanza_control import delete_stop_loss_no_page
+                prev_cancel_ok, _cancel_res = delete_stop_loss_no_page(
+                    ACCOUNT_ID, prev_stop_id,
+                )
+            except Exception as e:
+                prev_cancel_ok, _cancel_res = False, {"error": str(e)}
+            if not prev_cancel_ok:
+                # Old stop may still be live — do NOT place a full-volume
+                # replacement on top (over-encumbrance, the original bug).
+                # Old units keep their stop; the ADDED units are uncovered
+                # until an operator intervenes, so alert loudly.
+                log(f"  HW trailing stop replace: cancel of old stop "
+                    f"{prev_stop_id} UNCONFIRMED ({_cancel_res}) — keeping "
+                    f"old stop, replacement skipped (added units uncovered)")
+                send_telegram(
+                    f"*WARNING* {POSITIONS[pos_key]['name']}: added units "
+                    f"have NO trailing stop — cancel of old stop "
+                    f"{prev_stop_id} unconfirmed, replacement skipped to "
+                    f"avoid over-encumbrance. Check manually."
+                )
+        if prev_cancel_ok:
+            if prev_stop_id:
+                # Cancel confirmed — the recorded id is dead either way.
+                POSITIONS[pos_key]["hw_trailing_stop_id"] = None
+                _save_positions(POSITIONS)
+
+            def _try_place_trailing():
+                try:
+                    return place_trailing_stop_no_page(
+                        ACCOUNT_ID, ob_id_str,
+                        trail_percent=HARDWARE_TRAILING_PCT,
+                        volume=vol,
+                        valid_days=HARDWARE_TRAILING_VALID_DAYS,
+                    )
+                except Exception as e:  # noqa: BLE001 — degrade to (False, err)
+                    logger.exception(
+                        "_handle_buy_fill: hardware trailing stop placement "
+                        "raised pos_key=%s", pos_key,
+                    )
+                    return False, {"error": str(e)}
+
+            ok, result = _try_place_trailing()
+            if not ok and prev_stop_id:
+                # Naked window: old stop cancelled, replacement failed.
+                # Escalate + retry immediately (audit B4 fix 7 hook 1).
+                log(f"  HW trailing stop REPLACE failed after cancel for "
+                    f"{pos_key}: {result} — escalating + retrying once")
+                try:
+                    from portfolio.claude_gate import record_critical_error
+                    record_critical_error(
+                        "stop_replace_naked",
+                        "metals_loop._handle_buy_fill",
+                        f"Trailing-stop replacement failed after cancelling "
+                        f"old stop {prev_stop_id} — {POSITIONS[pos_key]['name']} "
+                        f"({vol}u) is stopless",
+                        {"pos_key": pos_key, "ob_id": str(ob_id_str),
+                         "old_stop_id": str(prev_stop_id),
+                         "volume": vol, "result": str(result)[:300]},
+                    )
+                except Exception:
+                    logger.exception("_handle_buy_fill: critical_errors append failed")
+                send_telegram(
+                    f"*URGENT* {POSITIONS[pos_key]['name']}: old trailing "
+                    f"stop cancelled but replacement FAILED — position "
+                    f"({vol}u) currently has NO stop. Retrying once."
+                )
+                ok, result = _try_place_trailing()
             if ok:
                 hw_stop_id = result.get("stoplossOrderId", "?")
                 POSITIONS[pos_key]["hw_trailing_stop_id"] = hw_stop_id
@@ -4812,15 +4903,6 @@ def _handle_buy_fill(page, order, exec_price, price_data):
                 log(f"  HW trailing stop FAILED for {pos_key}: {result}")
                 send_telegram(f"*WARNING* Hardware trailing stop failed for "
                               f"{POSITIONS[pos_key]['name']} — set manually!")
-        except Exception as e:
-            # 2026-04-09 Stage 3: ERROR — hardware trailing stop failure
-            # leaves the NEW position without broker-level protection.
-            # Telegram alert still fires with the short form; exc_info
-            # gives the operator a stack trace to diagnose persistent
-            # failures (API shape, stop-loss endpoint auth, etc.).
-            logger.exception("_handle_buy_fill: hardware trailing stop placement raised pos_key=%s", pos_key)
-            send_telegram(f"*WARNING* Hardware trailing stop error for "
-                          f"{POSITIONS[pos_key]['name']}: {e}")
 
     # Legacy cascade stop-loss (only if hardware trailing is OFF)
     if STOP_ORDER_ENABLED and not HARDWARE_TRAILING_ENABLED:
@@ -5963,6 +6045,14 @@ def write_context(prices, trigger_reason, tier=2):
     hours_remaining = hours_to_metals_close(now) if EXECUTION_ENGINE_AVAILABLE else round(
         max(0, EOD_HOUR_CET + 25 / 60 - cet_hour()), 1
     )
+    # 2026-06-12 (audit B4 fix 5): surface the dynamic close (half-days)
+    # instead of a hardcoded 21:55. Cached per day inside the resolver.
+    try:
+        from portfolio.grid_fisher import resolve_eod_cutoff_hm as _eod_hm
+        _close_h, _close_m = _eod_hm()
+        _market_close_cet = f"{_close_h:02d}:{_close_m:02d}"
+    except Exception:
+        _market_close_cet = "21:55"
     ctx = {
         "timestamp": now.isoformat(),
         "cet_time": cet_time_str(),
@@ -5970,7 +6060,7 @@ def write_context(prices, trigger_reason, tier=2):
         "invoke_count": invoke_count,
         "trigger_reason": trigger_reason,
         "tier": tier,
-        "market_close_cet": "21:55",
+        "market_close_cet": _market_close_cet,
         "hours_remaining": round(hours_remaining, 1),
         "positions": {},
         "underlying": {},
@@ -7591,8 +7681,15 @@ Positions: {pos_summary}{prob_summary}""")
                         # Compute minutes-until-EOD so the grid sweeps near
                         # session close. minutes_until_eod() returns inf if
                         # zoneinfo data is unavailable on the host.
-                        from portfolio.grid_fisher import minutes_until_eod
-                        _eod_min = minutes_until_eod()
+                        # 2026-06-12 (audit B4 fix 5): pass the dynamic
+                        # cutoff so half-days flatten before the real close.
+                        from portfolio.grid_fisher import (
+                            minutes_until_eod,
+                            resolve_eod_cutoff_hm,
+                        )
+                        _eod_min = minutes_until_eod(
+                            cutoff_hm=resolve_eod_cutoff_hm(),
+                        )
                         grid_fisher.tick(
                             signal_data=_grid_sigs,
                             prices=_grid_prices,

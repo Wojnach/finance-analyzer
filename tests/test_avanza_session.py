@@ -898,3 +898,223 @@ class TestPlaceOrderValidation:
         from portfolio.avanza_session import _place_order
         with pytest.raises(ValueError, match="non-whitelisted account"):
             _place_order("BUY", "12345", 100.0, 10, account_id="999999")
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 1): single-worker session executor — thread
+# pinning, re-entrancy guard, queue-wait metrics, escalation hooks.
+# ---------------------------------------------------------------------------
+
+
+import threading
+import time as _time
+
+import portfolio.avanza_session as avz
+
+
+@pytest.fixture
+def _reset_executor_stats():
+    """Reset the executor's escalation/stat globals around each test."""
+    def _reset():
+        with avz._stats_lock:
+            avz._last_call_stats.clear()
+        avz._consecutive_failures = 0
+        avz._last_queue_stall_escalation_mono = 0.0
+        avz._last_failure_escalation_mono = 0.0
+    _reset()
+    yield
+    _reset()
+
+
+class TestSessionExecutorPinning:
+    def test_calls_from_different_threads_land_on_one_worker(
+        self, _reset_executor_stats,
+    ):
+        first = avz._run_on_session_thread(
+            threading.get_ident, op_name="probe-main",
+        )
+        from_thread: list[int] = []
+        t = threading.Thread(
+            target=lambda: from_thread.append(
+                avz._run_on_session_thread(
+                    threading.get_ident, op_name="probe-thread",
+                )
+            ),
+        )
+        t.start()
+        t.join(timeout=10)
+        assert from_thread, "threaded call never completed"
+        assert first == from_thread[0]
+        assert first != threading.get_ident()
+        assert first == avz._session_thread_id
+
+    def test_reentrant_submit_raises(self, _reset_executor_stats):
+        def _inner():
+            return avz._run_on_session_thread(lambda: 1, op_name="inner")
+
+        with pytest.raises(RuntimeError, match="re-entrant"):
+            avz._run_on_session_thread(_inner, op_name="outer")
+
+    def test_queue_wait_and_duration_metrics_exposed(
+        self, _reset_executor_stats,
+    ):
+        result = avz._run_on_session_thread(
+            lambda: (_time.sleep(0.05), 42)[1], op_name="probe-stats",
+        )
+        assert result == 42
+        stats = avz.session_call_stats()
+        assert stats["op_name"] == "probe-stats"
+        assert stats["ok"] is True
+        assert stats["queue_wait_s"] >= 0.0
+        # Generous lower bound — Windows monotonic deltas can undershoot
+        # the requested sleep slightly.
+        assert stats["duration_s"] is not None and stats["duration_s"] >= 0.03
+        assert stats["consecutive_failures"] == 0
+
+    def test_queue_stall_records_critical_error(
+        self, _reset_executor_stats, monkeypatch,
+    ):
+        import portfolio.claude_gate as cg
+
+        events: list[tuple] = []
+        monkeypatch.setattr(
+            cg, "record_critical_error",
+            lambda *a, **k: events.append(a) or True,
+        )
+        monkeypatch.setattr(avz, "_QUEUE_WAIT_CRITICAL_S", 0.05)
+
+        hog = threading.Thread(
+            target=lambda: avz._run_on_session_thread(
+                lambda: _time.sleep(0.3), op_name="hog",
+            ),
+        )
+        hog.start()
+        _time.sleep(0.1)  # let the hog occupy the worker
+        avz._run_on_session_thread(lambda: 1, op_name="queued")
+        hog.join(timeout=10)
+        assert any(a[0] == "avanza_session_queue_stall" for a in events)
+
+    def test_consecutive_failures_escalate(
+        self, _reset_executor_stats, monkeypatch,
+    ):
+        import portfolio.claude_gate as cg
+
+        events: list[tuple] = []
+        telegrams: list[str] = []
+        monkeypatch.setattr(
+            cg, "record_critical_error",
+            lambda *a, **k: events.append(a) or True,
+        )
+        monkeypatch.setattr(avz, "_alert_telegram", telegrams.append)
+        monkeypatch.setattr(avz, "_CONSECUTIVE_FAILURE_ALERT_THRESHOLD", 3)
+
+        def _boom():
+            raise RuntimeError("simulated avanza failure")
+
+        for _ in range(3):
+            with pytest.raises(RuntimeError, match="simulated"):
+                avz._run_on_session_thread(_boom, op_name="boom")
+
+        assert any(
+            a[0] == "avanza_session_consecutive_failures" for a in events
+        )
+        assert telegrams, "telegram escalation not sent"
+        # A success resets the streak.
+        avz._run_on_session_thread(lambda: 1, op_name="ok")
+        assert avz.session_call_stats()["consecutive_failures"] == 0
+
+    def test_timeout_raises_session_timeout(self, _reset_executor_stats):
+        with pytest.raises(avz.AvanzaSessionTimeout, match="timed out"):
+            avz._run_on_session_thread(
+                lambda: _time.sleep(0.4), op_name="slow", timeout=0.05,
+            )
+        # Drain the worker so later tests don't inherit the queue delay.
+        avz._run_on_session_thread(lambda: 1, op_name="drain", timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 2): get_open_orders failure must raise — never
+# masquerade as an empty order book.
+# ---------------------------------------------------------------------------
+
+
+class TestGetOpenOrdersFailure:
+    @patch("portfolio.avanza_session.api_get")
+    def test_both_endpoints_failing_raises(self, mock_api_get):
+        from portfolio.avanza_session import get_open_orders
+        mock_api_get.side_effect = RuntimeError("Avanza API error 503")
+        with pytest.raises(AvanzaSessionError, match="Could not fetch open orders"):
+            get_open_orders()
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_fallback_endpoint_still_used(self, mock_api_get):
+        from portfolio.avanza_session import get_open_orders
+        mock_api_get.side_effect = [
+            RuntimeError("Avanza API error 500"),
+            {"orders": [
+                {"accountId": "1625505", "orderId": "A1"},
+                {"accountId": "999", "orderId": "A2"},
+            ]},
+        ]
+        orders = get_open_orders()
+        assert [o["orderId"] for o in orders] == ["A1"]
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_genuinely_empty_book_returns_empty_list(self, mock_api_get):
+        from portfolio.avanza_session import get_open_orders
+        mock_api_get.return_value = {"orders": []}
+        assert get_open_orders() == []
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 6): 1000-SEK minimum exempts position-closing
+# SELLs (verified against live positions; fail-closed on lookup error).
+# ---------------------------------------------------------------------------
+
+
+class TestClosingSellMinimumExemption:
+    def test_sub_minimum_buy_still_raises(self):
+        from portfolio.avanza_session import place_buy_order
+        with pytest.raises(ValueError, match="below minimum 1000"):
+            place_buy_order("123456", 5.0, 10)  # 50 SEK
+
+    @patch("portfolio.avanza_session.api_post")
+    @patch("portfolio.avanza_session.get_positions")
+    def test_closing_sell_exempt_from_minimum(self, mock_positions, mock_post):
+        from portfolio.avanza_session import place_sell_order
+        mock_positions.return_value = [
+            {"orderbook_id": "123456", "account_id": "1625505", "volume": 10},
+        ]
+        mock_post.return_value = {"orderRequestStatus": "SUCCESS", "orderId": "X1"}
+        result = place_sell_order("123456", 5.0, 10)  # 50 SEK, full close
+        assert result["orderRequestStatus"] == "SUCCESS"
+        assert mock_post.called
+
+    @patch("portfolio.avanza_session.api_post")
+    @patch("portfolio.avanza_session.get_positions")
+    def test_sell_without_matching_position_raises(self, mock_positions, mock_post):
+        from portfolio.avanza_session import place_sell_order
+        mock_positions.return_value = []  # nothing held — not a closing sell
+        with pytest.raises(ValueError, match="below minimum 1000"):
+            place_sell_order("123456", 5.0, 10)
+        assert not mock_post.called
+
+    @patch("portfolio.avanza_session.api_post")
+    @patch("portfolio.avanza_session.get_positions")
+    def test_sell_exceeding_held_volume_raises(self, mock_positions, mock_post):
+        from portfolio.avanza_session import place_sell_order
+        mock_positions.return_value = [
+            {"orderbook_id": "123456", "account_id": "1625505", "volume": 5},
+        ]
+        with pytest.raises(ValueError, match="below minimum 1000"):
+            place_sell_order("123456", 5.0, 10)  # selling more than held
+        assert not mock_post.called
+
+    @patch("portfolio.avanza_session.api_post")
+    @patch("portfolio.avanza_session.get_positions")
+    def test_position_lookup_failure_fails_closed(self, mock_positions, mock_post):
+        from portfolio.avanza_session import place_sell_order
+        mock_positions.side_effect = RuntimeError("api down")
+        with pytest.raises(ValueError, match="below minimum 1000"):
+            place_sell_order("123456", 5.0, 10)
+        assert not mock_post.called

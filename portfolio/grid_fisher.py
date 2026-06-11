@@ -39,6 +39,7 @@ from portfolio.grid_fisher_config import (
     GRID_DECISIONS_LOG,
     GRID_DIRECTION_FLIP_COOLDOWN_MIN,
     GRID_GLOBAL_MAX_SEK,
+    GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK,
     GRID_PER_INSTRUMENT_MAX_SEK,
     GRID_PER_SESSION_LOSS_LIMIT_SEK,
     GRID_STATE_FILE,
@@ -288,15 +289,178 @@ _EOD_LOCAL_HOUR = 21
 _EOD_LOCAL_MINUTE = 55
 _EOD_TZ_NAME = "Europe/Stockholm"
 
+# 2026-06-12 (audit B4 fix 5): dynamic EOD cutoff from the Avanza
+# marketPlace.todayClosingTime field. IMPORTANT nuance (memory
+# reference_avanza_trading_hours): for AVA market-maker-quoted certificates
+# todayClosingTime reports the EXCHANGE close (First North ~17:30) while
+# the MM keeps quoting until ~22:00 — so on a NORMAL day the fetched value
+# must NOT replace the 21:55 default. We use it only to detect EARLY-close
+# days (Swedish half-days, ~13:00 exchange close): a fetched close at or
+# below _EOD_EARLY_CLOSE_THRESHOLD_MIN signals a shortened session and the
+# cutoff becomes (close - margin). Fetch failure → fall back to 21:55
+# minus a safety margin and emit an `eod_close_time_fallback` decision-log
+# entry (binding premortem hook).
+_EOD_CLOSE_MARGIN_MIN = 5
+_EOD_FALLBACK_HOUR = 21
+_EOD_FALLBACK_MINUTE = 50  # 21:55 default minus the 5-min safety margin
+_EOD_EARLY_CLOSE_THRESHOLD_MIN = 17 * 60  # < 17:00 → treat as half-day
+_EOD_CLOSE_FETCH_RETRY_S = 1800.0  # re-try a failed fetch after 30 min
 
-def minutes_until_eod(now_utc: Optional[_dt.datetime] = None) -> float:
+_close_time_lock = threading.Lock()
+_close_time_cache: dict[str, tuple[int, int]] = {}  # local date -> cutoff
+_close_fetch_failed_mono: dict[str, float] = {}  # local date -> last fail ts
+_close_fallback_logged: set[str] = set()  # dates where fallback was logged
+
+
+def _parse_hhmm(raw: Any) -> Optional[tuple[int, int]]:
+    """Parse 'HH:MM' / 'HH:MM:SS' into (hour, minute), else None."""
+    if not isinstance(raw, str):
+        return None
+    parts = raw.strip().split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        h, m = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return None
+    return h, m
+
+
+def _extract_today_closing_time(payload: Any) -> Optional[tuple[int, int]]:
+    """Pull todayClosingTime out of a market-guide payload, defensively.
+
+    Avanza has renamed/nested fields before (see get_buying_power's
+    multi-shape fallback) so we probe every plausible location.
+    """
+    if not isinstance(payload, dict):
+        return None
+    candidates = [
+        (payload.get("marketPlace") or {}) if isinstance(
+            payload.get("marketPlace"), dict) else {},
+        (payload.get("listing") or {}) if isinstance(
+            payload.get("listing"), dict) else {},
+        (payload.get("orderbook") or {}) if isinstance(
+            payload.get("orderbook"), dict) else {},
+        payload,
+    ]
+    for obj in candidates:
+        for key in ("todayClosingTime", "closingTime"):
+            parsed = _parse_hhmm(obj.get(key))
+            if parsed is not None:
+                return parsed
+        nested = obj.get("marketPlace")
+        if isinstance(nested, dict):
+            for key in ("todayClosingTime", "closingTime"):
+                parsed = _parse_hhmm(nested.get(key))
+                if parsed is not None:
+                    return parsed
+    return None
+
+
+def _default_close_fetch() -> Any:
+    """Fetch a market-guide payload for the first active grid instrument."""
+    from portfolio.avanza_session import api_get  # noqa: PLC0415 — lazy
+
+    for by_dir in GRID_ACTIVE_INSTRUMENTS.values():
+        for ob_id in by_dir.values():
+            return api_get(f"/_api/market-guide/certificate/{ob_id}")
+    raise RuntimeError("no active grid instruments configured")
+
+
+def resolve_eod_cutoff_hm(
+    fetch_payload_fn: Optional[callable] = None,
+    *,
+    log_path: str | Path = GRID_DECISIONS_LOG,
+) -> tuple[int, int]:
+    """Return today's (hour, minute) EOD cutoff in Europe/Stockholm.
+
+    Cached per local date. Successful resolutions cache for the whole day;
+    failures fall back to 21:50 (21:55 minus safety margin) with an
+    ``eod_close_time_fallback`` decision-log entry (once per date) and a
+    retry after ``_EOD_CLOSE_FETCH_RETRY_S``. Never raises.
+    """
+    try:
+        import zoneinfo  # noqa: PLC0415
+        local_date = _dt.datetime.now(
+            zoneinfo.ZoneInfo(_EOD_TZ_NAME)
+        ).strftime("%Y-%m-%d")
+    except Exception:  # noqa: BLE001 — tzdata missing
+        local_date = _today_session_id()
+
+    with _close_time_lock:
+        cached = _close_time_cache.get(local_date)
+        if cached is not None:
+            return cached
+        last_fail = _close_fetch_failed_mono.get(local_date)
+        if last_fail is not None and (
+            time.monotonic() - last_fail < _EOD_CLOSE_FETCH_RETRY_S
+        ):
+            return _EOD_FALLBACK_HOUR, _EOD_FALLBACK_MINUTE
+
+    fetch = fetch_payload_fn or _default_close_fetch
+    close_hm: Optional[tuple[int, int]] = None
+    fetch_error: Optional[str] = None
+    try:
+        close_hm = _extract_today_closing_time(fetch())
+        if close_hm is None:
+            fetch_error = "todayClosingTime missing/unparseable in payload"
+    except Exception as exc:  # noqa: BLE001 — any fetch failure → fallback
+        fetch_error = f"{type(exc).__name__}: {exc}"
+
+    if close_hm is None:
+        with _close_time_lock:
+            _close_fetch_failed_mono[local_date] = time.monotonic()
+            should_log = local_date not in _close_fallback_logged
+            if should_log:
+                _close_fallback_logged.add(local_date)
+        if should_log:
+            log_decision(
+                "eod_close_time_fallback",
+                decisions_path=log_path,
+                error=fetch_error,
+                fallback=f"{_EOD_FALLBACK_HOUR:02d}:{_EOD_FALLBACK_MINUTE:02d}",
+            )
+        logger.warning(
+            "grid_fisher: todayClosingTime fetch failed (%s) — EOD cutoff "
+            "falls back to %02d:%02d",
+            fetch_error, _EOD_FALLBACK_HOUR, _EOD_FALLBACK_MINUTE,
+        )
+        return _EOD_FALLBACK_HOUR, _EOD_FALLBACK_MINUTE
+
+    close_min = close_hm[0] * 60 + close_hm[1]
+    if close_min < _EOD_EARLY_CLOSE_THRESHOLD_MIN:
+        # Half-day: exchange (and the MM session keyed to it) closes early.
+        cutoff_min = max(0, close_min - _EOD_CLOSE_MARGIN_MIN)
+        cutoff = (cutoff_min // 60, cutoff_min % 60)
+        logger.info(
+            "grid_fisher: early close detected (todayClosingTime=%02d:%02d) "
+            "— EOD cutoff %02d:%02d", close_hm[0], close_hm[1], *cutoff,
+        )
+    else:
+        # Normal day: the MM quotes well past the exchange close (memory
+        # reference_avanza_trading_hours) — keep the 21:55 default.
+        cutoff = (_EOD_LOCAL_HOUR, _EOD_LOCAL_MINUTE)
+    with _close_time_lock:
+        _close_time_cache[local_date] = cutoff
+    return cutoff
+
+
+def minutes_until_eod(
+    now_utc: Optional[_dt.datetime] = None,
+    *,
+    cutoff_hm: Optional[tuple[int, int]] = None,
+) -> float:
     """Minutes until the grid fisher's day-end cutoff in Europe/Stockholm.
 
-    Returns a non-negative float; if the cutoff has already passed for the
-    day, returns the minutes-until-tomorrow's cutoff (so the caller can
-    detect with ``< EOD_SWEEP_MINUTES_BEFORE`` only during the active
-    window). Returns ``float("inf")`` if zoneinfo is unavailable so the
-    caller never triggers EOD on the failure path.
+    ``cutoff_hm`` overrides the default 21:55 cutoff — production callers
+    pass ``resolve_eod_cutoff_hm()`` so half-days flatten before the real
+    close (audit B4 fix 5). Returns a non-negative float; if the cutoff has
+    already passed for the day, returns the minutes-until-tomorrow's cutoff
+    (so the caller can detect with ``< EOD_SWEEP_MINUTES_BEFORE`` only
+    during the active window). Returns ``float("inf")`` if zoneinfo is
+    unavailable so the caller never triggers EOD on the failure path.
     """
     try:
         import zoneinfo  # noqa: PLC0415 — optional import to keep startup cheap
@@ -306,10 +470,11 @@ def minutes_until_eod(now_utc: Optional[_dt.datetime] = None) -> float:
         tz = zoneinfo.ZoneInfo(_EOD_TZ_NAME)
     except Exception:  # noqa: BLE001 — missing tzdata
         return float("inf")
+    eod_hour, eod_minute = cutoff_hm or (_EOD_LOCAL_HOUR, _EOD_LOCAL_MINUTE)
     now = now_utc or _dt.datetime.now(_dt.timezone.utc)
     local = now.astimezone(tz)
     cutoff = local.replace(
-        hour=_EOD_LOCAL_HOUR, minute=_EOD_LOCAL_MINUTE, second=0, microsecond=0,
+        hour=eod_hour, minute=eod_minute, second=0, microsecond=0,
     )
     if cutoff <= local:
         cutoff = cutoff + _dt.timedelta(days=1)
@@ -507,6 +672,19 @@ def roll_session_if_new_day(state: GridFisherState) -> bool:
     state.session_id = today
     state.global_session_pnl_sek = 0.0
     state.global_max_dd_sek = 0.0
+    # 2026-06-12 (audit B4 fix 3): the halt flag is per-session — clear it
+    # on rollover. Previously it was never reset, so it stayed True in
+    # state/dashboard forever while trading silently resumed anyway (tick
+    # used to re-derive the halt from P&L instead of checking the flag).
+    # Now tick() honors state.halted explicitly, so without this reset a
+    # single halt would freeze the grid permanently.
+    if state.halted:
+        logger.info(
+            "grid_fisher: clearing session halt on rollover (was: %s)",
+            state.halt_reason,
+        )
+    state.halted = False
+    state.halt_reason = None
     for inst in state.by_instrument.values():
         inst.session_pnl_sek = 0.0
         inst.fills_this_session = 0
@@ -652,11 +830,13 @@ def should_halt_global(state: GridFisherState) -> Optional[str]:
 
     Currently uses session-wide P&L; richer drawdown tracking lives in
     ``risk_management.py`` and is wired in via a later batch.
+
+    2026-06-12 (audit B4 fix 9): fixed global limit from config instead of
+    per-instrument limit × seeded instrument count — the derived form
+    scaled with catalog size (6 seeded pairs → -3000 SEK, ~46% of budget)
+    and was unreachable before every instrument froze individually.
     """
-    # Per-session global loss limit = sum of per-instrument limits.
-    threshold = -abs(GRID_PER_SESSION_LOSS_LIMIT_SEK) * max(
-        len(state.by_instrument), 1
-    )
+    threshold = -abs(GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK)
     if state.global_session_pnl_sek <= threshold:
         return f"global_session_pnl<{threshold:.0f}sek"
     return None
@@ -681,6 +861,22 @@ class ReconcileResult:
     # skipped it). Those units carry no stop until the order fully fills/cancels;
     # the caller flags a stop rearm so the tick protects them. (2026-05-28)
     under_protected: list[tuple[str, int]] = field(default_factory=list)
+    # (ob_id, missing_buy_count, missing_sell_count) where a buy AND a sell
+    # both disappeared in the same tick — volume-delta inference is
+    # confounded (offsetting fills net to delta≈0), so the instrument was
+    # deferred this tick. (2026-06-12, audit B4 fix 8)
+    ambiguous: list[tuple[str, int, int]] = field(default_factory=list)
+
+
+# 2026-06-12 (audit B4 fix 8): consecutive same-tick buy+sell-disappearance
+# counter per ob_id. In-memory only (a restart just re-defers one tick).
+# First ambiguous tick → defer (re-poll next tick, record nothing). If the
+# SAME ambiguity persists on the next tick (orders genuinely gone, not a
+# transient read glitch), fall back to the volume heuristic rather than
+# stalling forever — an indefinitely-deferred fill would leave new
+# inventory without rotation or stop, which is worse than a possibly
+# mis-attributed P&L booking.
+_ambiguous_streak: dict[str, int] = {}
 
 
 def _position_volume_for(positions: list[dict[str, Any]], ob_id: str) -> int:
@@ -717,6 +913,34 @@ def reconcile_against_live(
     res = ReconcileResult()
     for ob_id, inst in state.by_instrument.items():
         live_vol = _position_volume_for(positions, ob_id)
+
+        # 2026-06-12 (audit B4 fix 8): if a buy tier AND a sell tier both
+        # vanished from the open list this tick, the volume deltas can
+        # offset (buy 74 fills + sell 74 fills → delta 0) and BOTH legs
+        # would be misclassified as CANCELLED: realised P&L never booked,
+        # avg entry wrong, no rotation/stop on the new lot. Conservative
+        # path: defer the instrument one tick (treat as unknown, re-poll);
+        # only if the same ambiguity persists next tick do we fall through
+        # to the volume heuristic (see _ambiguous_streak above).
+        missing_buys = [
+            t for t in inst.buy_ladder
+            if t.status == ORDER_ARMED and t.order_id
+            and t.order_id not in open_order_ids
+        ]
+        missing_sells = [
+            t for t in inst.sell_ladder
+            if t.status == ORDER_ARMED and t.order_id
+            and t.order_id not in open_order_ids
+        ]
+        if missing_buys and missing_sells:
+            streak = _ambiguous_streak.get(ob_id, 0) + 1
+            if streak <= 1:
+                _ambiguous_streak[ob_id] = streak
+                res.ambiguous.append(
+                    (ob_id, len(missing_buys), len(missing_sells))
+                )
+                continue
+        _ambiguous_streak.pop(ob_id, None)
 
         for tier in list(inst.buy_ladder):
             if tier.status != ORDER_ARMED:
@@ -1039,60 +1263,39 @@ class GridFisher:
         return True
 
     def _safe_session_call(self, fn, *args, default=None, **kwargs):
-        """Invoke an Avanza session method from a persistent worker thread.
+        """Invoke an Avanza session method, returning ``default`` on failure.
 
-        The metals loop runs Playwright async context for its swing-trader
-        page; the REST avanza_session module that grid_fisher uses internally
-        spins up its own sync_playwright client. Calling sync Playwright APIs
-        from a thread that has a running asyncio event loop raises
-        "Playwright Sync API inside the asyncio loop". Spawning a fresh
-        worker per call (e.g. with a per-call ThreadPoolExecutor) fixes
-        that but breaks the *next* call: the avanza_session module caches
-        its Playwright context to the FIRST thread that initialised it, so
-        when a later call lands in a different worker thread it raises
-        "cannot switch to a different thread (which happens to have exited)".
-        Solution: one long-lived worker thread for the lifetime of this
-        GridFisher — all session calls land on the same thread and the
-        cached Playwright context stays bound to it.
-
-        On timeout or worker exception, ``default`` is returned and the
-        failure is logged via the journal.
+        2026-06-12 (audit B4 fix 1): the per-GridFisher 'grid-fisher-session'
+        worker thread is gone. It was one of three competing Playwright
+        context initializers — whichever thread initialised avanza_session's
+        singleton first owned it, and the others got greenlet "cannot switch
+        to a different thread" on every call (16,719 such session_call_error
+        entries 2026-05-11→2026-06-09; the grid was completely blind on 9
+        full trading days). avanza_session now pins ALL Playwright traffic
+        to its own module-level single-worker executor with per-call
+        timeouts and queue-wait/consecutive-failure escalation, so we call
+        straight through from any thread (asyncio loops included). The
+        error envelope is preserved: timeout/exception → journal entry +
+        ``default``.
         """
-        import concurrent.futures
-
-        # Lazily create the persistent single-worker executor. Held on
-        # the instance so process shutdown cleans it up via __del__.
-        if getattr(self, "_session_executor", None) is None:
-            self._session_executor = concurrent.futures.ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix="grid-fisher-session",
-            )
-
-        def _runner():
-            return fn(*args, **kwargs)
-
-        future = self._session_executor.submit(_runner)
         try:
-            return future.result(timeout=30)
-        except concurrent.futures.TimeoutError:
-            self._log("session_call_timeout",
-                      method=getattr(fn, "__name__", repr(fn)))
-            return default
+            return fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
-            self._log("session_call_error",
-                      method=getattr(fn, "__name__", repr(fn)),
-                      error=str(exc))
-            return default
-
-    def __del__(self):
-        # Best-effort shutdown of the worker thread on GC. The metals
-        # loop holds the GridFisher for its lifetime so this only runs
-        # at process exit.
-        executor = getattr(self, "_session_executor", None)
-        if executor is not None:
+            is_timeout = False
             try:
-                executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:  # noqa: BLE001
+                from portfolio.avanza_session import AvanzaSessionTimeout
+                is_timeout = isinstance(exc, AvanzaSessionTimeout)
+            except Exception:  # noqa: BLE001 — classification only
                 pass
+            if is_timeout:
+                self._log("session_call_timeout",
+                          method=getattr(fn, "__name__", repr(fn)),
+                          error=str(exc))
+            else:
+                self._log("session_call_error",
+                          method=getattr(fn, "__name__", repr(fn)),
+                          error=str(exc))
+            return default
 
     # ---- Gate A: quote-staleness pre-placement check --------------------
 
@@ -1704,6 +1907,11 @@ class GridFisher:
                       ticker=inst.ticker, tier=tier)
         for ob, cached, live in reconcile.inventory_drift:
             self._log("inventory_drift", ob_id=ob, cached=cached, live=live)
+        for ob, n_buys, n_sells in reconcile.ambiguous:
+            inst = self.state.by_instrument[ob]
+            self._log("reconcile_ambiguous", ob_id=ob, ticker=inst.ticker,
+                      missing_buys=n_buys, missing_sells=n_sells,
+                      action="deferred_one_tick")
 
         # 2026-05-28: units from a partial fill on a still-resting buy were just
         # aligned into inventory by reconcile (under_protected) and flagged for a
@@ -1755,19 +1963,36 @@ class GridFisher:
         )
 
         # Global halt check (after fills are realised so the latest P&L is
-        # reflected).
-        halt_reason = should_halt_global(self.state)
-        if halt_reason:
-            self.state.halted = True
-            self.state.halt_reason = halt_reason
-            self._log("halt_global", reason=halt_reason)
-            self._persist()
-            return {**report, "halted": True, "halt_reason": halt_reason}
+        # reflected). 2026-06-12 (audit B4 fix 3): the halted flag is now
+        # authoritative — tick checks state.halted explicitly instead of
+        # re-deriving from P&L every cycle (roll_session_if_new_day clears
+        # it). On the halt TRANSITION we cancel every armed buy immediately:
+        # previously they kept resting at the broker and could fill while
+        # the system considered itself halted.
+        if not self.state.halted:
+            halt_reason = should_halt_global(self.state)
+            if halt_reason:
+                self.state.halted = True
+                self.state.halt_reason = halt_reason
+                halt_cancelled = 0
+                for inst in self.state.by_instrument.values():
+                    halt_cancelled += self.cancel_armed_buys(inst)
+                report["cancels"] += halt_cancelled
+                self._log("halt_global", reason=halt_reason,
+                          cancelled_buys=halt_cancelled)
+        report["halted"] = self.state.halted
+        if self.state.halted:
+            report["halt_reason"] = self.state.halt_reason
 
         # EOD handling — only sweep if we have a remaining-minutes value.
+        # 2026-06-12 (audit B4 fix 3): runs BEFORE the halt early-return.
+        # Previously a halted session skipped the sweep entirely, carrying
+        # leveraged warrant inventory overnight precisely on the worst-loss
+        # day — the one day the flat matters most.
         if eod_minutes_remaining is not None:
             if eod_minutes_remaining <= GRID_EOD_MARKET_SELL_MINUTES_BEFORE:
                 report["eod_swept"] = True
+                self.eod_cancel_buys()
                 self.eod_market_flat()
                 self._persist()
                 return report
@@ -1776,6 +2001,12 @@ class GridFisher:
                 self.eod_cancel_buys()
                 self._persist()
                 return report
+
+        # Halted: no new placements for the rest of the session (the EOD
+        # paths above still run each tick so inventory exits at day end).
+        if self.state.halted:
+            self._persist()
+            return report
 
         # Place / re-arm ladders per instrument.
         for ob_id, inst in self.state.by_instrument.items():
@@ -1937,13 +2168,45 @@ class GridFisher:
                 )
                 continue
             # Cancel any armed sell tiers (don't double-up volume).
+            # 2026-06-12 (audit B4 fix 4): only mark CANCELLED on a
+            # confirmed orderRequestStatus=="SUCCESS" — mirrors
+            # cancel_armed_buys. Previously the tier was flipped to
+            # CANCELLED unconditionally; on a failed cancel the old sell
+            # kept resting at the broker while the full-inventory EOD sell
+            # was placed on top → combined sell volume > position
+            # (short.sell.not.allowed at best, double fill at worst). On
+            # any unconfirmed cancel: leave the tier ARMED, skip this
+            # instrument's EOD sell this tick (stop left intact too), and
+            # retry on the next tick inside the EOD window.
+            sell_cancel_failed = False
             for tier in list(inst.sell_ladder):
-                if tier.status == ORDER_ARMED and tier.order_id:
-                    self._safe_session_call(
-                        self.session.cancel_order, tier.order_id,
-                        default=None,
-                    )
+                if tier.status != ORDER_ARMED:
+                    continue
+                if not tier.order_id:
+                    # Never accepted by Avanza — nothing resting to cancel.
                     tier.status = ORDER_CANCELLED
+                    continue
+                result = self._safe_session_call(
+                    self.session.cancel_order, tier.order_id,
+                    default=None,
+                )
+                status = (result or {}).get("orderRequestStatus") \
+                    if isinstance(result, dict) else None
+                if status != "SUCCESS":
+                    sell_cancel_failed = True
+                    self._log("eod_cancel_sell_failed", ob_id=inst.ob_id,
+                              ticker=inst.ticker, tier=tier.tier,
+                              order_id=tier.order_id,
+                              avanza_status=status,
+                              message=(result or {}).get("message")
+                              if isinstance(result, dict) else
+                              "session_call returned None")
+                    continue
+                tier.status = ORDER_CANCELLED
+            if sell_cancel_failed:
+                # Combined sell volume must never exceed the position —
+                # retry the whole flat sequence next tick.
+                continue
             # Cancel stop via the stop-loss-specific endpoint when present.
             if inst.stop_loss_id:
                 cancel_stop_fn = getattr(

@@ -61,6 +61,14 @@ def is_browser_dead_error(exc: BaseException) -> bool:
         "Target closed",
         "Browser has been closed",
         "has been closed",
+        # 2026-06-12 (audit B4 fix 1): greenlet thread-affinity error. With
+        # avanza_session now pinning all Playwright traffic to one worker
+        # thread this should no longer occur, but if it does (e.g. a future
+        # caller bypasses the executor) the context is unusable from the
+        # current thread — teardown + relaunch is the correct recovery.
+        # 16,719 occurrences in grid_fisher_decisions.jsonl May-Jun 2026
+        # went unrecovered because this classifier didn't match it.
+        "cannot switch to a different thread",
     ):
         if marker in msg:
             return True
