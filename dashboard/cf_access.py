@@ -46,6 +46,17 @@ _JWKS_CACHE_TTL = 3600.0
 _JWKS_CLIENT_CACHE: dict[str, tuple[float, PyJWKClient]] = {}
 _JWKS_LOCK = threading.Lock()
 
+# 2026-06-10 (audit batch 10): negative cache for failed JWKS fetches. Before
+# this, only successes were cached; a transient Cloudflare JWKS outage made
+# every CF-fronted request re-attempt requests.get() and block the full 5s
+# timeout on the request thread before falling through to cookie/token auth. A
+# burst of dashboard polling would each pay 5s. Caching the failure for a short
+# window lets subsequent requests fail fast (return None) and fall through to
+# the other auth methods immediately. 60s is short enough that recovery is
+# picked up within a minute once CF comes back.
+_JWKS_NEGATIVE_TTL = 60.0
+_JWKS_NEGATIVE_CACHE: dict[str, float] = {}
+
 _MISSING_CONFIG_WARNED = False
 _MISSING_CONFIG_LOCK = threading.Lock()
 
@@ -74,6 +85,11 @@ def _get_jwks_client(team_domain: str) -> Optional[PyJWKClient]:
         cached = _JWKS_CLIENT_CACHE.get(team_domain)
         if cached and (now - cached[0]) < _JWKS_CACHE_TTL:
             return cached[1]
+        # Negative cache: if a recent fetch failed, fail fast instead of paying
+        # the 5s requests.get timeout again (see _JWKS_NEGATIVE_TTL note above).
+        failed_at = _JWKS_NEGATIVE_CACHE.get(team_domain)
+        if failed_at is not None and (now - failed_at) < _JWKS_NEGATIVE_TTL:
+            return None
 
     url = f"https://{team_domain}/cdn-cgi/access/certs"
     try:
@@ -88,11 +104,14 @@ def _get_jwks_client(team_domain: str) -> Optional[PyJWKClient]:
             "cf_access: JWKs fetch failed team=%s url=%s err=%r",
             team_domain, url, e,
         )
+        with _JWKS_LOCK:
+            _JWKS_NEGATIVE_CACHE[team_domain] = now
         return None
 
     client = PyJWKClient(url, cache_keys=True, lifespan=int(_JWKS_CACHE_TTL))
     with _JWKS_LOCK:
         _JWKS_CLIENT_CACHE[team_domain] = (now, client)
+        _JWKS_NEGATIVE_CACHE.pop(team_domain, None)  # clear stale failure on success
     return client
 
 

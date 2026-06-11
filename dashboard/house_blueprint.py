@@ -40,6 +40,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 import markdown as md_lib  # type: ignore[import-not-found]
+import nh3  # type: ignore[import-not-found]  # Rust/ammonia HTML sanitizer
 
 from dashboard.auth import _get_config, require_auth
 
@@ -305,12 +306,38 @@ def _autolink(html: str) -> str:
     )
 
 
+# Tags markdown emits that we keep. nh3's default allowlist covers headings,
+# p, a, em, strong, code, ul/ol/li, blockquote, img etc.; we add the table tags
+# the `tables` extension produces (nh3 drops them by default) plus pre/span.
+_SANITIZE_TAGS = nh3.ALLOWED_TAGS | {
+    "table", "thead", "tbody", "tfoot", "tr", "th", "td", "pre", "span",
+}
+
+
+def _sanitize_html(html: str) -> str:
+    """Strip dangerous HTML from rendered markdown before it's concatenated
+    into the page shell and served same-origin on the authenticated dashboard.
+
+    2026-06-10 (stored-XSS fix, audit batch 10): the .md reports are built by
+    the findapartments pipeline from externally scraped Hemnet/Booli listing
+    fields passed through an LLM, and python-markdown (3.10.x) passes raw HTML —
+    including <script> — through verbatim. nh3 (ammonia) drops scripts, event
+    handlers and javascript: URLs via a vetted allowlist rather than a
+    hand-rolled regex. Applied here so all three render sites (run_detail,
+    candidate_detail, k10) are covered by the single chokepoint."""
+    return nh3.clean(html, tags=_SANITIZE_TAGS)
+
+
 def _render_markdown(text: str) -> str:
-    return _autolink(md_lib.markdown(
+    # Sanitize BEFORE _autolink: autolink only wraps regex-bounded https?:// URLs
+    # in trusted <a> tags it builds itself, so its output needs no scrubbing and
+    # its target=_blank/rel attrs would otherwise be stripped by nh3.
+    rendered = _sanitize_html(md_lib.markdown(
         text,
         extensions=["tables", "fenced_code", "sane_lists"],
         output_format="html5",
     ))
+    return _autolink(rendered)
 
 
 # ---------------------------------------------------------------------------

@@ -39,8 +39,28 @@ def test_correct_slug_sets_cookie_and_redirects(client):
     cookie = _cookie_header(resp)
     assert cookie is not None
     assert "HttpOnly" in cookie
-    assert "Secure" in cookie
     assert "SameSite=Lax" in cookie
+    # 2026-06-10 (audit batch 10): Secure is now scheme-aware. Over plain HTTP
+    # (the test client's default scheme), Secure is intentionally NOT set so the
+    # LAN-HTTP fallback can persist the cookie instead of forcing ?token= on
+    # every request. See the HTTPS variant below.
+    assert "Secure" not in cookie
+
+
+def test_secure_flag_set_when_behind_https_tunnel(client):
+    """Behind the Cloudflare tunnel (X-Forwarded-Proto=https) the cookie must
+    carry Secure. Added 2026-06-10 (audit batch 10) for the scheme-aware flag."""
+    cfg = {"dashboard_share_slug": "raanman-uploadme", "dashboard_token": "secret_tok_123"}
+    with patch("dashboard.auth._get_config", return_value=cfg):
+        resp = client.get(
+            "/go/raanman-uploadme",
+            follow_redirects=False,
+            headers={"X-Forwarded-Proto": "https"},
+        )
+    cookie = _cookie_header(resp)
+    assert cookie is not None
+    assert "Secure" in cookie
+    assert "HttpOnly" in cookie
 
 
 def test_cookie_value_is_dashboard_token_with_year_expiry(client):

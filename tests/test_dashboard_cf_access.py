@@ -196,3 +196,41 @@ class TestIsConfigured:
             "cf_access_team_domain": "  ",
             "cf_access_aud_tag": "",
         })
+
+
+# ---------------------------------------------------------------------------
+# JWKS negative cache (audit batch 10, 2026-06-10): a failed fetch must be
+# cached briefly so a CF JWKS outage doesn't cost the full 5s timeout per req.
+# ---------------------------------------------------------------------------
+
+
+def _reset_jwks_caches():
+    cfa._JWKS_CLIENT_CACHE.clear()
+    cfa._JWKS_NEGATIVE_CACHE.clear()
+
+
+def test_jwks_negative_cache_fails_fast_without_refetch():
+    _reset_jwks_caches()
+    import requests as _requests
+    with patch.object(cfa.requests, "get",
+                      side_effect=_requests.RequestException("boom")) as mget:
+        first = cfa._get_jwks_client("team.cloudflareaccess.com")
+        second = cfa._get_jwks_client("team.cloudflareaccess.com")
+    assert first is None and second is None
+    # Within the negative-cache window the second call must NOT hit the network.
+    assert mget.call_count == 1
+    _reset_jwks_caches()
+
+
+def test_jwks_negative_cache_expires_after_window():
+    _reset_jwks_caches()
+    import requests as _requests
+    base = 1000.0
+    times = iter([base, base + cfa._JWKS_NEGATIVE_TTL + 1])
+    with patch.object(cfa.requests, "get",
+                      side_effect=_requests.RequestException("boom")) as mget, \
+         patch.object(cfa.time, "monotonic", side_effect=lambda: next(times)):
+        cfa._get_jwks_client("team.cloudflareaccess.com")  # fails, caches at base
+        cfa._get_jwks_client("team.cloudflareaccess.com")  # window elapsed → re-fetch
+    assert mget.call_count == 2
+    _reset_jwks_caches()

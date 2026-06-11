@@ -127,14 +127,34 @@ def _get_dashboard_token() -> str | None:
 # Auth decorator
 # ---------------------------------------------------------------------------
 
+def _request_is_https() -> bool:
+    """True when the current request reached us over TLS, either directly
+    (request.is_secure) or via the Cloudflare tunnel which terminates TLS and
+    forwards X-Forwarded-Proto=https. Used to decide the cookie Secure flag."""
+    if request.is_secure:
+        return True
+    return request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower() == "https"
+
+
 def _refresh_cookie(response, token: str):
-    """Refresh the auth cookie's expiry on `response`."""
+    """Refresh the auth cookie's expiry on `response`.
+
+    2026-06-10 (audit batch 10): Secure is now set per-request scheme instead
+    of unconditionally True. The server also binds plain HTTP on all interfaces
+    for direct LAN / WSL / Tailscale access; browsers silently refuse to store
+    a Secure cookie over http://, which forced the user to re-supply ?token= on
+    every navigation — leaking the raw token into access logs each time. Setting
+    Secure only when the request is actually HTTPS (direct TLS or behind the CF
+    tunnel) lets the LAN-HTTP fallback keep a cookie. The HTTPS tunnel path is
+    unchanged. httponly + samesite are unchanged. Tradeoff: over plain LAN HTTP
+    the cookie is not Secure-flagged, accepted because that path is already
+    cleartext on a trusted LAN and the alternative (no cookie) is worse."""
     response.set_cookie(
         COOKIE_NAME,
         token,
         max_age=COOKIE_MAX_AGE,
         httponly=True,
-        secure=True,
+        secure=_request_is_https(),
         samesite="Lax",
     )
     return response

@@ -10,6 +10,7 @@ joblib
 # Web Dashboard
 flask
 markdown  # used by dashboard/house_blueprint.py for the /house viewer
+nh3       # HTML sanitizer for rendered markdown (stored-XSS guard, audit batch 10)
 
 # Testing
 pytest

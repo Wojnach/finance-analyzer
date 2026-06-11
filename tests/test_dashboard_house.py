@@ -565,3 +565,51 @@ def test_load_candidates_non_list_manifest_returns_empty(tmp_path):
     cfg = {"house_root": str(tmp_path)}
     with patch("dashboard.house_blueprint._get_config", lambda: cfg):
         assert house_blueprint._load_candidates("2026-05-01-0032") == []
+
+
+# ---------------------------------------------------------------------------
+# Stored-XSS sanitization (audit batch 10, 2026-06-10)
+# Scraped/LLM-derived report markdown must not pass raw <script>/event handlers
+# through to the same-origin authenticated dashboard.
+# ---------------------------------------------------------------------------
+
+
+def test_render_markdown_strips_script_tag():
+    out = house_blueprint._render_markdown(
+        "# Listing\n\nGreat flat <script>alert(document.cookie)</script> here.\n"
+    )
+    assert "<script" not in out.lower()
+    assert "alert(document.cookie)" not in out  # inert text also dropped with the tag
+
+
+def test_render_markdown_strips_event_handlers_and_js_urls():
+    out = house_blueprint._render_markdown(
+        '<img src=x onerror="alert(1)">\n\n'
+        '<a href="javascript:alert(1)">click</a>\n'
+    )
+    assert "onerror" not in out.lower()
+    assert "javascript:" not in out.lower()
+
+
+def test_render_markdown_keeps_safe_markdown():
+    out = house_blueprint._render_markdown(
+        "# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n*em* and **bold**\n"
+    )
+    assert "<table" in out.lower()
+    assert "<em>" in out.lower()
+    assert "<strong>" in out.lower()
+
+
+def test_candidate_detail_route_renders_sanitized(client, fake_house_root):
+    """End-to-end: a report file containing <script> renders escaped/stripped
+    through the authenticated candidate_detail route."""
+    run = fake_house_root / "data" / "findapartments" / "2026-05-01-0032"
+    (run / "evil-slug-xss-123.md").write_text(
+        "# Evil\n\n<script>alert('pwn')</script>\n", encoding="utf-8"
+    )
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+    resp = client.get("/house/runs/2026-05-01-0032/evil-slug-xss-123")
+    assert resp.status_code == 200
+    # The injected payload must be gone. (The page shell legitimately includes
+    # its own trusted _SORT_JS <script>, so we assert on the payload specifically.)
+    assert b"alert('pwn')" not in resp.data
