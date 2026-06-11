@@ -236,3 +236,24 @@ class TestAvanzaAccountEndpoint:
                 p.stop()
         assert resp.status_code == 200
         assert resp.get_json()["cash"]["buying_power"] == 12_345.6
+
+
+class TestOpenOrdersFailurePropagation:
+    """2026-06-12 (audit B4 fix 2): avanza_session.get_open_orders now
+    RAISES on read failure instead of returning []. The dashboard must
+    surface that as an error — never render 'no open orders' for an
+    unreadable book."""
+
+    def test_open_orders_read_failure_recorded_not_empty_success(self, client):
+        from portfolio.avanza_session import AvanzaSessionError
+        with patch("portfolio.avanza_session.get_buying_power", return_value=_stub_cash()), \
+             patch("portfolio.avanza_session.get_positions", return_value=[]), \
+             patch("portfolio.avanza_session.get_open_orders",
+                   side_effect=AvanzaSessionError("Could not fetch open orders")), \
+             patch("portfolio.avanza_session.get_stop_losses", return_value=[]), \
+             _no_auth():
+            resp = client.get("/api/avanza_account?force=1")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["orders"] == []
+        assert any("orders: AvanzaSessionError" in e for e in data["errors"])

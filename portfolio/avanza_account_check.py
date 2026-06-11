@@ -302,26 +302,19 @@ def _api_get_categorized_accounts():
     """Pulled out so tests can mock without touching avanza_session
     auth/playwright init.
 
-    Runs the sync_playwright fetch on a single-worker thread pool so
-    callers inside an asyncio context (notably ``metals_loop`` which
-    has an LLM worker + Playwright swing-trader page sharing the main
-    thread's event loop) don't trip ``Playwright Sync API inside the
-    asyncio loop``. Without the worker, every verifier invocation
-    inside metals_loop returned ``fetch_failed`` — the helper would
-    never actually catch an ISK mismatch in production. Same pattern
-    ``GridFisher._safe_session_call`` uses.
+    2026-06-12 (audit B4 fix 1): the transient single-worker pool this
+    used to spin up was one of three competing Playwright-context
+    initializers — when it won the init race at metals_loop startup, the
+    singleton context got bound to a thread that immediately exited,
+    breaking every later avanza_session call with greenlet "cannot switch
+    to a different thread". avanza_session now pins ALL Playwright traffic
+    to its own long-lived worker (``_run_on_session_thread``), which also
+    solves the original "Sync API inside asyncio loop" problem this pool
+    existed for — so we just call straight through.
     """
-    import concurrent.futures  # noqa: PLC0415
-
     from portfolio.avanza_session import api_get  # noqa: PLC0415
 
-    def _runner():
-        return api_get("/_api/account-overview/overview/categorizedAccounts")
-
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="avanza-acct-check",
-    ) as pool:
-        return pool.submit(_runner).result(timeout=30)
+    return api_get("/_api/account-overview/overview/categorizedAccounts")
 
 
 def verify_default_account(

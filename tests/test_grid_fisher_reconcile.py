@@ -658,8 +658,10 @@ class TestTick:
         assert len(bear.armed_buy_tiers()) == 3
 
     def test_global_halt_persists(self, fisher, fake_session, monkeypatch):
-        # Make halt trigger on tiny loss
-        monkeypatch.setattr(gf, "GRID_PER_SESSION_LOSS_LIMIT_SEK", 1)
+        # Make halt trigger on tiny loss. 2026-06-12 (audit B4 fix 9): the
+        # global breaker reads the fixed GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK
+        # now, not per-instrument limit × catalog size.
+        monkeypatch.setattr(gf, "GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK", 1)
         # tick() derives global_session_pnl_sek from per-instrument
         # session_pnl, so the loss has to live on the instrument.
         bull = fisher.state.by_instrument["1650161"]
@@ -827,3 +829,266 @@ class TestEodFlatStopSafety:
         fisher.eod_market_flat()  # default FakeSession sell succeeds
         assert inst.eod_sell_order_id is not None
         assert inst.stop_needs_rearm is False
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 8): same-tick buy+sell disappearance is
+# ambiguous — defer one tick, never book fills off confounded deltas.
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileAmbiguity:
+    def _state_with_offsetting_orders(self):
+        gf._ambiguous_streak.clear()
+        state = gf.GridFisherState(session_id="2026-06-12")
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="bull",
+            active_direction="LONG",
+        )
+        inst.inventory_units = 74
+        inst.avg_entry_price = 40.0
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="B1", price=39.0, qty=74,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        inst.sell_ladder.append(TierOrder(
+            tier=0, order_id="S1", price=41.0, qty=74,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        state.by_instrument["1650161"] = inst
+        return state, inst
+
+    def test_first_ambiguous_tick_defers_everything(self):
+        state, inst = self._state_with_offsetting_orders()
+        # Buy 74 filled AND sell 74 filled in the same window: live volume
+        # nets back to 74 — the volume heuristic would misclassify both
+        # legs as CANCELLED.
+        res = reconcile_against_live(
+            state, set(), [{"orderbook_id": "1650161", "volume": 74}],
+        )
+        assert res.ambiguous == [("1650161", 1, 1)]
+        assert res.filled_buys == [] and res.filled_sells == []
+        assert res.cancelled_buys == [] and res.cancelled_sells == []
+        # Tiers untouched — re-polled next tick.
+        assert inst.buy_ladder[0].status == ORDER_ARMED
+        assert inst.sell_ladder[0].status == ORDER_ARMED
+        assert inst.inventory_units == 74
+        gf._ambiguous_streak.clear()
+
+    def test_second_consecutive_ambiguous_tick_falls_back_to_heuristic(self):
+        state, inst = self._state_with_offsetting_orders()
+        live = [{"orderbook_id": "1650161", "volume": 74}]
+        first = reconcile_against_live(state, set(), live)
+        assert first.ambiguous
+        second = reconcile_against_live(state, set(), live)
+        # Persisting ambiguity → heuristic processes the tiers (bounded
+        # stall: indefinitely deferring a real fill would leave inventory
+        # without rotation or stop).
+        assert second.ambiguous == []
+        assert inst.buy_ladder[0].status != ORDER_ARMED
+        assert inst.sell_ladder[0].status != ORDER_ARMED
+        gf._ambiguous_streak.clear()
+
+    def test_single_side_disappearance_not_ambiguous(self):
+        state, inst = self._state_with_offsetting_orders()
+        # Sell still resting in the live book — only the buy vanished.
+        res = reconcile_against_live(
+            state, {"S1"}, [{"orderbook_id": "1650161", "volume": 148}],
+        )
+        assert res.ambiguous == []
+        assert res.filled_buys == [("1650161", 0, 39.0)]
+        gf._ambiguous_streak.clear()
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 4): EOD flat only marks sell tiers CANCELLED on
+# confirmed SUCCESS; unconfirmed cancel skips the flat for that tick.
+# ---------------------------------------------------------------------------
+
+
+class TestEodMarketFlatVerifiedCancels:
+    def _inst_with_inventory_and_sell(self, fisher):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.inventory_units = 30
+        inst.avg_entry_price = 40.0
+        inst.stop_loss_id = "STOP1"
+        inst.sell_ladder.append(TierOrder(
+            tier=0, order_id="SELL9", price=41.0, qty=30,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        return inst
+
+    def test_unconfirmed_sell_cancel_skips_eod_sell(
+        self, fisher, fake_session, monkeypatch,
+    ):
+        inst = self._inst_with_inventory_and_sell(fisher)
+        monkeypatch.setattr(
+            fake_session, "cancel_order",
+            lambda order_id: {"orderRequestStatus": "ERROR",
+                              "message": "rejected"},
+        )
+        touched = fisher.eod_market_flat()
+        assert touched == 0
+        # Tier stays ARMED (old sell may still rest at the broker) and no
+        # full-inventory sell was stacked on top.
+        assert inst.sell_ladder[0].status == ORDER_ARMED
+        assert fake_session.placed_sells == []
+        # Stop untouched — the lot keeps its protection while we retry.
+        assert inst.stop_loss_id == "STOP1"
+        assert inst.eod_sell_order_id is None
+
+    def test_confirmed_cancel_proceeds_with_flat(self, fisher, fake_session):
+        inst = self._inst_with_inventory_and_sell(fisher)
+        touched = fisher.eod_market_flat()
+        assert touched == 1
+        assert inst.sell_ladder[0].status == ORDER_CANCELLED
+        assert "SELL9" in fake_session.cancelled
+        assert len(fake_session.placed_sells) == 1
+        assert fake_session.placed_sells[0]["qty"] == 30
+        assert inst.eod_sell_order_id is not None
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fixes 3 + 9): global halt lifecycle — fixed
+# threshold, buys cancelled at halt, EOD still runs, flag honored and
+# reset on session roll.
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalHaltLifecycle:
+    def test_fixed_global_threshold(self):
+        state = gf.GridFisherState(session_id="2026-06-12")
+        for i in range(6):  # threshold must NOT scale with instrument count
+            state.by_instrument[str(i)] = InstrumentState(
+                ob_id=str(i), ticker="XAG-USD", cert_name=f"c{i}",
+            )
+        state.global_session_pnl_sek = -1100.0
+        assert gf.should_halt_global(state) is None
+        state.global_session_pnl_sek = -1250.0
+        assert gf.should_halt_global(state) is not None
+
+    def test_halt_cancels_armed_buys(self, fisher, fake_session):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY9", price=39.0, qty=30,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        fake_session.open_orders.append({"orderId": "BUY9"})
+        inst.session_pnl_sek = -1300.0
+        report = fisher.tick(signal_data={}, prices={})
+        assert report["halted"] is True
+        assert "BUY9" in fake_session.cancelled
+        assert inst.armed_buy_tiers() == []
+        assert fisher.state.halt_reason
+
+    def test_halted_session_still_runs_eod_flat(self, fisher, fake_session):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.session_pnl_sek = -1300.0
+        inst.inventory_units = 50
+        inst.avg_entry_price = 40.0
+        fake_session.positions.append(
+            {"orderbook_id": "1650161", "volume": 50},
+        )
+        report = fisher.tick(
+            signal_data={}, prices={}, eod_minutes_remaining=3.0,
+        )
+        assert report["halted"] is True
+        assert report["eod_swept"] is True
+        # Inventory was market-flattened despite the halt.
+        assert len(fake_session.placed_sells) == 1
+        assert fake_session.placed_sells[0]["qty"] == 50
+
+    def test_halted_flag_blocks_placement_without_rederiving(
+        self, fisher, fake_session,
+    ):
+        fisher.state.halted = True
+        fisher.state.halt_reason = "test_halt"
+        # P&L is fine — only the flag should gate.
+        report = fisher.tick(
+            signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.9}},
+            prices={"1650161": {"bid": 40.0}},
+        )
+        assert report["halted"] is True
+        assert report["placements"] == 0
+        assert fake_session.placed_buys == []
+
+    def test_roll_session_resets_halt_flag(self):
+        state = gf.GridFisherState(session_id="2020-01-01")
+        state.halted = True
+        state.halt_reason = "global_session_pnl<-1200sek"
+        assert gf.roll_session_if_new_day(state) is True
+        assert state.halted is False
+        assert state.halt_reason is None
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (review fixes for 18d9d0cc): halted-tick cancel retry +
+# stale ARMED carryover cancellation at session roll.
+# ---------------------------------------------------------------------------
+
+
+class TestHaltAndRollReviewFixes:
+    def test_halted_tick_retries_failed_cancels(self, fisher, fake_session):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY9", price=39.0, qty=30,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        fake_session.open_orders.append({"orderId": "BUY9"})
+        # Already-halted session (e.g. the cancel timed out during the
+        # halt transition and the tier stayed ARMED at the broker).
+        fisher.state.halted = True
+        fisher.state.halt_reason = "test_halt"
+        report = fisher.tick(signal_data={}, prices={})
+        assert report["halted"] is True
+        # Countdown starts at 0 → first halted tick re-attempts the cancel.
+        assert "BUY9" in fake_session.cancelled
+        assert inst.armed_buy_tiers() == []
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert "halt_cancel_retry" in log_text
+
+    def test_halted_retry_throttled_between_attempts(
+        self, fisher, fake_session, monkeypatch,
+    ):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="BUY9", price=39.0, qty=30,
+            placed_ts="2026-06-12T08:00:00Z",
+        ))
+        fake_session.open_orders.append({"orderId": "BUY9"})
+        fisher.state.halted = True
+        fisher.state.halt_reason = "test_halt"
+        # Cancel keeps failing — tier must stay ARMED, and the retry must
+        # NOT fire again on the immediately following tick.
+        monkeypatch.setattr(
+            fake_session, "cancel_order",
+            lambda order_id: {"orderRequestStatus": "ERROR"},
+        )
+        fisher.tick(signal_data={}, prices={})
+        assert inst.armed_buy_tiers()  # still armed after failed retry
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert log_text.count("halt_cancel_retry") == 1
+        fisher.tick(signal_data={}, prices={})  # tick 2: countdown holds
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert log_text.count("halt_cancel_retry") == 1
+
+    def test_session_roll_cancels_stale_armed_carryover(
+        self, fisher, fake_session,
+    ):
+        inst = fisher.state.by_instrument["1650161"]
+        inst.buy_ladder.append(TierOrder(
+            tier=0, order_id="OLD1", price=39.0, qty=30,
+            placed_ts="2020-01-01T08:00:00Z",
+        ))
+        inst.sell_ladder.append(TierOrder(
+            tier=0, order_id="OLDSELL1", price=41.0, qty=30,
+            placed_ts="2020-01-01T08:00:00Z",
+        ))
+        fisher.state.session_id = "2020-01-01"  # force a roll
+        fisher.tick(signal_data={}, prices={})
+        # Carried BUY cancelled via the verified path; sell only logged.
+        assert "OLD1" in fake_session.cancelled
+        assert "OLDSELL1" not in fake_session.cancelled
+        assert inst.armed_buy_tiers() == []
+        log_text = fisher.decisions_path.read_text(encoding="utf-8")
+        assert "stale_armed_carryover" in log_text

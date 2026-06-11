@@ -69,6 +69,16 @@ GRID_GLOBAL_MAX_SEK = 6500
 # Session loss budget per instrument. Breaching this freezes new
 # placements until the next session.
 GRID_PER_SESSION_LOSS_LIMIT_SEK = 500
+# Global session loss budget across ALL instruments — breaching halts the
+# whole grid for the session (buys cancelled, EOD sweep still runs).
+# 2026-06-12 (audit B4 fix 9): previously derived as per-instrument limit ×
+# len(by_instrument) = 500 × 6 seeded ticker-direction pairs = 3000 SEK,
+# ~46% of the 6500 SEK budget — decorative, since per-instrument freezes
+# fired long before, and adding catalog instruments silently loosened it.
+# Fixed at 1200 SEK (~18% of GRID_GLOBAL_MAX_SEK; inside the suggested
+# 15-25% band) so the global breaker fires after roughly two-three
+# instrument-level max losses, independent of catalog size.
+GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK = 1200
 # Reserve held back from the live Avanza buying power before the cap is
 # computed. Covers courtage, FX spread, and rotation legs that haven't
 # rebooked yet. The effective global cap each tick =

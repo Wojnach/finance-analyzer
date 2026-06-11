@@ -362,3 +362,112 @@ class TestStateVersionForwardAssert:
         assert inst.last_rapid_cancel_ts is None
         # Version field is migrated forward on load.
         assert state.version == gf.GRID_STATE_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 5): dynamic EOD cutoff from todayClosingTime.
+# Normal day → keep 21:55 (todayClosingTime reports the EXCHANGE close,
+# not the AVA market-maker window — memory reference_avanza_trading_hours);
+# half-day (early close) → close minus margin; fetch failure → 21:50
+# fallback + eod_close_time_fallback decision-log entry.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _reset_close_cache():
+    def _reset():
+        with gf._close_time_lock:
+            gf._close_time_cache.clear()
+            gf._close_fetch_failed_mono.clear()
+            gf._close_fallback_logged.clear()
+    _reset()
+    yield
+    _reset()
+
+
+class TestEodCloseTimeResolver:
+    def test_normal_day_keeps_default_cutoff(self, _reset_close_cache, tmp_path):
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"marketPlace": {"todayClosingTime": "17:30"}},
+            log_path=tmp_path / "decisions.jsonl",
+        )
+        assert cutoff == (21, 55)
+
+    def test_half_day_uses_early_close_minus_margin(
+        self, _reset_close_cache, tmp_path,
+    ):
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"marketPlace": {"todayClosingTime": "13:00"}},
+            log_path=tmp_path / "decisions.jsonl",
+        )
+        assert cutoff == (12, 55)
+
+    def test_fetch_failure_falls_back_and_logs(
+        self, _reset_close_cache, tmp_path,
+    ):
+        log_file = tmp_path / "decisions.jsonl"
+
+        def _boom():
+            raise RuntimeError("session down")
+
+        cutoff = gf.resolve_eod_cutoff_hm(_boom, log_path=log_file)
+        assert cutoff == (21, 50)  # 21:55 minus safety margin
+        entries = log_file.read_text(encoding="utf-8")
+        assert "eod_close_time_fallback" in entries
+
+    def test_missing_field_falls_back(self, _reset_close_cache, tmp_path):
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"quote": {"buy": 1.0}},
+            log_path=tmp_path / "decisions.jsonl",
+        )
+        assert cutoff == (21, 50)
+
+    def test_success_cached_for_the_day(self, _reset_close_cache, tmp_path):
+        calls = []
+
+        def _fetch():
+            calls.append(1)
+            return {"marketPlace": {"todayClosingTime": "13:00"}}
+
+        first = gf.resolve_eod_cutoff_hm(_fetch, log_path=tmp_path / "d.jsonl")
+        second = gf.resolve_eod_cutoff_hm(_fetch, log_path=tmp_path / "d.jsonl")
+        assert first == second == (12, 55)
+        assert len(calls) == 1
+
+    def test_minutes_until_eod_honors_cutoff_param(self):
+        # 10:00 UTC summer = 12:00 Stockholm (CEST). Cutoff 13:00 → 60 min.
+        now = _dt.datetime(2026, 6, 12, 10, 0, tzinfo=_dt.timezone.utc)
+        mins = gf.minutes_until_eod(now, cutoff_hm=(13, 0))
+        assert abs(mins - 60.0) < 0.01
+
+    def test_minutes_until_eod_default_unchanged(self):
+        # Default cutoff stays 21:55 Stockholm — 10:00 UTC = 12:00 local
+        # in June → 595 minutes.
+        now = _dt.datetime(2026, 6, 12, 10, 0, tzinfo=_dt.timezone.utc)
+        mins = gf.minutes_until_eod(now)
+        assert abs(mins - 595.0) < 0.01
+
+
+class TestEodCloseTimePlausibilityBand:
+    """2026-06-12 (review fix 18d9d0cc #3): early-close accepted only in
+    [12:00, 17:00) — garbage like 09:00 must NOT gate the grid all day."""
+
+    def test_implausibly_early_close_treated_as_fetch_failure(
+        self, _reset_close_cache, tmp_path,
+    ):
+        log_file = tmp_path / "decisions.jsonl"
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"marketPlace": {"todayClosingTime": "09:00"}},
+            log_path=log_file,
+        )
+        assert cutoff == (21, 50)  # fallback, not 08:55
+        entries = log_file.read_text(encoding="utf-8")
+        assert "eod_close_time_fallback" in entries
+        assert "implausible" in entries
+
+    def test_boundary_noon_close_accepted(self, _reset_close_cache, tmp_path):
+        cutoff = gf.resolve_eod_cutoff_hm(
+            lambda: {"marketPlace": {"todayClosingTime": "12:00"}},
+            log_path=tmp_path / "decisions.jsonl",
+        )
+        assert cutoff == (11, 55)

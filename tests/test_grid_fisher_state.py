@@ -378,11 +378,14 @@ class TestHealth:
 
     def test_should_halt_global_at_threshold(self, empty_state, silver_long_inst,
                                              monkeypatch):
-        monkeypatch.setattr(gf, "GRID_PER_SESSION_LOSS_LIMIT_SEK", 500)
+        # 2026-06-12 (audit B4 fix 9): the global breaker is a fixed config
+        # constant now (GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK) — it no longer
+        # scales with instrument count.
+        monkeypatch.setattr(gf, "GRID_GLOBAL_SESSION_LOSS_LIMIT_SEK", 500)
         empty_state.by_instrument[silver_long_inst.ob_id] = silver_long_inst
         empty_state.global_session_pnl_sek = -250.0
         assert gf.should_halt_global(empty_state) is None
-        empty_state.global_session_pnl_sek = -600.0  # > 500 * 1 instrument
+        empty_state.global_session_pnl_sek = -600.0  # > fixed 500 SEK limit
         assert gf.should_halt_global(empty_state) is not None
 
 

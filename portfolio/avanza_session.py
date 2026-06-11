@@ -7,6 +7,7 @@ Avanza expects (replaying cookies via requests library causes 401s).
 This is the preferred auth method until TOTP credentials are configured.
 """
 
+import concurrent.futures
 import json
 import logging
 import threading
@@ -59,6 +60,249 @@ _pw_context = None
 
 class AvanzaSessionError(Exception):
     """Raised when session is missing, expired, or invalid."""
+
+
+class AvanzaSessionTimeout(AvanzaSessionError):
+    """Raised when a session call exceeded its per-call timeout."""
+
+
+# ---------------------------------------------------------------------------
+# Single-worker session executor — Playwright thread pinning
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 1): sync Playwright objects are bound to the
+# thread that created them; calls from any other thread raise greenlet
+# "cannot switch to a different thread (which happens to have exited)".
+# Three competing initializers used to race for the singleton context
+# (avanza_account_check's transient pool, GridFisher's 'grid-fisher-session'
+# worker, metals_loop main-thread stop paths) — whichever won bound the
+# context to its thread and broke everyone else. Empirically: 16,719
+# session_call_error entries in grid_fisher_decisions.jsonl 2026-05-11 →
+# 2026-06-09, the grid market-maker completely blind on 9 full days.
+#
+# Fix: ALL Playwright traffic is marshalled onto ONE long-lived worker
+# thread owned by this module (`_run_on_session_thread`). Callers on any
+# thread (including asyncio loops — sync Playwright inside a running loop
+# raises otherwise) submit and wait. Premortem hooks (binding):
+#   (a) queue-wait + per-call duration recorded (see session_call_stats());
+#   (b) queue wait > _QUEUE_WAIT_CRITICAL_S → critical_errors.jsonl entry;
+#   (c) per-call timeout so one hung call can't silently block callers
+#       forever (the worker itself may stay busy — the queue-stall
+#       escalation in (b) is what surfaces that);
+#   (d) re-entrant guard — a submit from the worker thread itself raises
+#       immediately (1-worker pool would deadlock).
+# N consecutive failures escalate to critical_errors + Telegram so the
+# subsystem can never again be silently dead for a month.
+
+_SESSION_CALL_TIMEOUT_S = 90.0
+_QUEUE_WAIT_WARN_S = 5.0
+_QUEUE_WAIT_CRITICAL_S = 30.0
+_CONSECUTIVE_FAILURE_ALERT_THRESHOLD = 10
+_ESCALATION_COOLDOWN_S = 600.0  # min seconds between repeat escalations
+
+_executor_lock = threading.Lock()
+_session_executor: concurrent.futures.ThreadPoolExecutor | None = None
+_session_thread_id: int | None = None
+
+_stats_lock = threading.Lock()
+_last_call_stats: dict[str, Any] = {}
+_consecutive_failures = 0
+_last_queue_stall_escalation_mono = 0.0
+_last_failure_escalation_mono = 0.0
+_last_mutation_timeout_escalation_mono = 0.0
+
+
+def _record_mutation_timeout(verb: str, path: str) -> None:
+    """2026-06-12 (review fix 18d9d0cc #2): a timed-out MUTATING call
+    (POST/DELETE) may STILL succeed at the broker — the worker thread
+    cannot be interrupted mid-request, so the order/cancel can land after
+    we stopped waiting. Local state then doesn't know about a live broker
+    order until the next reconcile pass picks reality up. This entry makes
+    that residual risk visible in critical_errors.jsonl instead of silent.
+    Critical entries are cooled down (warning log always fires)."""
+    global _last_mutation_timeout_escalation_mono
+    logger.warning(
+        "avanza_session: %s %s timed out — the mutation may still have "
+        "been applied at the broker; reconcile next tick", verb, path,
+    )
+    now_mono = time.monotonic()
+    with _stats_lock:
+        if (now_mono - _last_mutation_timeout_escalation_mono
+                <= _ESCALATION_COOLDOWN_S):
+            return
+        _last_mutation_timeout_escalation_mono = now_mono
+    _record_critical(
+        "avanza_mutation_timeout",
+        f"{verb} {path} timed out after {_SESSION_CALL_TIMEOUT_S:.0f}s — "
+        "the order/cancel may still exist at the broker; verify via "
+        "reconcile / open-orders before re-issuing",
+        {"verb": verb, "path": path},
+    )
+
+
+def _ensure_session_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Create (once) and return the module's single session worker."""
+    global _session_executor, _session_thread_id
+    with _executor_lock:
+        if _session_executor is None:
+            _session_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="avanza-session",
+            )
+            # Resolve the worker's thread id eagerly so the re-entrant
+            # guard works from the very first real call.
+            _session_thread_id = _session_executor.submit(
+                threading.get_ident
+            ).result(timeout=10)
+        return _session_executor
+
+
+def _on_session_thread() -> bool:
+    return (_session_thread_id is not None
+            and threading.get_ident() == _session_thread_id)
+
+
+def session_call_stats() -> dict[str, Any]:
+    """Snapshot of the most recent session call's queue/duration metrics.
+
+    Keys: ``op_name``, ``queue_wait_s``, ``duration_s``, ``ok``, ``ts``,
+    ``consecutive_failures``. Exposed for tests + ops probes (hook (a)).
+    """
+    with _stats_lock:
+        snap = dict(_last_call_stats)
+        snap["consecutive_failures"] = _consecutive_failures
+        return snap
+
+
+def _record_critical(category: str, message: str, context: dict | None) -> None:
+    """Best-effort critical_errors.jsonl append. Never raises."""
+    try:
+        from portfolio.claude_gate import record_critical_error  # noqa: PLC0415
+        record_critical_error(category, "portfolio.avanza_session", message, context)
+    except Exception:  # noqa: BLE001
+        logger.debug("avanza_session: critical_errors append failed", exc_info=True)
+
+
+def _alert_telegram(message: str) -> None:
+    """Best-effort Telegram alert (pattern from avanza_account_check)."""
+    try:
+        from portfolio.telegram_notifications import send_telegram  # noqa: PLC0415
+        cfg = load_json("config.json") or {}
+        if cfg.get("telegram", {}).get("token"):
+            send_telegram(message, cfg)
+    except Exception:  # noqa: BLE001
+        logger.debug("avanza_session: telegram alert skipped", exc_info=True)
+
+
+def _note_call(op_name: str, queue_wait_s: float,
+               duration_s: float | None, ok: bool) -> None:
+    """Record per-call metrics and run the escalation hooks (a)/(b)."""
+    global _consecutive_failures
+    global _last_queue_stall_escalation_mono, _last_failure_escalation_mono
+    now_mono = time.monotonic()
+    with _stats_lock:
+        _last_call_stats.clear()
+        _last_call_stats.update({
+            "op_name": op_name,
+            "queue_wait_s": round(queue_wait_s, 3),
+            "duration_s": round(duration_s, 3) if duration_s is not None else None,
+            "ok": ok,
+            "ts": datetime.now(UTC).isoformat(),
+        })
+        if ok:
+            _consecutive_failures = 0
+        else:
+            _consecutive_failures += 1
+        failures = _consecutive_failures
+        queue_stall = (
+            queue_wait_s > _QUEUE_WAIT_CRITICAL_S
+            and now_mono - _last_queue_stall_escalation_mono > _ESCALATION_COOLDOWN_S
+        )
+        if queue_stall:
+            _last_queue_stall_escalation_mono = now_mono
+        failure_escalate = (
+            failures >= _CONSECUTIVE_FAILURE_ALERT_THRESHOLD
+            and now_mono - _last_failure_escalation_mono > _ESCALATION_COOLDOWN_S
+        )
+        if failure_escalate:
+            _last_failure_escalation_mono = now_mono
+
+    if queue_wait_s > _QUEUE_WAIT_WARN_S:
+        logger.warning(
+            "avanza_session: %s queued %.1fs behind the session worker "
+            "(duration=%s ok=%s)",
+            op_name, queue_wait_s, duration_s, ok,
+        )
+    else:
+        logger.debug(
+            "avanza_session: %s queue_wait=%.3fs duration=%s ok=%s",
+            op_name, queue_wait_s, duration_s, ok,
+        )
+    if queue_stall:
+        _record_critical(
+            "avanza_session_queue_stall",
+            f"Session call {op_name} waited {queue_wait_s:.1f}s for the "
+            "avanza-session worker — a previous call is likely hung",
+            {"op_name": op_name, "queue_wait_s": round(queue_wait_s, 1)},
+        )
+    if failure_escalate:
+        msg = (
+            f"avanza_session: {failures} consecutive session-call failures "
+            f"(latest: {op_name}). Avanza order/stop management is "
+            "effectively DOWN — investigate session auth / browser health."
+        )
+        _record_critical(
+            "avanza_session_consecutive_failures", msg,
+            {"failures": failures, "op_name": op_name},
+        )
+        _alert_telegram(f"*AVANZA SESSION DEGRADED*\n{msg}")
+
+
+def _run_on_session_thread(fn: Callable[[], Any], *, op_name: str,
+                           timeout: float | None = None) -> Any:
+    """Execute ``fn`` on the dedicated session worker thread.
+
+    Raises:
+        RuntimeError: if called FROM the worker thread (hook (d) — a
+            1-worker pool would deadlock waiting on itself).
+        AvanzaSessionTimeout: if the call exceeds the per-call timeout
+            (hook (c)). NOTE: the worker may still be busy executing the
+            hung call — subsequent callers will see queue-wait growth and
+            hook (b) escalates that to critical_errors.jsonl.
+    """
+    executor = _ensure_session_executor()
+    if _on_session_thread():
+        raise RuntimeError(
+            f"avanza_session: re-entrant session call {op_name!r} from the "
+            "session worker thread — would deadlock the 1-worker executor. "
+            "Call the underlying Playwright helpers directly instead."
+        )
+    effective_timeout = _SESSION_CALL_TIMEOUT_S if timeout is None else timeout
+    submitted_mono = time.monotonic()
+    started: dict[str, float] = {}
+
+    def _instrumented():
+        started["t"] = time.monotonic()
+        return fn()
+
+    future = executor.submit(_instrumented)
+    ok = False
+    try:
+        result = future.result(timeout=effective_timeout)
+        ok = True
+        return result
+    except concurrent.futures.TimeoutError:
+        future.cancel()  # only helps if still queued; a running call hangs the worker
+        raise AvanzaSessionTimeout(
+            f"avanza_session call {op_name!r} timed out after "
+            f"{effective_timeout:.0f}s"
+        ) from None
+    finally:
+        ended_mono = time.monotonic()
+        start_t = started.get("t")
+        queue_wait = (start_t - submitted_mono) if start_t is not None else (
+            ended_mono - submitted_mono
+        )
+        duration = (ended_mono - start_t) if start_t is not None else None
+        _note_call(op_name, queue_wait, duration, ok)
 
 
 def load_session() -> dict:
@@ -153,8 +397,12 @@ def _get_playwright_context():
         return _pw_context
 
 
-def close_playwright():
-    """Clean up Playwright resources."""
+def _close_playwright_inline():
+    """Tear down Playwright resources on the CURRENT thread.
+
+    Only safe when the current thread owns the context (i.e. the session
+    worker). External callers must use :func:`close_playwright`.
+    """
     global _pw_instance, _pw_browser, _pw_context
     with _pw_lock:
         if _pw_context:
@@ -177,6 +425,30 @@ def close_playwright():
             _pw_instance = None
 
 
+def close_playwright():
+    """Clean up Playwright resources.
+
+    2026-06-12 (audit B4 fix 1): teardown is marshalled to the session
+    worker thread when one exists — closing a sync-Playwright context from
+    a foreign thread raises the same greenlet error this module now
+    prevents. Runs inline when already on the worker (the 401 recovery
+    path inside api_get/api_post calls this from the worker itself) or
+    when no worker was ever started (nothing thread-bound exists yet).
+    """
+    if _session_thread_id is None or _on_session_thread():
+        return _close_playwright_inline()
+    try:
+        return _run_on_session_thread(
+            _close_playwright_inline, op_name="close_playwright", timeout=30,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort teardown
+        logger.warning(
+            "avanza_session: marshalled close_playwright failed (%s) — "
+            "clearing refs inline", exc,
+        )
+        return _close_playwright_inline()
+
+
 def verify_session() -> bool:
     """Verify that the session is valid by making a lightweight API call.
 
@@ -185,11 +457,16 @@ def verify_session() -> bool:
     """
     # A-AV-1: Hold _pw_lock for the entire context+request flow.
     # ctx.request.* is NOT thread-safe; concurrent callers must serialize.
-    try:
+    # 2026-06-12 (audit B4 fix 1): runs on the session worker thread so the
+    # context is created/used with the same thread affinity as api_*.
+    def _verify():
         with _pw_lock:
             ctx = _get_playwright_context()
             resp = ctx.request.get(f"{API_BASE}/_api/position-data/positions")
             return resp.ok
+
+    try:
+        return _run_on_session_thread(_verify, op_name="verify_session")
     except Exception as e:
         logger.warning("Session verification failed: %s", e)
         close_playwright()
@@ -210,26 +487,36 @@ def verify_session() -> bool:
 # teardown/relaunch. _get_playwright_context also acquires the lock but
 # it's reentrant for the same thread.
 def _with_browser_recovery(op: Callable[[Any], Any], *, op_name: str) -> Any:
-    """Run ``op(ctx)`` under ``_pw_lock``; on browser-dead error, teardown +
-    relaunch + retry once. Propagate all other exceptions unchanged.
+    """Run ``op(ctx)`` on the session worker thread under ``_pw_lock``; on
+    browser-dead error, teardown + relaunch + retry once. Propagate all
+    other exceptions unchanged.
 
     ``op`` is called with the current Playwright context. The op is responsible
     for making the actual ctx.request.* call and handling HTTP-level errors.
+
+    2026-06-12 (audit B4 fix 1): the entire locked flow is marshalled to the
+    module's single session worker thread (see ``_run_on_session_thread``),
+    so the Playwright context is always created AND used on the same
+    long-lived thread. The teardown/relaunch inside also happens on that
+    thread (``close_playwright`` runs inline when already on the worker).
     """
-    with _pw_lock:
-        ctx = _get_playwright_context()
-        try:
-            return op(ctx)
-        except Exception as exc:
-            if not is_browser_dead_error(exc):
-                raise
-            logger.warning(
-                "avanza_session: browser dead on %s (%r) — teardown + relaunch + retry",
-                op_name, exc,
-            )
-            close_playwright()
+    def _locked_op():
+        with _pw_lock:
             ctx = _get_playwright_context()
-            return op(ctx)
+            try:
+                return op(ctx)
+            except Exception as exc:
+                if not is_browser_dead_error(exc):
+                    raise
+                logger.warning(
+                    "avanza_session: browser dead on %s (%r) — teardown + relaunch + retry",
+                    op_name, exc,
+                )
+                close_playwright()
+                ctx = _get_playwright_context()
+                return op(ctx)
+
+    return _run_on_session_thread(_locked_op, op_name=op_name)
 
 
 # --- API convenience functions ---
@@ -283,12 +570,19 @@ def _get_csrf(ctx=None) -> str:
         raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
 
     # A-AV-1: ctx.cookies() reads Playwright internal state — needs lock.
-    with _pw_lock:
-        ctx = _get_playwright_context()
-        for c in ctx.cookies():
-            if c["name"] == "AZACSRF":
-                return c["value"]
-        raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
+    # 2026-06-12 (audit B4 fix 1): when no ctx was passed we are NOT inside
+    # an already-marshalled op, so route to the session worker thread.
+    def _read_csrf():
+        with _pw_lock:
+            inner_ctx = _get_playwright_context()
+            for c in inner_ctx.cookies():
+                if c["name"] == "AZACSRF":
+                    return c["value"]
+            raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
+
+    if _on_session_thread():
+        return _read_csrf()
+    return _run_on_session_thread(_read_csrf, op_name="_get_csrf")
 
 
 def api_post(path: str, payload: dict) -> Any:
@@ -341,7 +635,13 @@ def api_post(path: str, payload: dict) -> Any:
                 raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
             return {"raw": body}
 
-    return _with_browser_recovery(_op, op_name=f"POST {path}")
+    try:
+        return _with_browser_recovery(_op, op_name=f"POST {path}")
+    except AvanzaSessionTimeout:
+        # 2026-06-12 (review fix 18d9d0cc #2): POST is mutating — see
+        # _record_mutation_timeout for the residual broker-side risk.
+        _record_mutation_timeout("POST", path)
+        raise
 
 
 def api_delete(path: str) -> Any:
@@ -376,7 +676,13 @@ def api_delete(path: str) -> Any:
             )
         return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
 
-    return _with_browser_recovery(_op, op_name=f"DELETE {path}")
+    try:
+        return _with_browser_recovery(_op, op_name=f"DELETE {path}")
+    except AvanzaSessionTimeout:
+        # 2026-06-12 (review fix 18d9d0cc #2): DELETE is mutating — see
+        # _record_mutation_timeout for the residual broker-side risk.
+        _record_mutation_timeout("DELETE", path)
+        raise
 
 
 # --- Trading convenience functions ---
@@ -597,9 +903,40 @@ def _place_order(
         raise ValueError(f"Refusing to trade on non-whitelisted account {effective_account_id!r}")
 
     # H8: minimum order size guard
+    # 2026-06-12 (audit B4 fix 6): position-closing SELLs are exempt. The
+    # 1000-SEK floor exists to avoid minimum-courtage fee drag on ENTRIES;
+    # an unexitable sub-1000 SEK lot (partial fill, or a 1200-SEK leg whose
+    # price dropped) is strictly worse than paying minimum courtage once —
+    # eod_market_flat previously retried the blocked sell forever after the
+    # stop was already cancelled. Mirrors place_stop_loss's warn-don't-raise
+    # (2026-04-17). A SELL only qualifies when live positions confirm we
+    # hold at least the order volume; lookup failure fails CLOSED (guard
+    # still raises) so an unverifiable sell can't bypass the floor.
     order_total = round(volume * price, 2)
     if order_total < 1000.0:
-        raise ValueError(f"Order total {order_total:.2f} SEK below minimum 1000 SEK")
+        closing_sell = False
+        if side == "SELL":
+            try:
+                held = 0
+                for pos in get_positions():
+                    if str(pos.get("orderbook_id") or "") != ob_str:
+                        continue
+                    if str(pos.get("account_id") or "") != effective_account_id:
+                        continue
+                    held += int(pos.get("volume") or 0)
+                closing_sell = held >= volume
+            except Exception as exc:  # noqa: BLE001 — fail closed on lookup error
+                logger.warning(
+                    "_place_order: could not verify closing-sell exemption for "
+                    "ob=%s vol=%d (%s) — keeping 1000 SEK guard", ob_str, volume, exc,
+                )
+        if not closing_sell:
+            raise ValueError(f"Order total {order_total:.2f} SEK below minimum 1000 SEK")
+        logger.warning(
+            "_place_order: sub-minimum closing SELL allowed: %.2f SEK "
+            "(vol=%d price=%.3f ob=%s) — minimum-courtage fee applies",
+            order_total, volume, price, ob_str,
+        )
 
     # BUG-211: maximum order size guard — prevents full-account exposure from
     # a single malformed call (LLM hallucination, unit error, runaway loop).
@@ -651,22 +988,41 @@ def cancel_order(order_id: str, account_id: str | None = None) -> dict:
 
 
 def get_open_orders(account_id: str | None = None) -> list[dict]:
-    """Get all open (unfilled) orders for an account."""
+    """Get all open (unfilled) orders for an account.
+
+    2026-06-12 (audit B4 fix 2): a read failure now RAISES instead of
+    returning ``[]``. The old silent-[] fallback made "Avanza 5xx on both
+    endpoints" indistinguishable from "no open orders", which let
+    GridFisher's reconcile mass-misclassify still-resting orders as
+    filled/cancelled (and let the spike-rollback path in metals_loop treat
+    an unverifiable cancel as terminal). Callers must treat the exception
+    as "order book state UNKNOWN — skip this cycle", never as empty.
+
+    Raises:
+        AvanzaSessionError: session invalid (401), call timeout, or both
+            order endpoints failed with HTTP errors.
+    """
     aid = str(account_id or DEFAULT_ACCOUNT_ID)
     try:
         data = api_get(f"/_api/trading/rest/order/account/{aid}")
         if isinstance(data, list):
             return data
         return data.get("orders", data.get("openOrders", []))
-    except RuntimeError:
+    except RuntimeError as primary_exc:
         # Endpoint may vary — fallback to deal endpoint
         try:
             data = api_get("/_api/trading/rest/deals-and-orders")
             orders = data.get("orders", [])
             return [o for o in orders if str(o.get("accountId", "")) == aid]
-        except RuntimeError:
-            logger.warning("Could not fetch open orders")
-            return []
+        except RuntimeError as fallback_exc:
+            logger.warning(
+                "Could not fetch open orders (primary=%s fallback=%s)",
+                primary_exc, fallback_exc,
+            )
+            raise AvanzaSessionError(
+                f"Could not fetch open orders for account {aid}: "
+                f"primary={primary_exc}; fallback={fallback_exc}"
+            ) from fallback_exc
 
 
 def get_quote(orderbook_id: str) -> dict:

@@ -217,8 +217,13 @@ class TestSharedFunctions:
 
         assert any("test message" in rec.getMessage() for rec in caplog.records)
 
-    def test_is_avanza_open(self):
+    def test_is_avanza_open(self, monkeypatch):
         import metals_loop as mod
+        # 2026-06-12 (audit B4 fix 5): is_market_hours now consults the
+        # dynamic close-time resolver, which would hit the Avanza API on a
+        # machine with a live session file — stub it for hermetic tests.
+        import portfolio.grid_fisher as gf
+        monkeypatch.setattr(gf, "resolve_eod_cutoff_hm", lambda *a, **k: (21, 55))
         result = mod.is_avanza_open()
         assert isinstance(result, bool)
 
@@ -324,3 +329,179 @@ class TestSilverAlertLevelsFormat:
             assert isinstance(name, str)
             formatted = f"{threshold}%"
             assert "%" in formatted
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 7): trailing-stop add-to-position must cancel
+# the previous stop before placing the full-volume replacement, and a
+# placement failure after a successful cancel must escalate (critical
+# entry + Telegram + immediate retry) — never just a debug log.
+# ---------------------------------------------------------------------------
+
+
+class TestTrailingStopReplace:
+    @pytest.fixture
+    def env(self, monkeypatch):
+        import metals_loop as mod
+        import portfolio.avanza_control as ac
+        import portfolio.claude_gate as cg
+
+        calls = {"sequence": [], "telegrams": [], "criticals": [],
+                 "deleted": [], "placed": []}
+
+        monkeypatch.setattr(mod, "HARDWARE_TRAILING_ENABLED", True)
+        monkeypatch.setattr(mod, "STOP_ORDER_ENABLED", False)
+        monkeypatch.setattr(mod, "send_telegram",
+                            lambda m: calls["telegrams"].append(m))
+        monkeypatch.setattr(mod, "_save_positions", lambda p: None)
+        monkeypatch.setattr(
+            cg, "record_critical_error",
+            lambda cat, caller, msg, ctx=None:
+                calls["criticals"].append((cat, msg)) or True,
+        )
+
+        def _delete_ok(account_id, stop_id):
+            calls["sequence"].append(("delete", stop_id))
+            calls["deleted"].append(stop_id)
+            return True, {"ok": True}
+
+        monkeypatch.setattr(ac, "delete_stop_loss_no_page", _delete_ok)
+
+        def _place_ok(account_id, ob_id, trail_percent, volume, valid_days=8):
+            calls["sequence"].append(("place", volume))
+            calls["placed"].append(volume)
+            return True, {"stoplossOrderId": f"NEW{len(calls['placed'])}"}
+
+        monkeypatch.setattr(mod, "place_trailing_stop_no_page", _place_ok)
+
+        positions = {
+            "silver_q1": {
+                "name": "MINI L SILVER",
+                "ob_id": "111",
+                "units": 100,
+                "entry": 40.0,
+                "stop": 36.0,
+                "active": True,
+                "hw_trailing_stop_id": "OLD1",
+            },
+        }
+        monkeypatch.setattr(mod, "POSITIONS", positions)
+        return mod, ac, calls, positions
+
+    def _order(self):
+        return {"warrant_key": "MINI_L_SILVER", "ob_id": "111",
+                "volume": 50, "warrant_name": "MINI L SILVER"}
+
+    def test_replace_cancels_old_stop_before_placing(self, env):
+        mod, ac, calls, positions = env
+        mod._handle_buy_fill(None, self._order(), 41.0, {})
+        assert calls["deleted"] == ["OLD1"]
+        # Cancel happened strictly before the replacement placement.
+        assert calls["sequence"][0] == ("delete", "OLD1")
+        assert calls["sequence"][1][0] == "place"
+        # Replacement covers the new TOTAL volume (100 + 50).
+        assert calls["placed"] == [150]
+        assert positions["silver_q1"]["hw_trailing_stop_id"] == "NEW1"
+
+    def test_unconfirmed_cancel_skips_replacement(self, env, monkeypatch):
+        mod, ac, calls, positions = env
+        monkeypatch.setattr(
+            ac, "delete_stop_loss_no_page",
+            lambda account_id, stop_id: (False, {"error": "http 500"}),
+        )
+        mod._handle_buy_fill(None, self._order(), 41.0, {})
+        # No full-volume replacement on top of a possibly-live old stop.
+        assert calls["placed"] == []
+        assert positions["silver_q1"]["hw_trailing_stop_id"] == "OLD1"
+        assert any("NO trailing stop" in m for m in calls["telegrams"])
+
+    def test_naked_after_cancel_escalates_and_retries(self, env, monkeypatch):
+        mod, ac, calls, positions = env
+
+        def _place_fail(account_id, ob_id, trail_percent, volume, valid_days=8):
+            calls["placed"].append(volume)
+            return False, {"error": "rejected"}
+
+        monkeypatch.setattr(mod, "place_trailing_stop_no_page", _place_fail)
+        mod._handle_buy_fill(None, self._order(), 41.0, {})
+        # Escalation: critical entry + URGENT telegram + one retry.
+        assert any(cat == "stop_replace_naked" for cat, _ in calls["criticals"])
+        assert any("URGENT" in m for m in calls["telegrams"])
+        assert len(calls["placed"]) == 2  # initial attempt + retry
+
+    def test_retry_success_recovers_protection(self, env, monkeypatch):
+        mod, ac, calls, positions = env
+        attempts = []
+
+        def _place_flaky(account_id, ob_id, trail_percent, volume, valid_days=8):
+            attempts.append(volume)
+            if len(attempts) == 1:
+                return False, {"error": "transient"}
+            return True, {"stoplossOrderId": "RECOVERED"}
+
+        monkeypatch.setattr(mod, "place_trailing_stop_no_page", _place_flaky)
+        mod._handle_buy_fill(None, self._order(), 41.0, {})
+        assert len(attempts) == 2
+        assert positions["silver_q1"]["hw_trailing_stop_id"] == "RECOVERED"
+
+    def test_new_position_places_without_cancel(self, env, monkeypatch):
+        mod, ac, calls, positions = env
+        positions["silver_q1"]["hw_trailing_stop_id"] = None
+        positions["silver_q1"]["active"] = False  # force the new-position path
+        mod._handle_buy_fill(None, self._order(), 41.0, {})
+        assert calls["deleted"] == []
+        assert calls["placed"] == [50]
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-12 (audit B4 fix 2 call-site): spike rollback must NOT treat an
+# unreadable open-orders list as "spike order is terminal" — get_open_orders
+# now raises on read failure, and the rollback keeps the conservative path.
+# ---------------------------------------------------------------------------
+
+
+class TestSpikeRollbackOpenOrdersFailure:
+    def test_unreadable_open_orders_does_not_restore_stops(self, monkeypatch):
+        import metals_loop as mod
+        import portfolio.avanza_session as avz
+
+        telegrams = []
+        restored = []
+        monkeypatch.setattr(mod, "send_telegram", telegrams.append)
+        monkeypatch.setattr(
+            mod, "_rearm_stops_after_failed_sell",
+            lambda ob_id, snapshot: restored.append(ob_id),
+        )
+        monkeypatch.setattr(
+            avz, "cancel_order",
+            lambda order_id, account_id=None: {"orderRequestStatus": "FAIL"},
+        )
+
+        def _raise(*a, **k):
+            raise avz.AvanzaSessionError("both order endpoints failed")
+
+        monkeypatch.setattr(avz, "get_open_orders", _raise)
+
+        mod._rollback_spike_order_and_restore("SPK1", "111", [{"id": "SL1"}])
+        # Failure ≠ "order gone": originals must NOT be restored on top of
+        # a possibly-live spike sell; operator alert fires instead.
+        assert restored == []
+        assert any("ROLLBACK INCOMPLETE" in m for m in telegrams)
+
+    def test_confirmed_absent_order_restores(self, monkeypatch):
+        import metals_loop as mod
+        import portfolio.avanza_session as avz
+
+        restored = []
+        monkeypatch.setattr(mod, "send_telegram", lambda m: None)
+        monkeypatch.setattr(
+            mod, "_rearm_stops_after_failed_sell",
+            lambda ob_id, snapshot: restored.append(ob_id),
+        )
+        monkeypatch.setattr(
+            avz, "cancel_order",
+            lambda order_id, account_id=None: {"orderRequestStatus": "FAIL"},
+        )
+        monkeypatch.setattr(avz, "get_open_orders", lambda: [])
+        mod._rollback_spike_order_and_restore("SPK1", "111", [{"id": "SL1"}])
+        assert restored == ["111"]
