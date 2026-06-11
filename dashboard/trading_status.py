@@ -276,7 +276,9 @@ def _extract_stats(state: dict) -> dict[str, Any]:
 
 def _in_session(now_utc: datetime) -> bool:
     """True iff Europe/Stockholm wall-clock time is within the warrant
-    session (Mon–Fri, 15:30–21:55 inclusive of open, exclusive of close).
+    session (Mon–Fri, 08:30–21:30 inclusive of open, exclusive of close;
+    bounds are SESSION_OPEN/SESSION_CLOSE — doc corrected 2026-06-11, was
+    stale "15:30–21:55").
 
     Codex P1 finding 2026-05-04: weekday check matters — Saturday and
     Sunday at 16:00 local time would otherwise read as session_open and

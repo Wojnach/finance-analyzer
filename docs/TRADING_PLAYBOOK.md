@@ -33,7 +33,7 @@ Do NOT analyze all tickers — focus only on held positions and macro headline.
 + portfolio states. Analyze triggered tickers and held positions. Full journal + Telegram.
 
 **Tier 3 (Full Review):** Read `data/agent_summary_compact.json` + portfolio states.
-Full cross-asset analysis of all 20+ instruments. This is the default behavior described below.
+Full cross-asset analysis of all 11 instruments (5 Tier-1 + 3 Tier-2 + 3 Tier-3). This is the default behavior described below.
 
 Your prompt tells you which tier this is. Follow the tier-appropriate behavior.
 
@@ -61,7 +61,7 @@ You enter on confirmed breakouts with conviction sizing and ride trends until st
 - **Strongly avoid averaging down.** Failed breakout = wrong trade — cut it.
 - Volume expansion + directional signals = breakout confirmation. BB expansion is a breakout indicator.
 - EMA alignment across timeframes confirms trend health.
-- Floor: MIN_VOTERS=3. Never trade when fewer agree.
+- Floor: MIN_VOTERS=3 (crypto/stocks), 2 (metals, since 2026-05-11). Never trade when fewer agree.
 - **FOMC:** Don't trade the event. Watch for post-event breakouts (1–4 hrs after).
 - **Go dormant** when no breakout setups are forming.
 
@@ -86,7 +86,7 @@ You are not a vote counter — you are an analyst.
 ### 1. Read the Data
 
 - `data/layer2_context.md` — **read this first.** Your memory from previous invocations
-- `data/agent_summary_compact.json` — all 30 signals, timeframes, indicators, macro, fundamentals
+- `data/agent_summary_compact.json` — all active signals, timeframes, indicators, macro, fundamentals
 - `data/portfolio_state.json` — Patient strategy state
 - `data/portfolio_state_bold.json` — Bold strategy state
 - `data/portfolio_state_warrants.json` — Warrant holdings with leverage
@@ -96,7 +96,7 @@ You are not a vote counter — you are an analyst.
 
 - **Use your memory:** Compare previous thesis prices with current prices — were you right?
   Check if watchlist conditions were met. Notice regime shifts.
-- Review all 30 signals across all timeframes for each instrument
+- Review the active signals (see `agent_summary_compact`) across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transactions: avoid whipsaw trades
@@ -237,7 +237,10 @@ Append one JSON line to `data/layer2_journal.jsonl`:
 ### 6. Notify via Telegram
 
 **ALWAYS send a Telegram message.** Every invocation means something triggered.
-You are the ONLY Telegram sender — Layer 1 does NOT send messages.
+You are the sole authority on TRADE notifications. Layer 1 independently sends
+its own operational messages (error/crash alerts via `main.py`, the 4h digest
+via `digest.py`, the morning digest via `daily_digest.py`), so messages you see
+in `data/telegram_messages.jsonl` are not necessarily yours.
 
 **Apple Watch first line (CRITICAL):** ~60 chars visible on wrist. Pack it with: action,
 top 1-2 movers, Fear & Greed. The user glances at their wrist and decides whether to check phone.
@@ -320,13 +323,17 @@ BTC: coin-flip accuracy, don't trade on signals alone.
 
 ```python
 from portfolio.message_store import send_or_store
-import json
+from portfolio.file_utils import load_json
 
 msg = "YOUR_MESSAGE"
 category = "trade"  # or "analysis"
-config = json.load(open("config.json"))
+config = load_json("config.json")  # atomic loader; never raw json.load(open(...))
 send_or_store(msg, config, category=category)
 ```
+
+> **Never Read/cat `config.json` into your context** — it holds live API keys
+> (Mar 15 2026 exposure incident). `load_json` returns the dict for
+> `send_or_store`; if you only need one value, grep that specific key instead.
 
 ## Trading Rules
 
@@ -357,8 +364,10 @@ send_or_store(msg, config, category=category)
 
 ## Forecast Health
 
-Forecast signal (#28) uses health-weighted voting. Kronos mostly dead (0.5% success);
-Chronos is primary. XAG-USD 24h ~76% accurate. BTC-USD 24h ~54% (coin-flip).
+The Forecast (Chronos) signal was fully disabled 2026-05-12 (recent accuracy
+25.6%) and Kronos was retired entirely 2026-04-21 — neither votes anymore, so
+do not weight a "Forecast" entry or expect time-series model output in
+consensus. Use the active regime/momentum signals in `agent_summary` instead.
 
 ## Prophecy System
 

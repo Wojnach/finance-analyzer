@@ -5,9 +5,9 @@ Branch: improve/auto-session-2026-06-01
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 80 signal modules (21 active, 59 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 89 tracked signals (15 active, 76 disabled; 79 files in `portfolio/signals/`, 70 registered), 5 Tier-1 instruments, and dual-strategy portfolio management. (Counts reconciled 2026-06-11.)
 
-- **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
+- **Layer 1** (`portfolio/main.py`): Continuous 600s loop (bumped from 60s 2026-04-09) — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
 - **Autonomous mode** (`portfolio/autonomous.py`): Fallback when Layer 2 disabled — signal-based decisions without LLM.
 - **Dashboard** (`dashboard/app.py`): Flask REST API over `data/` files, port 5055.
@@ -23,7 +23,7 @@ Two-layer autonomous trading system with 80 signal modules (21 active, 59 disabl
 | Metals loop | `data/metals_loop.py` | Separate process, warrant trading |
 | Agent | `scripts/win/pf-agent.bat` | Spawns Claude CLI for Layer 2 |
 
-## 3) Module Map (283 portfolio modules)
+## 3) Module Map (167 top-level `portfolio/*.py`, 300 incl. subpackages; 2026-06-11)
 
 ### Orchestration (5 modules)
 - `main.py` (1532 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8), post-cycle housekeeping (15+ tasks), heartbeat keepalive for Layer 2
@@ -32,11 +32,11 @@ Two-layer autonomous trading system with 80 signal modules (21 active, 59 disabl
 - `market_timing.py` (342 lines): DST-aware US/EU market hours, NYSE + Swedish holiday calendars (Easter-based), agent invocation window, GPU signal gating
 - `config_validator.py` (87 lines): Startup config validation
 
-### Signal System (69 modules: 69 enhanced, 15 active + 54 disabled)
-- `signal_engine.py` (4495 lines): 69-module voting (15 active), weighted consensus, accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
-- `signal_registry.py` (399 lines): Plugin-based signal discovery via importlib, lazy loading. 69 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
+### Signal System (89 tracked names: 15 active + 76 disabled; 79 files, 70 registered)
+- `signal_engine.py`: weighted-consensus voting (15 active), accuracy gating, 8-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + content-keyed ADX cache, dead-zone soft votes, per-phase timing diagnostics
+- `signal_registry.py` (399 lines): Plugin-based signal discovery via importlib, lazy loading. 70 enhanced signals via `register_enhanced()`. 5-min import-failure cooldown. Shadow enrollment for LLM models.
 - `signal_utils.py` (132 lines): Shared helpers — SMA, EMA, RSI, majority_vote
-- `signals/*.py` (69 files): Enhanced composite signals, each with 4-8 sub-indicators
+- `signals/*.py` (79 files): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (2070 lines): Per-signal hit rate tracking, accuracy cache, activation rates, thundering-herd lock, degradation detection
 - `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
@@ -138,9 +138,10 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (69 total: 15 active, 54 disabled)
-- **Active (15)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, News Event, Econ Calendar, Crypto Macro, Metals Cross-Asset, COT Positioning, On-Chain BTC, Statistical Jump Regime, Drift Regime Gate
-- **Per-ticker overrides** (globally disabled, active on specific tickers): Williams VIX Fix (XAU/XAG), Realized Skewness (XAU), Credit Spread Risk (BTC/ETH), ML Classifier (ETH)
+### Signal Inventory (89 tracked: 15 active, 76 disabled; reconciled 2026-06-11)
+- **Active (15)**: RSI, BB, Fear&Greed, Ministral-8B, Qwen3-8B, Momentum, Mean Reversion, News Event, Econ Calendar, Crypto Macro, COT Positioning, On-Chain BTC, Statistical Jump Regime, Drift Regime Gate, Amihud Illiquidity Regime
+- **Per-ticker overrides** (globally disabled, active on one ticker via `_DISABLED_SIGNAL_OVERRIDES`): Realized Skewness (XAU), ML Classifier (ETH). (Williams VIX Fix override removed 2026-05-31; Credit Spread Risk override removed 2026-05-26.)
+- Recently disabled (collapsed accuracy): Metals Cross-Asset (2026-06-06), Crypto EVRP (2026-05-26), ADX Regime Switch (2026-06-01), Choppiness Regime Gate, BOCPD Regime Switch, Vol Ratio Regime.
 - **Disabled (54)**: ML Classifier, MACD, EMA, Volume, Funding Rate, Sentiment, Forecast, Claude Fundamental, Fibonacci, Trend, Volume Flow, Volatility, Candlestick, Structure, Heikin-Ashi, Calendar, Macro Regime, Smart Money, Oscillators, Orderbook Flow, Futures Flow, DXY Cross-Asset, Momentum Factors, BTC Proxy, Credit Spread Risk, Crypto EVRP, plus 28 pending-validation signals added Apr-May 2026 (Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, Kalman Trend Momentum, etc.)
 
 ## 6) Configuration

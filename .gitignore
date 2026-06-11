@@ -502,3 +502,16 @@ data/start_loops.bat
 
 # Adversarial review worktree (created inside repo, 2026-05-24)
 finance-analyzer-reviews/
+
+# Recurring debris (audit batch 12, 2026-06-11): scratch dumps (zz*.txt),
+# arxiv fetcher outputs incl. the double-prefix bug variant (arxiv_arxiv_*.xml),
+# the static dashboard export snapshot (_livecheck/), the 'nul' redirect
+# artifact, per-task scheduled-task logs, corruption-quarantine files, and
+# pre-batch state backups. (/0 and phone-*.png already covered above.)
+zz*.txt
+data/arxiv_*.xml
+_livecheck/
+/nul
+data/*_task.log
+data/*.corrupt
+*.pre_b6.json
