@@ -48,6 +48,27 @@ def _utcnow_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _bar_ts_iso(df: "pd.DataFrame") -> Optional[str]:
+    """ISO-8601 (UTC) timestamp of the LAST bar in the frame, or None.
+
+    2026-06-11 (audit B8 premortem hook 4): this is the bar's OWN timestamp
+    (data age), distinct from fetched_ts (when we pulled it / cache
+    freshness). BZ=F via yfinance lags 10-15 min, so a fresh fetch can
+    return an old bar; consumers must judge data age off this, not the
+    fetch time. Returns None if the index isn't a usable datetime.
+    """
+    try:
+        idx = df.index[-1]
+        ts = pd.Timestamp(idx)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _rsi(series: pd.Series, period: int = 14) -> float:
     """Wilder's RSI on the latest bar; returns NaN if too few points."""
     if len(series) < period + 1:
@@ -121,8 +142,11 @@ def compute_signal() -> dict:
         )
     except SourceUnavailableError as exc:
         logger.warning("oil_grid_signal: fetch failed: %s", exc)
+        now = _utcnow_iso()
         return {
-            "ts": _utcnow_iso(),
+            "ts": now,           # back-compat alias of fetched_ts
+            "fetched_ts": now,   # when we fetched (cache freshness)
+            "bar_ts": None,      # last bar's own ts (data age) — none on failure
             "underlying": UNDERLYING,
             "direction": None,
             "confidence": 0.0,
@@ -130,8 +154,11 @@ def compute_signal() -> dict:
         }
 
     if df is None or df.empty or "close" not in df.columns:
+        now = _utcnow_iso()
         return {
-            "ts": _utcnow_iso(),
+            "ts": now,
+            "fetched_ts": now,
+            "bar_ts": None,
             "underlying": UNDERLYING,
             "direction": None,
             "confidence": 0.0,
@@ -139,8 +166,19 @@ def compute_signal() -> dict:
         }
 
     direction, confidence, meta = _signal_from_indicators(df["close"])
+    now = _utcnow_iso()
+    # 2026-06-11 (audit B8 premortem hook 4): split the timestamps.
+    #   fetched_ts — when this fetch happened. get_cached_or_refresh keys the
+    #     5-min cache TTL off THIS so the cache keeps working against a feed
+    #     that lags 10-15 min (using bar_ts would expire the cache instantly
+    #     and the oil leg would silently die hammering yfinance).
+    #   bar_ts — the last bar's own timestamp (real data age). grid_fisher /
+    #     metals_loop consumers judge staleness off this, not fetch time.
+    # `ts` is retained as an alias of fetched_ts for back-compat.
     return {
-        "ts": _utcnow_iso(),
+        "ts": now,
+        "fetched_ts": now,
+        "bar_ts": _bar_ts_iso(df),
         "underlying": UNDERLYING,
         "direction": direction,
         "confidence": confidence,
@@ -156,10 +194,19 @@ def get_cached_or_refresh(force: bool = False) -> dict:
     processes can read it without re-pulling klines.
     """
     cached = load_json(SIGNAL_FILE, default=None)
-    if not force and isinstance(cached, dict) and cached.get("ts"):
+    # 2026-06-11 (audit B8 premortem hook 4): the cache TTL keys off
+    # fetched_ts (when WE last pulled), NOT bar_ts (the bar's age). The feed
+    # lags 10-15 min, so keying off bar_ts would make every cached value look
+    # >5 min stale and refresh every cycle — defeating the cache and
+    # hammering yfinance. Fall back to legacy `ts` for caches written before
+    # the split.
+    _fetch_ts = None
+    if isinstance(cached, dict):
+        _fetch_ts = cached.get("fetched_ts") or cached.get("ts")
+    if not force and _fetch_ts:
         try:
             cached_dt = _dt.datetime.strptime(
-                cached["ts"], "%Y-%m-%dT%H:%M:%SZ",
+                _fetch_ts, "%Y-%m-%dT%H:%M:%SZ",
             ).replace(tzinfo=_dt.timezone.utc)
         except ValueError:
             cached_dt = None

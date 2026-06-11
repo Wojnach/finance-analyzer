@@ -115,3 +115,10 @@ def test_module_reimport_idempotent():
     importlib.reload(cfg)
     assert cfg.DRY_RUN is True
     assert cfg.INSTRUMENTS == ("OIL-USD",)
+
+
+def test_fast_tick_interval_is_60s():
+    """Audit B8 fix 7: fast-tick raised 10s -> 60s. The BZ=F/CL=F feed lags
+    10-15 min, so a 10s sub-poll just abuses yfinance with no signal gain."""
+    from data import oil_swing_config as cfg
+    assert cfg.FAST_TICK_INTERVAL_SEC == 60

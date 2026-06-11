@@ -222,7 +222,14 @@ TELEGRAM_SUMMARY_INTERVAL = 20
 # ---------------------------------------------------------------------------
 # Fast-tick monitor (analog of crypto_loop's fast tick)
 # ---------------------------------------------------------------------------
-FAST_TICK_INTERVAL_SEC = 10        # Per-cycle sub-poll cadence
+# 2026-06-11 (audit B8 fix 7): 10s -> 60s. Each fast tick does a full
+# yf.download (plus a 1d fallback download when the 1m feed is gapped),
+# i.e. up to ~360-720 Yahoo requests/hour around the clock — which trips
+# yfinance rate limiting and can starve the main cycle of its price. The
+# BZ=F/CL=F feed lags 10-15 min, so sub-minute "velocity flush" detection
+# is structurally meaningless on this source. 60s removes the abuse with
+# zero loss of signal fidelity.
+FAST_TICK_INTERVAL_SEC = 60        # Per-cycle sub-poll cadence
 FAST_TICK_DIP_ALERT_PCT = -2.5     # Threshold for sharp-dip Telegram alert
 FAST_TICK_FLUSH_PCT = 1.5          # Velocity-flush threshold
 FAST_TICK_FLUSH_WINDOW_SEC = 180

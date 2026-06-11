@@ -68,6 +68,87 @@ def _log_poll(bundle_or_none, reason: str, cycle_count: int) -> None:
         logger.exception("loop: poll log write failed")
 
 
+def _degraded_bundle_for(pos: "state.Position") -> Any:
+    """Build a minimal MstrBundle from a position's last-known entry data.
+
+    2026-06-11 (audit B8 fix 3): the EOD-flatten backstop must run even when
+    build_bundle() returns None or an unusable (stale) bundle — otherwise a
+    >5-min data-loop lag inside the 21:45-22:00 CET window carries a
+    5x-leveraged position overnight. We can't get a fresh quote, so we
+    synthesize a degraded bundle off the position's entry underlying price.
+    execution._estimate_cert_bid falls back to the leverage-derived
+    synthetic when no live quote is available, so the journaled exit price
+    is approximate-but-bounded rather than zero. The bundle is flagged
+    stale so nothing downstream mistakes it for live data.
+    """
+    from portfolio.mstr_loop.data_provider import MstrBundle
+    return MstrBundle(
+        ts=datetime.datetime.now(datetime.UTC).isoformat(),
+        source_stale_seconds=float("inf"),
+        price_usd=pos.entry_underlying_price,
+        raw_action="HOLD",
+        raw_weighted_confidence=0.0,
+        rsi=50.0,
+        macd_hist=0.0,
+        bb_position="",
+        regime="unknown",
+        atr_pct=0.0,
+        buy_count=0,
+        sell_count=0,
+        total_voters=0,
+        votes={},
+        p_up_1d=0.0,
+        exp_return_1d_pct=0.0,
+        exp_return_3d_pct=0.0,
+        heatmap=[],
+        stale=True,
+        weighted_score_long=0.0,
+        weighted_score_short=0.0,
+    )
+
+
+def _eod_flatten_backstop(
+    bot_state: state.BotState, strategies: list, cycle_count: int,
+    bundle: Any = None,
+) -> None:
+    """Force-exit every open position during the EOD window.
+
+    2026-06-11 (audit B8 fix 3): loop-level backstop independent of
+    bundle.is_usable(). The strategy-level EOD exit lives in
+    _evaluate_exit, which is unreachable when momentum_rider/mean_reversion
+    return None on stale data. This runs regardless: if `bundle` is usable
+    we exit at its price; otherwise we synthesize a degraded bundle per
+    position so the intraday-only contract holds even on a data outage.
+    """
+    if not bot_state.positions:
+        return
+    from portfolio.mstr_loop.strategies.base import Decision
+    for pos in list(bot_state.positions.values()):
+        use_bundle = bundle
+        degraded = bundle is None or not bundle.is_usable()
+        if degraded:
+            use_bundle = _degraded_bundle_for(pos)
+        if degraded:
+            logger.warning(
+                "loop: EOD backstop flattening %s on DEGRADED data "
+                "(bundle unusable/missing) — exit price is synthetic",
+                pos.strategy_key,
+            )
+        exit_dec = Decision(
+            strategy_key=pos.strategy_key,
+            action="SELL",
+            direction=pos.direction,
+            cert_ob_id=pos.cert_ob_id,
+            rationale="eod_flatten_backstop",
+            exit_reason="eod_backstop_degraded" if degraded else "eod_backstop",
+        )
+        try:
+            execution.execute(exit_dec, use_bundle, bot_state)
+        except Exception:
+            logger.exception("loop: EOD backstop execute() raised for %s",
+                             pos.strategy_key)
+
+
 def run_cycle(bot_state: state.BotState, strategies: list, cycle_count: int) -> None:
     """Execute one 60s cycle."""
     bot_state.last_cycle_ts = datetime.datetime.now(datetime.UTC).isoformat()
@@ -100,12 +181,25 @@ def run_cycle(bot_state: state.BotState, strategies: list, cycle_count: int) -> 
     # Session window — no new entries outside hours, but we STILL run exits
     # in the EOD flatten window.
     in_window = session.in_session_window()
-    if not in_window and not session.in_eod_flatten_window():
+    in_eod = session.in_eod_flatten_window()
+    if not in_window and not in_eod:
         _log_poll(None, "outside_session_window", cycle_count)
         state.save_state(bot_state)
         return
 
     bundle = build_bundle()
+
+    # 2026-06-11 (audit B8 fix 3): loop-level EOD-flatten backstop. Runs
+    # regardless of bundle usability so a stale/missing bundle in the EOD
+    # window cannot silently carry a leveraged position overnight. Fires
+    # before the bundle-unavailable / unusable early returns below.
+    if in_eod:
+        _eod_flatten_backstop(bot_state, strategies, cycle_count, bundle=bundle)
+        if bundle is None or not bundle.is_usable():
+            _log_poll(bundle, "eod_backstop_degraded", cycle_count)
+            state.save_state(bot_state)
+            return
+
     if bundle is None:
         _log_poll(None, "bundle_unavailable", cycle_count)
         state.save_state(bot_state)

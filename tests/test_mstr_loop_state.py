@@ -161,3 +161,31 @@ def test_position_unrealized_pct_zero_entry_defensive():
     )
     # Div-by-zero defence — returns 0 instead of crashing
     assert pos.unrealized_underlying_pct(100) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Live-phase fail-loud on missing cash sync (audit B8 fix 2)
+# ---------------------------------------------------------------------------
+def test_default_state_live_raises_without_cash_sync(monkeypatch):
+    """A fresh live state must refuse to construct — no implemented Avanza
+    cash sync means a 0-SEK start that silently refuses every BUY."""
+    monkeypatch.setattr(config, "PHASE", "live")
+    with pytest.raises(RuntimeError, match="cash sync"):
+        default_state()
+
+
+def test_load_state_live_seeded_file_bypasses_default(tmp_path, monkeypatch):
+    """Explicit escape hatch: a seeded state file is read directly and never
+    calls default_state(), so live can start with real cash."""
+    monkeypatch.setattr(config, "PHASE", "live")
+    path = str(tmp_path / "seeded.json")
+    save_state(BotState(cash_sek=42_000), path)
+    s = load_state(path)
+    assert s.cash_sek == 42_000
+
+
+def test_load_state_live_missing_file_raises(tmp_path, monkeypatch):
+    """No file + live phase => default_state() raises (fail-loud)."""
+    monkeypatch.setattr(config, "PHASE", "live")
+    with pytest.raises(RuntimeError, match="cash sync"):
+        load_state(str(tmp_path / "nope.json"))
