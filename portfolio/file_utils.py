@@ -3,9 +3,24 @@ import json
 import logging
 import os
 import tempfile
+import time
 from collections import deque
 from contextlib import contextmanager, suppress
 from pathlib import Path
+
+# 2026-06-11: msvcrt.locking(LK_LOCK) is NOT truly blocking — per CPython it
+# retries once/second and raises OSError after 10 failed attempts. Long
+# rotations (log_rotation.rotate_jsonl holds the same sidecar lock across a
+# read+gzip-archive-merge+rewrite that can exceed 10s on signal_log.jsonl)
+# would otherwise make any concurrent atomic_append_jsonl on Windows raise.
+# We wrap acquisition in a bounded blocking retry with a real wall-clock
+# budget. The budget is deliberately well under the 300s heartbeat staleness
+# threshold / loop-contract watchdog restart window (premortem hook 5): a
+# lock wait that long means the loop has already stalled, so we surface a
+# clear error rather than block to the watchdog timeout.
+_MSVCRT_LOCK_BUDGET_S = 30.0  # total wall-clock wait before giving up
+_MSVCRT_LOCK_WARN_S = 5.0     # log a WARNING once a wait exceeds this (hook 5 visibility)
+_MSVCRT_LOCK_RETRY_SLEEP_S = 0.25  # poll interval between non-blocking attempts
 
 # Cross-platform file-locking primitives for `atomic_append_jsonl`.
 # Same pattern as `portfolio/process_lock.py`.
@@ -265,8 +280,22 @@ def jsonl_sidecar_lock(path):
       the empty-file ``msvcrt.locking(fd, LK_LOCK, 1)`` failure path
       and interleave. A pre-seeded sidecar guarantees a lockable byte
       always exists.
-    * **Windows + POSIX:** ``msvcrt.locking`` blocks on contention on
-      Windows; ``fcntl.flock`` blocks on POSIX. Both release on close.
+    * **Windows + POSIX:** ``msvcrt.locking(LK_LOCK)`` is NOT truly
+      blocking (it retries 10x1s then raises OSError), so on Windows we
+      poll ``LK_NBLCK`` against a bounded ~30s deadline (see
+      ``_MSVCRT_LOCK_BUDGET_S``); ``fcntl.flock`` blocks indefinitely on
+      POSIX. Both release on close.
+
+    Lock ordering (2026-06-11): this sidecar lock is the OUTER lock of
+    the system's two-level scheme; file-level msvcrt *byte* locks are
+    inner. ``atomic_append_jsonl``, ``atomic_write_jsonl``, ``prune_jsonl``
+    and ``log_rotation.rotate_jsonl`` all take this sidecar lock around
+    their whole read/write/replace sequence. It is NOT reentrant — a
+    caller already inside one ``jsonl_sidecar_lock(path)`` must not call
+    another primitive that re-enters it for the *same* path (would
+    deadlock under the Windows byte-lock). The B6 outcome_tracker backfill
+    holds this lock around its snapshot-verify and calls only
+    lock-free I/O inside; keep that discipline.
 
     Callers MUST keep *all* mutations of the target file inside the
     ``with`` block — read, write, fsync, rename. Appends that arrive
@@ -291,9 +320,40 @@ def jsonl_sidecar_lock(path):
         win_locked = False
         try:
             if _msvcrt is not None:
-                os.lseek(lfd, 0, os.SEEK_SET)
-                _msvcrt.locking(lfd, _msvcrt.LK_LOCK, 1)  # blocking
-                win_locked = True
+                # 2026-06-11: bounded blocking retry via non-blocking LK_NBLCK
+                # polling (LK_LOCK is itself a bounded 10x1s retry that raises,
+                # so we can't rely on it to block). Loop on a real deadline,
+                # emit a WARNING once a wait exceeds _MSVCRT_LOCK_WARN_S so a
+                # long-held rotation lock is visible (premortem hook 5), and
+                # raise a clear error naming the contended file on budget
+                # exhaustion instead of the opaque CPython OSError.
+                deadline = time.monotonic() + _MSVCRT_LOCK_BUDGET_S
+                warned = False
+                start = time.monotonic()
+                while True:
+                    os.lseek(lfd, 0, os.SEEK_SET)
+                    try:
+                        _msvcrt.locking(lfd, _msvcrt.LK_NBLCK, 1)
+                        win_locked = True
+                        break
+                    except OSError:
+                        now = time.monotonic()
+                        waited = now - start
+                        if not warned and waited >= _MSVCRT_LOCK_WARN_S:
+                            warned = True
+                            logger.warning(
+                                "sidecar lock on %s contended for %.1fs "
+                                "(budget %.0fs) — possible long rotation hold",
+                                path.name, waited, _MSVCRT_LOCK_BUDGET_S,
+                            )
+                        if now >= deadline:
+                            raise OSError(
+                                f"sidecar lock acquisition timed out after "
+                                f"{_MSVCRT_LOCK_BUDGET_S:.0f}s for {path} "
+                                f"(.{path.name}.lock); a holder (e.g. log "
+                                f"rotation) did not release in time"
+                            ) from None
+                        time.sleep(_MSVCRT_LOCK_RETRY_SLEEP_S)
             elif _fcntl is not None:
                 _fcntl.flock(lfd, _fcntl.LOCK_EX)
             yield
@@ -353,21 +413,38 @@ def atomic_write_jsonl(path, entries):
     """Atomically rewrite a JSONL file with the given entries.
 
     Uses tempfile + os.replace so the file is never left partially written.
+
+    2026-06-11: now takes ``jsonl_sidecar_lock`` around the write+replace so
+    a concurrent ``atomic_append_jsonl`` cannot land on the doomed pre-replace
+    inode and be discarded by ``os.replace`` (same class of loss the 2026-05-11
+    rotation fix closed, commit 3b623129). The sidecar lock is the OUTER lock
+    and is NOT reentrant for the same path — verified that no live caller
+    (fin_evolve, forecast_accuracy, signal_history,
+    scripts/backfill_accuracy_snapshots) already holds it, so taking it here is
+    safe. A future caller that DOES hold the lock around a read-modify-rewrite
+    must call a ``_locked`` variant instead of this function.
+
+    NOTE: this closes the write-side race only. A caller doing
+    ``load_jsonl -> mutate -> atomic_write_jsonl`` still reads outside the lock,
+    so an append landing between the read and this call is overwritten. Such
+    callers should hold ``jsonl_sidecar_lock(path)`` around the whole
+    read→mutate→write sequence (and then must not re-enter via this function).
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, str(path))
-    except BaseException:
-        with suppress(OSError):
-            os.unlink(tmp)
-        raise
+    with jsonl_sidecar_lock(path):
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for entry in entries:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, str(path))
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp)
+            raise
 
 
 def last_jsonl_entry(path, field=None):
@@ -402,11 +479,21 @@ def last_jsonl_entry(path, field=None):
         if not line:
             continue
         objs = _decode_jsonl_line(line)
-        if objs:
-            entry = objs[-1]
-            if field is not None:
-                return entry.get(field) if isinstance(entry, dict) else None
-            return entry
+        if not objs:
+            continue
+        entry = objs[-1]
+        # 2026-06-11: the 4KB tail window can truncate a >4KB final line
+        # mid-object; raw_decode then happily returns a bare scalar (e.g.
+        # the string "context" before a quoted key). A non-dict entry is
+        # never a real journal row, so skip it and keep scanning backward
+        # to the previous complete line rather than handing callers
+        # (loop_contract, _write_fishing_context) a str/number where a dict
+        # is expected.
+        if not isinstance(entry, dict):
+            continue
+        if field is not None:
+            return entry.get(field)
+        return entry
     return None
 
 
@@ -436,14 +523,24 @@ def prune_jsonl(path, max_entries=5000):
     """Prune a JSONL file to keep only the most recent *max_entries*.
 
     Reads the file, keeps the tail, and atomically rewrites it.
-    Skips malformed lines (e.g., from partial writes) during read.
     No-op if the file has fewer entries than *max_entries*.
+
+    2026-06-11: validate via ``_decode_jsonl_line`` (the 2026-06-06 recovery
+    decoder) instead of bare ``json.loads``. The old bare-loads validation
+    permanently dropped legacy concatenated-object lines (``...}{"ts":...}``)
+    that ``last_jsonl_entry``/``load_jsonl`` recover — silently deleting real
+    data (e.g. critical_errors resolution rows) on the next prune. We now keep
+    every line the decoder can recover, AND heal the file by re-emitting each
+    recovered object on its own physical line. ``removed`` counts *objects*,
+    matching the entry-count semantics of ``max_entries``.
 
     Returns the number of entries removed, or 0 if no pruning was needed.
     """
     path = Path(path)
     with jsonl_sidecar_lock(path):
-        lines = []
+        # Each element is a JSON-serialized single object (recovered lines are
+        # split into one entry each, healing legacy concatenated rows).
+        objs = []
         try:
             f = open(path, encoding="utf-8")
         except FileNotFoundError:
@@ -453,15 +550,15 @@ def prune_jsonl(path, max_entries=5000):
                 stripped = line.strip()
                 if not stripped:
                     continue
-                try:
-                    json.loads(stripped)
-                    lines.append(stripped)
-                except json.JSONDecodeError:
+                decoded = _decode_jsonl_line(stripped)
+                if not decoded:
                     logger.warning("prune_jsonl: skipping malformed line in %s", path.name)
-        if len(lines) <= max_entries:
+                    continue
+                objs.extend(json.dumps(o, ensure_ascii=False) for o in decoded)
+        if len(objs) <= max_entries:
             return 0
-        removed = len(lines) - max_entries
-        keep = lines[-max_entries:]
+        removed = len(objs) - max_entries
+        keep = objs[-max_entries:]
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:

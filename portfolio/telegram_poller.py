@@ -38,6 +38,26 @@ POLLER_STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "telegram_
 # 60 s stale filter applies.
 RESTART_BYPASS_MAX_AGE_S = 60 * 60
 
+# 2026-06-11 (audit batch 9, finding "offset-holdback retry is illusory"):
+# The old design left the persisted offset un-advanced on a dispatch raise
+# so a *restart* would re-fetch and retry. But Telegram acks an update as
+# soon as the next getUpdates is called with offset > update_id, so the
+# in-process 5s poll permanently consumes the failed update server-side —
+# the persisted-offset replay only fired in the narrow window where the
+# process died within that single poll. Real-money bookkeeping commands
+# ("bought MSTR …") were silently lost on any transient handler failure.
+#
+# New design — ack-after-success with a bounded retry:
+#   * On dispatch raise, increment a persisted per-update attempt count and
+#     do NOT advance the persisted offset (the in-memory offset still
+#     advances within this poll to avoid spinning, but the next poll resets
+#     it to the persisted value so the failed update is re-fetched).
+#   * After MAX_DISPATCH_ATTEMPTS failures the update is given up on: the
+#     offset advances past it (so it stops blocking the queue) AND an
+#     explicit "command dropped" reply is sent to the user (premortem hook
+#     12 — never a silent drop; the user may have sent a halt command).
+MAX_DISPATCH_ATTEMPTS = 3
+
 
 class TelegramPoller:
     def __init__(self, config, on_command):
@@ -57,7 +77,16 @@ class TelegramPoller:
         # which preserves the original cold-start behavior.
         self._initial_offset = self._load_persisted_offset()
         self.offset = self._initial_offset
+        # The last offset durably written to disk. The in-memory ``self.offset``
+        # may run ahead within a poll to avoid spinning on a poison update, but
+        # a dispatch failure leaves ``_persisted_offset`` behind so the next
+        # poll re-fetches the failed update (ack-after-success, 2026-06-11).
+        self._persisted_offset = self._initial_offset
         self._has_persisted_offset = self._initial_offset > 0
+        # Per-update_id dispatch attempt counts, persisted alongside the offset
+        # so a restart does not reset the bounded-retry counter (otherwise a
+        # reliably-failing command would retry forever across restarts).
+        self._attempts = self._load_persisted_attempts()
         self._startup_time = time.time()
         self._thread = None
 
@@ -89,16 +118,46 @@ class TelegramPoller:
             return 0
         return offset
 
+    @staticmethod
+    def _load_persisted_attempts() -> dict:
+        """Read the per-update dispatch attempt counts from POLLER_STATE_FILE.
+
+        Returns a ``{update_id_str: int}`` dict. Fail-soft to ``{}`` on any
+        problem (missing file, malformed JSON, wrong shape) — a lost counter
+        just means a failing command gets a fresh set of retries, which is
+        strictly safer than crashing the poll loop."""
+        try:
+            state = load_json(POLLER_STATE_FILE, default=None)
+        except Exception as e:
+            logger.warning("poller attempts load failed: %s", e)
+            return {}
+        if not isinstance(state, dict):
+            return {}
+        raw = state.get("attempts")
+        if not isinstance(raw, dict):
+            return {}
+        out = {}
+        for k, v in raw.items():
+            try:
+                out[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        return out
+
     def _save_offset(self) -> None:
-        """Persist current offset atomically. Best-effort: a write failure
-        means the next restart re-fetches updates we already acked, but
-        that's recoverable (Telegram dedups via the same update_id) so we
-        don't crash the poll loop on disk errors."""
+        """Persist the *durable* offset + attempt counts atomically.
+
+        2026-06-11: persists ``self._persisted_offset`` (the ack-after-success
+        watermark), NOT the in-memory ``self.offset`` which may run ahead of a
+        still-failing update. Best-effort: a write failure means the next
+        restart re-fetches updates we already acked, recoverable via Telegram's
+        update_id dedup, so we never crash the poll loop on disk errors."""
         try:
             atomic_write_json(
                 POLLER_STATE_FILE,
                 {
-                    "offset": int(self.offset),
+                    "offset": int(self._persisted_offset),
+                    "attempts": {str(k): int(v) for k, v in self._attempts.items()},
                     "updated_ts": datetime.now(UTC).isoformat(),
                 },
             )
@@ -113,6 +172,12 @@ class TelegramPoller:
     def _poll_loop(self):
         while True:
             try:
+                # 2026-06-11: start each poll from the durable watermark so a
+                # dispatch that failed last poll (and therefore did not advance
+                # _persisted_offset) is re-fetched and retried, up to
+                # MAX_DISPATCH_ATTEMPTS. The in-memory offset may run ahead
+                # within a single poll to avoid spinning on a poison update.
+                self.offset = self._persisted_offset
                 updates = self._get_updates()
                 for update in updates:
                     self._handle_update(update)
@@ -154,17 +219,44 @@ class TelegramPoller:
         "unrecognized",
     })
 
+    def _ack_update(self, update_id) -> None:
+        """Durably ack *update_id*: advance the persisted offset past it and
+        clear any retry counter, then persist. The in-memory ``self.offset``
+        already advanced within the poll; this commits it to disk."""
+        self._persisted_offset = max(self._persisted_offset, update_id + 1)
+        self._attempts.pop(str(update_id), None)
+        self._save_offset()
+
+    def _notify_dropped(self, cmd, text) -> None:
+        """Tell the user a command was dropped after exhausting retries.
+
+        Premortem hook 12: a dropped command must NEVER be silent — the user
+        may have sent a halt/position-update command.
+
+        DEVIATION from the literal "via telegram_notifications" directive:
+        telegram_notifications.send_telegram is gated by the ``layer1_messages``
+        config flag (default OFF) and returns True *without sending* when the
+        gate is off — routing the drop notice through it would silently swallow
+        exactly the message hook 12 says must never be silent. The poller's own
+        ``_send_reply`` posts directly to the user's chat, is ungated, and is
+        already the path every successful command reply uses, so we use it for
+        guaranteed delivery. Best-effort; ``_send_reply`` already swallows its
+        own send errors and never raises."""
+        label = cmd or (text or "")[:60]
+        self._send_reply(
+            f"⚠ command dropped after {MAX_DISPATCH_ATTEMPTS} failed "
+            f"attempts: {label}"
+        )
+
     def _handle_update(self, update):
         """Process a single update."""
         update_id = update.get("update_id", 0)
-        prev_offset = self.offset
         self.offset = max(self.offset, update_id + 1)
-        # In-memory offset advances unconditionally so a single poison
-        # update doesn't loop the in-process poll, but persistence is
-        # delayed until we know the message is settled — successful
-        # dispatch, intentional drop, or non-message frame. If the
-        # handler raises, we leave the persisted offset where it was so
-        # restart re-fetches and retries (Codex P1 round-7 2026-04-28).
+        # In-memory offset advances unconditionally so a single poison update
+        # doesn't loop the in-process poll. Durable persistence is decided by
+        # the ack-after-success accounting at the end of this method
+        # (2026-06-11): a settled outcome acks; a raised dispatch leaves the
+        # durable offset behind for a bounded retry.
         offset_settled = False
 
         msg = update.get("message")
@@ -182,8 +274,8 @@ class TelegramPoller:
                 msg = None  # short-circuit out of the rest of the body
 
         if msg is None:
-            if offset_settled and self.offset > prev_offset:
-                self._save_offset()
+            if offset_settled:
+                self._ack_update(update_id)
             return
 
         # Accumulate log outcome; single append in finally so we log every
@@ -237,9 +329,10 @@ class TelegramPoller:
 
             # Dispatch can raise (Avanza session, volume math, network) — we
             # want processed=True to mean "dispatch completed", not "dispatch
-            # was attempted". On raise, tag drop_reason with the exception
-            # type so the audit log reflects the actual outcome, then re-raise
-            # to preserve the old error-propagation behavior.
+            # was attempted". 2026-06-11: the exception is now caught locally
+            # (no re-raise) so the finally block can run the ack-after-success
+            # bookkeeping; _poll_loop's own try/except no longer needs to see
+            # it. The raise:* drop_reason is still logged for the audit trail.
             try:
                 if cmd == "mode":
                     response = self._handle_mode_command(args)
@@ -250,19 +343,35 @@ class TelegramPoller:
                 outcome["processed"] = True
             except Exception as exc:
                 outcome["drop_reason"] = f"raised:{type(exc).__name__}"
-                raise
+                logger.warning("Poller dispatch failed for %r: %s", cmd, exc)
         finally:
             self._log_inbound(update, msg, **outcome)
-            # Persist offset only when the message has *settled* —
-            # successful dispatch or an intentional drop. A raised
-            # dispatch leaves persistence un-claimed so a restart can
-            # retry; otherwise a transient handler crash silently
-            # consumes the user's command (Codex P1 round-7 2026-04-28).
-            should_persist = outcome["processed"] or (
-                outcome["drop_reason"] in self._SETTLED_DROP_REASONS
-            )
-            if should_persist and self.offset > prev_offset:
-                self._save_offset()
+            # Offset/ack accounting (2026-06-11 ack-after-success):
+            #   * processed OR intentional settled-drop -> ack (advance the
+            #     durable offset, clear any attempt counter).
+            #   * raised dispatch -> bounded retry: count the attempt; if we
+            #     have exhausted MAX_DISPATCH_ATTEMPTS, give up (ack so it
+            #     stops blocking the queue) and send the user an explicit
+            #     "command dropped" reply (premortem hook 12 — never silent).
+            #     Otherwise leave the durable offset behind so the next poll
+            #     re-fetches and retries.
+            if outcome["processed"] or outcome["drop_reason"] in self._SETTLED_DROP_REASONS:
+                self._ack_update(update_id)
+            elif outcome["drop_reason"] and outcome["drop_reason"].startswith("raised:"):
+                key = str(update_id)
+                attempts = self._attempts.get(key, 0) + 1
+                self._attempts[key] = attempts
+                if attempts >= MAX_DISPATCH_ATTEMPTS:
+                    logger.error(
+                        "Poller giving up on update %s (cmd=%r) after %d failed "
+                        "attempts — dropping", update_id, outcome["cmd"], attempts,
+                    )
+                    self._notify_dropped(outcome["cmd"], text)
+                    self._ack_update(update_id)  # also clears the counter
+                else:
+                    # Persist the incremented counter without advancing the
+                    # durable offset, so the retry budget survives a restart.
+                    self._save_offset()
 
     def _log_inbound(self, update, msg, cmd, processed, drop_reason):
         """Persist one inbound message to data/telegram_inbound.jsonl.

@@ -256,3 +256,164 @@ class TestRotateEdgeCases:
                                   dry_run=True)
         assert result["status"] == "dry_run"
         assert filepath.read_text() == before
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-11 audit batch 9 additions
+# ---------------------------------------------------------------------------
+
+import os
+import subprocess
+import sys
+
+
+class TestAtomicWriteJsonlSidecarLock:
+    """atomic_write_jsonl must take the sidecar lock around write+replace so a
+    concurrent append cannot be discarded by os.replace (and must not deadlock
+    against the lock it now takes)."""
+
+    def test_takes_sidecar_lock(self, tmp_path):
+        path = tmp_path / "rewrite.jsonl"
+        path.write_text(json.dumps({"old": 1}) + "\n", encoding="utf-8")
+
+        acquired = {"n": 0}
+        real_lock = fu.jsonl_sidecar_lock
+
+        def counting_lock(p):
+            acquired["n"] += 1
+            return real_lock(p)
+
+        with patch.object(fu, "jsonl_sidecar_lock", counting_lock):
+            fu.atomic_write_jsonl(path, [{"new": 1}, {"new": 2}])
+
+        # The rewrite acquired the sidecar lock exactly once.
+        assert acquired["n"] == 1
+        objs = fu.load_jsonl(path)
+        assert objs == [{"new": 1}, {"new": 2}]
+
+    def test_no_deadlock_completes_quickly(self, tmp_path):
+        """Calling atomic_write_jsonl when nobody else holds the lock must not
+        block (regression guard against accidentally taking the lock twice)."""
+        path = tmp_path / "rewrite2.jsonl"
+        start = time.monotonic()
+        fu.atomic_write_jsonl(path, [{"i": i} for i in range(10)])
+        assert time.monotonic() - start < 5.0
+        assert len(fu.load_jsonl(path)) == 10
+
+    def test_append_after_rewrite_not_lost(self, tmp_path):
+        """Sequential append after a locked rewrite is preserved (sanity that
+        the lock is released)."""
+        path = tmp_path / "rewrite3.jsonl"
+        fu.atomic_write_jsonl(path, [{"i": 0}])
+        fu.atomic_append_jsonl(path, {"i": 1})
+        objs = fu.load_jsonl(path)
+        assert objs == [{"i": 0}, {"i": 1}]
+
+
+class TestLastJsonlEntryScalarTail:
+    """A truncated >4KB final line can make the recovery decoder return a bare
+    scalar; last_jsonl_entry must skip non-dict tails and return the previous
+    complete dict (or None), never a str/number."""
+
+    def test_truncated_scalar_tail_skipped(self, tmp_path):
+        path = tmp_path / "tail.jsonl"
+        good = {"ts": "2026-06-11", "ok": True}
+        # A complete dict line, then a final line whose only recoverable token
+        # within the 4KB tail window is a bare string scalar.
+        big_filler = "x" * 5000  # pushes the good line out of the 4KB window? no
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(good) + "\n")
+            # Final physical line: a bare quoted string (what a truncation
+            # landing before a quoted key decodes to).
+            f.write('"context"' + "\n")
+
+        entry = fu.last_jsonl_entry(path)
+        # Must NOT return the bare string "context"; scans back to the dict.
+        assert entry == good
+        assert big_filler  # silence lint
+
+    def test_field_access_on_scalar_tail_returns_prev_dict_field(self, tmp_path):
+        path = tmp_path / "tail2.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": "A"}) + "\n")
+            f.write("12345" + "\n")  # bare numeric scalar tail
+        assert fu.last_jsonl_entry(path, field="ts") == "A"
+
+    def test_all_scalar_lines_returns_none(self, tmp_path):
+        path = tmp_path / "tail3.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('"a"' + "\n")
+            f.write('42' + "\n")
+        assert fu.last_jsonl_entry(path) is None
+
+
+# Holder script: open the sidecar lock file and grab the same single-byte
+# msvcrt lock the sidecar uses, hold it for HOLD_S, then release. Run as a
+# separate process so the byte lock genuinely contends with the parent.
+_HOLDER_SRC = r'''
+import os, sys, time
+import msvcrt
+lock_path, hold_s = sys.argv[1], float(sys.argv[2])
+f = open(lock_path, "rb+")
+os.lseek(f.fileno(), 0, os.SEEK_SET)
+msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+sys.stdout.write("LOCKED\n"); sys.stdout.flush()
+time.sleep(hold_s)
+os.lseek(f.fileno(), 0, os.SEEK_SET)
+msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+f.close()
+'''
+
+
+@pytest.mark.skipif(os.name != "nt", reason="msvcrt byte-lock contention is Windows-only")
+class TestMsvcrtBoundedRetry:
+    def test_blocks_then_acquires_within_budget(self, tmp_path):
+        """A second process holding the lock briefly: jsonl_sidecar_lock must
+        block (bounded retry), then acquire once the holder releases."""
+        path = tmp_path / "contended.jsonl"
+        # Pre-create the sidecar so the holder can lock it.
+        with fu.jsonl_sidecar_lock(path):
+            pass
+        lock_path = str(path.parent / f".{path.name}.lock")
+
+        hold_s = 1.5
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _HOLDER_SRC, lock_path, str(hold_s)],
+            stdout=subprocess.PIPE, text=True,
+        )
+        # Wait until the child confirms it holds the lock.
+        assert proc.stdout.readline().strip() == "LOCKED"
+
+        start = time.monotonic()
+        with fu.jsonl_sidecar_lock(path):
+            waited = time.monotonic() - start
+        proc.wait(timeout=10)
+
+        # Acquisition waited for the holder (bounded retry actually blocked)
+        # but completed well within the ~30s budget once released.
+        assert waited >= 0.5
+        assert waited < 30.0
+
+    def test_budget_exhaustion_raises_clear_error(self, tmp_path, monkeypatch):
+        """When the holder outlives the budget, acquisition raises an OSError
+        naming the contended file (not the opaque CPython retry error)."""
+        path = tmp_path / "stuck.jsonl"
+        with fu.jsonl_sidecar_lock(path):
+            pass
+        lock_path = str(path.parent / f".{path.name}.lock")
+
+        # Shrink the budget so the test is fast.
+        monkeypatch.setattr(fu, "_MSVCRT_LOCK_BUDGET_S", 1.0)
+        monkeypatch.setattr(fu, "_MSVCRT_LOCK_WARN_S", 0.3)
+
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _HOLDER_SRC, lock_path, "5"],
+            stdout=subprocess.PIPE, text=True,
+        )
+        assert proc.stdout.readline().strip() == "LOCKED"
+        try:
+            with pytest.raises(OSError, match=str(path.name)):
+                with fu.jsonl_sidecar_lock(path):
+                    pass
+        finally:
+            proc.wait(timeout=10)
