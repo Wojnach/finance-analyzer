@@ -1,5 +1,6 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
+import copy
 import hashlib
 import logging
 import math
@@ -69,10 +70,21 @@ def _rotate_backups(path: Path):
 
 
 def _validated_state(loaded):
-    """Merge loaded state with defaults to ensure all required keys exist."""
+    """Merge loaded state with defaults to ensure all required keys exist.
+
+    2026-06-11 (audit batch 7): _DEFAULT_STATE is a module constant whose
+    ``holdings`` dict and ``transactions`` list are mutable. ``{**_DEFAULT_STATE,
+    **loaded}`` is a SHALLOW copy — when ``loaded`` lacks one of those keys
+    (fresh bootstrap, corrupt-then-recovered file, hand-edit missing a key) the
+    returned dict aliases the module-global container. Any in-place mutation
+    (update_state's mutate_fn, a caller appending a transaction to a load_state()
+    result) then contaminates the global for the process lifetime AND leaks
+    across Patient/Bold (both default paths would share one transactions list).
+    Deep-copy the defaults at every use so each load gets independent containers.
+    """
     if not loaded or not isinstance(loaded, dict):
-        return {**_DEFAULT_STATE, "start_date": datetime.now(UTC).isoformat()}
-    result = {**_DEFAULT_STATE, **loaded}
+        return {**copy.deepcopy(_DEFAULT_STATE), "start_date": datetime.now(UTC).isoformat()}
+    result = {**copy.deepcopy(_DEFAULT_STATE), **loaded}
     # Ensure types are correct for critical fields
     if not isinstance(result.get("holdings"), dict):
         result["holdings"] = {}
@@ -177,7 +189,8 @@ def _load_state_from(path: Path):
             "ALL backups corrupt/missing for %s — returning fresh defaults", path.name
         )
 
-    return {**_DEFAULT_STATE, "start_date": datetime.now(UTC).isoformat()}
+    # Deep-copy: see _validated_state — never hand back the shared module globals.
+    return {**copy.deepcopy(_DEFAULT_STATE), "start_date": datetime.now(UTC).isoformat()}
 
 
 def _save_state_to(path: Path, state):
