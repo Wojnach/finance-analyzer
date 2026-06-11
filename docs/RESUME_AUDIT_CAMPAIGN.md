@@ -29,7 +29,10 @@ implementing any batch.
 | B5 orchestration | DONE — `1c93e174`, merged, self-reviewed, **pushed** |
 | B6-B12 | Not started — B6 findings pre-extracted (re-extract via awk if /tmp cleared) |
 
-Both `main` and the branch are pushed to origin. **Next session starts directly at B4.**
+Both `main` and the branch are pushed to origin. **Next session starts directly at B6
+(signal-core).** Already done off-schedule: ops item 2 (16 accuracy_degradation criticals
++ today's netflow staleness alert RESOLVED in the journal 2026-06-11, startup check exits
+0) and the hook-10 pre-snapshot (`data/accuracy_cache.pre_b6.json`).
 
 ### B3 security notes worth knowing (already fixed, context only)
 
