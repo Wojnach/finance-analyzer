@@ -262,12 +262,23 @@ class TestEntryLogic:
         trader._check_entries({}, {"XAG-USD": sig})
         assert len(trader.state["positions"]) == 1  # unchanged
 
-    def test_entry_on_valid_signal(self):
-        """With valid BUY signal + enough cash + good RSI → should create position."""
+    def test_entry_on_valid_signal(self, monkeypatch):
+        """With valid BUY signal + enough cash + good RSI → should create position.
+
+        2026-06-11 rot fix: two gates added after this test was written made
+        it fail — (a) the MACD decay gate (2026-04-17, Gate B) rejects
+        make_signal's default macd_hist=0 against the seeded history peak 0.3
+        (0% < MACD_DECAY_MIN_RATIO 30%), so the signal now carries
+        macd_hist=0.3; (b) the EOD "too close to close" entry gate reads the
+        real wall clock via _cet_hour(), so evening test runs were rejected —
+        pinned to 15:00 CET like the TestExitLogic EOD tests already do.
+        """
+        import metals_swing_trader as mst
+        monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
         trader = make_trader(cash=10000, macd_history={
             "XAG-USD": [0.1, 0.2, 0.3],  # improving
         })
-        sig = make_signal(action="BUY", buy_count=5, rsi=50,
+        sig = make_signal(action="BUY", buy_count=5, rsi=50, macd_hist=0.3,
                           timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
                                       "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"})
         trader._check_entries({}, {"XAG-USD": sig})
@@ -363,8 +374,15 @@ class TestExitLogic:
         trader._check_exits({}, {"XAG-USD": sell_sig})
         assert len(trader.state["positions"]) == 0
 
-    def test_hold_when_no_exit_condition(self):
-        """Keep position when no exit trigger fires."""
+    def test_hold_when_no_exit_condition(self, monkeypatch):
+        """Keep position when no exit trigger fires.
+
+        2026-06-11 rot fix: _check_exits reads the real wall clock via
+        _cet_hour(), so evening test runs fired EOD_EXIT and sold the
+        position. Pinned to 15:00 CET like the other EOD tests in this class.
+        """
+        import metals_swing_trader as mst
+        monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
         pos = self._make_position(und_entry=87.0)  # entry=current, no trigger
         trader = make_trader(cash=5000, positions={"pos_1": pos})
         trader._check_exits({}, {"XAG-USD": make_signal()})
@@ -577,12 +595,19 @@ class TestIntegration:
         assert len(trader.state["positions"]) == 0
         assert trader.check_count == 1
 
-    def test_full_cycle_with_buy_signal(self):
-        """Full cycle: BUY signal → creates position (DRY_RUN)."""
+    def test_full_cycle_with_buy_signal(self, monkeypatch):
+        """Full cycle: BUY signal → creates position (DRY_RUN).
+
+        2026-06-11 rot fix: same two gates as test_entry_on_valid_signal —
+        macd_hist=0.3 clears the MACD decay gate (Gate B, 2026-04-17) and
+        _cet_hour pinned to 15:00 CET clears the EOD entry gate.
+        """
+        import metals_swing_trader as mst
+        monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
         trader = make_trader(cash=10000, macd_history={
             "XAG-USD": [0.1, 0.2, 0.3],
         })
-        sig = make_signal(action="BUY", buy_count=5, rsi=50,
+        sig = make_signal(action="BUY", buy_count=5, rsi=50, macd_hist=0.3,
                           timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
                                       "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"})
         trader.evaluate_and_execute({}, {"XAG-USD": sig})
