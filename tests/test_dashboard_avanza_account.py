@@ -257,3 +257,90 @@ class TestOpenOrdersFailurePropagation:
         data = resp.get_json()
         assert data["orders"] == []
         assert any("orders: AvanzaSessionError" in e for e in data["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Audit batch 10 (2026-06-10): bounded queue + in-flight dedup.
+# We pin _ensure_avanza_worker to a no-op so enqueued jobs are NOT drained,
+# letting us observe queue/dedup state deterministically without a live worker.
+# ---------------------------------------------------------------------------
+
+
+class TestAvanzaQueueBounding:
+    def _reset(self):
+        import dashboard.app as a
+        # Drain any residual queued futures and clear in-flight slot.
+        try:
+            while True:
+                a._AVANZA_REQ_Q.get_nowait()
+        except Exception:
+            pass
+        with a._AVANZA_INFLIGHT_LOCK:
+            a._AVANZA_INFLIGHT = None
+
+    def test_queue_full_raises_and_route_returns_503(self, client):
+        import dashboard.app as a
+        self._reset()
+        with patch("dashboard.app._ensure_avanza_worker", lambda: None):
+            # No in-flight future; saturate the bounded queue with direct puts
+            # so the snapshot call's put_nowait raises queue.Full → route 503.
+            for _ in range(a._AVANZA_REQ_Q.maxsize):
+                a._AVANZA_REQ_Q.put_nowait({"result": None, "done": __import__("threading").Event()})
+            # No in-flight future, so _avanza_account_snapshot tries to enqueue
+            # → queue full → _AvanzaQueueFull → route 503.
+            with _no_auth():
+                resp = client.get("/api/avanza_account?force=1")
+            assert resp.status_code == 503
+            assert resp.json["error"] == "avanza_worker_busy"
+            assert "Retry-After" in resp.headers
+        self._reset()
+
+    def test_concurrent_callers_coalesce_onto_one_inflight(self):
+        """5 concurrent cache-miss callers must enqueue exactly ONE job (dedup)
+        and all receive the same coalesced result. We count put_nowait calls so
+        the assertion is robust regardless of how fast a worker drains."""
+        import threading
+        import dashboard.app as a
+        self._reset()
+
+        enqueue_count = {"n": 0}
+        # Block enqueued futures from being served until we release them, so the
+        # in-flight slot stays occupied while the other callers pile in.
+        release = threading.Event()
+        real_put = a._AVANZA_REQ_Q.put_nowait
+
+        def counting_put(item):
+            enqueue_count["n"] += 1
+            # Spawn a one-shot resolver that waits for release, then fulfils the
+            # future exactly like the real worker would, and clears in-flight.
+            def resolve():
+                release.wait(timeout=5)
+                item["result"] = {"ok": True}
+                with a._AVANZA_INFLIGHT_LOCK:
+                    if a._AVANZA_INFLIGHT is item:
+                        a._AVANZA_INFLIGHT = None
+                item["done"].set()
+            threading.Thread(target=resolve, daemon=True).start()
+
+        results: list = []
+
+        def call():
+            results.append(a._avanza_account_snapshot())
+
+        with patch("dashboard.app._ensure_avanza_worker", lambda: None), \
+             patch.object(a._AVANZA_REQ_Q, "put_nowait", counting_put):
+            threads = [threading.Thread(target=call) for _ in range(5)]
+            for t in threads:
+                t.start()
+            # Let all 5 attach to the single in-flight future before releasing.
+            time = __import__("time")
+            time.sleep(0.2)
+            release.set()
+            for t in threads:
+                t.join(timeout=5)
+
+        # Exactly one enqueue despite 5 concurrent callers; all share the result.
+        assert enqueue_count["n"] == 1
+        assert len(results) == 5
+        assert all(r == {"ok": True} for r in results)
+        self._reset()

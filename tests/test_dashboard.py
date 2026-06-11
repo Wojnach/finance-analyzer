@@ -1905,3 +1905,58 @@ class TestSecurityHeaders:
         assert resp.headers["X-Frame-Options"] == "DENY"
         assert "max-age=" in resp.headers["Strict-Transport-Security"]
         assert "frame-ancestors" in resp.headers["Content-Security-Policy"]
+
+
+# ---------------------------------------------------------------------------
+# Audit batch 10 (2026-06-10): request-size cap + access-log redaction
+# ---------------------------------------------------------------------------
+
+
+def test_max_content_length_configured():
+    from dashboard.app import app as _app
+    assert _app.config["MAX_CONTENT_LENGTH"] == 1 * 1024 * 1024
+
+
+def test_oversized_post_rejected_with_413(client):
+    """A >1 MiB body to /api/validate-portfolio is rejected before parsing."""
+    big = b"x" * (1 * 1024 * 1024 + 1)
+    with patch("dashboard.auth._get_dashboard_token", return_value=None):
+        resp = client.post(
+            "/api/validate-portfolio",
+            data=big,
+            content_type="application/json",
+        )
+    assert resp.status_code == 413
+
+
+def test_log_redaction_scrubs_token_query():
+    from dashboard.app import _redact_request_line
+    line = 'GET /api/summary?token=secret_tok_123&x=1 HTTP/1.1'
+    out = _redact_request_line(line)
+    assert "secret_tok_123" not in out
+    assert "token=[redacted]" in out
+    assert "x=1" in out  # other params preserved
+
+
+def test_log_redaction_scrubs_go_slug():
+    from dashboard.app import _redact_request_line
+    line = 'GET /go/raanman-uploadme HTTP/1.1'
+    out = _redact_request_line(line)
+    assert "raanman-uploadme" not in out
+    assert "/go/[redacted]" in out
+
+
+def test_log_redaction_filter_mutates_record_args():
+    import logging as _logging
+    from dashboard.app import _RedactingFilter
+    rec = _logging.LogRecord(
+        name="werkzeug", level=_logging.INFO, pathname=__file__, lineno=1,
+        msg='%s - - "%s" %s',
+        args=("127.0.0.1", "GET /go/raanman-uploadme?token=abc123 HTTP/1.1", "200"),
+        exc_info=None,
+    )
+    assert _RedactingFilter().filter(rec) is True
+    formatted = rec.getMessage()
+    assert "raanman-uploadme" not in formatted
+    assert "abc123" not in formatted
+    assert "[redacted]" in formatted

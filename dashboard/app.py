@@ -40,6 +40,57 @@ class SafeJSONProvider(DefaultJSONProvider):
 app = Flask(__name__, static_folder="static")
 app.json = SafeJSONProvider(app)
 
+# 2026-06-10 (audit batch 10): cap request bodies. POST /api/validate-portfolio
+# json-parses request.get_json() with no size limit; without a ceiling an
+# authenticated client (or a same-origin XSS payload) could buffer an arbitrary
+# body in memory on a worker thread. 1 MiB is far above any real payload here.
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+
+
+import re as _re
+
+# 2026-06-10 (audit batch 10): the /go/<slug> magic link and the first-visit
+# ?token= query param are credentials, but Werkzeug's request handler logs the
+# full request line ("GET /go/<slug>?token=... HTTP/1.1") to the `werkzeug`
+# logger by default — landing both secrets in the dashboard access log and any
+# Cloudflare request log. This filter rewrites the logged line so the slug and
+# token value are replaced with [redacted] before the record is emitted. It
+# mutates record.args (the % interpolation args) since WSGIRequestHandler logs
+# via "%s" with the request line in args[0]; we also scrub the formatted message
+# defensively in case a future caller pre-formats. Dependency-free.
+_TOKEN_QS_RE = _re.compile(r"([?&]token=)[^&\s\"']+", _re.IGNORECASE)
+_GO_SLUG_RE = _re.compile(r"(/go/)[^\s?\"']+")
+
+
+def _redact_request_line(text: str) -> str:
+    text = _TOKEN_QS_RE.sub(r"\1[redacted]", text)
+    text = _GO_SLUG_RE.sub(r"\1[redacted]", text)
+    return text
+
+
+class _RedactingFilter(logging.Filter):
+    """Strip ?token= values and /go/ slugs from werkzeug access-log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.args = tuple(
+                _redact_request_line(arg) if isinstance(arg, str) else arg
+                for arg in record.args
+            )
+        if isinstance(record.msg, str):
+            record.msg = _redact_request_line(record.msg)
+        return True
+
+
+def _install_log_redaction() -> None:
+    """Attach the redaction filter to the werkzeug logger (idempotent)."""
+    wlog = logging.getLogger("werkzeug")
+    if not any(isinstance(f, _RedactingFilter) for f in wlog.filters):
+        wlog.addFilter(_RedactingFilter())
+
+
+_install_log_redaction()
+
 
 _ALLOWED_ORIGINS = {
     "http://localhost:5055",
@@ -831,8 +882,16 @@ def share_link(slug):
     Added 2026-06-03. Share e.g. https://bets.raanman.lol/go/raanman-uploadme.
     Hitting it sets the same ``pf_dashboard_token`` cookie ``require_auth``
     checks, then 302-redirects to ``/`` — the dashboard_token itself never
-    appears in the URL or the response body, so it can't be lifted from
-    browser history / referrer / server logs.
+    appears in the URL or the response body.
+
+    NOTE (corrected 2026-06-10, audit batch 10): the *slug* IS the URL path,
+    so unlike the token it DOES reach server access logs — Werkzeug's request
+    handler logs the full request line ("GET /go/<slug> ...") by default. The
+    slug is a 1-year credential, so a ``_RedactingFilter`` is installed on the
+    ``werkzeug`` logger (see ``_install_log_redaction``) to replace ``/go/``
+    slugs and ``?token=`` values with ``[redacted]`` before they are logged.
+    The earlier claim that the secret "can't be lifted from server logs" was
+    false for the slug and is removed.
 
     The path segment IS a shared secret (anyone with the link gets a 1-year
     pass; rotate ``dashboard_share_slug`` to revoke everyone). Security
@@ -2015,15 +2074,34 @@ _TRADING_STATUS_TTL_SECONDS = 30.0
 
 import queue  # noqa: E402  (kept near the worker for grouping)
 
-_AVANZA_REQ_Q: "queue.Queue[dict]" = queue.Queue()
+# 2026-06-10 (audit batch 10): the queue was unbounded and had no in-flight
+# dedup, so N concurrent cache-miss / ?force=1 requests enqueued N jobs that
+# serialised on the single worker — the k-th caller's 25s wait would expire and
+# return a timeout while the worker kept draining stale queued jobs, and a
+# stuck BankID session (every snapshot hitting the full timeout) could grow the
+# queue without bound. Fixes: (1) bound the queue (maxsize) and return 503 when
+# full instead of piling on; (2) coalesce concurrent callers onto a single
+# in-flight future so duplicate requests share one snapshot build rather than
+# each enqueuing their own.
+_AVANZA_REQ_Q: "queue.Queue[dict]" = queue.Queue(maxsize=4)
 _AVANZA_WORKER_LOCK = threading.Lock()
 _AVANZA_WORKER_STARTED = False
 _AVANZA_REQ_TIMEOUT_SECONDS = 25.0  # snapshot upper bound
+
+# In-flight dedup: at most one snapshot future is enqueued at a time;
+# concurrent callers attach to it and await the same result.
+_AVANZA_INFLIGHT_LOCK = threading.Lock()
+_AVANZA_INFLIGHT: dict[str, Any] | None = None
+
+
+class _AvanzaQueueFull(Exception):
+    """Raised when the worker queue is saturated — surfaced as HTTP 503."""
 
 
 def _avanza_worker_loop() -> None:
     """Single-thread worker that owns Playwright. Blocks on the request
     queue and serves snapshot requests sequentially."""
+    global _AVANZA_INFLIGHT
     while True:
         future = _AVANZA_REQ_Q.get()
         try:
@@ -2040,6 +2118,11 @@ def _avanza_worker_loop() -> None:
                 "errors": [f"worker: {type(e).__name__}: {e}"],
             }
         finally:
+            # Clear the in-flight slot before signalling waiters so the next
+            # caller after this one completes starts a fresh snapshot.
+            with _AVANZA_INFLIGHT_LOCK:
+                if _AVANZA_INFLIGHT is future:
+                    _AVANZA_INFLIGHT = None
             future["done"].set()
 
 
@@ -2059,10 +2142,28 @@ def _ensure_avanza_worker() -> None:
 
 def _avanza_account_snapshot() -> dict:
     """Public entry. Marshals snapshot building onto the worker thread so
-    Playwright's thread affinity is honoured."""
+    Playwright's thread affinity is honoured.
+
+    Concurrent callers coalesce onto a single in-flight future (dedup). If no
+    snapshot is in flight, this caller enqueues one; a bounded queue means a
+    saturated worker raises ``_AvanzaQueueFull`` (HTTP 503) rather than piling
+    up unbounded work."""
+    global _AVANZA_INFLIGHT
     _ensure_avanza_worker()
-    future: dict[str, Any] = {"result": None, "done": threading.Event()}
-    _AVANZA_REQ_Q.put(future)
+
+    with _AVANZA_INFLIGHT_LOCK:
+        future = _AVANZA_INFLIGHT
+        if future is None:
+            future = {"result": None, "done": threading.Event()}
+            try:
+                # Non-blocking: if the queue is already saturated, fail fast
+                # rather than blocking the request thread.
+                _AVANZA_REQ_Q.put_nowait(future)
+            except queue.Full as exc:
+                raise _AvanzaQueueFull() from exc
+            _AVANZA_INFLIGHT = future
+        # else: attach to the existing in-flight future (dedup).
+
     if not future["done"].wait(timeout=_AVANZA_REQ_TIMEOUT_SECONDS):
         return {
             "ts": datetime.now(UTC).isoformat(),
@@ -2216,7 +2317,14 @@ def api_avanza_account():
             cached = _AVANZA_CACHE.get("value")
             if cached and (now - _AVANZA_CACHE["at"]) < _AVANZA_TTL_SECONDS:
                 return jsonify(cached)
-    snapshot = _avanza_account_snapshot()
+    try:
+        snapshot = _avanza_account_snapshot()
+    except _AvanzaQueueFull:
+        # Worker saturated (e.g. a stuck BankID session). Fail fast with 503 +
+        # Retry-After rather than enqueuing more work the worker can't drain.
+        resp = jsonify({"error": "avanza_worker_busy"})
+        resp.headers["Retry-After"] = str(int(_AVANZA_REQ_TIMEOUT_SECONDS))
+        return resp, 503
     with _AVANZA_CACHE_LOCK:
         _AVANZA_CACHE["value"] = snapshot
         _AVANZA_CACHE["at"] = now
