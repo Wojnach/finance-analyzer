@@ -34,17 +34,37 @@ from portfolio.agent_invocation import (
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _reset_agent_globals():
-    """Reset module-level agent state before and after each test."""
+def _reset_agent_globals(tmp_path, monkeypatch):
+    """Reset module-level agent state before and after each test.
+
+    2026-06-11 (audit B5): invoke_agent now checks claude_gate's master kill
+    switch first (CLAUDE_ENABLED is False in production during the token
+    freeze), so unit tests stub the gate open here; gate-behavior tests
+    re-patch it themselves. The JSONL/state file globals are pointed at
+    tmp_path so the new completion-accounting-before-spawn path and the PID
+    persistence file never touch the real data/ directory (xdist safety).
+    """
     ai._agent_proc = None
     ai._agent_log = None
     ai._agent_start = 0
     ai._agent_timeout = 900
+    ai._patient_txn_count_before = 0
+    ai._bold_txn_count_before = 0
+    monkeypatch.setattr(ai, "check_claude_gates", lambda caller: (True, "ok"))
+    monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(ai, "AGENT_PROC_FILE", tmp_path / "layer2_agent_proc.json")
+    monkeypatch.setattr(ai, "INVOCATIONS_FILE", tmp_path / "invocations.jsonl")
+    monkeypatch.setattr(ai, "JOURNAL_FILE", tmp_path / "layer2_journal.jsonl")
+    monkeypatch.setattr(ai, "TELEGRAM_FILE", tmp_path / "telegram_messages.jsonl")
+    monkeypatch.setattr(ai, "PATIENT_PORTFOLIO", tmp_path / "portfolio_state.json")
+    monkeypatch.setattr(ai, "BOLD_PORTFOLIO", tmp_path / "portfolio_state_bold.json")
     yield
     ai._agent_proc = None
     ai._agent_log = None
     ai._agent_start = 0
     ai._agent_timeout = 900
+    ai._patient_txn_count_before = 0
+    ai._bold_txn_count_before = 0
 
 
 @pytest.fixture
@@ -911,14 +931,28 @@ class TestTelegramNotification:
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
     def test_notification_failure_is_non_critical(self, mock_popen_cls, mock_which):
-        """invoke_agent still returns True even if notification sending fails."""
+        """invoke_agent still returns True even if notification sending fails.
+
+        2026-06-11 (audit B5): the gate-time config read now fails CLOSED, so
+        only the notification-time _load_config call may raise here — the
+        first call must succeed or the invocation is (correctly) blocked.
+        """
         mock_popen_cls.return_value = MagicMock(pid=1)
 
-        with patch("portfolio.agent_invocation._load_config", side_effect=Exception("config error")), \
+        calls = {"n": 0}
+
+        def _cfg():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"layer2": {"enabled": True}}
+            raise Exception("config error")
+
+        with patch("portfolio.agent_invocation._load_config", side_effect=_cfg), \
              patch("builtins.open", mock_open()):
             result = invoke_agent(["test"], tier=1)
 
         assert result is True
+        assert calls["n"] >= 2  # the notification-time read did raise
 
 
 # ===========================================================================
@@ -930,10 +964,16 @@ class TestInvokeAgentPopenFailure:
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
     def test_returns_false_on_popen_exception(self, mock_popen_cls, mock_which):
-        """invoke_agent returns False when Popen raises an exception."""
+        """invoke_agent returns False when Popen raises an exception.
+
+        2026-06-11 (audit B5): _load_config must be stubbed to succeed —
+        config read errors now fail closed BEFORE reaching Popen, which
+        would make this test pass for the wrong reason.
+        """
         mock_popen_cls.side_effect = OSError("command not found")
 
-        with patch("builtins.open", mock_open()):
+        with patch("portfolio.agent_invocation._load_config", return_value={"layer2": {"enabled": True}}), \
+             patch("builtins.open", mock_open()):
             result = invoke_agent(["test"], tier=1)
 
         assert result is False
@@ -1020,8 +1060,14 @@ class TestModuleConstants:
         assert ai.BASE_DIR.name != "portfolio"
 
     def test_data_dir_is_under_base(self):
-        """DATA_DIR is BASE_DIR/data."""
-        assert ai.DATA_DIR == ai.BASE_DIR / "data"
+        """DATA_DIR is BASE_DIR/data in production.
+
+        2026-06-11 (audit B5): the autouse fixture redirects ai.DATA_DIR to
+        tmp_path for hermeticity, so assert the production default derived
+        from the module location rather than the patched global.
+        """
+        expected = Path(ai.__file__).resolve().parent.parent / "data"
+        assert ai.BASE_DIR / "data" == expected
 
     def test_invocations_file_path(self):
         """INVOCATIONS_FILE is in the data directory."""
@@ -2102,3 +2148,310 @@ class TestRegimeContext:
         with patch.object(ai, "DATA_DIR", tmp_path):
             result = ai._build_regime_context()
         assert result == ""
+
+
+# ===========================================================================
+# Audit B5 (2026-06-11): claude_gate master check, fail-closed config gate,
+# completion accounting before spawn, PID persistence + startup reap.
+# ===========================================================================
+
+class TestClaudeGateMasterCheck:
+
+    def test_gate_blocked_returns_false_and_logs(self, monkeypatch):
+        """A blocked claude_gate short-circuits invoke_agent before any spawn."""
+        rows = []
+        monkeypatch.setattr(
+            ai, "check_claude_gates", lambda caller: (False, "CLAUDE_ENABLED=False")
+        )
+        monkeypatch.setattr(
+            ai, "_log_trigger", lambda r, s, tier=None: rows.append(s)
+        )
+        with patch("portfolio.agent_invocation.subprocess.Popen") as mock_p:
+            result = invoke_agent(["test"], tier=1)
+            mock_p.assert_not_called()
+        assert result is False
+        assert rows == ["blocked_claude_gate"]
+
+    def test_gate_called_with_layer2_caller(self, monkeypatch):
+        seen = {}
+
+        def gate(caller):
+            seen["caller"] = caller
+            return (False, "blocked")
+
+        monkeypatch.setattr(ai, "check_claude_gates", gate)
+        invoke_agent(["test"], tier=1)
+        assert seen["caller"] == "layer2"
+
+    def test_gate_exception_fails_closed(self, monkeypatch):
+        """If the gate itself errors, a kill switch must fail CLOSED."""
+        def gate(caller):
+            raise OSError("gate exploded")
+
+        monkeypatch.setattr(ai, "check_claude_gates", gate)
+        with patch("portfolio.agent_invocation.subprocess.Popen") as mock_p:
+            result = invoke_agent(["test"], tier=1)
+            mock_p.assert_not_called()
+        assert result is False
+
+
+class TestConfigFailClosed:
+
+    def test_config_read_error_blocks_spawn(self, monkeypatch):
+        """2026-06-11 (audit B5): a config read error must NOT default the
+        layer2.enabled kill flag to True (the old config={} fallback
+        silently un-froze Layer 2 on any transient read failure)."""
+        rows = []
+        monkeypatch.setattr(
+            ai, "_log_trigger", lambda r, s, tier=None: rows.append(s)
+        )
+        with patch("portfolio.agent_invocation._load_config",
+                   side_effect=OSError("file locked")), \
+             patch("portfolio.agent_invocation.subprocess.Popen") as mock_p:
+            result = invoke_agent(["test"], tier=1)
+            mock_p.assert_not_called()
+        assert result is False
+        assert "skipped_config_error" in rows
+
+    def test_busy_skip_logs_own_row(self, monkeypatch):
+        """invoke_agent owns the skipped_busy row now (main.py no longer
+        re-logs every False return as skipped_busy)."""
+        rows = []
+        monkeypatch.setattr(
+            ai, "_log_trigger", lambda r, s, tier=None: rows.append(s)
+        )
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 77
+        ai._agent_proc = proc
+        ai._agent_start = time.monotonic()
+        ai._agent_timeout = 900
+        # Config gate runs before the busy check — stub it enabled so the
+        # busy path is actually reached (worktree has no config.json symlink).
+        with patch("portfolio.agent_invocation._load_config",
+                   return_value={"layer2": {"enabled": True}}):
+            result = invoke_agent(["test"], tier=1)
+        assert result is False
+        assert "skipped_busy" in rows
+
+
+class TestCompletionAccountingBeforeSpawn:
+
+    def test_exited_unobserved_agent_is_accounted(self, monkeypatch):
+        """An agent that EXITED but whose completion was not yet observed
+        must get full completion accounting before a new spawn — not have
+        its baselines silently overwritten."""
+        old_proc = MagicMock()
+        old_proc.poll.return_value = 0  # exited, unobserved
+        old_proc.pid = 50
+        ai._agent_proc = old_proc
+        ai._agent_start = time.monotonic() - 60
+
+        called = {"n": 0}
+        real_locked = ai._check_agent_completion_locked
+
+        def tracking_locked():
+            called["n"] += 1
+            return real_locked()
+
+        monkeypatch.setattr(ai, "_check_agent_completion_locked", tracking_locked)
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen") as mock_p, \
+             patch("portfolio.agent_invocation._load_config",
+                   return_value={"layer2": {"enabled": True}}), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()):
+            mock_p.return_value = MagicMock(pid=51)
+            result = invoke_agent(["test"], tier=1)
+
+        assert result is True
+        assert called["n"] >= 1, "completion accounting must run before spawn"
+
+    def test_exited_agent_gets_completion_row(self):
+        """End-to-end through the real completion path: the finished run
+        writes an invocations row before the new agent's baselines are set."""
+        old_proc = MagicMock()
+        old_proc.poll.return_value = 0
+        old_proc.pid = 60
+        ai._agent_proc = old_proc
+        ai._agent_start = time.monotonic() - 60
+        ai._agent_tier = 2
+        ai._agent_reasons = ["old trigger"]
+
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen") as mock_p, \
+             patch("portfolio.agent_invocation._load_config",
+                   return_value={"layer2": {"enabled": True}}), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl") as mock_append, \
+             patch("builtins.open", mock_open()):
+            mock_p.return_value = MagicMock(pid=61)
+            invoke_agent(["new trigger"], tier=1)
+
+        # One of the atomic_append_jsonl calls must be the completion row
+        # for the exited (tier 2) agent.
+        completion_rows = [
+            c.args[1] for c in mock_append.call_args_list
+            if isinstance(c.args[1], dict) and c.args[1].get("tier") == 2
+            and "journal_written" in c.args[1]
+        ]
+        assert completion_rows, "exited agent must get a completion row"
+
+
+class TestAgentPidPersistence:
+
+    def _spawn_mocks(self, mock_p, pid=12345):
+        return [
+            patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"),
+            patch("portfolio.agent_invocation._load_config",
+                  return_value={"layer2": {"enabled": True}}),
+            patch("portfolio.agent_invocation.send_or_store"),
+            patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x),
+        ]
+
+    def test_pid_file_written_on_spawn(self):
+        import json as _json
+        with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
+             patch("portfolio.agent_invocation.subprocess.Popen") as mock_p, \
+             patch("portfolio.agent_invocation._load_config",
+                   return_value={"layer2": {"enabled": True}}), \
+             patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("builtins.open", mock_open()):
+            proc = MagicMock()
+            proc.pid = 4321
+            proc.poll.return_value = None
+            mock_p.return_value = proc
+            result = invoke_agent(["test"], tier=2)
+
+        assert result is True
+        assert ai.AGENT_PROC_FILE.exists(), "PID file must be written at spawn"
+        data = _json.loads(ai.AGENT_PROC_FILE.read_text(encoding="utf-8"))
+        assert data["pid"] == 4321
+        assert data["tier"] == 2
+        assert data["start_ts"]
+
+    def test_pid_file_cleared_on_completion(self):
+        ai.AGENT_PROC_FILE.write_text('{"pid": 4321, "tier": 1}', encoding="utf-8")
+        proc = MagicMock()
+        proc.poll.return_value = 0
+        proc.pid = 4321
+        ai._agent_proc = proc
+        ai._agent_start = time.monotonic() - 5
+        ai._agent_tier = 1
+        ai._agent_reasons = ["t"]
+        with patch("portfolio.agent_invocation.send_or_store"), \
+             patch("portfolio.agent_invocation._load_config", return_value={}):
+            result = ai.check_agent_completion()
+        assert result is not None
+        assert not ai.AGENT_PROC_FILE.exists(), "completion must clear the PID file"
+
+
+class TestReapStaleAgent:
+
+    def test_no_file_returns_none(self):
+        assert not ai.AGENT_PROC_FILE.exists()
+        assert ai.reap_stale_agent() is None
+
+    def test_dead_pid_clears_file_without_kill(self, monkeypatch):
+        ai.AGENT_PROC_FILE.write_text(
+            '{"pid": 99991, "start_ts": "2026-06-11T00:00:00+00:00", "tier": 2}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(ai, "_pid_cmdline_is_claude", lambda pid: None)
+        kills = []
+        monkeypatch.setattr(ai, "_kill_pid_tree", lambda pid: kills.append(pid) or True)
+        res = ai.reap_stale_agent()
+        assert res["action"] == "cleared_dead"
+        assert kills == []
+        assert not ai.AGENT_PROC_FILE.exists()
+
+    def test_pid_reuse_is_never_killed(self, monkeypatch):
+        """cmdline guard: a live PID that is NOT a claude process (PID reuse
+        after reboot) must be left alone — only the stale file is cleared."""
+        ai.AGENT_PROC_FILE.write_text(
+            '{"pid": 99992, "start_ts": "2026-06-11T00:00:00+00:00", "tier": 3}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(ai, "_pid_cmdline_is_claude", lambda pid: False)
+        kills = []
+        monkeypatch.setattr(ai, "_kill_pid_tree", lambda pid: kills.append(pid) or True)
+        res = ai.reap_stale_agent()
+        assert res["action"] == "cleared_pid_reuse"
+        assert kills == [], "PID-reuse process must NOT be killed"
+        assert not ai.AGENT_PROC_FILE.exists()
+
+    def test_verified_claude_orphan_is_reaped(self, monkeypatch):
+        ai.AGENT_PROC_FILE.write_text(
+            '{"pid": 99993, "start_ts": "2026-06-11T00:00:00+00:00", "tier": 2}',
+            encoding="utf-8",
+        )
+        rows = []
+        monkeypatch.setattr(ai, "_pid_cmdline_is_claude", lambda pid: True)
+        kills = []
+        monkeypatch.setattr(ai, "_kill_pid_tree", lambda pid: kills.append(pid) or True)
+        monkeypatch.setattr(ai, "_log_trigger", lambda r, s, tier=None: rows.append(s))
+        res = ai.reap_stale_agent()
+        assert res["action"] == "reaped"
+        assert kills == [99993]
+        assert "stale_agent_reaped" in rows
+        assert not ai.AGENT_PROC_FILE.exists()
+
+    def test_bogus_pid_clears_file(self, monkeypatch):
+        ai.AGENT_PROC_FILE.write_text('{"pid": "not-a-pid"}', encoding="utf-8")
+        kills = []
+        monkeypatch.setattr(ai, "_kill_pid_tree", lambda pid: kills.append(pid) or True)
+        res = ai.reap_stale_agent()
+        assert res["action"] == "cleared_bogus"
+        assert kills == []
+        assert not ai.AGENT_PROC_FILE.exists()
+
+
+class TestPidCmdlineGuard:
+
+    @staticmethod
+    def _fake_psutil(cmdline=None, name="", raise_no_such=False):
+        import types
+
+        class NoSuchProcess(Exception):
+            pass
+
+        class Process:
+            def __init__(self, pid):
+                if raise_no_such:
+                    raise NoSuchProcess(pid)
+                self._pid = pid
+
+            def cmdline(self):
+                return list(cmdline or [])
+
+            def name(self):
+                return name
+
+        return types.SimpleNamespace(NoSuchProcess=NoSuchProcess, Process=Process)
+
+    def test_claude_cmdline_is_recognized(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(
+            sys.modules, "psutil",
+            self._fake_psutil(cmdline=["node", "C:\\Users\\x\\claude.exe", "-p"], name="node.exe"),
+        )
+        assert ai._pid_cmdline_is_claude(123) is True
+
+    def test_non_claude_process_is_rejected(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(
+            sys.modules, "psutil",
+            self._fake_psutil(cmdline=["notepad.exe"], name="notepad.exe"),
+        )
+        assert ai._pid_cmdline_is_claude(123) is False
+
+    def test_missing_process_returns_none(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(
+            sys.modules, "psutil", self._fake_psutil(raise_no_such=True),
+        )
+        assert ai._pid_cmdline_is_claude(123) is None

@@ -136,28 +136,41 @@ def _update_sustained(
     Increments count if value unchanged, resets if changed. Returns
     (count_ok, duration_ok) indicating whether either debounce gate passed.
 
-    Duration tracking uses time.monotonic() internally to avoid NTP-jump
-    false negatives. On process restart, monotonic origin resets and the
-    duration gate conservatively starts fresh (correct behavior — a
-    restart already resets the sustained counter).
+    2026-06-11 (audit B5): duration tracking now uses wall-clock epoch
+    seconds (``now_ts`` — the caller's ``time.time()``). The previous
+    implementation persisted a ``time.monotonic()`` origin into
+    trigger_state.json (via state['sustained_counts']) while its docstring
+    claimed restart-safety — but monotonic is seconds-since-boot (QPC on
+    Windows): within one boot a persisted origin made post-restart flips
+    skip the debounce entirely, and after a reboot the values were garbage
+    (negative elapsed, gate dead until the value changed). Wall clock is
+    comparable across restarts; loop downtime counting toward the duration
+    is the correct direction for a "has this action persisted >=900s" gate.
+    Legacy persisted monotonic values are detected by magnitude (monotonic
+    is far below 1e9; epoch is ~1.78e9) and the start is re-seeded so a
+    stale origin can never fire the gate spuriously.
     """
-    mono_now = time.monotonic()
     prev = state_dict.get(key, {})
+    # Accept the legacy "_mono_start" key for state written before
+    # 2026-06-11, but only if the value is plausible epoch seconds.
+    prev_start = prev.get("_wall_start", prev.get("_mono_start"))
+    if prev_start is not None and not (1e9 <= prev_start <= now_ts + 86400):
+        prev_start = None  # legacy monotonic or implausible — re-seed
     if prev.get("value") == value:
         state_dict[key] = {
             "value": value,
-            "count": prev["count"] + 1,
-            "_mono_start": prev.get("_mono_start", mono_now),
+            "count": prev.get("count", 0) + 1,
+            "_wall_start": prev_start if prev_start is not None else now_ts,
         }
     else:
         state_dict[key] = {
             "value": value,
             "count": 1,
-            "_mono_start": mono_now,
+            "_wall_start": now_ts,
         }
     entry = state_dict[key]
     count_ok = entry["count"] >= SUSTAINED_CHECKS
-    duration_ok = (mono_now - entry["_mono_start"]) >= SUSTAINED_DURATION_S
+    duration_ok = (now_ts - entry["_wall_start"]) >= SUSTAINED_DURATION_S
     return count_ok, duration_ok
 
 
@@ -275,10 +288,12 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 
     # claude_budget gates (items 1, 4, 5)
     budget = _load_claude_budget()
-    # candidate reasons accumulate as (reason, weighted_conf, atr_mult) tuples
-    # for the item-5 floor; we append to `reasons` immediately for exempt
-    # reason types and defer floor-eligible ones until after collection.
-    _floor_candidates: list[tuple[str, float, float]] = []
+    # candidate reasons accumulate as (reason, weighted_conf, atr_mult,
+    # flip_ticker) tuples for the item-5 floor; we append to `reasons`
+    # immediately for exempt reason types and defer floor-eligible ones until
+    # after collection. flip_ticker is non-None only for sustained flips —
+    # used to arm the flip cooldown AFTER the floor gate accepts (audit B5).
+    _floor_candidates: list[tuple[str, float, float, str | None]] = []
 
     # 0. Trade reset — if Layer 2 made a trade, trigger reassessment
     if _check_recent_trade(state):
@@ -331,7 +346,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 continue
             # New consensus from HOLD — trigger (deferred to floor gate)
             _reason_str = f"{ticker} consensus {action} ({conf:.0%})"
-            _floor_candidates.append((_reason_str, conf, 0.0))
+            _floor_candidates.append((_reason_str, conf, 0.0, None))
             triggered_consensus[ticker] = action
         elif action == "HOLD" and last_tc != "HOLD":
             # Consensus cleared — reset so next BUY/SELL is "new"
@@ -390,7 +405,12 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                     FLIP_COOLDOWN_S - elapsed,
                 )
                 continue
-            flip_cooldowns[ticker] = _flip_now_ts
+            # 2026-06-11 (audit B5): cooldown is NO LONGER armed here. It used
+            # to be set before the claude_budget floor gate ran, so a flip the
+            # floor then suppressed still blocked the next GENUINE flip on the
+            # same ticker for FLIP_COOLDOWN_S (30 min) even though no Layer 2
+            # invocation ever happened. The cooldown is now armed in the
+            # floor-gate emit loop below, only when the reason is accepted.
             # Item 5: route through floor gate with weighted_conf + atr_mult.
             _flip_reason = (
                 f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
@@ -403,7 +423,9 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             if prev_price and cur_price and _flip_atr_pct and _flip_atr_pct > 0:
                 pct_move = abs(cur_price - prev_price) / prev_price * 100
                 _flip_atr_mult = pct_move / _flip_atr_pct
-            _floor_candidates.append((_flip_reason, _flip_conf, _flip_atr_mult))
+            _floor_candidates.append(
+                (_flip_reason, _flip_conf, _flip_atr_mult, ticker)
+            )
     state["flip_cooldowns"] = flip_cooldowns
 
     # 3. Price move >2% since last trigger
@@ -429,7 +451,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 _pm_atr_mult = 0.0
                 if _pm_atr_pct and _pm_atr_pct > 0:
                     _pm_atr_mult = (pct * 100.0) / _pm_atr_pct
-                _floor_candidates.append((_pm_reason, _pm_conf, _pm_atr_mult))
+                _floor_candidates.append((_pm_reason, _pm_conf, _pm_atr_mult, None))
 
     # 4. Fear & Greed crossed threshold
     prev_fg = prev.get("fear_greeds", {})
@@ -474,16 +496,22 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     # OR reason_type is in the exempt set. Defaults are 0.0 (no-op).
     min_conf = budget["min_weighted_confidence"]
     min_atr = budget["min_atr_multiple"]
-    for reason_str, weighted_conf, atr_mult in _floor_candidates:
+    for reason_str, weighted_conf, atr_mult, flip_ticker in _floor_candidates:
         rt = _reason_type(reason_str)
-        if rt in _FLOOR_EXEMPT_REASON_TYPES:
+        accepted = (
+            rt in _FLOOR_EXEMPT_REASON_TYPES
+            or (min_conf <= 0 and min_atr <= 0)
+            or weighted_conf >= min_conf
+            or atr_mult >= min_atr
+        )
+        if accepted:
             reasons.append(reason_str)
-            continue
-        if min_conf <= 0 and min_atr <= 0:
-            reasons.append(reason_str)
-            continue
-        if weighted_conf >= min_conf or atr_mult >= min_atr:
-            reasons.append(reason_str)
+            # 2026-06-11 (audit B5): arm the flip cooldown only now that the
+            # budget floor has accepted the reason. flip_cooldowns is the
+            # same dict object already assigned into state above, so this
+            # mutation is persisted by _save_state below.
+            if flip_ticker is not None:
+                flip_cooldowns[flip_ticker] = _flip_now_ts
         else:
             logger.info(
                 "claude_budget floor: suppressed '%s' (conf=%.2f < %.2f, "

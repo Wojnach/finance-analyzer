@@ -969,7 +969,20 @@ def run(force_report=False, active_symbols=None):
                 logger.info("escalation_router: escalating to claude (%s)", why)
                 with heartbeat_keepalive():
                     result = invoke_agent(reasons_list, tier=tier)
-                _log_trigger(reasons_list, f"invoked_{why}" if result else f"skipped_busy_{why}", tier=tier)
+                # 2026-06-11 (audit B5): invoke_agent returns False for 9+
+                # distinct reasons (gate block, drawdown block, auth cooldown,
+                # busy, config error, ...) and each path now writes its OWN
+                # accurate invocations.jsonl row. Re-logging every False here
+                # as "skipped_busy_*" double-logged a second, usually WRONG
+                # row. Log only the success row; the skip rows come from
+                # invoke_agent itself.
+                if result:
+                    _log_trigger(reasons_list, f"invoked_{why}", tier=tier)
+                else:
+                    logger.debug(
+                        "invoke_agent declined (%s) — see invoke_agent's own "
+                        "invocations.jsonl row for the accurate status", why,
+                    )
             else:
                 if escalate:
                     logger.info(
@@ -994,7 +1007,16 @@ def run(force_report=False, active_symbols=None):
             if _is_agent_window():
                 with heartbeat_keepalive():
                     result = invoke_agent(reasons_list, tier=tier)
-                _log_trigger(reasons_list, "invoked" if result else "skipped_busy", tier=tier)
+                # 2026-06-11 (audit B5): see comment in the escalation branch
+                # above — invoke_agent self-logs every skip/block path, so
+                # only the success row is logged here.
+                if result:
+                    _log_trigger(reasons_list, "invoked", tier=tier)
+                else:
+                    logger.debug(
+                        "invoke_agent declined — see invoke_agent's own "
+                        "invocations.jsonl row for the accurate status",
+                    )
             else:
                 logger.info("Layer 2: outside market window, skipping")
                 _log_trigger(reasons_list, "skipped_offhours", tier=tier)
@@ -1067,7 +1089,9 @@ def run(force_report=False, active_symbols=None):
         logger.warning("health update failed: %s", e)
         report.errors.append(("health_update", str(e)))
 
-    # Periodic safeguard checks (every 100 cycles ≈ 100 min)
+    # Periodic safeguard checks (every 100 cycles ≈ 16.7h at the 600s cadence
+    # in force since 2026-04-09 — NOT "≈ 100 min", which assumed the old 60s
+    # cadence; comment corrected 2026-06-11, audit B5).
     if _ss._run_cycle_id % 100 == 0 and _ss._run_cycle_id > 0:
         try:
             from portfolio.health import check_dead_signals, check_outcome_staleness
@@ -1378,6 +1402,17 @@ def loop(interval=None):
     # Validate config on startup (fail fast if misconfigured)
     from portfolio.config_validator import validate_config_file
     validate_config_file()
+
+    # 2026-06-11 (audit B5, premortem hook 7): reap any Layer 2 agent
+    # orphaned by a previous loop process. Loop restarts after merges leave
+    # 600-900s claude subprocesses running; orphan + freshly spawned agent =
+    # concurrent read-modify-write on portfolio_state.json. cmdline-guarded
+    # (PID-reuse safe) — see agent_invocation.reap_stale_agent.
+    try:
+        from portfolio.agent_invocation import reap_stale_agent
+        reap_stale_agent()
+    except Exception as e:
+        logger.warning("stale Layer 2 agent reap failed: %s", e)
 
     # Check if previous loop crashed (stale heartbeat)
     heartbeat_file = DATA_DIR / "heartbeat.txt"

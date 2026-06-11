@@ -1143,7 +1143,8 @@ class TestUpdateSustained:
         count_ok, duration_ok = _update_sustained(state, "BTC", "BUY", 1000.0)
         assert state["BTC"]["value"] == "BUY"
         assert state["BTC"]["count"] == 1
-        assert "_mono_start" in state["BTC"]
+        # 2026-06-11 (audit B5): wall-clock start replaced _mono_start.
+        assert "_wall_start" in state["BTC"]
         assert not count_ok
         assert not duration_ok
 
@@ -1167,27 +1168,23 @@ class TestUpdateSustained:
         assert not duration_ok
 
     def test_duration_gate_fires_after_threshold(self):
-        mono_start = 5000.0
-        with mock.patch("portfolio.trigger.time") as mock_time:
-            # First call: establish _mono_start
-            mock_time.monotonic.return_value = mono_start
-            state = {}
-            _update_sustained(state, "BTC", "BUY", 1000.0)
-            # Second call: monotonic advanced past threshold
-            mock_time.monotonic.return_value = mono_start + SUSTAINED_DURATION_S
-            _, duration_ok = _update_sustained(state, "BTC", "BUY", 2000.0)
+        # 2026-06-11 (audit B5): duration gate is now driven by the caller's
+        # wall-clock now_ts (epoch seconds), not time.monotonic().
+        wall_start = 1.7e9
+        state = {}
+        _update_sustained(state, "BTC", "BUY", wall_start)
+        _, duration_ok = _update_sustained(
+            state, "BTC", "BUY", wall_start + SUSTAINED_DURATION_S
+        )
         assert duration_ok
 
     def test_duration_gate_does_not_fire_before_threshold(self):
-        mono_start = 5000.0
-        with mock.patch("portfolio.trigger.time") as mock_time:
-            # First call: establish _mono_start
-            mock_time.monotonic.return_value = mono_start
-            state = {}
-            _update_sustained(state, "BTC", "BUY", 1000.0)
-            # Second call: monotonic NOT yet past threshold
-            mock_time.monotonic.return_value = mono_start + SUSTAINED_DURATION_S - 1
-            _, duration_ok = _update_sustained(state, "BTC", "BUY", 2000.0)
+        wall_start = 1.7e9
+        state = {}
+        _update_sustained(state, "BTC", "BUY", wall_start)
+        _, duration_ok = _update_sustained(
+            state, "BTC", "BUY", wall_start + SUSTAINED_DURATION_S - 1
+        )
         assert not duration_ok
 
     def test_independent_keys(self):
@@ -1783,3 +1780,88 @@ class TestClaudeBudgetGates:
         )
         moved = [r for r in reasons if "moved" in r]
         assert moved, f"expected price_move emitted via ATR override, got: {reasons}"
+
+
+# ---------------------------------------------------------------------------
+# Audit B5 (2026-06-11): flip cooldown must arm only AFTER the budget floor
+# gate accepts the flip — a suppressed flip used to block the next genuine
+# flip on the same ticker for FLIP_COOLDOWN_S (30 min).
+# ---------------------------------------------------------------------------
+
+class TestFlipCooldownArmOrder:
+
+    def _patch_budget(self, monkeypatch, **overrides):
+        defaults = dict(trigger_mod._CLAUDE_BUDGET_DEFAULTS)
+        defaults.update(overrides)
+        monkeypatch.setattr(trigger_mod, "_load_claude_budget", lambda: defaults)
+
+    @staticmethod
+    def _sig(action, conf):
+        return {
+            "action": action,
+            "confidence": conf,
+            # atr_pct large so atr_mult stays ~0 with unchanged prices and
+            # acceptance is decided purely by the confidence floor.
+            "extra": {"_voters": 8, "_total_applicable": 10, "atr_pct": 5.0},
+        }
+
+    def test_suppressed_flip_does_not_arm_cooldown(
+        self, isolate_state_files, monkeypatch,
+    ):
+        self._patch_budget(
+            monkeypatch,
+            min_weighted_confidence=0.55,
+            min_atr_multiple=1.5,
+        )
+        sf = isolate_state_files["state_file"]
+        prices = {"BTC-USD": 68000}
+
+        # Seed state directly (grace-flag independent — module-level
+        # _startup_grace_active is consumed by earlier tests in a full-file
+        # run): previous trigger was BUY; sustained counter primed to SELL
+        # so the next SELL signal fires a flip.
+        import os as _os
+        _seed_state(sf, {
+            "last_loop_pid": _os.getpid(),
+            "last": {
+                "signals": {"BTC-USD": {"action": "BUY", "confidence": 0.30}},
+                "prices": {"BTC-USD": 68000},
+                "fear_greeds": {},
+                "sentiments": {},
+                "time": time.time(),
+            },
+            "triggered_consensus": {"BTC-USD": "BUY"},
+            "sustained_counts": {
+                "BTC-USD": {
+                    "value": "SELL",
+                    "count": 5,
+                    "_wall_start": time.time() - 10,
+                },
+            },
+            "last_trigger_time": time.time() + 99999,
+        })
+        trigger_mod._startup_grace_active = False
+
+        # Weak SELL flip — floor suppresses it.
+        triggered, reasons = check_triggers(
+            {"BTC-USD": self._sig("SELL", 0.30)}, prices, {}, {},
+        )
+        assert not any("flipped" in r for r in reasons)
+        state = json.loads(sf.read_text(encoding="utf-8"))
+        assert "BTC-USD" not in (state.get("flip_cooldowns") or {}), (
+            "floor-suppressed flip must NOT arm the flip cooldown"
+        )
+
+        # Genuine high-conviction flip on the very next cycle fires —
+        # no 30-min lockout from the suppressed attempt.
+        _suppress_cooldown(sf)
+        triggered, reasons = check_triggers(
+            {"BTC-USD": self._sig("SELL", 0.90)}, prices, {}, {},
+        )
+        assert any("flipped" in r for r in reasons), (
+            f"genuine flip should fire after a suppressed one, got: {reasons}"
+        )
+        state = json.loads(sf.read_text(encoding="utf-8"))
+        assert "BTC-USD" in state.get("flip_cooldowns", {}), (
+            "accepted flip must arm the cooldown"
+        )

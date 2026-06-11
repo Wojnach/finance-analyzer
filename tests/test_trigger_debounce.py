@@ -44,34 +44,33 @@ class TestSustainedResetsOnValueChange:
 
 
 class TestSustainedDurationGate:
-    """Duration gate fires when monotonic elapsed >= SUSTAINED_DURATION_S."""
+    """Duration gate fires when wall-clock elapsed >= SUSTAINED_DURATION_S.
+
+    2026-06-11 (audit B5): _update_sustained now anchors on the caller's
+    wall-clock now_ts (epoch seconds) instead of time.monotonic(), so the
+    persisted start survives loop restarts.
+    """
 
     def test_duration_ok_after_120s(self):
         state = {}
-        now = 1000.0
-        mono_start = 100.0
+        wall_start = 1.7e9
 
-        # First call — anchors _mono_start
-        with patch("portfolio.trigger.time.monotonic", return_value=mono_start):
-            _update_sustained(state, "k", "X", now)
+        # First call — anchors _wall_start
+        _update_sustained(state, "k", "X", wall_start)
 
         # Second call — still within window
-        with patch(
-            "portfolio.trigger.time.monotonic",
-            return_value=mono_start + SUSTAINED_DURATION_S - 1,
-        ):
-            _, duration_ok = _update_sustained(state, "k", "X", now)
-            assert duration_ok is False
+        _, duration_ok = _update_sustained(
+            state, "k", "X", wall_start + SUSTAINED_DURATION_S - 1
+        )
+        assert duration_ok is False
 
         # Third call — crosses the duration boundary
-        with patch(
-            "portfolio.trigger.time.monotonic",
-            return_value=mono_start + SUSTAINED_DURATION_S,
-        ):
-            count_ok, duration_ok = _update_sustained(state, "k", "X", now)
-            assert duration_ok is True
-            # Three calls total with same value — count gate also passes
-            assert count_ok is True
+        count_ok, duration_ok = _update_sustained(
+            state, "k", "X", wall_start + SUSTAINED_DURATION_S
+        )
+        assert duration_ok is True
+        # Three calls total with same value — count gate also passes
+        assert count_ok is True
 
 
 class TestSustainedFirstCallNotOk:
