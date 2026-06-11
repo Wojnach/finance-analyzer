@@ -209,25 +209,37 @@ class TestSignalEngineMacroWindowOverlay:
         balanced opposing vote of equal accuracy, sentiment loses the
         consensus tug-of-war it would have won at full weight.
 
-        Uses ``trending-up`` because sentiment is REGIME_GATED to HOLD in
-        ranging/trending-down — those regimes already suppress it
-        regardless of the macro overlay, which would mask the test signal.
+        2026-06-11 (suite-cleanup): switched regime from ``trending-up`` to
+        ``high-vol``. The old docstring chose trending-up to dodge
+        sentiment's ranging/trending-down gating, but did not account for
+        rsi ITSELF being REGIME_GATED to HOLD in trending-up (mean-reversion
+        cluster gated in trending regimes, added 2026-05-29 commit 55a1334d,
+        pre-dating this campaign). With rsi force-HELD, sentiment voted
+        unopposed → the test asserted SELL but production returned BUY, and
+        had been silently broken since 2026-05-29. high-vol gates NEITHER
+        signal and applies neutral (1.0) regime multipliers to both, so the
+        macro ×0.5 downweight on sentiment is the sole deciding factor.
         """
-        # sentiment BUY at 0.7 acc should beat rsi SELL at 0.65 normally.
-        # Macro × 0.5 → sentiment effective ~0.35 < 0.65 → SELL.
+        # sentiment BUY at 0.7 acc beats rsi SELL at 0.65 at full weight.
+        # Macro × 0.5 → sentiment effective 0.35 < rsi 0.65 → SELL.
         votes = {"sentiment": "BUY", "rsi": "SELL"}
         accuracy = {
             "sentiment": {"accuracy": 0.70, "total": 500},
             "rsi": {"accuracy": 0.65, "total": 500},
         }
         action, _conf = _weighted_consensus(
-            votes, accuracy, "trending-up", activation_rates={},
+            votes, accuracy, "high-vol", activation_rates={},
         )
         assert action == "SELL"
 
     def test_macro_inactive_sentiment_vote_full_weight(self, stub_macro_inactive):
         """Inverse of the above: with macro inactive, sentiment's higher
-        accuracy beats rsi outright (in a regime that doesn't gate it).
+        accuracy beats rsi outright (in a regime that gates neither).
+
+        2026-06-11 (suite-cleanup): regime switched trending-up → high-vol
+        for the same reason as the active counterpart (rsi is regime-gated
+        in trending-up; this test passed before only because rsi was held
+        and sentiment voted alone — the right answer for the wrong reason).
         """
         votes = {"sentiment": "BUY", "rsi": "SELL"}
         accuracy = {
@@ -235,7 +247,7 @@ class TestSignalEngineMacroWindowOverlay:
             "rsi": {"accuracy": 0.65, "total": 500},
         }
         action, _conf = _weighted_consensus(
-            votes, accuracy, "trending-up", activation_rates={},
+            votes, accuracy, "high-vol", activation_rates={},
         )
         assert action == "BUY"
 

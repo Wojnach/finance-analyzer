@@ -122,6 +122,13 @@ def test_invoke_claude_overrides_exit0_on_auth_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(claude_gate, "INVOCATIONS_LOG", inv_log)
     monkeypatch.setattr(claude_gate, "_find_claude_cmd", lambda: "claude")
     monkeypatch.setattr(claude_gate, "_load_config_layer2_enabled", lambda: True)
+    # 2026-06-11 (suite-cleanup): claude_gate.CLAUDE_ENABLED is the module-level
+    # master kill switch, flipped to False during the 2026-06-05 token freeze.
+    # invoke_claude's Gate 1 short-circuits on it BEFORE _run_with_tree_kill,
+    # so these auth-detection-logic tests must pin it True to exercise the run
+    # path. (Freeze flag predates this campaign; stubbing makes the test
+    # hermetic regardless of the live freeze state.)
+    monkeypatch.setattr(claude_gate, "CLAUDE_ENABLED", True)
 
     def fake_run(cmd, *, timeout, env, cwd, label):
         return 0, "Not logged in\nPlease run /login\n", "", False
@@ -152,6 +159,13 @@ def test_invoke_claude_success_still_works(monkeypatch, tmp_path):
     monkeypatch.setattr(claude_gate, "INVOCATIONS_LOG", tmp_path / "inv.jsonl")
     monkeypatch.setattr(claude_gate, "_find_claude_cmd", lambda: "claude")
     monkeypatch.setattr(claude_gate, "_load_config_layer2_enabled", lambda: True)
+    # 2026-06-11 (suite-cleanup): claude_gate.CLAUDE_ENABLED is the module-level
+    # master kill switch, flipped to False during the 2026-06-05 token freeze.
+    # invoke_claude's Gate 1 short-circuits on it BEFORE _run_with_tree_kill,
+    # so these auth-detection-logic tests must pin it True to exercise the run
+    # path. (Freeze flag predates this campaign; stubbing makes the test
+    # hermetic regardless of the live freeze state.)
+    monkeypatch.setattr(claude_gate, "CLAUDE_ENABLED", True)
 
     def fake_run(cmd, *, timeout, env, cwd, label):
         return 0, "analysis complete", "", False
@@ -174,6 +188,13 @@ def test_invoke_claude_text_overrides_exit0_on_auth_failure(monkeypatch, tmp_pat
     monkeypatch.setattr(claude_gate, "INVOCATIONS_LOG", tmp_path / "inv.jsonl")
     monkeypatch.setattr(claude_gate, "_find_claude_cmd", lambda: "claude")
     monkeypatch.setattr(claude_gate, "_load_config_layer2_enabled", lambda: True)
+    # 2026-06-11 (suite-cleanup): claude_gate.CLAUDE_ENABLED is the module-level
+    # master kill switch, flipped to False during the 2026-06-05 token freeze.
+    # invoke_claude's Gate 1 short-circuits on it BEFORE _run_with_tree_kill,
+    # so these auth-detection-logic tests must pin it True to exercise the run
+    # path. (Freeze flag predates this campaign; stubbing makes the test
+    # hermetic regardless of the live freeze state.)
+    monkeypatch.setattr(claude_gate, "CLAUDE_ENABLED", True)
 
     def fake_run(cmd, *, timeout, env, cwd, label):
         return 0, "Not logged in", "", False

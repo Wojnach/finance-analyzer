@@ -130,7 +130,10 @@ class TestVoteCountIntegrity:
         # 2026-05-28: 10 → 15 after enabling 5 regime signals (adx_regime_switch,
         # amihud_illiquidity_regime, choppiness_regime_gate, bocpd_regime_switch,
         # vol_ratio_regime).
-        assert extra["_total_applicable"] == 15
+        # 2026-06-11 (B6 audit + June disable wave): 15 → 12. ministral now
+        # counts on all tickers (special-case removed); June disables trimmed
+        # the MSTR set. GPU pinned on via should_skip_gpu=False above.
+        assert extra["_total_applicable"] == 12
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
@@ -149,7 +152,10 @@ class TestVoteCountIntegrity:
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 17
+        # 2026-06-11 (B6 audit + June disable wave): 17 → 12. ministral now
+        # counts on metals too (special-case removed); June disables trimmed
+        # the XAU set. Metals are 24/7 so GPU signals always count.
+        assert extra["_total_applicable"] == 12
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
@@ -165,10 +171,13 @@ class TestVoteCountIntegrity:
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
+        # 2026-06-11 (B6 audit + June disable wave): 15 → 12. ministral now
+        # counts on all tickers (special-case removed); June disables trimmed
+        # the stock set. GPU pinned on via should_skip_gpu=False above.
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 15, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 15"
+            assert extra["_total_applicable"] == 12, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 12"
 
 
 # ---------------------------------------------------------------------------

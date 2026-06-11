@@ -151,17 +151,24 @@ class TestSignalStrength:
 # ---------------------------------------------------------------------------
 
 class TestAgentInvocationIntegration:
+    @patch("portfolio.agent_invocation._load_config", return_value={"layer2": {"enabled": True}})
+    @patch("portfolio.agent_invocation.check_claude_gates", return_value=(True, "ok"))
     @patch("portfolio.perception_gate.load_config", return_value=_cfg())
     @patch("portfolio.perception_gate._load_compact_summary", return_value=_summary())
     @patch("portfolio.agent_invocation._log_trigger")
     @patch("portfolio.journal.write_context", return_value=0)
     @patch("portfolio.agent_invocation.load_jsonl", return_value=[])
-    def test_gate_skips_invocation(self, mock_jsonl, mock_ctx, mock_log, mock_summary, mock_config):
+    def test_gate_skips_invocation(self, mock_jsonl, mock_ctx, mock_log, mock_summary, mock_config, mock_gate, mock_l2cfg):
         # 2026-04-17: reset module-level agent_invocation state. Under
         # xdist, other tests leave `_agent_proc` populated so invoke_agent
         # early-returns at the "already running" branch and never calls
         # _log_trigger("skipped_gate"). Clearing here makes this test
         # hermetic regardless of worker ordering.
+        # 2026-06-11 (audit B5 follow-up): invoke_agent now checks
+        # claude_gate.check_claude_gates("layer2") FIRST and would log
+        # "blocked_claude_gate" before ever reaching the perception gate.
+        # Stub it open so this test still exercises the PERCEPTION gate
+        # ("skipped_gate") it is asserting on.
         import portfolio.agent_invocation as ai
         ai._agent_proc = None
         ai._agent_start = 0

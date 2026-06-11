@@ -1140,10 +1140,14 @@ class TestRecordNewTrades:
             ai._record_new_trades()
 
         assert mock_record.call_count == 2
-        # BUG-219: SELL must forward pnl_pct from the transaction dict
-        mock_record.assert_any_call("ETH-USD", "SELL", "patient", pnl_pct=-2.5)
-        # BUY has no pnl_pct in txn → defaults to None
-        mock_record.assert_any_call("XAG-USD", "BUY", "patient", pnl_pct=None)
+        # BUG-219: SELL must forward pnl_pct from the transaction dict.
+        # 2026-06-11 (audit B7): record_trade now also takes is_new_position
+        # so the new-position rate limit only arms on genuine opens. A SELL is
+        # never a new position. The XAG BUY had no prior XAG holding in
+        # before_txns (only BTC), so it OPENS a new position → True.
+        mock_record.assert_any_call("ETH-USD", "SELL", "patient", pnl_pct=-2.5, is_new_position=False)
+        # BUY has no pnl_pct in txn → defaults to None; new ticker → new position.
+        mock_record.assert_any_call("XAG-USD", "BUY", "patient", pnl_pct=None, is_new_position=True)
 
     def test_pnl_pct_forwarded_for_sell_with_loss(self):
         """SELL with negative pnl_pct should forward it to record_trade()."""
@@ -1156,7 +1160,8 @@ class TestRecordNewTrades:
             mock_load.return_value = self._make_state(txns)
             ai._record_new_trades()
 
-        mock_record.assert_any_call("BTC-USD", "SELL", "patient", pnl_pct=-3.2)
+        # 2026-06-11 (audit B7): SELL is never a new position.
+        mock_record.assert_any_call("BTC-USD", "SELL", "patient", pnl_pct=-3.2, is_new_position=False)
 
     def test_pnl_pct_forwarded_for_sell_with_win(self):
         """SELL with positive pnl_pct should forward it (resets loss streak)."""
@@ -1169,7 +1174,8 @@ class TestRecordNewTrades:
             mock_load.return_value = self._make_state(txns)
             ai._record_new_trades()
 
-        mock_record.assert_any_call("ETH-USD", "SELL", "patient", pnl_pct=5.1)
+        # 2026-06-11 (audit B7): SELL is never a new position.
+        mock_record.assert_any_call("ETH-USD", "SELL", "patient", pnl_pct=5.1, is_new_position=False)
 
     def test_missing_pnl_pct_defaults_to_none(self):
         """Transaction without pnl_pct field should pass None (backward compat)."""
@@ -1182,7 +1188,8 @@ class TestRecordNewTrades:
             mock_load.return_value = self._make_state(txns)
             ai._record_new_trades()
 
-        mock_record.assert_any_call("BTC-USD", "SELL", "patient", pnl_pct=None)
+        # 2026-06-11 (audit B7): SELL is never a new position.
+        mock_record.assert_any_call("BTC-USD", "SELL", "patient", pnl_pct=None, is_new_position=False)
 
     def test_skips_hold_and_malformed_transactions(self):
         """Transactions without ticker or with non-BUY/SELL action are skipped."""

@@ -31,6 +31,10 @@ class TestAgentInvocationHeadlessEnv:
             ai, "_load_config",
             lambda: {"layer2": {"enabled": True, "multi_agent": False}},
         )
+        # 2026-06-11 (audit B5): invoke_agent checks claude_gate first and
+        # fails closed during the token freeze (CLAUDE_ENABLED=False). Stub
+        # it open so this test reaches the Popen env-construction path.
+        monkeypatch.setattr(ai, "check_claude_gates", lambda caller: (True, "ok"))
         # Bypass perception gate
         import portfolio.perception_gate as pg
         monkeypatch.setattr(
@@ -163,6 +167,11 @@ class TestMultiAgentSpecialistHeadlessEnv:
             mock_p.pid = 11111 + len(captured_envs)
             return mock_p
 
+        # 2026-06-11 (audit B5): launch_specialists checks claude_gate first
+        # (multi_agent_layer2.py:145) and fails closed during the token freeze
+        # (CLAUDE_ENABLED=False), returning zero specialists. Stub it open so
+        # this test reaches the per-specialist Popen env construction.
+        monkeypatch.setattr(mal, "check_claude_gates", lambda caller: (True, "ok"))
         monkeypatch.setattr(mal.subprocess, "Popen", fake_popen)
         # Keys must match SPECIALISTS dict, or launch_specialists raises KeyError
         monkeypatch.setattr(

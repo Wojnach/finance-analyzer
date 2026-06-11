@@ -22,10 +22,16 @@ def _client(monkeypatch, tmp_path, pickups_payload):
     def _bypass(f):
         return f
 
-    # If auth is implemented via header check, we go in with a dummy
-    # config that opens the door.
+    # 2026-06-11 (suite-cleanup): require_auth was extracted into
+    # dashboard.auth and resolves config via dashboard.auth._get_config /
+    # _get_dashboard_token — NOT dashboard.app._get_config (see the import
+    # block + comment at dashboard/app.py:808-820). Patching dashboard.app
+    # alone left auth reading the real config → 401. Patch BOTH: app's for
+    # the endpoint body, auth's so ?token=secret is accepted.
     cfg = {"dashboard_token": "secret"}
+    import dashboard.auth as dashboard_auth
     monkeypatch.setattr(dashboard_app, "_get_config", lambda: cfg)
+    monkeypatch.setattr(dashboard_auth, "_get_config", lambda: cfg)
     client = dashboard_app.app.test_client()
     return client
 
@@ -60,10 +66,14 @@ def test_pickups_endpoint_returns_sorted_list(monkeypatch, tmp_path):
 
 def test_pickups_endpoint_handles_missing_file(monkeypatch, tmp_path):
     import dashboard.app as dashboard_app
+    import dashboard.auth as dashboard_auth
 
     monkeypatch.setattr(dashboard_app, "DATA_DIR", tmp_path / "data")
     (tmp_path / "data").mkdir()
+    # 2026-06-11 (suite-cleanup): auth now resolves via dashboard.auth — patch
+    # it too or ?token=secret 401s (see test_api_pickups._client comment).
     monkeypatch.setattr(dashboard_app, "_get_config", lambda: {"dashboard_token": "secret"})
+    monkeypatch.setattr(dashboard_auth, "_get_config", lambda: {"dashboard_token": "secret"})
     client = dashboard_app.app.test_client()
     resp = client.get("/api/pickups?token=secret")
     assert resp.status_code == 200
@@ -73,12 +83,16 @@ def test_pickups_endpoint_handles_missing_file(monkeypatch, tmp_path):
 
 def test_pickups_endpoint_handles_malformed_file(monkeypatch, tmp_path):
     import dashboard.app as dashboard_app
+    import dashboard.auth as dashboard_auth
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     (data_dir / "pending_pickups.json").write_text("not json", encoding="utf-8")
     monkeypatch.setattr(dashboard_app, "DATA_DIR", data_dir)
+    # 2026-06-11 (suite-cleanup): auth now resolves via dashboard.auth — patch
+    # it too or ?token=secret 401s (see test_api_pickups._client comment).
     monkeypatch.setattr(dashboard_app, "_get_config", lambda: {"dashboard_token": "secret"})
+    monkeypatch.setattr(dashboard_auth, "_get_config", lambda: {"dashboard_token": "secret"})
     client = dashboard_app.app.test_client()
     resp = client.get("/api/pickups?token=secret")
     # Returns 200 with empty list (graceful) OR 500 (logged). Both are

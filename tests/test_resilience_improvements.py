@@ -183,29 +183,39 @@ class TestJsonlPruneIsolation:
 # ===========================================================================
 
 class TestTriggerSustainedState:
-    """Sustained state entries should NOT contain started_ts (dead code removed)."""
+    """Sustained state entries should NOT contain started_ts (dead code removed).
+
+    2026-06-11 (audit B5): _update_sustained's time arg is now wall-clock
+    EPOCH SECONDS (float time.time()), not an ISO string, and the persisted
+    origin key is `_wall_start` (was `_mono_start`). Passing an ISO string
+    now raises `str - str` in the duration check. Updated to pass time.time()
+    and assert the new `_wall_start` key.
+    """
 
     def test_new_entry_has_no_started_ts(self):
+        import time
         from portfolio.trigger import _update_sustained
         state = {}
-        _update_sustained(state, "test_key", "BUY", datetime.now(UTC).isoformat())
+        _update_sustained(state, "test_key", "BUY", time.time())
         assert "started_ts" not in state["test_key"]
-        assert "_mono_start" in state["test_key"]
+        assert "_wall_start" in state["test_key"]
         assert state["test_key"]["count"] == 1
 
     def test_continued_entry_has_no_started_ts(self):
+        import time
         from portfolio.trigger import _update_sustained
         state = {}
-        ts = datetime.now(UTC).isoformat()
+        ts = time.time()
         _update_sustained(state, "k", "BUY", ts)
         _update_sustained(state, "k", "BUY", ts)
         assert "started_ts" not in state["k"]
         assert state["k"]["count"] == 2
 
     def test_value_change_resets(self):
+        import time
         from portfolio.trigger import _update_sustained
         state = {}
-        ts = datetime.now(UTC).isoformat()
+        ts = time.time()
         _update_sustained(state, "k", "BUY", ts)
         _update_sustained(state, "k", "BUY", ts)
         _update_sustained(state, "k", "SELL", ts)

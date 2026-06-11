@@ -38,8 +38,18 @@ from portfolio.agent_invocation import (
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _reset_agent_globals():
-    """Reset module-level agent state before and after each test."""
+def _reset_agent_globals(tmp_path, monkeypatch):
+    """Reset module-level agent state before and after each test.
+
+    2026-06-11 (audit B5 follow-up): invoke_agent now calls
+    claude_gate.check_claude_gates("layer2") at the top and fails closed
+    (CLAUDE_ENABLED is False in production during the token freeze), and it
+    persists data/layer2_agent_proc.json before spawning. The TestInvoke*
+    tests here exercise the real invoke_agent path, so stub the gate open
+    and redirect the state-file globals at tmp_path — same autouse pattern
+    as tests/test_agent_invocation.py. Tests that want the gate CLOSED
+    re-patch check_claude_gates themselves.
+    """
     ai._agent_proc = None
     ai._agent_log = None
     ai._agent_start = 0
@@ -48,6 +58,11 @@ def _reset_agent_globals():
     ai._agent_reasons = None
     ai._journal_ts_before = None
     ai._telegram_ts_before = None
+    monkeypatch.setattr(ai, "check_claude_gates", lambda caller: (True, "ok"))
+    monkeypatch.setattr(ai, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(ai, "AGENT_PROC_FILE", tmp_path / "layer2_agent_proc.json")
+    monkeypatch.setattr(ai, "PATIENT_PORTFOLIO", tmp_path / "portfolio_state.json")
+    monkeypatch.setattr(ai, "BOLD_PORTFOLIO", tmp_path / "portfolio_state_bold.json")
     yield
     ai._agent_proc = None
     ai._agent_log = None

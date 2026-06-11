@@ -124,9 +124,11 @@ class TestBlendDirectionalFollowsSampleFloor:
         result = blend_accuracy_data(alltime, recent)
         # Overall uses alltime (recent below threshold).
         assert result["sig"]["accuracy"] == 0.60
-        # Directional blended via sample-weighted average.
-        expected_buy = (0.55 * 100 + 0.90 * 10) / (100 + 10)
-        assert abs(result["sig"]["buy_accuracy"] - expected_buy) < 1e-6
+        # 2026-06-11 (B6 audit): directional now follows the same 70/30 recency
+        # blend with a min_recent_samples=30 floor per side. recent buy side is
+        # 10 < 30, so it falls back to the all-time directional accuracy
+        # (was a sample-weighted average that double-counted recent).
+        assert result["sig"]["buy_accuracy"] == 0.55
 
 
 class TestReplayRegimeExcludesErrorRows:

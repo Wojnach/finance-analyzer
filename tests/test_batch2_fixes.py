@@ -242,7 +242,13 @@ class TestBug91TimeoutLogging:
         proc.wait.return_value = None
 
         ai._agent_proc = proc
-        ai._agent_start = time.time() - 1000  # Started long ago
+        # 2026-06-11 (audit B5 / BUG-203): _safe_elapsed_s() measures elapsed
+        # as time.monotonic() - _agent_start. Seeding with time.time() makes
+        # `monotonic - walltime` hugely negative, so the timeout branch clamps
+        # to 0 and never fires. Seed with the monotonic clock (matches the
+        # sibling test in test_agent_timeout_enforcement.py).
+        ai._agent_start = time.monotonic() - 1000  # Started long ago
+        ai._agent_start_wall = time.time() - 1000  # wall-clock fallback seed
         ai._agent_timeout = 100  # Timeout threshold
         ai._agent_tier = 2
         ai._agent_reasons = ["consensus BTC BUY"]
@@ -251,9 +257,13 @@ class TestBug91TimeoutLogging:
         with patch("subprocess.run") as mock_run, \
              patch("subprocess.Popen") as mock_popen, \
              patch("portfolio.agent_invocation._load_config", return_value={"layer2": {"enabled": True}}), \
+             patch("portfolio.agent_invocation.check_claude_gates", return_value=(True, "ok")), \
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation._last_jsonl_ts", return_value=None), \
              patch("portfolio.agent_invocation.shutil") as mock_shutil:
+            # 2026-06-11 (audit B5): invoke_agent checks claude_gate first and
+            # fails closed during the token freeze (CLAUDE_ENABLED=False), so
+            # stub the gate open to reach the timeout-kill + invocations-log path.
             # taskkill succeeds
             mock_run.return_value = MagicMock(returncode=0)
             mock_shutil.which.return_value = "claude"

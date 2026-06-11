@@ -655,7 +655,13 @@ class TestOrderLockOnTotpPath:
 
         with patch.object(mod, "CONFIG_FILE", config_file), \
              patch.object(mod, "avanza_order_lock", fake_lock):
-            mod.place_sell_order("9001", price=99.5, volume=10)
+            # 2026-06-11 (audit B4 fix 6): _place_order grew a 1000-SEK
+            # minimum-order guard for SELLs that only exempts verified
+            # position-closing sells (via get_positions, fail-closed). The old
+            # 99.5×10=995 SEK order now trips the guard and raises before the
+            # lock/API path this test targets. Bump volume to clear the floor
+            # (1094.5 SEK) so the test still exercises lock-around-API ordering.
+            mod.place_sell_order("9001", price=99.5, volume=11)
 
         assert ("acquire", "place_order_totp/SELL/9001") in events
         assert ("release", "place_order_totp/SELL/9001") in events

@@ -168,6 +168,11 @@ class TestInvokeAgentReusesHelper:
         fake_run = MagicMock()
         fake_run.return_value.returncode = 0
         monkeypatch.setattr(ai.subprocess, "run", fake_run)
+        # 2026-06-11 (audit B5): invoke_agent now calls check_claude_gates
+        # FIRST and fails closed (CLAUDE_ENABLED=False during the token
+        # freeze). Stub it open so this test exercises the layer2-enabled /
+        # timeout-kill ordering it actually targets.
+        monkeypatch.setattr(ai, "check_claude_gates", lambda caller: (True, "ok"))
         # Block layer2 enabled check so we don't spawn a new agent
         monkeypatch.setattr(
             ai, "_load_config", lambda: {"layer2": {"enabled": False}}

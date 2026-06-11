@@ -37,6 +37,60 @@ def _null_cached(key, ttl, func, *args):
 _NO_PENALTIES = {"confidence_penalties": {"enabled": False}}
 
 
+# 2026-06-11 (suite-cleanup): the 3-voter consensus tests assert the
+# consensus MECHANIC (3 same-direction voters → that direction). They were
+# silently depending on the live data/accuracy_cache.json: generate_signal
+# pulls directional accuracy via accuracy_stats.get_or_compute_*, and the
+# directional gate (_DIRECTIONAL_GATE_THRESHOLD=0.44) force-HOLDs a signal
+# whose buy/sell accuracy on that direction is below 44%. As production
+# accuracy drifted, rsi/macd/bb BUY accuracy fell below 0.44 (observed
+# 41.3%/43.8%/39.7% on MSTR), so all three raw BUY votes were
+# direction-gated and consensus returned HOLD — exactly the
+# accuracy_cache.json fragility documented in docs/TESTING.md. This was
+# NOT a campaign change (test file + gate threshold unchanged since
+# pre-campaign eed1f70a). Make the test hermetic by pinning the directional
+# accuracy above the gate so it exercises the voting logic, not live data.
+_HERMETIC_ACC = {
+    sig: {
+        "accuracy": 0.60, "total": 500,
+        "buy_accuracy": 0.60, "total_buy": 250,
+        "sell_accuracy": 0.60, "total_sell": 250,
+    }
+    for sig in ("rsi", "macd", "bb", "ema", "mean_reversion", "momentum")
+}
+
+
+def _pin_accuracy():
+    """Patch accuracy_stats helpers so directional gating is deterministic.
+
+    Returns a list of started patchers; caller is responsible for stopping
+    them (use as ``with contextlib.ExitStack()`` or via the fixture below).
+    """
+    import contextlib
+    stack = contextlib.ExitStack()
+    for name in (
+        "get_or_compute_accuracy",
+        "get_or_compute_recent_accuracy",
+    ):
+        stack.enter_context(
+            mock.patch(f"portfolio.accuracy_stats.{name}",
+                       return_value=dict(_HERMETIC_ACC))
+        )
+    stack.enter_context(
+        mock.patch("portfolio.accuracy_stats.get_or_compute_per_ticker_accuracy",
+                   return_value={})
+    )
+    # The PER-TICKER directional cache overrides the global blend inside
+    # generate_signal (signal_engine.py ~4521) — including buy_accuracy used
+    # by the directional gate. It's the real source of the live drift (rsi
+    # BUY 41%, bb 39% on MSTR). Return {} so the pinned globals stand.
+    stack.enter_context(
+        mock.patch("portfolio.accuracy_stats.accuracy_by_ticker_signal_cached",
+                   return_value={})
+    )
+    return stack
+
+
 # Stock-price defaults for consensus tests (conftest defaults to crypto prices)
 _STOCK_DEFAULTS = dict(
     close=130.0, ema9=130.0, ema21=130.0,
@@ -102,9 +156,12 @@ class TestStockConsensus:
             ema21=130.0,  # no gap → no EMA vote
             price_vs_bb="below_lower",  # below lower band → BUY vote
         )
-        action, conf, extra = generate_signal(
-            ind, ticker="MSTR", config=_NO_PENALTIES,
-        )
+        # 2026-06-11 (suite-cleanup): pin directional accuracy above the
+        # 0.44 gate so live cache drift can't direction-gate the BUY votes.
+        with _pin_accuracy():
+            action, conf, extra = generate_signal(
+                ind, ticker="MSTR", config=_NO_PENALTIES,
+            )
         assert extra["_buy_count"] >= 3
         assert action == "BUY"
 
@@ -146,6 +203,8 @@ class TestStockConsensus:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_all_stock_tickers_use_3_voter_threshold(self, _mock):
         """All stock tickers need 3+ voters for consensus."""
+        # 2026-06-11 (suite-cleanup): pin directional accuracy above the
+        # 0.44 gate so live cache drift can't direction-gate the BUY votes.
         for ticker in STOCK_SYMBOLS:
             ind = make_indicators(
                 rsi=25,
@@ -155,9 +214,10 @@ class TestStockConsensus:
                 ema21=130.0,  # no gap; EMA gated in ranging anyway
                 price_vs_bb="below_lower",  # 3 voters: RSI + MACD + BB
             )
-            action, conf, extra = generate_signal(
-                ind, ticker=ticker, config=_NO_PENALTIES,
-            )
+            with _pin_accuracy():
+                action, conf, extra = generate_signal(
+                    ind, ticker=ticker, config=_NO_PENALTIES,
+                )
             assert action == "BUY", f"{ticker} should reach BUY consensus with 3 voters"
 
 
@@ -334,20 +394,19 @@ class TestSentimentHysteresis:
 class TestStockSignalVoteCounts:
     """Stock signal generation produces correct total_applicable counts."""
 
+    @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_stock_total_applicable(self, _mock):
+    def test_stock_total_applicable(self, _mock, _gpu_mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        # 2026-05-11: 19 → 16 after commit added 4 MSTR _default disables
-        # (sentiment, volume_flow, heikin_ashi, momentum_factors). Codex
-        # review C1 surfaced this; production paired-edit was skipped.
-        # 2026-05-19: 16 → 10 after additional May disables for MSTR
-        # (matches CLAUDE.md "stocks=10 applicable").
-        # 2026-05-26: 10 → 9 after crypto_evrp re-disabled.
-        # 2026-05-28: 9 → 14 after enabling 5 proven regime signals:
-        # adx_regime_switch, amihud_illiquidity_regime, choppiness_regime_gate,
-        # bocpd_regime_switch, vol_ratio_regime.
-        assert extra["_total_applicable"] == 14
+        # 2026-05-28: 9 → 14 after enabling 5 proven regime signals.
+        # 2026-06-11 (B6 audit): 14 → 12. The "ministral only counts on
+        # crypto" special-case was removed (_compute_applicable_count now
+        # counts ministral on ALL tickers), and the June disable wave
+        # trimmed the MSTR set. Pinned should_skip_gpu=False so the GPU
+        # signals (incl. ministral) count deterministically regardless of
+        # MSTR market hours — was flaky on the unmocked path.
+        assert extra["_total_applicable"] == 12
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):
@@ -355,12 +414,11 @@ class TestStockSignalVoteCounts:
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
         # 2026-05-10: 33 → 26 after the disable wave above. Same
         # tripwire pattern as the stock counterpart.
-        # 2026-05-19: 26 → 17 after May-2026 disable wave (matches CLAUDE.md
-        # "crypto=16 applicable" ± 1 recent addition).
-        # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
-        # 2026-05-26: 15 → 14 after crypto_evrp re-disabled.
         # 2026-05-28: 14 → 19 after enabling 5 proven regime signals.
-        assert extra["_total_applicable"] == 19
+        # 2026-06-11 (B6 audit + June disable wave): 19 → 15. ministral now
+        # counts on all tickers (already counted for crypto, so no +1 here),
+        # and the June signal disables trimmed the crypto applicable set.
+        assert extra["_total_applicable"] == 15
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):

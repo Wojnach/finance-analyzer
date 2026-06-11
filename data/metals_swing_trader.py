@@ -1380,6 +1380,20 @@ class SwingTrader:
         ingested_count = 0
         deferred_count = 0
         for ob_id, holding in held.items():
+            # 2026-06-11 (suite-cleanup, B12 follow-up): defend against legacy
+            # / non-dict holding shapes. fetch_positions normally yields
+            # {ob_id: {name, volume, ...}}, but older state and some
+            # page-overview payloads keyed a bare int (share count) or other
+            # scalar per ob_id. Calling holding.get(...) on an int raised
+            # AttributeError, which aborted orphan adoption (and, via the
+            # caller's broad except, the surrounding cycle). Skip anything
+            # that isn't a dict so a malformed row can't take down migration.
+            if not isinstance(holding, dict):
+                _log(
+                    f"_migrate_orphans: ob {ob_id} holding is "
+                    f"{type(holding).__name__}, not dict — skip (legacy shape)"
+                )
+                continue
             ob_id_str = str(ob_id)
             if ob_id_str in existing_ob_ids:
                 continue

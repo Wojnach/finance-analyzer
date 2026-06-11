@@ -212,7 +212,10 @@ class TestMetalsSignalConfig:
         # +realized_skewness, -statistical_jump_regime for XAU-USD.
         # 2026-05-26: 13 → 12 after re-disabling crypto_evrp (43.4% recent).
         # 2026-05-28: 12 → 17 after enabling 5 proven regime signals.
-        assert extra["_total_applicable"] == 17
+        # 2026-06-11 (B6 audit + June disable wave): 17 → 12. ministral now
+        # counts on metals too (special-case removed); June disables trimmed
+        # the XAU set. Metals are 24/7 so GPU signals always count.
+        assert extra["_total_applicable"] == 12
 
     def test_stocks_total_applicable(self):
         """Stocks: 28 → 21 → 18 after MSTR _default bump (codex C1 2026-05-11)."""
@@ -242,7 +245,10 @@ class TestMetalsSignalConfig:
         # 2026-05-19: 15 → 11 after further May disables.
         # 2026-05-26: 11 → 10 after re-disabling crypto_evrp.
         # 2026-05-28: 10 → 15 after enabling 5 proven regime signals.
-        assert extra["_total_applicable"] == 15
+        # 2026-06-11 (B6 audit + June disable wave): 15 → 12. ministral now
+        # counts on all tickers (special-case removed); June disables trimmed
+        # the MSTR set. GPU pinned on via should_skip_gpu=False above.
+        assert extra["_total_applicable"] == 12
 
     def test_crypto_total_applicable(self):
         """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""
@@ -264,10 +270,9 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        # 2026-05-12: 26 → 23 after disabling volatility_sig, dxy_cross_asset,
-        # forecast (all 3 apply to crypto despite dxy being metals-focused).
-        # 2026-05-19: 23 → 17 after further May disables.
-        # 2026-05-24: 17 → 15 after disabling momentum_factors + btc_proxy.
-        # 2026-05-26: 15 → 14 after re-disabling crypto_evrp.
         # 2026-05-28: 14 → 19 after enabling 5 proven regime signals.
-        assert extra["_total_applicable"] == 19
+        # 2026-06-11 (B6 audit + June disable wave): 19 → 15. ministral
+        # already counted on crypto (no +1 from special-case removal here),
+        # and the June disables trimmed the crypto applicable set. Crypto is
+        # 24/7 so GPU signals always count.
+        assert extra["_total_applicable"] == 15

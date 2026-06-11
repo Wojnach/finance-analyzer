@@ -23,6 +23,16 @@ def _isolate_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "TRADES_LOG", str(tmp_path / "trades.jsonl"))
     monkeypatch.setattr(config, "SHADOW_LOG", str(tmp_path / "shadow.jsonl"))
     monkeypatch.setattr(config, "POLL_LOG", str(tmp_path / "poll.jsonl"))
+    # 2026-06-11 (suite-cleanup): force the synthetic-cert pricing path.
+    # _compute_shadow_cert_price and _estimate_cert_bid try a LIVE Avanza
+    # get_quote first (shadow/paper fidelity) and only fall back to the
+    # synthetic 100.0 SEK / leverage model when it's unavailable. On a machine
+    # with an authed Avanza session this returns a real ~0.04 SEK MINI cert
+    # quote, which breaks the synthetic +15%/-cash math these tests assert (and
+    # made them pass in the campaign worktree only because it had no auth).
+    # Stub get_quote to None so pricing is deterministic and offline.
+    import portfolio.avanza_session as _avs
+    monkeypatch.setattr(_avs, "get_quote", lambda *a, **kw: None, raising=False)
     yield
 
 

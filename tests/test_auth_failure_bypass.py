@@ -20,7 +20,27 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from portfolio import claude_gate
+
+
+@pytest.fixture(autouse=True)
+def _open_claude_gate(monkeypatch):
+    """Pin the claude_gate master switches open for every test here.
+
+    2026-06-11 (suite-cleanup): claude_gate.invoke_claude short-circuits on
+    the module-level CLAUDE_ENABLED master kill switch (flipped False during
+    the 2026-06-05 token freeze) and on _load_config_layer2_enabled (which
+    reads the live config where layer2.enabled is currently false). Both gate
+    BEFORE _run_with_tree_kill, so the bigbet/iskbets/analyze auth-detection
+    tests — which patch _run_with_tree_kill to simulate a 'Not logged in'
+    reply — never reach the run path unless the switches are pinned open.
+    The freeze flag predates this campaign; stubbing keeps these tests
+    hermetic regardless of the live freeze state.
+    """
+    monkeypatch.setattr(claude_gate, "CLAUDE_ENABLED", True)
+    monkeypatch.setattr(claude_gate, "_load_config_layer2_enabled", lambda: True)
 
 
 def _fake_run_auth_failure(*args, **kwargs):

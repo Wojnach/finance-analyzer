@@ -7,8 +7,13 @@ import sys
 
 import pytest
 
-# Ensure data/ is on path for imports
-sys.path.insert(0, os.path.dirname(__file__))
+# Ensure data/ is on path for imports.
+# 2026-06-11 (suite-cleanup, B12 follow-up): this test was moved from data/
+# into tests/, but the path insert still pointed at the test's own dir
+# (os.path.dirname(__file__) == tests/), so `import metals_swing_config`
+# raised ModuleNotFoundError at collection. The trader modules still live in
+# data/ — point sys.path at the repo's data/ dir (tests/.. == repo root).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 
 # Patch config before importing trader
 import metals_swing_config as cfg

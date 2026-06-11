@@ -182,7 +182,12 @@ class TestBlendAccuracyData:
         assert abs(result["rsi"]["accuracy"] - expected) < 0.01
 
 
-    def test_blend_directional_counts_sum_not_max(self):
+    def test_blend_directional_counts_max_not_sum(self):
+        # 2026-06-11 (B6 audit): directional totals now report max(alltime,
+        # recent), NOT the sum. `recent` is a strict subset of `alltime`
+        # (same log, `since=` cutoff), so summing double-counted the recent
+        # window and tripped the 30-sample directional gate early. This test
+        # was previously named "..._sum_not_max" and asserted the bug.
         from portfolio.accuracy_stats import blend_accuracy_data
 
         alltime = {
@@ -200,8 +205,8 @@ class TestBlendAccuracyData:
             }
         }
         result = blend_accuracy_data(alltime, recent)
-        assert result["rsi"]["total_buy"] == 360, "should sum, not max"
-        assert result["rsi"]["total_sell"] == 240, "should sum, not max"
+        assert result["rsi"]["total_buy"] == 300, "max(300, 60), not sum"
+        assert result["rsi"]["total_sell"] == 200, "max(200, 40), not sum"
 
 
 class TestLoadJsonOSError:
