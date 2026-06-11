@@ -3946,8 +3946,27 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                             if compute_fn is not None:
                                 if ticker:
                                     _set_last_signal(ticker, f"shadow:{sig_name}")
+                                # 2026-06-11: LLM shadows need the RICH context
+                                # (price_usd/rsi/macd_hist/...), not the minimal
+                                # context_data dict above. Passing context_data
+                                # made cryptotrader_lm KeyError on 'price_usd'
+                                # every run since its 2026-05-17 wiring (zero
+                                # prob-log rows in 24d) while finance_llama and
+                                # phi4_mini silently rendered "RSI=?" placeholder
+                                # prompts — predictions from the ticker name
+                                # alone. _build_llm_context is the same builder
+                                # the ministral/qwen3 voters use. "ticker" is
+                                # restored to the full "BTC-USD" form because the
+                                # builder strips "-USD" for prompt display while
+                                # cryptotrader_lm's crypto-only guard matches the
+                                # full form.
+                                _llm_ctx = dict(context_data)
+                                _llm_ctx.update(
+                                    _build_llm_context(ticker, ind, timeframes, extra_info)
+                                )
+                                _llm_ctx["ticker"] = ticker
                                 # LLM shadows are all requires_context=True.
-                                result = compute_fn(df, context=context_data)
+                                result = compute_fn(df, context=_llm_ctx)
                                 _sig_dt = time.monotonic() - _sig_t0
                                 # Always log latency for LLM shadows (not just
                                 # >1s) — this is the premortem's lock-hold/cycle-
@@ -3964,6 +3983,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                                 shadow_votes[sig_name] = validated["action"]
                         except Exception as e:
                             logger.info("Shadow LLM %s failed: %s", sig_name, e, exc_info=True)
+                    else:
+                        # 2026-06-11: off-rotation / off-phase ticks never
+                        # computed anything, so mark them throttled — the
+                        # log_vote hook below skips throttled signals. Without
+                        # this flag every off-rotation ticker emitted a
+                        # [log_vote_skipped] abstain_conf_zero line each cycle
+                        # (~600 noise lines/day across 4 tickers × 3 shadows).
+                        extra_info[f"{sig_name}_throttled"] = True
                 votes[sig_name] = "HOLD"
                 continue
             if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):

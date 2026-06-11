@@ -129,3 +129,110 @@ def test_at_most_two_shadows_per_cycle(multi_registry):
                   if se._shadow_llm_runs_now(s, t, cyc)}
         assert len(firing) <= 2, f"cyc {cyc}: {firing}"
         assert firing != {"finance_llama", "cryptotrader_lm"}, f"cyc {cyc}: both 4s signals"
+
+
+# ---------------------------------------------------------------------------
+# (f) Rich-context dispatch (2026-06-11): LLM shadows must receive the SAME
+#     rich context the ministral/qwen3 voters get (price_usd, rsi, ...), with
+#     "ticker" in full "BTC-USD" form. Passing the minimal context_data dict
+#     made cryptotrader_lm KeyError on 'price_usd' on every run since its
+#     2026-05-17 wiring (zero llm_probability_log rows in 24 days), while
+#     finance_llama / phi4_mini silently rendered "RSI=?" placeholder prompts.
+#     Also covers the off-rotation `_throttled` flag so the log_vote hook
+#     stays silent for ticks that never computed.
+# ---------------------------------------------------------------------------
+
+import unittest.mock as mock
+
+from conftest import make_candles, make_indicators
+
+
+def _null_cached(key, ttl, func, *args):
+    """Block external accuracy/activation lookups (same as test_consensus)."""
+    if key and ("accuracy" in key or "activation_rates" in key):
+        return {}
+    return None
+
+
+@pytest.fixture
+def dispatch_registry(monkeypatch):
+    """cryptotrader_lm enrolled + always phase-aligned; no registry file I/O."""
+    monkeypatch.setattr(
+        sr, "get_status",
+        lambda s, **k: "shadow" if s in se._SHADOW_LLM_SIGNALS else None,
+    )
+    monkeypatch.setattr(sr, "get_cycle_modulo", lambda s, **k: 3)
+    monkeypatch.setattr(
+        sr, "should_run_this_cycle", lambda s, c, **k: s == "cryptotrader_lm",
+    )
+    # cyc=0 -> rotation index 0 -> BTC-USD is the chosen crypto ticker.
+    monkeypatch.setattr(sr, "cycle_count_now", lambda: 0)
+    monkeypatch.setattr(sr, "is_promoted", lambda s, **k: False)
+    # Restrict the enhanced-dispatch loop to cryptotrader_lm only: with a real
+    # df present every enhanced signal would compute (news/econ do network I/O).
+    entry = dict(se.get_enhanced_signals()["cryptotrader_lm"])
+    monkeypatch.setattr(se, "get_enhanced_signals", lambda: {"cryptotrader_lm": entry})
+
+
+def _capture_dispatch(monkeypatch, captured):
+    """Route cryptotrader_lm's compute through a capture fn; others load normally."""
+    orig = se.load_signal_func
+
+    def fake_load(entry):
+        if entry.get("module_path") == "portfolio.signals.cryptotrader_lm":
+            def compute(df, context=None):
+                captured.append(context)
+                return {
+                    "action": "BUY",
+                    "confidence": 0.7,
+                    "sub_signals": {"cryptotrader_lm": "BUY"},
+                    "indicators": {},
+                }
+            return compute
+        return orig(entry)
+
+    monkeypatch.setattr(se, "load_signal_func", fake_load)
+
+
+@mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
+def test_shadow_llm_receives_rich_context(_mock, dispatch_registry, monkeypatch):
+    captured = []
+    _capture_dispatch(monkeypatch, captured)
+    ind = make_indicators(close=69_000.0, rsi=41.0)
+    # Enhanced dispatch only runs with a real df of >=26 candles.
+    df = make_candles([69_000.0 + i for i in range(30)])
+    _action, _conf, extra = se.generate_signal(ind, ticker="BTC-USD", df=df)
+    assert len(captured) == 1
+    ctx = captured[0]
+    # Rich keys the prompt builders need — 'price_usd' is the one whose
+    # absence KeyError'd cryptotrader_lm for 24 days.
+    assert ctx["price_usd"] == 69_000.0
+    assert ctx["rsi"] == 41.0
+    assert "macd_hist" in ctx
+    assert "bb_position" in ctx
+    assert "ema_bullish" in ctx
+    # Full ticker form: cryptotrader_lm's crypto-only guard matches "BTC-USD";
+    # _build_llm_context's stripped display form ("BTC") must not leak through.
+    assert ctx["ticker"] == "BTC-USD"
+    # Minimal-context keys survive the merge (config/regime for gating helpers).
+    assert "config" in ctx
+    assert "regime" in ctx
+    # Shadow result recorded for accuracy tracking, run not flagged throttled.
+    assert extra["cryptotrader_lm_action"] == "BUY"
+    assert extra["cryptotrader_lm_confidence"] > 0
+    assert "cryptotrader_lm_throttled" not in extra
+
+
+@mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
+def test_off_rotation_tick_marked_throttled(_mock, dispatch_registry, monkeypatch):
+    captured = []
+    _capture_dispatch(monkeypatch, captured)
+    ind = make_indicators()
+    df = make_candles([4_000.0 + i for i in range(30)])
+    # XAU is outside cryptotrader_lm's BTC/ETH rotation scope -> never computes;
+    # the tick must be flagged throttled so the log_vote hook skips it silently
+    # instead of emitting a [log_vote_skipped] abstain_conf_zero line per cycle.
+    _action, _conf, extra = se.generate_signal(ind, ticker="XAU-USD", df=df)
+    assert captured == []
+    assert extra.get("cryptotrader_lm_throttled") is True
+    assert "cryptotrader_lm_action" not in extra
