@@ -359,6 +359,47 @@ def _num_or_none(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+def _cov_has(d, *path):
+    cur = d
+    for k in path:
+        cur = cur.get(k) if isinstance(cur, dict) else None
+    return cur not in (None, "", [], {})
+
+
+# Per-candidate data-completeness checks — surfaced as a "Data N/total" column on
+# the hub so missing research is visible at a glance. Each entry: (label, fn).
+_COVERAGE_FIELDS = [
+    ("floor", lambda d: d.get("floor") is not None),
+    ("energiklass", lambda d: _cov_has(d, "energideklaration", "energiklass")),
+    ("BRF skuld", lambda d: _cov_has(d, "brf_health", "skuld_per_kvm")),
+    ("BRF soliditet", lambda d: _cov_has(d, "brf_thesis", "soliditet_pct")),
+    ("BRF sparande", lambda d: _cov_has(d, "brf_health", "sparande_per_kvm")),
+    ("tenure", lambda d: (d.get("brf_thesis") or {}).get("is_tomtratt") is not None),
+    ("comps+floors", lambda d: _cov_has(d, "building_comps_recent")),
+    ("Booli est", lambda d: d.get("booli_estimate") is not None),
+    ("fair band", lambda d: _cov_has(d, "fair_value_band")),
+    ("vision", lambda d: _cov_has(d, "premium_llm")),
+    ("stadgar", lambda d: _cov_has(d, "stadgar")),
+    ("underhåll", lambda d: _cov_has(d, "gap_closure")),
+    ("listing status", lambda d: _cov_has(d, "gap_closure", "listing_status")),
+    ("seller floor", lambda d: d.get("seller_floor_price") is not None),
+]
+
+
+def _data_coverage(data: dict) -> dict:
+    """Count present vs total research fields; return missing labels for a tooltip."""
+    missing = []
+    for lbl, fn in _COVERAGE_FIELDS:
+        try:
+            ok = bool(fn(data))
+        except Exception:
+            ok = False
+        if not ok:
+            missing.append(lbl)
+    return {"n": len(_COVERAGE_FIELDS) - len(missing),
+            "total": len(_COVERAGE_FIELDS), "missing": missing}
+
+
 def _candidate_row(run_id: str, slug: str, data: dict) -> dict:
     """Flatten one candidate's data.json into the table-row fields. Every
     field is optional — the findapartments pipeline writes partial records
@@ -404,6 +445,7 @@ def _candidate_row(run_id: str, slug: str, data: dict) -> dict:
         # the unit isn't for-sale on Booli so no model estimate exists).
         "booli_kind": data.get("booli_estimate_kind") or "estimate",
         "fair_delta": (price / fair - 1.0) if price and fair else None,
+        "coverage": _data_coverage(data),
     }
 
 
@@ -499,6 +541,15 @@ def _cashflow_tag(row: dict) -> str:
     return f" <span class=\"meta\" title=\"{escape(title)}\">⚠</span>"
 
 
+def _coverage_cell(cov: dict) -> str:
+    """Compact 'N/total' data-completeness badge; hover lists missing fields."""
+    n, total, missing = cov["n"], cov["total"], cov["missing"]
+    if missing:
+        title = "Missing: " + ", ".join(missing)
+        return f"<span class=\"rich\" title=\"{escape(title)}\">{n}/{total} ⚠</span>"
+    return f"<span class=\"cheap\" title=\"complete\">{n}/{total}</span>"
+
+
 def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
     if not rows:
         return "<p>No candidates in this run.</p>"
@@ -506,7 +557,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
         "<tr><th>#</th><th>Score</th><th>Address</th><th>Price</th>"
         "<th>Est.<br>value</th><th>Booli<br>est.</th>"
         "<th>kr/m²</th><th>m²</th><th>Fee</th><th>Built</th>"
-        "<th>Prem<br>S/L</th><th>CAGR%</th><th>vs<br>fair</th><th></th></tr>"
+        "<th>Prem<br>S/L</th><th>CAGR%</th><th>vs<br>fair</th><th>Data</th><th></th></tr>"
     )
     body_rows = []
     for i, r in enumerate(rows, 1):
@@ -554,6 +605,7 @@ def _render_apartment_table(run_id: str, rows: list[dict]) -> str:
             f"<td class=\"num\">{escape(prem)}</td>"
             f"<td class=\"num\">{_fmt_cagr(r['cagr'])}</td>"
             f"<td class=\"num\">{fair_cell}</td>"
+            f"<td class=\"num\">{_coverage_cell(r['coverage'])}</td>"
             f"<td>{report}</td>"
             "</tr>"
         )
