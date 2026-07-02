@@ -1,3 +1,33 @@
+## 2026-07-02 — master local-LLM pause switch (ACTIVE)
+
+User requested all local LLMs paused going forward. Built portfolio/local_llm_gate.py:
+local_llm_enabled() → False when data/local_llm.disabled exists OR config local_llm.enabled=false.
+Live-togglable (flag checked per call, config mtime-cached) — no loop restart needed to flip.
+PAUSE IS ACTIVE: data/local_llm.disabled created 2026-07-02 19:18 CET.
+
+Gated choke points (100% coverage, main + metals): llama_server.query_llama_server/_batch
+(all GGUF incl. metals ministral8_lora + prewarmer; also tears down resident server → frees
+~5 GB VRAM), model_load_safe → False (subprocess cold-start fallbacks abstain),
+bert_sentiment.predict → zero-conf neutral placeholders (exception would trigger sentiment.py
+subprocess fallback — deliberate), forecast_signal.forecast_chronos → None (covers
+chronos_server.py + metals fallback), metals_llm._run_ministral_metals/_run_chronos_metals →
+None (legacy stdin server + one-shot subprocess paths never touch model_load_safe).
+
+Effect while paused: Ministral-8B + Qwen3-8B votes absent (2 of 15 active voters),
+BERT sentiment neutral@0.0, fingpt/shadow LLMs silent, metals LLM signals None.
+Resume: rm data/local_llm.disabled.
+
+Merged feat/local-llm-pause-switch → main (merge after 408cd654). 17 new tests
+(tests/test_local_llm_gate.py) + 229 related tests green. Loops restarted 19:21 CET —
+schtasks NOT visible from WSL cmd ("cannot find the file specified" on /end + /run, and
+/query | findstr PF- returns nothing) → used taskkill PIDs + Start-Process detached bats.
+Killed orphaned llama-server.exe holding VRAM post-restart.
+
+NOT pushed — classifier blocks push to main; user runs `! git push`.
+
+Unresolved criticals (22, NOT resolved this session): Avanza session expired 2026-06-13
+(needs user BankID: python scripts/avanza_login.py) + BGeometrics netflow feed stale.
+
 ## 2026-06-11 (late) — shadow-LLM context fix + swing-test rot (post-campaign follow-ups)
 
 ROOT CAUSE of cryptotrader_lm 24d silence (pickup defer verdict): the _SHADOW_LLM_SIGNALS
