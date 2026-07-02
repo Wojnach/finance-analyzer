@@ -30,6 +30,7 @@ sys.path.insert(0, ".")
 import requests
 
 from portfolio.file_utils import atomic_append_jsonl
+from portfolio.local_llm_gate import local_llm_enabled
 
 # --- CONFIG ---
 LLM_INTERVAL = 300       # run Ministral every 5 minutes
@@ -476,6 +477,11 @@ def _run_ministral_metals(context):
 
     Returns {"action": "BUY/SELL/HOLD", "reasoning": "...", "confidence": 0.0-1.0}
     """
+    # 2026-07-02 (local-llm-pause): master pause switch. Gated here (not just
+    # in llama_server) because the legacy stdin server + one-shot subprocess
+    # fallbacks below never touch model_load_safe and would cold-start anyway.
+    if not local_llm_enabled():
+        return None
     try:
         metals_context = {
             "ticker": context.get("ticker", "XAG-USD"),
@@ -555,6 +561,10 @@ def _run_chronos_metals(ticker, close_prices, horizons=(1, 3)):
 
     Returns dict of {horizon_key: {"direction": "up/down", "pct_move": float, "confidence": float}}
     """
+    # 2026-07-02 (local-llm-pause): master pause switch — seals the persistent
+    # chronos_server path AND the subprocess fallback (treated as HOLD upstream).
+    if not local_llm_enabled():
+        return None
     try:
         # Persistent server (fast, ~0.3s per query, minimal VRAM)
         result = _query_chronos_server(close_prices, horizons)

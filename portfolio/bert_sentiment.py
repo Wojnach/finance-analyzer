@@ -342,6 +342,22 @@ def predict(model_name: str, texts: list[str]) -> list[dict]:
     if not texts:
         return []
 
+    # 2026-07-02 (local-llm-pause): master pause switch. Return the same
+    # shape as real output — a raised exception here would make
+    # sentiment._run_model fall back to the legacy subprocess path, loading
+    # the very model the pause is meant to keep cold.
+    from portfolio.local_llm_gate import local_llm_enabled
+    if not local_llm_enabled():
+        return [
+            {
+                "text": text[:100],
+                "sentiment": "neutral",
+                "confidence": 0.0,
+                "scores": {"positive": 0.0, "negative": 0.0, "neutral": 1.0},
+            }
+            for text in texts
+        ]
+
     # Lazy torch import. If this fails, caller (sentiment.py) catches and
     # falls back to subprocess. Don't try to guard here - let the exception
     # propagate.

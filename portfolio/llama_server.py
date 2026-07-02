@@ -25,6 +25,8 @@ from contextlib import suppress
 
 import requests as _requests
 
+from portfolio.local_llm_gate import local_llm_enabled
+
 logger = logging.getLogger("portfolio.llama_server")
 
 if platform.system() == "Windows":
@@ -343,7 +345,13 @@ def model_load_safe() -> bool:
     Errors (nvidia-smi missing, permission, etc) → returns True. We never
     block the finance loop on a tooling failure — a missed signal is recoverable,
     a permanent block is not.
+
+    2026-07-02 (local-llm-pause): also returns False while the master local-LLM
+    pause switch is on, so subprocess-fallback callers abstain cleanly instead
+    of cold-starting a model the pause is meant to prevent.
     """
+    if not local_llm_enabled():
+        return False
     if not _plex_transcode_active():
         return True
     free = _query_free_vram_mb()
@@ -554,6 +562,19 @@ def _release_file_lock(fh):
             os.remove(_LOCK_FILE)
 
 
+def _pause_stop_server():
+    """Tear down a resident llama-server when the pause switch trips mid-session.
+
+    2026-07-02 (local-llm-pause): without this, flipping the pause on while the
+    loops are running would stop new inference but leave an idle 8B model
+    holding ~5 GB VRAM until the next reboot. Called from the two query
+    entry points — the only paths that can have started the server.
+    """
+    with _thread_lock:
+        if _local_proc is not None:
+            _stop_server()
+
+
 def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
                        top_p=0.2, stop=None):
     """Query the shared llama-server. Swaps model if needed.
@@ -561,6 +582,9 @@ def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
     Thread-safe and cross-process-safe via file lock.
     Returns completion text or None (caller should fall back to subprocess).
     """
+    if not local_llm_enabled():
+        _pause_stop_server()
+        return None
     cfg = _MODEL_CONFIGS.get(name)
     if cfg is None:
         return None
@@ -634,6 +658,9 @@ def query_llama_server_batch(name, prompts_and_params):
     Returns:
         list of (completion_text_or_None) in same order as input.
     """
+    if not local_llm_enabled():
+        _pause_stop_server()
+        return [None] * len(prompts_and_params)
     cfg = _MODEL_CONFIGS.get(name)
     if cfg is None:
         return [None] * len(prompts_and_params)

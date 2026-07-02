@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio.file_utils import atomic_append_jsonl, load_json
+from portfolio.local_llm_gate import local_llm_enabled
 
 logger = logging.getLogger("portfolio.forecast")
 
@@ -124,6 +125,11 @@ def forecast_chronos(ticker, prices, horizons=(1, 24)):
     Returns:
         Dict with forecast results per horizon, or None on failure
     """
+    # 2026-07-02 (local-llm-pause): master pause switch. Gating here covers
+    # the main-loop forecast vote, data/chronos_server.py (imports this
+    # function), and the metals-loop subprocess fallback in one place.
+    if not local_llm_enabled():
+        return None
     pipeline = _get_chronos_pipeline()
     if pipeline is None:
         return None
