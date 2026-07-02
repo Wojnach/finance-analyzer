@@ -335,9 +335,11 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `health.py` (heartbeat, module failures), `claude_gate.py` (CLI gate),
 `gpu_gate.py` (GPU lock), `shared_state.py` (thread-safe cache, rate limiters),
 `local_llm_gate.py` (master pause switch for ALL local model inference —
-GGUF/llama-server, BERT sentiment, Chronos, metals fallbacks; pause with
-`touch data/local_llm.disabled` or config `local_llm.enabled=false`,
-live-togglable, no restart needed; added 2026-07-02)
+GGUF/llama-server, BERT sentiment, Chronos, metals fallbacks.
+**Pause:** `touch data/local_llm.disabled` (or config `local_llm.enabled=false`).
+**Resume:** `rm data/local_llm.disabled` (and/or set config key back to true).
+Live-togglable, no loop restart needed. Flag file wins over config.
+**Status: PAUSED since 2026-07-02** — flag file is in place at user request.)
 
 Full module map (167 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/SYSTEM_OVERVIEW.md`
 
