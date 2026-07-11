@@ -26,6 +26,7 @@ Requires a pandas DataFrame with at least 65 rows (for rolling covariance).
 
 Data: 5-asset daily closes via yfinance (free, no API key).
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,9 +50,9 @@ _COV_WINDOW = 252
 _Z_WINDOW = 60
 
 # Thresholds
-_Z_HIGH = 2.0       # Extreme turbulence
-_Z_ELEVATED = 1.5   # Elevated turbulence
-_Z_CALM = -1.5      # Abnormally calm (complacency)
+_Z_HIGH = 2.0  # Extreme turbulence
+_Z_ELEVATED = 1.5  # Elevated turbulence
+_Z_CALM = -1.5  # Abnormally calm (complacency)
 
 # Absorption ratio threshold (percentile)
 _AR_HIGH_PCTILE = 90
@@ -70,13 +71,12 @@ def _fetch_multi_asset_closes() -> pd.DataFrame | None:
     Returns DataFrame with columns = ticker symbols, index = dates.
     Cached for 1 hour via shared_state.
     """
+
     def _do_fetch():
         try:
             import yfinance as yf
 
-            data = yf.download(
-                _YF_TICKERS, period="14mo", progress=False, threads=True
-            )
+            data = yf.download(_YF_TICKERS, period="14mo", progress=False, threads=True)
             if data is None or data.empty:
                 return None
 
@@ -127,7 +127,7 @@ def _compute_turbulence_series(closes: pd.DataFrame) -> pd.DataFrame | None:
     indices = []
 
     for i in range(effective_window, len(returns)):
-        window = returns.iloc[i - effective_window:i]
+        window = returns.iloc[i - effective_window : i]
 
         # Drop columns with all NaN in window
         valid_cols = window.dropna(axis=1, how="all")
@@ -146,7 +146,8 @@ def _compute_turbulence_series(closes: pd.DataFrame) -> pd.DataFrame | None:
         cov = valid_cols.cov().values
 
         # Regularize covariance matrix for numerical stability
-        cov += np.eye(n) * 1e-8
+        # (no in-place +=: pandas .values can be a read-only view on numpy 2.x)
+        cov = cov + np.eye(n) * 1e-8
 
         # Today's return vector (must match valid_cols columns)
         today_ret = returns.iloc[i][valid_cols.columns].values
@@ -182,13 +183,17 @@ def _compute_turbulence_series(closes: pd.DataFrame) -> pd.DataFrame | None:
     if len(turbulence_vals) < 10:
         return None
 
-    return pd.DataFrame({
-        "turbulence": turbulence_vals,
-        "absorption_ratio": ar_vals,
-    }, index=indices)
+    return pd.DataFrame(
+        {
+            "turbulence": turbulence_vals,
+            "absorption_ratio": ar_vals,
+        },
+        index=indices,
+    )
 
 
 # --------------- Sub-signal voters ---------------
+
 
 def _turbulence_z_vote(turb_z: float, is_safe_haven: bool) -> str:
     """Vote based on turbulence z-score."""
@@ -243,7 +248,8 @@ def _absorption_ratio_vote(ar_series: pd.Series, is_safe_haven: bool) -> str:
 
 
 def compute_mahalanobis_turbulence_signal(
-    df: pd.DataFrame, context: dict | None = None,
+    df: pd.DataFrame,
+    context: dict | None = None,
 ) -> dict[str, Any]:
     """Compute Mahalanobis turbulence regime signal.
 
@@ -325,7 +331,8 @@ def compute_mahalanobis_turbulence_signal(
             "absorption_ratio": safe_float(current_ar),
             "ar_percentile": safe_float(
                 (ar_series < current_ar).sum() / len(ar_series) * 100
-                if len(ar_series) > 0 else 0.0
+                if len(ar_series) > 0
+                else 0.0
             ),
             "is_safe_haven": is_safe_haven,
         },
