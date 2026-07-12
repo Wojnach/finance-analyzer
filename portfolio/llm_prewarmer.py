@@ -155,11 +155,17 @@ def _read_last_state() -> dict | None:
         return None
 
 
-def _write_state(counter: int, prewarmed_slot: str, server_slot: str,
-                 outcome: str, duration_s: float | None = None) -> None:
+def _write_state(
+    counter: int,
+    prewarmed_slot: str,
+    server_slot: str,
+    outcome: str,
+    duration_s: float | None = None,
+) -> None:
     """Append a single state record. Best-effort; swallows errors."""
     try:
         from portfolio.file_utils import atomic_append_jsonl
+
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -185,6 +191,7 @@ def _current_loaded_server_slot() -> str | None:
     """
     try:
         from portfolio.llama_server import _read_pid_model
+
         _, current_model = _read_pid_model()
         return current_model
     except Exception as e:
@@ -234,6 +241,12 @@ def prewarm_next_model(current_counter: int) -> bool:
             logger.debug("llm_prewarmer skip: pytest detected, no-op")
             return False
 
+        from portfolio.local_llm_gate import local_llm_enabled
+
+        if not local_llm_enabled():
+            logger.debug("llm_prewarmer skip: local LLM gate paused")
+            return False
+
         counter = int(current_counter)
         if counter <= 0:
             # Counter==0 means no flush has run yet, so the rotation hasn't
@@ -245,7 +258,8 @@ def prewarm_next_model(current_counter: int) -> bool:
         server_slot = ROTATION_SLOT_TO_SERVER.get(next_slot)
         if server_slot is None:
             logger.warning(
-                "llm_prewarmer skip: no server mapping for slot=%s", next_slot,
+                "llm_prewarmer skip: no server mapping for slot=%s",
+                next_slot,
             )
             return False
 
@@ -272,7 +286,8 @@ def prewarm_next_model(current_counter: int) -> bool:
             logger.debug(
                 "llm_prewarmer skip: counter=%d slot=%s already prewarmed "
                 "and still loaded",
-                counter, next_slot,
+                counter,
+                next_slot,
             )
             return False
 
@@ -282,7 +297,8 @@ def prewarm_next_model(current_counter: int) -> bool:
         if currently_loaded == server_slot:
             logger.info(
                 "llm_prewarmer noop: slot=%s server=%s already loaded",
-                next_slot, server_slot,
+                next_slot,
+                server_slot,
             )
             _write_state(counter, next_slot, server_slot, outcome="already_loaded")
             return False
@@ -291,13 +307,19 @@ def prewarm_next_model(current_counter: int) -> bool:
         # work minimal — the load + KV-cache-prime cost dominates and
         # that's what we actually want to pay before the next loop cycle.
         from portfolio.llama_server import query_llama_server
+
         t0 = time.monotonic()
         logger.info(
             "llm_prewarmer start: counter=%d slot=%s server=%s",
-            counter, next_slot, server_slot,
+            counter,
+            next_slot,
+            server_slot,
         )
         text = query_llama_server(
-            server_slot, "test", n_predict=1, temperature=0.0,
+            server_slot,
+            "test",
+            n_predict=1,
+            temperature=0.0,
         )
         duration = time.monotonic() - t0
 
@@ -308,18 +330,29 @@ def prewarm_next_model(current_counter: int) -> bool:
             # JSONL.
             logger.warning(
                 "llm_prewarmer query returned None: counter=%d slot=%s in %.1fs",
-                counter, next_slot, duration,
+                counter,
+                next_slot,
+                duration,
             )
-            _write_state(counter, next_slot, server_slot,
-                         outcome="query_none", duration_s=duration)
+            _write_state(
+                counter,
+                next_slot,
+                server_slot,
+                outcome="query_none",
+                duration_s=duration,
+            )
             return False
 
         logger.info(
             "llm_prewarmer warmed: counter=%d slot=%s server=%s in %.1fs",
-            counter, next_slot, server_slot, duration,
+            counter,
+            next_slot,
+            server_slot,
+            duration,
         )
-        _write_state(counter, next_slot, server_slot,
-                     outcome="warmed", duration_s=duration)
+        _write_state(
+            counter, next_slot, server_slot, outcome="warmed", duration_s=duration
+        )
         return True
     except Exception as e:
         # Defensive backstop. Anything else in this function should have
@@ -327,6 +360,7 @@ def prewarm_next_model(current_counter: int) -> bool:
         # that the prewarmer NEVER raises.
         logger.warning(
             "llm_prewarmer unexpected failure: counter=%s err=%s",
-            current_counter, e,
+            current_counter,
+            e,
         )
         return False

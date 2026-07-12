@@ -6,11 +6,18 @@ requests
 # Machine Learning
 scikit-learn
 joblib
+lightgbm       # meta_learner retrain
 
 # Web Dashboard
 flask
 markdown  # used by dashboard/house_blueprint.py for the /house viewer
 nh3       # HTML sanitizer for rendered markdown (stored-XSS guard, audit batch 10)
+PyJWT[crypto]  # dashboard/cf_access.py — Cloudflare Access JWT verification
+
+# Market data + infra
+yfinance       # VIX, oil/metals cross-asset fetches
+filelock       # Avanza order check locking
+playwright     # Avanza BankID session capture (also: playwright install chromium)
 
 # Testing
 pytest
