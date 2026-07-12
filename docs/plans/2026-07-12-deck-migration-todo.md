@@ -28,18 +28,18 @@ verified: main loop = 171 MB RAM, ~9 s CPU per 600 s cycle, network-bound.
 
 Move each as systemd user unit on Deck, then disable herc2 twin (schtasks):
 
-- [ ] Crypto loop (`data/crypto_loop.py`, 60 s, DRY_RUN) ← PF-CryptoLoop
-- [ ] Oil loop (`data/oil_loop.py`, 60 s, DRY_RUN) ← PF-OilLoop
-- [ ] MSTR loop (`portfolio/mstr_loop/`, shadow phase) ← PF-MstrLoop
-- [ ] Outcome backfill (`--check-outcomes`, daily) ← PF-OutcomeCheck
+- [x] Crypto loop (`data/crypto_loop.py`, 60 s, DRY_RUN) ← PF-CryptoLoop
+- [x] Oil loop (`data/oil_loop.py`, 60 s, DRY_RUN) ← PF-OilLoop
+- [x] MSTR loop (`portfolio/mstr_loop/`, shadow phase) ← PF-MstrLoop
+- [x] Outcome backfill (`--check-outcomes`, daily) ← PF-OutcomeCheck
       **Must move — signal data lives on Deck now.**
-- [ ] ML retrain (weekly, sklearn HistGradientBoosting — CPU-light,
+- [x] ML retrain (weekly, sklearn HistGradientBoosting — CPU-light,
       NOT an LLM job) ← PF-MLRetrain
-- [ ] Meta-learner retrain ← PF-MetaLearnerRetrain (verify not GPU first)
-- [ ] Shadow review ← PF-ShadowReview
-- [ ] Pending pickups dispatcher (`scripts/process_pending_pickups.py`,
+- [x] Meta-learner retrain ← PF-MetaLearnerRetrain (verify not GPU first)
+- [x] Shadow review ← PF-ShadowReview
+- [x] Pending pickups dispatcher (`scripts/process_pending_pickups.py`,
       daily 08:00 CET) ← PF-PendingPickups
-- [ ] Check each entry script for Windows-only paths before enabling.
+- [x] Check each entry script for Windows-only paths before enabling.
 
 ## Phase B — Avanza stack (REAL MONEY — confirm with user before executing)
 
