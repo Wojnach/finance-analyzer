@@ -23,8 +23,9 @@ import sys
 import threading
 import time
 import traceback
+from pathlib import Path
 
-os.chdir(r"Q:/finance-analyzer")
+os.chdir(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, ".")
 
 import requests
@@ -33,13 +34,13 @@ from portfolio.file_utils import atomic_append_jsonl
 from portfolio.local_llm_gate import local_llm_enabled
 
 # --- CONFIG ---
-LLM_INTERVAL = 300       # run Ministral every 5 minutes
-CHRONOS_INTERVAL = 60    # run Chronos every 60 seconds (builds samples ~5x faster)
+LLM_INTERVAL = 300  # run Ministral every 5 minutes
+CHRONOS_INTERVAL = 60  # run Chronos every 60 seconds (builds samples ~5x faster)
 
 # Quiet hours: reduced intervals to cut CPU fan noise after market close
-LLM_INTERVAL_QUIET = 1800       # Ministral every 30 minutes
-CHRONOS_INTERVAL_QUIET = 300    # Chronos every 5 minutes
-ACCURACY_WINDOW = 50     # rolling window for accuracy calculation
+LLM_INTERVAL_QUIET = 1800  # Ministral every 30 minutes
+CHRONOS_INTERVAL_QUIET = 300  # Chronos every 5 minutes
+ACCURACY_WINDOW = 50  # rolling window for accuracy calculation
 PREDICTION_LOG = "data/metals_llm_predictions.jsonl"
 PREDICTION_OUTCOMES_LOG = "data/metals_llm_outcomes.jsonl"
 
@@ -72,9 +73,9 @@ else:
 
 # --- SHARED STATE (thread-safe) ---
 _lock = threading.Lock()
-_llm_signals = {}        # latest model predictions
-_llm_accuracy = {}       # rolling accuracy per model
-_llm_last_run = 0        # timestamp of last inference run
+_llm_signals = {}  # latest model predictions
+_llm_accuracy = {}  # rolling accuracy per model
+_llm_last_run = 0  # timestamp of last inference run
 _llm_thread = None
 _llm_stop = threading.Event()
 
@@ -123,6 +124,7 @@ def _start_ministral_server():
     global _ministral_proc, _ministral_job
     try:
         from portfolio.subprocess_utils import popen_in_job
+
         proc, job = popen_in_job(
             [MINISTRAL_PYTHON, MINISTRAL_SCRIPT, "--server"],
             stdin=subprocess.PIPE,
@@ -172,6 +174,7 @@ def _stop_ministral_server():
     if _ministral_job is not None:
         try:
             from portfolio.subprocess_utils import close_job
+
             close_job(_ministral_job)
         except Exception:
             pass
@@ -190,7 +193,9 @@ def _query_ministral_server(context):
         try:
             _ministral_proc.stdin.write(json.dumps(context) + "\n")
             _ministral_proc.stdin.flush()
-            response_line = _readline_with_timeout(_ministral_proc.stdout, timeout_s=120)
+            response_line = _readline_with_timeout(
+                _ministral_proc.stdout, timeout_s=120
+            )
             if not response_line:
                 _log("Ministral server timed out or empty response, restarting")
                 _stop_ministral_server()
@@ -243,6 +248,7 @@ def _start_chronos_server_inner():
     global _chronos_proc, _chronos_job
     try:
         from portfolio.gpu_gate import get_vram_usage
+
         vram = get_vram_usage()
         if vram and vram["free_mb"] < 1000:
             _log(f"Chronos: insufficient VRAM ({vram['free_mb']}MB free, need 1000MB)")
@@ -251,6 +257,7 @@ def _start_chronos_server_inner():
         pass
     try:
         from portfolio.subprocess_utils import popen_in_job
+
         proc, job = popen_in_job(
             [MAIN_PYTHON, "-u", CHRONOS_SERVER_SCRIPT],
             stdin=subprocess.PIPE,
@@ -263,7 +270,9 @@ def _start_chronos_server_inner():
         while time.time() < deadline:
             if proc.poll() is not None:
                 stderr = proc.stderr.read()
-                _log(f"Chronos server exited during startup (code {proc.returncode}): {stderr[:200]}")
+                _log(
+                    f"Chronos server exited during startup (code {proc.returncode}): {stderr[:200]}"
+                )
                 return None
             line = proc.stderr.readline()
             if "CHRONOS_READY" in line:
@@ -300,6 +309,7 @@ def _stop_chronos_server():
     if _chronos_job is not None:
         try:
             from portfolio.subprocess_utils import close_job
+
             close_job(_chronos_job)
         except Exception:
             pass
@@ -410,7 +420,9 @@ def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
     """
     try:
         # Crypto tickers use SPOT; metals use FAPI
-        is_crypto = ticker in _CRYPTO_TICKERS if ticker else symbol in ("BTCUSDT", "ETHUSDT")
+        is_crypto = (
+            ticker in _CRYPTO_TICKERS if ticker else symbol in ("BTCUSDT", "ETHUSDT")
+        )
         base_url = SPOT_KLINES_BASE if is_crypto else FAPI_BASE
 
         params = {
@@ -426,13 +438,15 @@ def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
         # Extract close prices + OHLCV
         candles = []
         for k in data:
-            candles.append({
-                "open": float(k[1]),
-                "high": float(k[2]),
-                "low": float(k[3]),
-                "close": float(k[4]),
-                "volume": float(k[5]),
-            })
+            candles.append(
+                {
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
+                }
+            )
         return candles
     except Exception as e:
         _log(f"FAPI kline error {symbol}: {e}")
@@ -503,10 +517,15 @@ def _run_ministral_metals(context):
         # Try shared llama-server first
         try:
             from portfolio.llama_server import query_llama_server
+
             prompt = _build_ministral8_prompt(metals_context)
-            text = query_llama_server("ministral8_lora", prompt,
-                                      n_predict=100, temperature=0.1,
-                                      stop=["[INST]", "\n\n"])
+            text = query_llama_server(
+                "ministral8_lora",
+                prompt,
+                n_predict=100,
+                temperature=0.1,
+                stop=["[INST]", "\n\n"],
+            )
             if text is not None:
                 decision = "HOLD"
                 for word in ["BUY", "SELL", "HOLD"]:
@@ -597,10 +616,12 @@ try:
 except Exception as e:
     print(json.dumps({"error": str(e)}))
 """
-        input_data = json.dumps({
-            "close_prices": close_prices,
-            "horizons": list(horizons),
-        })
+        input_data = json.dumps(
+            {
+                "close_prices": close_prices,
+                "horizons": list(horizons),
+            }
+        )
         proc = subprocess.run(
             [MAIN_PYTHON, "-c", script],
             input=input_data,
@@ -630,7 +651,9 @@ except Exception as e:
         return None
 
 
-def _log_prediction(model, ticker, direction, confidence, current_price, horizon_key="1h"):
+def _log_prediction(
+    model, ticker, direction, confidence, current_price, horizon_key="1h"
+):
     """Log a prediction for accuracy tracking."""
     try:
         entry = {
@@ -660,8 +683,12 @@ def _load_resolved_prediction_keys():
             for line in f:
                 try:
                     entry = json.loads(line.strip())
-                    key = (entry.get("pred_ts", ""), entry.get("model", ""),
-                           entry.get("ticker", ""), entry.get("horizon", ""))
+                    key = (
+                        entry.get("pred_ts", ""),
+                        entry.get("model", ""),
+                        entry.get("ticker", ""),
+                        entry.get("horizon", ""),
+                    )
                     resolved.add(key)
                 except (json.JSONDecodeError, KeyError):
                     pass
@@ -751,7 +778,7 @@ def check_prediction_accuracy(current_prices):
                 continue
 
             actual_direction = "up" if actual_price > pred_price else "down"
-            correct = (pred_direction == actual_direction)
+            correct = pred_direction == actual_direction
 
             outcome_entry = {
                 "pred_ts": pred_ts_str,
@@ -897,7 +924,11 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                 "ministral": None,
                 "chronos_1h": None,
                 "chronos_3h": None,
-                "consensus": {"direction": "flat", "confidence": 0, "weighted_action": "HOLD"},
+                "consensus": {
+                    "direction": "flat",
+                    "confidence": 0,
+                    "weighted_action": "HOLD",
+                },
             }
 
         # --- Ministral inference (skip in chronos_only mode) ---
@@ -909,7 +940,11 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                 ministral_result = _run_ministral_metals(ctx)
                 if ministral_result:
                     action = ministral_result["action"]
-                    direction = "up" if action == "BUY" else ("down" if action == "SELL" else "flat")
+                    direction = (
+                        "up"
+                        if action == "BUY"
+                        else ("down" if action == "SELL" else "flat")
+                    )
                     ticker_result["ministral"] = {
                         "action": action,
                         "direction": direction,
@@ -917,33 +952,55 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                         "confidence": ministral_result.get("confidence", 0.5),
                     }
                     if direction != "flat":
-                        _log_prediction("ministral", ticker, direction,
-                                        ministral_result.get("confidence", 0.5),
-                                        current_price, "1h")
-                        _log_prediction("ministral", ticker, direction,
-                                        ministral_result.get("confidence", 0.5),
-                                        current_price, "3h")
-                    _log(f"Ministral {ticker}: {action} — {ministral_result.get('reasoning', '')[:60]}")
+                        _log_prediction(
+                            "ministral",
+                            ticker,
+                            direction,
+                            ministral_result.get("confidence", 0.5),
+                            current_price,
+                            "1h",
+                        )
+                        _log_prediction(
+                            "ministral",
+                            ticker,
+                            direction,
+                            ministral_result.get("confidence", 0.5),
+                            current_price,
+                            "3h",
+                        )
+                    _log(
+                        f"Ministral {ticker}: {action} — {ministral_result.get('reasoning', '')[:60]}"
+                    )
             except Exception as e:
                 _log(f"Ministral {ticker} failed: {e}")
 
         # --- Chronos inference ---
         try:
-            candles = _fetch_fapi_klines(binance_sym, interval="1h", limit=200, ticker=ticker)
+            candles = _fetch_fapi_klines(
+                binance_sym, interval="1h", limit=200, ticker=ticker
+            )
             if candles and len(candles) >= 50:
                 close_prices = [c["close"] for c in candles]
 
-                chronos_result = _run_chronos_metals(ticker, close_prices, horizons=(1, 3))
+                chronos_result = _run_chronos_metals(
+                    ticker, close_prices, horizons=(1, 3)
+                )
                 if chronos_result:
                     for h_key, h_data in chronos_result.items():
                         if isinstance(h_data, dict):
                             # forecast_chronos returns "action" (BUY/SELL/HOLD), map to direction
                             action = h_data.get("action", "HOLD")
-                            direction = "up" if action == "BUY" else ("down" if action == "SELL" else "flat")
+                            direction = (
+                                "up"
+                                if action == "BUY"
+                                else ("down" if action == "SELL" else "flat")
+                            )
                             pct_move = h_data.get("pct_move", 0)
                             conf = h_data.get("confidence", 0)
 
-                            horizon_label = f"{h_key}h" if not h_key.endswith("h") else h_key
+                            horizon_label = (
+                                f"{h_key}h" if not h_key.endswith("h") else h_key
+                            )
                             out_key = f"chronos_{horizon_label}"
                             ticker_result[out_key] = {
                                 "direction": direction,
@@ -954,10 +1011,18 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                             # Log prediction for accuracy tracking
                             if direction in ("up", "down"):
                                 log_horizon = "1h" if h_key in ("1", "1h") else "3h"
-                                _log_prediction("chronos", ticker, direction,
-                                                conf, current_price, log_horizon)
+                                _log_prediction(
+                                    "chronos",
+                                    ticker,
+                                    direction,
+                                    conf,
+                                    current_price,
+                                    log_horizon,
+                                )
 
-                    _log(f"Chronos {ticker}: {json.dumps({k: h_data.get('action', '?') for k, h_data in chronos_result.items() if isinstance(h_data, dict)})}")
+                    _log(
+                        f"Chronos {ticker}: {json.dumps({k: h_data.get('action', '?') for k, h_data in chronos_result.items() if isinstance(h_data, dict)})}"
+                    )
         except Exception as e:
             _log(f"Chronos {ticker} failed: {e}")
 
@@ -969,14 +1034,20 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
             weights = _compute_model_weights(_llm_accuracy)
 
             # Ministral vote
-            if ticker_result.get("ministral") and ticker_result["ministral"]["direction"] != "flat":
+            if (
+                ticker_result.get("ministral")
+                and ticker_result["ministral"]["direction"] != "flat"
+            ):
                 w = weights.get("ministral_1h", 0.5)
                 votes.append((ticker_result["ministral"]["direction"], w))
 
             # Chronos votes
             for h in ["1h", "3h"]:
                 key = f"chronos_{h}"
-                if ticker_result.get(key) and ticker_result[key].get("direction") in ("up", "down"):
+                if ticker_result.get(key) and ticker_result[key].get("direction") in (
+                    "up",
+                    "down",
+                ):
                     w = weights.get(f"chronos_{h}", 0.5)
                     votes.append((ticker_result[key]["direction"], w))
 
@@ -996,7 +1067,11 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                         direction = "flat"
                         confidence = 0
 
-                    action = "BUY" if direction == "up" else ("SELL" if direction == "down" else "HOLD")
+                    action = (
+                        "BUY"
+                        if direction == "up"
+                        else ("SELL" if direction == "down" else "HOLD")
+                    )
                     ticker_result["consensus"] = {
                         "direction": direction,
                         "confidence": round(confidence, 3),
@@ -1006,8 +1081,10 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                         "model_weights": weights,
                         "n_votes": len(votes),
                     }
-                    _log(f"Consensus {ticker}: {action} ({confidence:.0%}) "
-                         f"[up={up_weight:.2f} down={down_weight:.2f}]")
+                    _log(
+                        f"Consensus {ticker}: {action} ({confidence:.0%}) "
+                        f"[up={up_weight:.2f} down={down_weight:.2f}]"
+                    )
 
         except Exception as e:
             _log(f"Consensus error {ticker}: {e}")
@@ -1058,11 +1135,15 @@ def _llm_worker(signal_data_fn, underlying_prices_fn):
             # Log transitions
             if quiet != _was_quiet:
                 if quiet:
-                    _log(f"Quiet hours — Ministral every {LLM_INTERVAL_QUIET}s, "
-                         f"Chronos every {CHRONOS_INTERVAL_QUIET}s")
+                    _log(
+                        f"Quiet hours — Ministral every {LLM_INTERVAL_QUIET}s, "
+                        f"Chronos every {CHRONOS_INTERVAL_QUIET}s"
+                    )
                 else:
-                    _log(f"Market hours — Ministral every {LLM_INTERVAL}s, "
-                         f"Chronos every {CHRONOS_INTERVAL}s")
+                    _log(
+                        f"Market hours — Ministral every {LLM_INTERVAL}s, "
+                        f"Chronos every {CHRONOS_INTERVAL}s"
+                    )
                 _was_quiet = quiet
 
             ministral_interval = LLM_INTERVAL_QUIET if quiet else LLM_INTERVAL
@@ -1101,6 +1182,7 @@ def _sweep_orphaned_servers():
     """
     try:
         from portfolio.subprocess_utils import kill_orphaned_by_cmdline
+
         killed = 0
         killed += kill_orphaned_by_cmdline("chronos_server.py")
         killed += kill_orphaned_by_cmdline("ministral_trader.py")
@@ -1133,7 +1215,9 @@ def start_llm_thread(signal_data_fn, underlying_prices_fn):
         name="metals-llm-worker",
     )
     _llm_thread.start()
-    _log(f"LLM background thread started (Ministral: {LLM_INTERVAL}s, Chronos: {CHRONOS_INTERVAL}s)")
+    _log(
+        f"LLM background thread started (Ministral: {LLM_INTERVAL}s, Chronos: {CHRONOS_INTERVAL}s)"
+    )
 
 
 def stop_llm_thread():
