@@ -73,7 +73,6 @@ def _pid_alive(pid: int) -> bool:
     """Check if *pid* is running. Windows: tasklist; POSIX: kill(0)."""
     try:
         if os.name == "nt":
-            import subprocess
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}"],
                 capture_output=True, text=True, timeout=5,
