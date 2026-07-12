@@ -46,15 +46,15 @@ Move each as systemd user unit on Deck, then disable herc2 twin (schtasks):
 Metals trades run LLM-less: LLM signals abstain via gate; metals has 10
 non-LLM voters, MIN_VOTERS=2 since 2026-05-11.
 
-- [ ] Install Playwright + Chromium in Deck venv (BankID auth flow).
-- [ ] **MOVE (not copy)** `data/avanza_session.json` +
+- [x] Install Playwright + Chromium in Deck venv (BankID auth flow).
+- [x] **MOVE (not copy)** `data/avanza_session.json` +
       `data/avanza_storage_state.json` from herc2 — two machines holding
       live sessions = conflicting order state. Sessions expire ~24 h;
       re-auth ritual (BankID + phone) moves to Deck.
-- [ ] Metals loop (`data/metals_loop.py` + embedded silver fast-tick +
+- [x] Metals loop (`data/metals_loop.py` + embedded silver fast-tick +
       grid-fisher) ← PF-MetalsLoop, PF-SilverMonitor
-- [ ] GoldDigger ← PF-GoldDigger
-- [ ] iskbets / fin-snipe — trace how they're invoked before moving.
+- [x] GoldDigger ← PF-GoldDigger
+- [x] iskbets / fin-snipe — trace how they're invoked before moving.
 - [ ] Stop-loss rule applies: `/_api/trading/stoploss/new`, never the
       regular order API.
 
@@ -79,3 +79,21 @@ non-LLM voters, MIN_VOTERS=2 since 2026-05-11.
   noise only. Candidate: skip prewarm when gate paused.
 - herc2-sourced dashboard tiles (metals/crypto/oil/golddigger) freeze while
   herc2 is off — resolves as Phase A/B lands.
+
+## Phase B execution notes (2026-07-12)
+
+- Deck units: `pf-metalsloop.service` (always-on), `pf-silvermonitor.timer` +
+  `pf-golddigger.timer` (daily 07:00, oneshot, golddigger keeps `--dry-run`).
+- herc2 twins disabled (PF-MetalsLoop/SilverMonitor/GoldDigger), stray
+  processes killed; session files RENAMED to `*.migrated-to-deck` (not
+  deleted) — Deck is sole session owner.
+- iskbets + fin-snipe need no separate migration: invoked from within
+  main loop / metals loop.
+- Fixed for Linux: `data/metals_llm.py` hardcoded `os.chdir("Q:/...")`
+  (FileNotFoundError at import, not caught by ImportError fallback).
+- Gotcha: tar-over-ssh pull TRUNCATED `data/metals_loop.py` (~2 KB tail) —
+  restored from git. Compile-sweep all pulled .py files after any snapshot.
+- **REMAINING: BankID re-auth on Deck** — `python scripts/avanza_login.py`
+  opens visible Chromium on Deck screen, user authenticates with phone,
+  session valid ~24 h. Current session expired (236 h) — loops run in
+  monitoring mode, no order placement until re-auth.
