@@ -57,8 +57,14 @@ echo "== disabling sleep"
 hssh "powercfg /change standby-timeout-ac 0 & powercfg /change hibernate-timeout-ac 0" >/dev/null
 
 echo "== launching PF-LLMBacktest (models=$MODELS $START..$END interval=$INTERVAL step=${STEP_HOURS}h)"
-PSCMD="powershell -NoProfile -ExecutionPolicy Bypass -File $RREPO\\scripts\\win\\llm-backtest-run.ps1 -Models $MODELS -Start $START -End $END -StepHours $STEP_HOURS -Out $OUT -Tickers $TICKERS -Interval $INTERVAL"
-[ -n "$KEEP_RAW" ] && PSCMD="$PSCMD -KeepRaw"
+KR=false; [ -n "$KEEP_RAW" ] && KR=true
+OUT_J=${OUT//\\//}
+ARGS_JSON=$(printf '{"models":"%s","start":"%s","end":"%s","step_hours":%s,"out":"%s","tickers":"%s","interval":"%s","keep_raw":%s}' \
+    "$MODELS" "$START" "$END" "$STEP_HOURS" "$OUT_J" "$TICKERS" "$INTERVAL" "$KR")
+echo "$ARGS_JSON" | timeout 60 ssh -o BatchMode=yes "$HOST" "cmd /c more > Q:\\finance-analyzer\\data\\llm_backtest_args.json" \
+    || { echo "args upload failed"; exit 1; }
+# /tr truncates ~261 chars (bit us 2026-07-13) — keep this SHORT and fixed.
+PSCMD="powershell -NoProfile -ExecutionPolicy Bypass -File $RREPO\\scripts\\win\\llm-backtest-run.ps1 -FromArgsFile"
 hssh "schtasks /create /f /tn PF-LLMBacktest /sc once /st 23:59 /tr \"$PSCMD\" & schtasks /run /tn PF-LLMBacktest" \
     || { echo "task launch failed"; exit 1; }
 

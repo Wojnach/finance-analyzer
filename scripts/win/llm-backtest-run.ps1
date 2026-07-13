@@ -10,8 +10,25 @@ param(
     [string]$Out = "data\llm_backtest_results.jsonl",
     [string]$Tickers = "BTC-USD,ETH-USD",
     [string]$Interval = "1h",
-    [switch]$KeepRaw
+    [switch]$KeepRaw,
+    [switch]$FromArgsFile
 )
+
+# schtasks /tr silently truncates ~261 chars — long invocations must go
+# through the args file (written by the Deck orchestrator) and a short
+# fixed task command with just -FromArgsFile.
+if ($FromArgsFile) {
+    $af = "Q:\finance-analyzer\data\llm_backtest_args.json"
+    if (Test-Path $af) {
+        $a = Get-Content $af -Raw | ConvertFrom-Json
+        $Models = $a.models; $Start = $a.start; $End = $a.end
+        $StepHours = [int]$a.step_hours; $Out = $a.out
+        $Tickers = $a.tickers; $Interval = $a.interval
+        if ($a.keep_raw) { $KeepRaw = $true }
+    } else {
+        Write-Host "args file missing: $af"; exit 1
+    }
+}
 
 $repo = "Q:\finance-analyzer"
 $gate = Join-Path $repo "data\local_llm.disabled"
