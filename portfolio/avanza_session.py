@@ -122,12 +122,13 @@ def _record_mutation_timeout(verb: str, path: str) -> None:
     global _last_mutation_timeout_escalation_mono
     logger.warning(
         "avanza_session: %s %s timed out — the mutation may still have "
-        "been applied at the broker; reconcile next tick", verb, path,
+        "been applied at the broker; reconcile next tick",
+        verb,
+        path,
     )
     now_mono = time.monotonic()
     with _stats_lock:
-        if (now_mono - _last_mutation_timeout_escalation_mono
-                <= _ESCALATION_COOLDOWN_S):
+        if now_mono - _last_mutation_timeout_escalation_mono <= _ESCALATION_COOLDOWN_S:
             return
         _last_mutation_timeout_escalation_mono = now_mono
     _record_critical(
@@ -145,19 +146,21 @@ def _ensure_session_executor() -> concurrent.futures.ThreadPoolExecutor:
     with _executor_lock:
         if _session_executor is None:
             _session_executor = concurrent.futures.ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix="avanza-session",
+                max_workers=1,
+                thread_name_prefix="avanza-session",
             )
             # Resolve the worker's thread id eagerly so the re-entrant
             # guard works from the very first real call.
-            _session_thread_id = _session_executor.submit(
-                threading.get_ident
-            ).result(timeout=10)
+            _session_thread_id = _session_executor.submit(threading.get_ident).result(
+                timeout=10
+            )
         return _session_executor
 
 
 def _on_session_thread() -> bool:
-    return (_session_thread_id is not None
-            and threading.get_ident() == _session_thread_id)
+    return (
+        _session_thread_id is not None and threading.get_ident() == _session_thread_id
+    )
 
 
 def session_call_stats() -> dict[str, Any]:
@@ -176,6 +179,7 @@ def _record_critical(category: str, message: str, context: dict | None) -> None:
     """Best-effort critical_errors.jsonl append. Never raises."""
     try:
         from portfolio.claude_gate import record_critical_error  # noqa: PLC0415
+
         record_critical_error(category, "portfolio.avanza_session", message, context)
     except Exception:  # noqa: BLE001
         logger.debug("avanza_session: critical_errors append failed", exc_info=True)
@@ -185,6 +189,7 @@ def _alert_telegram(message: str) -> None:
     """Best-effort Telegram alert (pattern from avanza_account_check)."""
     try:
         from portfolio.telegram_notifications import send_telegram  # noqa: PLC0415
+
         cfg = load_json("config.json") or {}
         if cfg.get("telegram", {}).get("token"):
             send_telegram(message, cfg)
@@ -192,21 +197,24 @@ def _alert_telegram(message: str) -> None:
         logger.debug("avanza_session: telegram alert skipped", exc_info=True)
 
 
-def _note_call(op_name: str, queue_wait_s: float,
-               duration_s: float | None, ok: bool) -> None:
+def _note_call(
+    op_name: str, queue_wait_s: float, duration_s: float | None, ok: bool
+) -> None:
     """Record per-call metrics and run the escalation hooks (a)/(b)."""
     global _consecutive_failures
     global _last_queue_stall_escalation_mono, _last_failure_escalation_mono
     now_mono = time.monotonic()
     with _stats_lock:
         _last_call_stats.clear()
-        _last_call_stats.update({
-            "op_name": op_name,
-            "queue_wait_s": round(queue_wait_s, 3),
-            "duration_s": round(duration_s, 3) if duration_s is not None else None,
-            "ok": ok,
-            "ts": datetime.now(UTC).isoformat(),
-        })
+        _last_call_stats.update(
+            {
+                "op_name": op_name,
+                "queue_wait_s": round(queue_wait_s, 3),
+                "duration_s": round(duration_s, 3) if duration_s is not None else None,
+                "ok": ok,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
         if ok:
             _consecutive_failures = 0
         else:
@@ -229,12 +237,18 @@ def _note_call(op_name: str, queue_wait_s: float,
         logger.warning(
             "avanza_session: %s queued %.1fs behind the session worker "
             "(duration=%s ok=%s)",
-            op_name, queue_wait_s, duration_s, ok,
+            op_name,
+            queue_wait_s,
+            duration_s,
+            ok,
         )
     else:
         logger.debug(
             "avanza_session: %s queue_wait=%.3fs duration=%s ok=%s",
-            op_name, queue_wait_s, duration_s, ok,
+            op_name,
+            queue_wait_s,
+            duration_s,
+            ok,
         )
     if queue_stall:
         _record_critical(
@@ -250,14 +264,16 @@ def _note_call(op_name: str, queue_wait_s: float,
             "effectively DOWN — investigate session auth / browser health."
         )
         _record_critical(
-            "avanza_session_consecutive_failures", msg,
+            "avanza_session_consecutive_failures",
+            msg,
             {"failures": failures, "op_name": op_name},
         )
         _alert_telegram(f"*AVANZA SESSION DEGRADED*\n{msg}")
 
 
-def _run_on_session_thread(fn: Callable[[], Any], *, op_name: str,
-                           timeout: float | None = None) -> Any:
+def _run_on_session_thread(
+    fn: Callable[[], Any], *, op_name: str, timeout: float | None = None
+) -> Any:
     """Execute ``fn`` on the dedicated session worker thread.
 
     Raises:
@@ -298,8 +314,10 @@ def _run_on_session_thread(fn: Callable[[], Any], *, op_name: str,
     finally:
         ended_mono = time.monotonic()
         start_t = started.get("t")
-        queue_wait = (start_t - submitted_mono) if start_t is not None else (
-            ended_mono - submitted_mono
+        queue_wait = (
+            (start_t - submitted_mono)
+            if start_t is not None
+            else (ended_mono - submitted_mono)
         )
         duration = (ended_mono - start_t) if start_t is not None else None
         _note_call(op_name, queue_wait, duration, ok)
@@ -336,7 +354,10 @@ def load_session() -> dict:
                     "Run: python scripts/avanza_login.py"
                 )
         except ValueError:
-            logger.warning("Cannot parse expires_at %r — cannot verify expiry, proceeding with caution", expires_at)
+            logger.warning(
+                "Cannot parse expires_at %r — cannot verify expiry, proceeding with caution",
+                expires_at,
+            )
 
     if not STORAGE_STATE_FILE.exists():
         raise AvanzaSessionError(
@@ -439,12 +460,15 @@ def close_playwright():
         return _close_playwright_inline()
     try:
         return _run_on_session_thread(
-            _close_playwright_inline, op_name="close_playwright", timeout=30,
+            _close_playwright_inline,
+            op_name="close_playwright",
+            timeout=30,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort teardown
         logger.warning(
             "avanza_session: marshalled close_playwright failed (%s) — "
-            "clearing refs inline", exc,
+            "clearing refs inline",
+            exc,
         )
         return _close_playwright_inline()
 
@@ -455,6 +479,7 @@ def verify_session() -> bool:
     Returns:
         True if session is valid, False otherwise.
     """
+
     # A-AV-1: Hold _pw_lock for the entire context+request flow.
     # ctx.request.* is NOT thread-safe; concurrent callers must serialize.
     # 2026-06-12 (audit B4 fix 1): runs on the session worker thread so the
@@ -500,6 +525,7 @@ def _with_browser_recovery(op: Callable[[Any], Any], *, op_name: str) -> Any:
     long-lived thread. The teardown/relaunch inside also happens on that
     thread (``close_playwright`` runs inline when already on the worker).
     """
+
     def _locked_op():
         with _pw_lock:
             ctx = _get_playwright_context()
@@ -510,7 +536,8 @@ def _with_browser_recovery(op: Callable[[Any], Any], *, op_name: str) -> Any:
                     raise
                 logger.warning(
                     "avanza_session: browser dead on %s (%r) — teardown + relaunch + retry",
-                    op_name, exc,
+                    op_name,
+                    exc,
                 )
                 close_playwright()
                 ctx = _get_playwright_context()
@@ -632,7 +659,9 @@ def api_post(path: str, payload: dict) -> Any:
             return json.loads(body)
         except (json.JSONDecodeError, TypeError):
             if not resp.ok:
-                raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
+                raise RuntimeError(
+                    f"Avanza API error {resp.status}: {body[:500]}"
+                ) from None
             return {"raw": body}
 
     try:
@@ -674,7 +703,10 @@ def api_delete(path: str) -> Any:
                 "Session returned 401 Unauthorized. "
                 "Run: python scripts/avanza_login.py"
             )
-        return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
+        return {
+            "http_status": resp.status,
+            "ok": 200 <= resp.status < 300 or resp.status == 404,
+        }
 
     try:
         return _with_browser_recovery(_op, op_name=f"DELETE {path}")
@@ -734,14 +766,16 @@ def get_buying_power(account_id: str | None = None) -> dict | None:
     except Exception as e:
         logger.warning(
             "get_buying_power: api_get raised account_id=%s exception=%r",
-            aid, e,
+            aid,
+            e,
         )
         return None
 
     if not isinstance(data, dict):
         logger.warning(
             "get_buying_power: unexpected response type account_id=%s type=%s",
-            aid, type(data).__name__,
+            aid,
+            type(data).__name__,
         )
         return None
 
@@ -784,15 +818,18 @@ def get_buying_power(account_id: str | None = None) -> dict | None:
     def _make_result(acc: dict) -> dict:
         return {
             "buying_power": _get_balance(
-                acc, "buyingPower",
+                acc,
+                "buyingPower",
                 ("buyingPowerAvailable", "availableCash", "availableFunds"),
             ),
             "total_value": _get_balance(
-                acc, "totalValue",
+                acc,
+                "totalValue",
                 ("accountTotalValue", "totalHoldings"),
             ),
             "own_capital": _get_balance(
-                acc, "ownCapital",
+                acc,
+                "ownCapital",
                 ("netDeposit", "selfOwnedCapital"),
             ),
         }
@@ -814,7 +851,7 @@ def get_buying_power(account_id: str | None = None) -> dict | None:
     # Path A (legacy, pre-2026-04-09): data.categorizedAccounts[].accounts[]
     legacy_cats = data.get("categorizedAccounts") or []
     for cat in legacy_cats:
-        for acc in (cat.get("accounts") or []):
+        for acc in cat.get("accounts") or []:
             r = _check_account(acc)
             if r is not None:
                 return r
@@ -829,7 +866,7 @@ def get_buying_power(account_id: str | None = None) -> dict | None:
     # Path C (new categorized shape, 2026-04-09): data.categories[].accounts[]
     new_cats = data.get("categories") or []
     for cat in new_cats:
-        for acc in (cat.get("accounts") or []):
+        for acc in cat.get("accounts") or []:
             r = _check_account(acc)
             if r is not None:
                 return r
@@ -839,8 +876,13 @@ def get_buying_power(account_id: str | None = None) -> dict | None:
         "get_buying_power: no_account_match account_id=%s "
         "legacy_category_count=%d flat_account_count=%d new_category_count=%d "
         "ids_seen=%s sample_account_keys=%s top_level_keys=%s",
-        aid, len(legacy_cats), len(flat_accounts), len(new_cats),
-        ids_seen, sample_account_keys, list(data.keys()),
+        aid,
+        len(legacy_cats),
+        len(flat_accounts),
+        len(new_cats),
+        ids_seen,
+        sample_account_keys,
+        list(data.keys()),
     )
     return None
 
@@ -900,7 +942,9 @@ def _place_order(
     # H7: account whitelist guard
     effective_account_id = str(account_id or DEFAULT_ACCOUNT_ID)
     if effective_account_id not in ALLOWED_ACCOUNT_IDS:
-        raise ValueError(f"Refusing to trade on non-whitelisted account {effective_account_id!r}")
+        raise ValueError(
+            f"Refusing to trade on non-whitelisted account {effective_account_id!r}"
+        )
 
     # H8: minimum order size guard
     # 2026-06-12 (audit B4 fix 6): position-closing SELLs are exempt. The
@@ -928,14 +972,22 @@ def _place_order(
             except Exception as exc:  # noqa: BLE001 — fail closed on lookup error
                 logger.warning(
                     "_place_order: could not verify closing-sell exemption for "
-                    "ob=%s vol=%d (%s) — keeping 1000 SEK guard", ob_str, volume, exc,
+                    "ob=%s vol=%d (%s) — keeping 1000 SEK guard",
+                    ob_str,
+                    volume,
+                    exc,
                 )
         if not closing_sell:
-            raise ValueError(f"Order total {order_total:.2f} SEK below minimum 1000 SEK")
+            raise ValueError(
+                f"Order total {order_total:.2f} SEK below minimum 1000 SEK"
+            )
         logger.warning(
             "_place_order: sub-minimum closing SELL allowed: %.2f SEK "
             "(vol=%d price=%.3f ob=%s) — minimum-courtage fee applies",
-            order_total, volume, price, ob_str,
+            order_total,
+            volume,
+            price,
+            ob_str,
         )
 
     # BUG-211: maximum order size guard — prevents full-account exposure from
@@ -963,11 +1015,16 @@ def _place_order(
         result = api_post("/_api/trading-critical/rest/order/new", payload)
     status = result.get("orderRequestStatus", "UNKNOWN")
     if status != "SUCCESS":
-        logger.warning("Order %s failed: %s — %s", side, status, result.get("message", ""))
+        logger.warning(
+            "Order %s failed: %s — %s", side, status, result.get("message", "")
+        )
     else:
         logger.info(
             "Order %s placed: %dx @ %.3f SEK (id=%s)",
-            side, volume, price, result.get("orderId", "?"),
+            side,
+            volume,
+            price,
+            result.get("orderId", "?"),
         )
     return result
 
@@ -1004,20 +1061,29 @@ def get_open_orders(account_id: str | None = None) -> list[dict]:
     """
     aid = str(account_id or DEFAULT_ACCOUNT_ID)
     try:
-        data = api_get(f"/_api/trading/rest/order/account/{aid}")
-        if isinstance(data, list):
-            return data
-        return data.get("orders", data.get("openOrders", []))
+        # 2026-07-13: Avanza removed the account-scoped route AND the old
+        # deals-and-orders route ("No static resource" 404 on both). The
+        # surviving endpoint returns all accounts' orders — filter locally.
+        data = api_get("/_api/trading/rest/orders")
+        orders = data.get("orders", []) if isinstance(data, dict) else data
+        return [
+            o
+            for o in orders
+            if str(o.get("accountId", o.get("account", {}).get("id", ""))) in (aid, "")
+        ]
     except RuntimeError as primary_exc:
-        # Endpoint may vary — fallback to deal endpoint
+        # Fallback: the pre-2026-07 account-scoped route, in case Avanza
+        # reverts or the new route disappears.
         try:
-            data = api_get("/_api/trading/rest/deals-and-orders")
-            orders = data.get("orders", [])
-            return [o for o in orders if str(o.get("accountId", "")) == aid]
+            data = api_get(f"/_api/trading/rest/order/account/{aid}")
+            if isinstance(data, list):
+                return data
+            return data.get("orders", data.get("openOrders", []))
         except RuntimeError as fallback_exc:
             logger.warning(
                 "Could not fetch open orders (primary=%s fallback=%s)",
-                primary_exc, fallback_exc,
+                primary_exc,
+                fallback_exc,
             )
             raise AvanzaSessionError(
                 f"Could not fetch open orders for account {aid}: "
@@ -1053,28 +1119,38 @@ def get_positions() -> list[dict]:
 
         vol = volume_obj.get("value", 0) if isinstance(volume_obj, dict) else volume_obj
         val = value_obj.get("value", 0) if isinstance(value_obj, dict) else value_obj
-        acq = acquired_obj.get("value", 0) if isinstance(acquired_obj, dict) else acquired_obj
+        acq = (
+            acquired_obj.get("value", 0)
+            if isinstance(acquired_obj, dict)
+            else acquired_obj
+        )
         latest = quote.get("latest", {})
         last_price = latest.get("value", 0) if isinstance(latest, dict) else latest
         change_pct_obj = quote.get("changePercent", {})
-        change_pct = change_pct_obj.get("value", 0) if isinstance(change_pct_obj, dict) else change_pct_obj
+        change_pct = (
+            change_pct_obj.get("value", 0)
+            if isinstance(change_pct_obj, dict)
+            else change_pct_obj
+        )
 
-        positions.append({
-            "name": inst.get("name", orderbook.get("name", "")),
-            "orderbook_id": str(orderbook.get("id", "")),
-            "instrument_id": str(inst.get("id", "")),
-            "type": inst.get("type", orderbook.get("type", "")),
-            "volume": vol,
-            "value": val,
-            "acquired_value": acq,
-            "profit": val - acq if val and acq else 0,
-            "profit_percent": ((val - acq) / acq * 100) if acq else 0,
-            "currency": inst.get("currency", "SEK"),
-            "last_price": last_price,
-            "change_percent": change_pct,
-            "account_id": account.get("id", ""),
-            "account_type": account.get("type", ""),
-        })
+        positions.append(
+            {
+                "name": inst.get("name", orderbook.get("name", "")),
+                "orderbook_id": str(orderbook.get("id", "")),
+                "instrument_id": str(inst.get("id", "")),
+                "type": inst.get("type", orderbook.get("type", "")),
+                "volume": vol,
+                "value": val,
+                "acquired_value": acq,
+                "profit": val - acq if val and acq else 0,
+                "profit_percent": ((val - acq) / acq * 100) if acq else 0,
+                "currency": inst.get("currency", "SEK"),
+                "last_price": last_price,
+                "change_percent": change_pct,
+                "account_id": account.get("id", ""),
+                "account_type": account.get("type", ""),
+            }
+        )
     return positions
 
 
@@ -1109,7 +1185,9 @@ def place_stop_loss(
     """
     acct = str(account_id or DEFAULT_ACCOUNT_ID)
     if acct not in ALLOWED_ACCOUNT_IDS:
-        raise ValueError(f"Refusing to place stop-loss on non-whitelisted account {acct!r}")
+        raise ValueError(
+            f"Refusing to place stop-loss on non-whitelisted account {acct!r}"
+        )
     valid_until = (date.today() + timedelta(days=valid_days)).isoformat()
 
     # BUG-223: trailing stops (FOLLOW_DOWNWARDS/UPWARDS) legitimately use
@@ -1117,7 +1195,11 @@ def place_stop_loss(
     # must have sell_price > 0 — a zero sell_price would execute as a market
     # sell at whatever price exists, potentially the worst available price.
     _TRAILING_TYPES = {"FOLLOW_DOWNWARDS", "FOLLOW_UPWARDS"}
-    if trigger_type not in _TRAILING_TYPES and value_type == "MONETARY" and sell_price <= 0:
+    if (
+        trigger_type not in _TRAILING_TYPES
+        and value_type == "MONETARY"
+        and sell_price <= 0
+    ):
         raise ValueError(
             f"Non-trailing stop-loss requires sell_price > 0, got {sell_price}"
         )
@@ -1132,7 +1214,10 @@ def place_stop_loss(
             logger.warning(
                 "place_stop_loss leg %.2f SEK below 1000 SEK courtage threshold "
                 "(vol=%d sell=%.3f ob=%s)",
-                leg_total, volume, sell_price, orderbook_id,
+                leg_total,
+                volume,
+                sell_price,
+                orderbook_id,
             )
 
     payload = {
@@ -1164,7 +1249,10 @@ def place_stop_loss(
     if status == "SUCCESS":
         logger.info(
             "Stop-loss placed: %s trigger=%.3f sell=%.3f vol=%d (id=%s)",
-            trigger_type, trigger_price, sell_price, volume,
+            trigger_type,
+            trigger_price,
+            sell_price,
+            volume,
             result.get("stoplossOrderId", "?"),
         )
     else:
@@ -1268,7 +1356,12 @@ def cancel_stop_loss(stop_id: str, account_id: str | None = None) -> dict:
         ``http_status=0`` and an ``error`` key describing the cause.
     """
     if not stop_id:
-        return {"status": "FAILED", "http_status": 0, "stop_id": "", "error": "empty stop_id"}
+        return {
+            "status": "FAILED",
+            "http_status": 0,
+            "stop_id": "",
+            "error": "empty stop_id",
+        }
     acct = str(account_id or DEFAULT_ACCOUNT_ID)
     try:
         # 2026-04-13: cross-process order lock — SL cancel is mutating.
@@ -1277,14 +1370,24 @@ def cancel_stop_loss(stop_id: str, account_id: str | None = None) -> dict:
             result = api_delete(f"/_api/trading/stoploss/{acct}/{stop_id}")
     except Exception as exc:  # noqa: BLE001 — propagate as structured failure
         logger.error("cancel_stop_loss(%s) raised: %s", stop_id, exc, exc_info=True)
-        return {"status": "FAILED", "http_status": 0, "stop_id": stop_id, "error": str(exc)}
+        return {
+            "status": "FAILED",
+            "http_status": 0,
+            "stop_id": stop_id,
+            "error": str(exc),
+        }
     http_status = int(result.get("http_status", 0)) if isinstance(result, dict) else 0
     # 2xx = deleted; 404 = already gone (triggered/expired/cancelled). Both succeed.
     ok = (200 <= http_status < 300) or http_status == 404
     if ok:
         logger.info("cancel_stop_loss(%s) -> %s", stop_id, http_status)
     else:
-        logger.warning("cancel_stop_loss(%s) failed: http=%s result=%s", stop_id, http_status, result)
+        logger.warning(
+            "cancel_stop_loss(%s) failed: http=%s result=%s",
+            stop_id,
+            http_status,
+            result,
+        )
     return {
         "status": "SUCCESS" if ok else "FAILED",
         "http_status": http_status,
@@ -1365,7 +1468,8 @@ def cancel_all_stop_losses_for(
         elapsed = time.monotonic() - started
         logger.error(
             "cancel_all_stop_losses_for(%s): cannot read stop-loss list: %s",
-            target_ob, exc,
+            target_ob,
+            exc,
         )
         return {
             "status": "FAILED",
@@ -1390,6 +1494,7 @@ def cancel_all_stop_losses_for(
     # dependent sell fails downstream. We deep-copy to insulate against any
     # downstream mutation of the returned structure.
     import copy as _copy
+
     snapshot = [_copy.deepcopy(sl) for sl in initial]
 
     # Issue cancels for every matching stop. Use the SL's own account id when
@@ -1416,11 +1521,16 @@ def cancel_all_stop_losses_for(
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "cancel_all_stop_losses_for(%s): poll read failed: %s",
-                target_ob, exc,
+                target_ob,
+                exc,
             )
             poll_read_failed = True
             # We don't know if the stops are gone. Fail closed.
-            remaining = [sl.get("id", "") for sl in initial if sl.get("id") and sl.get("id") not in cancelled]
+            remaining = [
+                sl.get("id", "")
+                for sl in initial
+                if sl.get("id") and sl.get("id") not in cancelled
+            ]
             break
         still = _filter_for_ob(poll_stops)
         remaining = [s.get("id", "") for s in still if s.get("id")]
@@ -1448,19 +1558,27 @@ def cancel_all_stop_losses_for(
         status = "SUCCESS"
         logger.info(
             "cancel_all_stop_losses_for(%s): cleared %d stops in %.2fs",
-            target_ob, len(cancelled), elapsed,
+            target_ob,
+            len(cancelled),
+            elapsed,
         )
     elif cancelled and not poll_read_failed:
         status = "PARTIAL"
         logger.warning(
             "cancel_all_stop_losses_for(%s): PARTIAL — verified_cancelled=%s remaining=%s elapsed=%.2fs",
-            target_ob, cancelled, remaining, elapsed,
+            target_ob,
+            cancelled,
+            remaining,
+            elapsed,
         )
     else:
         status = "FAILED"
         logger.error(
             "cancel_all_stop_losses_for(%s): FAILED — cancelled=%s remaining=%s read_failed=%s",
-            target_ob, cancelled, remaining, poll_read_failed,
+            target_ob,
+            cancelled,
+            remaining,
+            poll_read_failed,
         )
         # When the verification poll failed, we don't actually know which
         # DELETEs took effect. The list of DELETE-accepted ids is
@@ -1541,8 +1659,15 @@ def rearm_stop_losses_from_snapshot(snapshot: list[dict]) -> dict:
                 except (ValueError, TypeError):
                     pass
 
-            if not (ob_id and trigger_value is not None and sell_price is not None and volume):
-                logger.warning("rearm_stop_losses: snapshot entry missing fields: %s", sl)
+            if not (
+                ob_id
+                and trigger_value is not None
+                and sell_price is not None
+                and volume
+            ):
+                logger.warning(
+                    "rearm_stop_losses: snapshot entry missing fields: %s", sl
+                )
                 failed.append(original_id)
                 continue
 
@@ -1561,18 +1686,24 @@ def rearm_stop_losses_from_snapshot(snapshot: list[dict]) -> dict:
                 rearmed.append(new_id)
                 logger.info(
                     "rearm_stop_losses: replaced %s -> %s (ob=%s vol=%s)",
-                    original_id, new_id, ob_id, volume,
+                    original_id,
+                    new_id,
+                    ob_id,
+                    volume,
                 )
             else:
                 logger.warning(
                     "rearm_stop_losses: place_stop_loss failed for original %s: %s",
-                    original_id, result,
+                    original_id,
+                    result,
                 )
                 failed.append(original_id)
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "rearm_stop_losses: exception for original %s: %s",
-                original_id, exc, exc_info=True,
+                original_id,
+                exc,
+                exc_info=True,
             )
             failed.append(original_id)
 
@@ -1602,7 +1733,12 @@ def get_instrument_price(orderbook_id: str) -> dict[str, Any]:
             )
             return data
         except Exception as e:
-            logger.warning("Market guide lookup failed for %s/%s: %s", instrument_type, orderbook_id, e)
+            logger.warning(
+                "Market guide lookup failed for %s/%s: %s",
+                instrument_type,
+                orderbook_id,
+                e,
+            )
             continue
 
     # Fallback: generic orderbook endpoint

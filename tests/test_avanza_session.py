@@ -33,7 +33,8 @@ def _make_session_data(
     """Create a valid session data dict."""
     now = datetime.now(UTC)
     return {
-        "cookies": cookies or [
+        "cookies": cookies
+        or [
             {
                 "name": "ava_cookie",
                 "value": "cookie_value",
@@ -70,8 +71,10 @@ def session_file():
         ssf = Path(td) / "avanza_storage_state.json"
         # Create a minimal storage state file so load_session doesn't fail
         ssf.write_text("{}", encoding="utf-8")
-        with patch("portfolio.avanza_session.SESSION_FILE", sf), \
-             patch("portfolio.avanza_session.STORAGE_STATE_FILE", ssf):
+        with (
+            patch("portfolio.avanza_session.SESSION_FILE", sf),
+            patch("portfolio.avanza_session.STORAGE_STATE_FILE", ssf),
+        ):
             yield sf
 
 
@@ -121,6 +124,7 @@ class TestLoadSession:
         session_file.write_text(json.dumps(data), encoding="utf-8")
         # Remove the storage state file created by the fixture
         import portfolio.avanza_session as mod
+
         mod.STORAGE_STATE_FILE.unlink(missing_ok=True)
         with pytest.raises(AvanzaSessionError, match="storage state"):
             load_session()
@@ -240,9 +244,7 @@ class TestApiGet:
 
     @patch("portfolio.avanza_session._get_playwright_context")
     def test_full_url_not_prepended(self, mock_get_ctx, session_file):
-        mock_ctx, mock_resp = _make_mock_pw_context(
-            status=200, json_data={}, ok=True
-        )
+        mock_ctx, mock_resp = _make_mock_pw_context(status=200, json_data={}, ok=True)
         mock_get_ctx.return_value = mock_ctx
 
         api_get("https://custom.url/api/test")
@@ -341,14 +343,17 @@ class TestGetInstrumentPrice:
 class TestLoginHelpers:
     def test_no_tokens_not_logged_in(self):
         from scripts.avanza_login import _is_logged_in
+
         assert _is_logged_in({}) is False
 
     def test_customer_id_means_logged_in(self):
         from scripts.avanza_login import _is_logged_in
+
         assert _is_logged_in({"customer_id": "12345"}) is True
 
     def test_csid_cstoken_cookies_means_logged_in(self):
         from scripts.avanza_login import _is_logged_in
+
         cookies = [
             {"name": "csid", "value": "abc"},
             {"name": "cstoken", "value": "def"},
@@ -357,11 +362,13 @@ class TestLoginHelpers:
 
     def test_partial_cookies_not_logged_in(self):
         from scripts.avanza_login import _is_logged_in
+
         cookies = [{"name": "csid", "value": "abc"}]
         assert _is_logged_in({}, cookies=cookies) is False
 
     def test_irrelevant_cookies_not_logged_in(self):
         from scripts.avanza_login import _is_logged_in
+
         cookies = [{"name": "session", "value": "xyz"}]
         assert _is_logged_in({}, cookies=cookies) is False
 
@@ -376,7 +383,9 @@ class TestPlaceStopLoss:
 
         mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-123"}
 
-        result = place_stop_loss("856394", trigger_price=23.0, sell_price=22.5, volume=100)
+        result = place_stop_loss(
+            "856394", trigger_price=23.0, sell_price=22.5, volume=100
+        )
         assert result["status"] == "SUCCESS"
         assert result["stoplossOrderId"] == "SL-123"
 
@@ -421,8 +430,12 @@ class TestPlaceStopLoss:
         mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-TRAIL"}
 
         place_stop_loss(
-            "856394", trigger_price=5.0, sell_price=0, volume=50,
-            trigger_type="FOLLOW_DOWNWARDS", value_type="PERCENTAGE",
+            "856394",
+            trigger_price=5.0,
+            sell_price=0,
+            volume=50,
+            trigger_type="FOLLOW_DOWNWARDS",
+            value_type="PERCENTAGE",
         )
         payload = mock_post.call_args[0][1]
         assert payload["stopLossTrigger"]["type"] == "FOLLOW_DOWNWARDS"
@@ -446,8 +459,12 @@ class TestPlaceStopLoss:
         mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-T0"}
 
         result = place_stop_loss(
-            "856394", trigger_price=5.0, sell_price=0, volume=50,
-            trigger_type="FOLLOW_DOWNWARDS", value_type="MONETARY",
+            "856394",
+            trigger_price=5.0,
+            sell_price=0,
+            volume=50,
+            trigger_type="FOLLOW_DOWNWARDS",
+            value_type="MONETARY",
         )
         assert result["status"] == "SUCCESS"
         mock_post.assert_called_once()
@@ -725,12 +742,15 @@ class TestPlaywrightLockSerialization:
         import threading
 
         from portfolio.avanza_session import _pw_lock
+
         # threading.RLock is a factory, not a class — check via behavior:
         # RLock allows the same thread to acquire twice without blocking.
         acquired_twice = [False]
+
         def double_acquire():
             with _pw_lock, _pw_lock:
                 acquired_twice[0] = True
+
         t = threading.Thread(target=double_acquire)
         t.start()
         t.join(timeout=1.0)
@@ -767,7 +787,9 @@ class TestPlaywrightLockSerialization:
         mock_ctx.request.get.side_effect = fake_get
         mock_get_ctx.return_value = mock_ctx
 
-        threads = [threading.Thread(target=api_get, args=("/_api/test",)) for _ in range(10)]
+        threads = [
+            threading.Thread(target=api_get, args=("/_api/test",)) for _ in range(10)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -782,7 +804,9 @@ class TestPlaywrightLockSerialization:
 
     @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
     @patch("portfolio.avanza_session._get_playwright_context")
-    def test_concurrent_api_post_serialized(self, mock_get_ctx, mock_csrf, session_file):
+    def test_concurrent_api_post_serialized(
+        self, mock_get_ctx, mock_csrf, session_file
+    ):
         """Same invariant for api_post."""
         import threading
         import time
@@ -811,19 +835,24 @@ class TestPlaywrightLockSerialization:
         mock_ctx.request.post.side_effect = fake_post
         mock_get_ctx.return_value = mock_ctx
 
-        threads = [threading.Thread(target=api_post, args=("/_api/test", {"a": 1})) for _ in range(10)]
+        threads = [
+            threading.Thread(target=api_post, args=("/_api/test", {"a": 1}))
+            for _ in range(10)
+        ]
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=5.0)
 
-        assert max_active[0] == 1, (
-            f"api_post not serialized: max concurrent={max_active[0]}"
-        )
+        assert (
+            max_active[0] == 1
+        ), f"api_post not serialized: max concurrent={max_active[0]}"
 
     @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
     @patch("portfolio.avanza_session._get_playwright_context")
-    def test_concurrent_mixed_get_post_delete_serialized(self, mock_get_ctx, mock_csrf, session_file):
+    def test_concurrent_mixed_get_post_delete_serialized(
+        self, mock_get_ctx, mock_csrf, session_file
+    ):
         """Mixed api_get/api_post/api_delete must all serialize through the
         same lock — that's the actual race condition in production
         (one ticker reads positions while another places an order)."""
@@ -851,6 +880,7 @@ class TestPlaywrightLockSerialization:
                 resp.json.return_value = {}
                 resp.text.return_value = "{}"
                 return resp
+
             return fake
 
         mock_ctx = MagicMock()
@@ -862,8 +892,12 @@ class TestPlaywrightLockSerialization:
         threads = []
         for _ in range(5):
             threads.append(threading.Thread(target=api_get, args=("/_api/positions",)))
-            threads.append(threading.Thread(target=api_post, args=("/_api/order/new", {"x": 1})))
-            threads.append(threading.Thread(target=api_delete, args=("/_api/order/123",)))
+            threads.append(
+                threading.Thread(target=api_post, args=("/_api/order/new", {"x": 1}))
+            )
+            threads.append(
+                threading.Thread(target=api_delete, args=("/_api/order/123",))
+            )
 
         for t in threads:
             t.start()
@@ -881,21 +915,25 @@ class TestPlaceOrderValidation:
 
     def test_empty_orderbook_id_raises(self):
         from portfolio.avanza_session import _place_order
+
         with pytest.raises(ValueError, match="orderbook_id is required"):
             _place_order("BUY", "", 100.0, 10)
 
     def test_none_orderbook_id_raises(self):
         from portfolio.avanza_session import _place_order
+
         with pytest.raises(ValueError, match="orderbook_id is required"):
             _place_order("BUY", None, 100.0, 10)
 
     def test_non_numeric_orderbook_id_raises(self):
         from portfolio.avanza_session import _place_order
+
         with pytest.raises(ValueError, match="must be numeric"):
             _place_order("BUY", "abc", 100.0, 10)
 
     def test_valid_numeric_orderbook_id_passes_guard(self):
         from portfolio.avanza_session import _place_order
+
         with pytest.raises(ValueError, match="non-whitelisted account"):
             _place_order("BUY", "12345", 100.0, 10, account_id="999999")
 
@@ -915,12 +953,14 @@ import portfolio.avanza_session as avz
 @pytest.fixture
 def _reset_executor_stats():
     """Reset the executor's escalation/stat globals around each test."""
+
     def _reset():
         with avz._stats_lock:
             avz._last_call_stats.clear()
         avz._consecutive_failures = 0
         avz._last_queue_stall_escalation_mono = 0.0
         avz._last_failure_escalation_mono = 0.0
+
     _reset()
     yield
     _reset()
@@ -928,16 +968,19 @@ def _reset_executor_stats():
 
 class TestSessionExecutorPinning:
     def test_calls_from_different_threads_land_on_one_worker(
-        self, _reset_executor_stats,
+        self,
+        _reset_executor_stats,
     ):
         first = avz._run_on_session_thread(
-            threading.get_ident, op_name="probe-main",
+            threading.get_ident,
+            op_name="probe-main",
         )
         from_thread: list[int] = []
         t = threading.Thread(
             target=lambda: from_thread.append(
                 avz._run_on_session_thread(
-                    threading.get_ident, op_name="probe-thread",
+                    threading.get_ident,
+                    op_name="probe-thread",
                 )
             ),
         )
@@ -956,10 +999,12 @@ class TestSessionExecutorPinning:
             avz._run_on_session_thread(_inner, op_name="outer")
 
     def test_queue_wait_and_duration_metrics_exposed(
-        self, _reset_executor_stats,
+        self,
+        _reset_executor_stats,
     ):
         result = avz._run_on_session_thread(
-            lambda: (_time.sleep(0.05), 42)[1], op_name="probe-stats",
+            lambda: (_time.sleep(0.05), 42)[1],
+            op_name="probe-stats",
         )
         assert result == 42
         stats = avz.session_call_stats()
@@ -972,20 +1017,24 @@ class TestSessionExecutorPinning:
         assert stats["consecutive_failures"] == 0
 
     def test_queue_stall_records_critical_error(
-        self, _reset_executor_stats, monkeypatch,
+        self,
+        _reset_executor_stats,
+        monkeypatch,
     ):
         import portfolio.claude_gate as cg
 
         events: list[tuple] = []
         monkeypatch.setattr(
-            cg, "record_critical_error",
+            cg,
+            "record_critical_error",
             lambda *a, **k: events.append(a) or True,
         )
         monkeypatch.setattr(avz, "_QUEUE_WAIT_CRITICAL_S", 0.05)
 
         hog = threading.Thread(
             target=lambda: avz._run_on_session_thread(
-                lambda: _time.sleep(0.3), op_name="hog",
+                lambda: _time.sleep(0.3),
+                op_name="hog",
             ),
         )
         hog.start()
@@ -995,14 +1044,17 @@ class TestSessionExecutorPinning:
         assert any(a[0] == "avanza_session_queue_stall" for a in events)
 
     def test_consecutive_failures_escalate(
-        self, _reset_executor_stats, monkeypatch,
+        self,
+        _reset_executor_stats,
+        monkeypatch,
     ):
         import portfolio.claude_gate as cg
 
         events: list[tuple] = []
         telegrams: list[str] = []
         monkeypatch.setattr(
-            cg, "record_critical_error",
+            cg,
+            "record_critical_error",
             lambda *a, **k: events.append(a) or True,
         )
         monkeypatch.setattr(avz, "_alert_telegram", telegrams.append)
@@ -1015,9 +1067,7 @@ class TestSessionExecutorPinning:
             with pytest.raises(RuntimeError, match="simulated"):
                 avz._run_on_session_thread(_boom, op_name="boom")
 
-        assert any(
-            a[0] == "avanza_session_consecutive_failures" for a in events
-        )
+        assert any(a[0] == "avanza_session_consecutive_failures" for a in events)
         assert telegrams, "telegram escalation not sent"
         # A success resets the streak.
         avz._run_on_session_thread(lambda: 1, op_name="ok")
@@ -1026,7 +1076,9 @@ class TestSessionExecutorPinning:
     def test_timeout_raises_session_timeout(self, _reset_executor_stats):
         with pytest.raises(avz.AvanzaSessionTimeout, match="timed out"):
             avz._run_on_session_thread(
-                lambda: _time.sleep(0.4), op_name="slow", timeout=0.05,
+                lambda: _time.sleep(0.4),
+                op_name="slow",
+                timeout=0.05,
             )
         # Drain the worker so later tests don't inherit the queue delay.
         avz._run_on_session_thread(lambda: 1, op_name="drain", timeout=5)
@@ -1042,26 +1094,43 @@ class TestGetOpenOrdersFailure:
     @patch("portfolio.avanza_session.api_get")
     def test_both_endpoints_failing_raises(self, mock_api_get):
         from portfolio.avanza_session import get_open_orders
+
         mock_api_get.side_effect = RuntimeError("Avanza API error 503")
         with pytest.raises(AvanzaSessionError, match="Could not fetch open orders"):
             get_open_orders()
 
     @patch("portfolio.avanza_session.api_get")
-    def test_fallback_endpoint_still_used(self, mock_api_get):
+    def test_primary_filters_other_accounts(self, mock_api_get):
+        # 2026-07-13 endpoint change: primary /_api/trading/rest/orders is
+        # account-global — result must be filtered to the requested account.
         from portfolio.avanza_session import get_open_orders
-        mock_api_get.side_effect = [
-            RuntimeError("Avanza API error 500"),
-            {"orders": [
+
+        mock_api_get.return_value = {
+            "orders": [
                 {"accountId": "1625505", "orderId": "A1"},
                 {"accountId": "999", "orderId": "A2"},
-            ]},
-        ]
+            ]
+        }
         orders = get_open_orders()
         assert [o["orderId"] for o in orders] == ["A1"]
 
     @patch("portfolio.avanza_session.api_get")
+    def test_fallback_endpoint_still_used(self, mock_api_get):
+        # Fallback = pre-2026-07 account-scoped route; server-side scoped,
+        # returned as-is.
+        from portfolio.avanza_session import get_open_orders
+
+        mock_api_get.side_effect = [
+            RuntimeError("Avanza API error 404"),
+            {"orders": [{"accountId": "1625505", "orderId": "B1"}]},
+        ]
+        orders = get_open_orders()
+        assert [o["orderId"] for o in orders] == ["B1"]
+
+    @patch("portfolio.avanza_session.api_get")
     def test_genuinely_empty_book_returns_empty_list(self, mock_api_get):
         from portfolio.avanza_session import get_open_orders
+
         mock_api_get.return_value = {"orders": []}
         assert get_open_orders() == []
 
@@ -1075,6 +1144,7 @@ class TestGetOpenOrdersFailure:
 class TestClosingSellMinimumExemption:
     def test_sub_minimum_buy_still_raises(self):
         from portfolio.avanza_session import place_buy_order
+
         with pytest.raises(ValueError, match="below minimum 1000"):
             place_buy_order("123456", 5.0, 10)  # 50 SEK
 
@@ -1082,6 +1152,7 @@ class TestClosingSellMinimumExemption:
     @patch("portfolio.avanza_session.get_positions")
     def test_closing_sell_exempt_from_minimum(self, mock_positions, mock_post):
         from portfolio.avanza_session import place_sell_order
+
         mock_positions.return_value = [
             {"orderbook_id": "123456", "account_id": "1625505", "volume": 10},
         ]
@@ -1094,6 +1165,7 @@ class TestClosingSellMinimumExemption:
     @patch("portfolio.avanza_session.get_positions")
     def test_sell_without_matching_position_raises(self, mock_positions, mock_post):
         from portfolio.avanza_session import place_sell_order
+
         mock_positions.return_value = []  # nothing held — not a closing sell
         with pytest.raises(ValueError, match="below minimum 1000"):
             place_sell_order("123456", 5.0, 10)
@@ -1103,6 +1175,7 @@ class TestClosingSellMinimumExemption:
     @patch("portfolio.avanza_session.get_positions")
     def test_sell_exceeding_held_volume_raises(self, mock_positions, mock_post):
         from portfolio.avanza_session import place_sell_order
+
         mock_positions.return_value = [
             {"orderbook_id": "123456", "account_id": "1625505", "volume": 5},
         ]
@@ -1114,6 +1187,7 @@ class TestClosingSellMinimumExemption:
     @patch("portfolio.avanza_session.get_positions")
     def test_position_lookup_failure_fails_closed(self, mock_positions, mock_post):
         from portfolio.avanza_session import place_sell_order
+
         mock_positions.side_effect = RuntimeError("api down")
         with pytest.raises(ValueError, match="below minimum 1000"):
             place_sell_order("123456", 5.0, 10)
@@ -1125,13 +1199,16 @@ class TestMutationTimeoutEscalation:
     still have succeeded at the broker — must surface a critical entry."""
 
     def test_api_post_timeout_records_mutation_critical(
-        self, _reset_executor_stats, monkeypatch,
+        self,
+        _reset_executor_stats,
+        monkeypatch,
     ):
         import portfolio.claude_gate as cg
 
         events: list[tuple] = []
         monkeypatch.setattr(
-            cg, "record_critical_error",
+            cg,
+            "record_critical_error",
             lambda *a, **k: events.append(a) or True,
         )
         avz._last_mutation_timeout_escalation_mono = 0.0
@@ -1145,13 +1222,16 @@ class TestMutationTimeoutEscalation:
         assert any(a[0] == "avanza_mutation_timeout" for a in events)
 
     def test_api_delete_timeout_records_mutation_critical(
-        self, _reset_executor_stats, monkeypatch,
+        self,
+        _reset_executor_stats,
+        monkeypatch,
     ):
         import portfolio.claude_gate as cg
 
         events: list[tuple] = []
         monkeypatch.setattr(
-            cg, "record_critical_error",
+            cg,
+            "record_critical_error",
             lambda *a, **k: events.append(a) or True,
         )
         avz._last_mutation_timeout_escalation_mono = 0.0
@@ -1165,13 +1245,16 @@ class TestMutationTimeoutEscalation:
         assert any(a[0] == "avanza_mutation_timeout" for a in events)
 
     def test_get_timeout_does_not_record_mutation_critical(
-        self, _reset_executor_stats, monkeypatch,
+        self,
+        _reset_executor_stats,
+        monkeypatch,
     ):
         import portfolio.claude_gate as cg
 
         events: list[tuple] = []
         monkeypatch.setattr(
-            cg, "record_critical_error",
+            cg,
+            "record_critical_error",
             lambda *a, **k: events.append(a) or True,
         )
 
