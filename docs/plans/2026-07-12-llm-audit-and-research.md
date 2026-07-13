@@ -171,3 +171,31 @@ Zero errors, zero breaker trips across all 3,848 inferences.
 - **qwen3: coin flip (50.0%) on indicator-only context.** Its live 58.9%
   presumably owes to richer context — do not replace yet, but phi4_mini
   beats it same-sample by ~17 points.
+
+## DESIGN INVESTIGATION (2026-07-14, from 5,772 backtest votes)
+
+1. **Model self-confidence is non-discriminative — ignore it.** All three
+   models mode-collapse to ~0.75 confidence. fin_r1 scores 47.0% while
+   reporting 75% confidence (n=366). The system's empirical
+   accuracy-weighting (accuracy gate + tier boosts) is the correct design;
+   never weight votes by model-reported conf.
+2. **phi4 is an overbought-zone specialist.** Vote rate: 53.8% when
+   RSI>65 vs ~5% elsewhere. Accuracy uniform (~61%) across regimes —
+   selectivity, not regime luck.
+3. **The LLM adds real signal over its inputs.** Naive rule (SELL RSI>65 /
+   BUY RSI<35) on the same timestamps: 48.5% (n=458). phi4 in the same
+   overbought zone: 61.0% (n=105), deviating from the naive rule in 27/105
+   votes (BUY-on-overbought continuation calls). +12.5pts = genuine
+   multi-indicator discrimination, not RSI repackaging.
+4. **Selectivity correlates with quality.** phi4 votes 11% of the time and
+   wins; fin_r1 votes 19% and loses. High abstain rate is a feature.
+   HOLDs are deliberate low-edge calls, all parse-clean.
+5. **Competence is instrument×horizon specific.** Crypto @24h only
+   (intraday = coin flip), XAU all tested horizons, XAG @3h only.
+   Promotion wiring must stay per-ticker (done via
+   _DISABLED_SIGNAL_OVERRIDES) — interval sweep running to complete
+   the matrix.
+6. fin_r1 autopsy: systematic long bias (131 BUY vs 52 SELL crypto; hit
+   42.7% on BUYs in a flat-to-down market) + finance-QA training that
+   does not transfer to direction calls. Confidently wrong — worst
+   failure mode for a voter.
