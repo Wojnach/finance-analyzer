@@ -1,0 +1,257 @@
+"""Historical LLM backtest — replay indicator snapshots through local models.
+
+Rebuilds the trading-prompt context at historical timestamps from Binance
+1h klines, queries each llama_server model on identical prompts (temp 0),
+and scores directional accuracy against the known +1d outcome.
+
+Usage (on the GPU host):
+    python scripts/llm_backtest.py --models ministral3,qwen3,phi4_mini,fin_r1 \
+        --start 2026-02-01 --end 2026-07-11 --step-hours 8 --out data/llm_backtest_results.jsonl
+    python scripts/llm_backtest.py --score data/llm_backtest_results.jsonl
+
+Context is indicator-only (RSI/MACD/EMA/BB/volume + historical Fear&Greed);
+news sentiment is fixed to "neutral" because it cannot be reconstructed.
+Scores are comparable ACROSS models (same inputs), not with live accuracy
+stats (different context mix).
+"""
+
+import argparse
+import datetime as dt
+import json
+import sys
+import time
+from collections import defaultdict
+from pathlib import Path
+
+import pandas as pd
+import requests
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from portfolio.signal_utils import ema, rsi  # noqa: E402
+
+BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+FNG_HISTORY = "https://api.alternative.me/fng/?limit=0"
+TICKERS = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
+
+
+def fetch_klines_1h(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+    rows = []
+    cur = start_ms
+    while cur < end_ms:
+        r = requests.get(
+            BINANCE_KLINES,
+            params={
+                "symbol": symbol,
+                "interval": "1h",
+                "startTime": cur,
+                "endTime": end_ms,
+                "limit": 1000,
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        rows.extend(batch)
+        cur = batch[-1][6] + 1
+        time.sleep(0.15)
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "open_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "close_time",
+            "qv",
+            "n",
+            "tbb",
+            "tbq",
+            "ig",
+        ],
+    )
+    for c in ("open", "high", "low", "close", "volume"):
+        df[c] = df[c].astype(float)
+    df["ts"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    return df.set_index("ts")
+
+
+def fetch_fng() -> dict:
+    data = requests.get(FNG_HISTORY, timeout=15).json()["data"]
+    return {
+        dt.datetime.fromtimestamp(int(d["timestamp"]), dt.UTC).date(): int(d["value"])
+        for d in data
+    }
+
+
+def build_context(
+    df: pd.DataFrame, at: pd.Timestamp, ticker: str, fng: dict
+) -> dict | None:
+    hist = df[df.index <= at]
+    if len(hist) < 120:
+        return None
+    close = hist["close"]
+    price = float(close.iloc[-1])
+    rsi_v = float(rsi(close, 14).iloc[-1])
+    macd_line = ema(close, 12) - ema(close, 26)
+    macd_hist = float((macd_line - ema(macd_line, 9)).iloc[-1])
+    e9, e21 = float(ema(close, 9).iloc[-1]), float(ema(close, 21).iloc[-1])
+    sma20 = close.rolling(20).mean()
+    std20 = close.rolling(20).std()
+    upper = float(sma20.iloc[-1] + 2 * std20.iloc[-1])
+    lower = float(sma20.iloc[-1] - 2 * std20.iloc[-1])
+    if price > upper:
+        bb_pos = "above upper band"
+    elif price < lower:
+        bb_pos = "below lower band"
+    else:
+        bb_pos = "between bands, near middle"
+    vol_ratio = float(
+        hist["volume"].iloc[-1] / hist["volume"].rolling(20).mean().iloc[-1]
+    )
+    day_ago = close[close.index <= at - pd.Timedelta(hours=24)]
+    chg24 = (price / float(day_ago.iloc[-1]) - 1) * 100 if len(day_ago) else 0.0
+    return {
+        "ticker": ticker,
+        "price_usd": price,
+        "change_24h": f"{chg24:+.2f}%",
+        "rsi": round(rsi_v, 1),
+        "macd_hist": round(macd_hist, 2),
+        "ema_bullish": e9 > e21,
+        "ema_gap_pct": round((e9 / e21 - 1) * 100, 2),
+        "bb_position": bb_pos,
+        "volume_ratio": round(vol_ratio, 2),
+        "fear_greed": fng.get(at.date(), 50),
+        "sentiment": "neutral",
+    }
+
+
+def outcome_1d(df: pd.DataFrame, at: pd.Timestamp) -> float | None:
+    fut = df[df.index >= at + pd.Timedelta(hours=24)]
+    hist = df[df.index <= at]
+    if fut.empty or hist.empty:
+        return None
+    return (float(fut["close"].iloc[0]) / float(hist["close"].iloc[-1]) - 1) * 100
+
+
+def run(args):
+    from portfolio.llama_server import query_llama_server, stop_server
+    from portfolio.qwen3_trader import _build_prompt, _parse_response
+
+    start = pd.Timestamp(args.start, tz="UTC")
+    end = pd.Timestamp(args.end, tz="UTC")
+    fng = fetch_fng()
+    frames = {}
+    for tick, sym in TICKERS.items():
+        pad = start - pd.Timedelta(days=10)
+        frames[tick] = fetch_klines_1h(
+            sym,
+            int(pad.timestamp() * 1000),
+            int((end + pd.Timedelta(days=2)).timestamp() * 1000),
+        )
+        print(f"{tick}: {len(frames[tick])} candles", flush=True)
+
+    cases = []
+    at = start
+    while at <= end:
+        for tick in TICKERS:
+            ctx = build_context(frames[tick], at, tick, fng)
+            out = outcome_1d(frames[tick], at)
+            if ctx is not None and out is not None:
+                cases.append(
+                    {"at": at.isoformat(), "ctx": ctx, "outcome_pct": round(out, 3)}
+                )
+        at += pd.Timedelta(hours=args.step_hours)
+    print(f"{len(cases)} cases x {len(args.models.split(','))} models", flush=True)
+
+    done = set()
+    out_path = Path(args.out)
+    if out_path.exists():
+        for line in out_path.open():
+            r = json.loads(line)
+            done.add((r["model"], r["at"], r["ticker"]))
+        print(f"resume: {len(done)} results already present", flush=True)
+
+    with out_path.open("a") as fh:
+        for model in args.models.split(","):
+            todo = [
+                c for c in cases if (model, c["at"], c["ctx"]["ticker"]) not in done
+            ]
+            print(f"[{model}] {len(todo)} queries", flush=True)
+            for i, c in enumerate(todo):
+                t0 = time.time()
+                try:
+                    raw = query_llama_server(
+                        model, _build_prompt(c["ctx"]), n_predict=2048, temperature=0.0
+                    )
+                    vote, reason, conf = _parse_response(raw)
+                except Exception as e:
+                    vote, reason, conf = "ERROR", str(e)[:120], None
+                fh.write(
+                    json.dumps(
+                        {
+                            "model": model,
+                            "at": c["at"],
+                            "ticker": c["ctx"]["ticker"],
+                            "vote": vote,
+                            "conf": conf,
+                            "outcome_pct": c["outcome_pct"],
+                            "secs": round(time.time() - t0, 1),
+                        }
+                    )
+                    + "\n"
+                )
+                fh.flush()
+                if i % 25 == 0:
+                    print(
+                        f"[{model}] {i}/{len(todo)} last={vote} {time.time()-t0:.0f}s",
+                        flush=True,
+                    )
+    stop_server()
+    print("BACKTEST RUN COMPLETE", flush=True)
+
+
+def score(path):
+    stats = defaultdict(lambda: {"hit": 0, "dir": 0, "hold": 0, "err": 0, "n": 0})
+    for line in open(path):
+        r = json.loads(line)
+        s = stats[r["model"]]
+        s["n"] += 1
+        if r["vote"] in ("BUY", "SELL"):
+            s["dir"] += 1
+            if (r["vote"] == "BUY" and r["outcome_pct"] > 0) or (
+                r["vote"] == "SELL" and r["outcome_pct"] < 0
+            ):
+                s["hit"] += 1
+        elif r["vote"] == "ERROR":
+            s["err"] += 1
+        else:
+            s["hold"] += 1
+    print(
+        f"{'model':16s} {'1d dir acc':>10s} {'B/S votes':>9s} {'abstain%':>8s} {'errors':>6s} {'total':>6s}"
+    )
+    for m, s in sorted(stats.items()):
+        acc = s["hit"] / s["dir"] * 100 if s["dir"] else 0
+        print(
+            f"{m:16s} {acc:9.1f}% {s['dir']:9d} {s['hold']/s['n']*100:7.1f}% {s['err']:6d} {s['n']:6d}"
+        )
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--models", default="ministral3,qwen3,phi4_mini,fin_r1")
+    p.add_argument("--start", default="2026-02-01")
+    p.add_argument("--end", default="2026-07-11")
+    p.add_argument("--step-hours", type=int, default=8)
+    p.add_argument("--out", default="data/llm_backtest_results.jsonl")
+    p.add_argument("--score", metavar="RESULTS")
+    a = p.parse_args()
+    if a.score:
+        score(a.score)
+    else:
+        run(a)
