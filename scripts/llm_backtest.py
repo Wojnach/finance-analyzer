@@ -32,18 +32,23 @@ sys.path.insert(0, str(REPO))
 from portfolio.signal_utils import ema, rsi  # noqa: E402
 
 BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+BINANCE_FAPI_KLINES = "https://fapi.binance.com/fapi/v1/klines"
 FNG_HISTORY = "https://api.alternative.me/fng/?limit=0"
 TICKERS = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
+FAPI_TICKERS = {"XAU-USD": "XAUUSDT", "XAG-USD": "XAGUSDT"}
+HORIZONS_H = (1, 3, 24)
 
 
-def fetch_klines_1h(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def fetch_klines_1h(
+    symbol: str, start_ms: int, end_ms: int, base_url: str = BINANCE_KLINES
+) -> pd.DataFrame:
     rows = []
     cur = start_ms
     while cur < end_ms:
         for attempt in range(3):
             try:
                 r = requests.get(
-                    BINANCE_KLINES,
+                    base_url,
                     params={
                         "symbol": symbol,
                         "interval": "1h",
@@ -138,8 +143,8 @@ def build_context(
     }
 
 
-def outcome_1d(df: pd.DataFrame, at: pd.Timestamp) -> float | None:
-    fut = df[df.index >= at + pd.Timedelta(hours=24)]
+def outcome_at(df: pd.DataFrame, at: pd.Timestamp, hours: int) -> float | None:
+    fut = df[df.index >= at + pd.Timedelta(hours=hours)]
     hist = df[df.index <= at]
     if fut.empty or hist.empty:
         return None
@@ -153,26 +158,36 @@ def run(args):
     start = pd.Timestamp(args.start, tz="UTC")
     end = pd.Timestamp(args.end, tz="UTC")
     fng = fetch_fng()
+    wanted = [t.strip() for t in args.tickers.split(",")]
     frames = {}
-    for tick, sym in TICKERS.items():
+    for tick in wanted:
+        if tick in TICKERS:
+            sym, url = TICKERS[tick], BINANCE_KLINES
+        elif tick in FAPI_TICKERS:
+            sym, url = FAPI_TICKERS[tick], BINANCE_FAPI_KLINES
+        else:
+            raise SystemExit(f"unknown ticker {tick}")
         pad = start - pd.Timedelta(days=10)
         frames[tick] = fetch_klines_1h(
             sym,
             int(pad.timestamp() * 1000),
             int((end + pd.Timedelta(days=2)).timestamp() * 1000),
+            base_url=url,
         )
         print(f"{tick}: {len(frames[tick])} candles", flush=True)
 
     cases = []
     at = start
     while at <= end:
-        for tick in TICKERS:
+        for tick in frames:
             ctx = build_context(frames[tick], at, tick, fng)
-            out = outcome_1d(frames[tick], at)
-            if ctx is not None and out is not None:
-                cases.append(
-                    {"at": at.isoformat(), "ctx": ctx, "outcome_pct": round(out, 3)}
-                )
+            outs = {
+                f"outcome_{h}h_pct": outcome_at(frames[tick], at, h)
+                for h in HORIZONS_H
+            }
+            if ctx is not None and outs.get("outcome_24h_pct") is not None:
+                outs = {k: (round(v, 3) if v is not None else None) for k, v in outs.items()}
+                cases.append({"at": at.isoformat(), "ctx": ctx, **outs})
         at += pd.Timedelta(hours=args.step_hours)
     print(f"{len(cases)} cases x {len(args.models.split(','))} models", flush=True)
 
@@ -208,7 +223,8 @@ def run(args):
                     "ticker": c["ctx"]["ticker"],
                     "vote": vote,
                     "conf": conf,
-                    "outcome_pct": c["outcome_pct"],
+                    "outcome_pct": c["outcome_24h_pct"],
+                    **{k: c[k] for k in c if k.startswith("outcome_")},
                     "secs": round(time.time() - t0, 1),
                 }
                 # Raw output kept on failures always (post-mortem), on all
@@ -276,6 +292,7 @@ if __name__ == "__main__":
     p.add_argument("--start", default="2026-02-01")
     p.add_argument("--end", default="2026-07-11")
     p.add_argument("--step-hours", type=int, default=8)
+    p.add_argument("--tickers", default="BTC-USD,ETH-USD")
     p.add_argument("--out", default="data/llm_backtest_results.jsonl")
     p.add_argument("--keep-raw", action="store_true")
     p.add_argument("--score", metavar="RESULTS")
