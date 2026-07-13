@@ -141,3 +141,33 @@ transferability). Treat vendor benchmark tables with that skepticism.
       (code change: llama_server client URL configurable, gate opens only
       when herc2 reachable), (b) scheduled herc2 LLM-duty windows, (c)
       leave LLM voters dormant. User decision pending.
+
+## BACKTEST RESULTS (2026-07-13, 3848 rows, Feb-Jul 2026, BTC+ETH, 1d horizon)
+
+Same prompts, same snapshots, indicator-only context, temp 0. Full data:
+herc2 Q:\finance-analyzer\data\llm_backtest_results.jsonl (+ Deck /tmp copy).
+
+| model | 1d dir acc | B/S votes | abstain | BTC | ETH | BUY | SELL |
+|---|---|---|---|---|---|---|---|
+| **phi4_mini** | **66.7%** | 108 | 88.8% | 63.8% | 71.8% | 60.7% | 73.1% |
+| ministral3 | 61.5% | 13 | 98.6% | — | — | 61.5% | — |
+| qwen3 | 50.0% | 74 | 92.3% | 52.3% | 46.7% | 50.9% | 47.4% |
+| fin_r1 | 44.8% | 183 | 81.0% | 50.5% | 36.8% | 42.7% | 50.0% |
+
+Zero errors, zero breaker trips across all 3,848 inferences.
+
+### Verdicts
+
+- **phi4_mini: PROMOTE-candidate confirmed.** 66.7% (n=108, 95% CI lower
+  bound ~58%) ≥ incumbents' live 57.6/58.9, consistent across tickers and
+  directions. Caveat: indicator-only diet — final promotion after brief
+  live shadow with full context.
+- **fin_r1: DO NOT wire as voter.** Most decisive (19% vote rate) but
+  wrong: 44.8%, ETH 36.8%, systematically bullish-wrong (131 BUYs @42.7%).
+  FinQA-style benchmark strength does not transfer to direction calls.
+  Keep GGUF for sentiment-duty experiments only.
+- **ministral3: near-dead voter on this diet** (98.6% abstain, n=13 — no
+  conclusion possible).
+- **qwen3: coin flip (50.0%) on indicator-only context.** Its live 58.9%
+  presumably owes to richer context — do not replace yet, but phi4_mini
+  beats it same-sample by ~17 points.
