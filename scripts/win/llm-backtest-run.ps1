@@ -6,7 +6,9 @@ param(
     [string]$Models = "ministral3,qwen3,phi4_mini,fin_r1",
     [string]$Start = "2026-02-01",
     [string]$End = "2026-07-11",
-    [int]$StepHours = 8
+    [int]$StepHours = 8,
+    [string]$Out = "data\llm_backtest_results.jsonl",
+    [switch]$KeepRaw
 )
 
 $repo = "Q:\finance-analyzer"
@@ -21,9 +23,11 @@ try {
         Write-Host "gate lifted"
     }
     Set-Location $repo
+    $extra = @()
+    if ($KeepRaw) { $extra += "--keep-raw" }
     & .venv\Scripts\python.exe -u scripts\llm_backtest.py `
         --models $Models --start $Start --end $End --step-hours $StepHours `
-        --out data\llm_backtest_results.jsonl
+        --out $Out @extra
     Write-Host "exit code: $LASTEXITCODE"
 } finally {
     if (Test-Path $gateLifted) {

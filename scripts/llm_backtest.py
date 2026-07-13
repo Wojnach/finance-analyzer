@@ -40,18 +40,25 @@ def fetch_klines_1h(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
     rows = []
     cur = start_ms
     while cur < end_ms:
-        r = requests.get(
-            BINANCE_KLINES,
-            params={
-                "symbol": symbol,
-                "interval": "1h",
-                "startTime": cur,
-                "endTime": end_ms,
-                "limit": 1000,
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    BINANCE_KLINES,
+                    params={
+                        "symbol": symbol,
+                        "interval": "1h",
+                        "startTime": cur,
+                        "endTime": end_ms,
+                        "limit": 1000,
+                    },
+                    timeout=15,
+                )
+                r.raise_for_status()
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(2 ** (attempt + 1))
         batch = r.json()
         if not batch:
             break
@@ -177,14 +184,17 @@ def run(args):
             done.add((r["model"], r["at"], r["ticker"]))
         print(f"resume: {len(done)} results already present", flush=True)
 
+    tripped = []
     with out_path.open("a") as fh:
         for model in args.models.split(","):
             todo = [
                 c for c in cases if (model, c["at"], c["ctx"]["ticker"]) not in done
             ]
             print(f"[{model}] {len(todo)} queries", flush=True)
+            consec_err = 0
             for i, c in enumerate(todo):
                 t0 = time.time()
+                raw = None
                 try:
                     raw = query_llama_server(
                         model, _build_prompt(c["ctx"]), n_predict=2048, temperature=0.0
@@ -192,27 +202,45 @@ def run(args):
                     vote, reason, conf = _parse_response(raw)
                 except Exception as e:
                     vote, reason, conf = "ERROR", str(e)[:120], None
-                fh.write(
-                    json.dumps(
-                        {
-                            "model": model,
-                            "at": c["at"],
-                            "ticker": c["ctx"]["ticker"],
-                            "vote": vote,
-                            "conf": conf,
-                            "outcome_pct": c["outcome_pct"],
-                            "secs": round(time.time() - t0, 1),
-                        }
-                    )
-                    + "\n"
-                )
+                row = {
+                    "model": model,
+                    "at": c["at"],
+                    "ticker": c["ctx"]["ticker"],
+                    "vote": vote,
+                    "conf": conf,
+                    "outcome_pct": c["outcome_pct"],
+                    "secs": round(time.time() - t0, 1),
+                }
+                # Raw output kept on failures always (post-mortem), on all
+                # rows with --keep-raw (pilot analysis).
+                if args.keep_raw or vote == "ERROR" or vote is None:
+                    row["raw"] = (raw or "")[:300]
+                    if vote == "ERROR":
+                        row["error"] = reason
+                fh.write(json.dumps(row) + "\n")
                 fh.flush()
+                # Circuit breaker: a dead server / broken model produces an
+                # unbroken ERROR streak — abort the model phase instead of
+                # burning hours writing garbage rows.
+                consec_err = consec_err + 1 if vote == "ERROR" else 0
+                if consec_err >= 6:
+                    print(
+                        f"[{model}] CIRCUIT BREAKER: 6 consecutive errors "
+                        f"after {i + 1} queries — aborting model phase. "
+                        f"Last error: {reason}",
+                        flush=True,
+                    )
+                    tripped.append(model)
+                    break
                 if i % 25 == 0:
                     print(
                         f"[{model}] {i}/{len(todo)} last={vote} {time.time()-t0:.0f}s",
                         flush=True,
                     )
     stop_server()
+    if tripped:
+        print(f"BACKTEST RUN INCOMPLETE — breaker tripped: {tripped}", flush=True)
+        sys.exit(2)
     print("BACKTEST RUN COMPLETE", flush=True)
 
 
@@ -249,6 +277,7 @@ if __name__ == "__main__":
     p.add_argument("--end", default="2026-07-11")
     p.add_argument("--step-hours", type=int, default=8)
     p.add_argument("--out", default="data/llm_backtest_results.jsonl")
+    p.add_argument("--keep-raw", action="store_true")
     p.add_argument("--score", metavar="RESULTS")
     a = p.parse_args()
     if a.score:

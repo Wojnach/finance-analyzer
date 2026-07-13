@@ -21,6 +21,8 @@ MODELS=${MODELS:-ministral3,qwen3,phi4_mini,fin_r1}
 START=${START:-2026-02-01}
 END=${END:-2026-07-11}
 STEP_HOURS=${STEP_HOURS:-8}
+OUT=${OUT:-data\\llm_backtest_results.jsonl}
+KEEP_RAW=${KEEP_RAW:-}
 
 hssh() { ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" "$@"; }
 
@@ -31,7 +33,8 @@ case "${1:-}" in
     exit 0
     ;;
 --results)
-    scp -q "$HOST:Q:/finance-analyzer/data/llm_backtest_results.jsonl" /tmp/llm_backtest_results.jsonl \
+    RFILE=$(echo "${OUT}" | tr '\\\\' '/')
+    scp -q "$HOST:Q:/finance-analyzer/$RFILE" /tmp/llm_backtest_results.jsonl \
         || { echo "no results file on herc2"; exit 1; }
     "$LREPO/.venv/bin/python" "$LREPO/scripts/llm_backtest.py" --score /tmp/llm_backtest_results.jsonl
     exit 0
@@ -52,7 +55,8 @@ echo "== disabling sleep"
 hssh "powercfg /change standby-timeout-ac 0 & powercfg /change hibernate-timeout-ac 0" >/dev/null
 
 echo "== launching PF-LLMBacktest (models=$MODELS $START..$END step=${STEP_HOURS}h)"
-PSCMD="powershell -NoProfile -ExecutionPolicy Bypass -File $RREPO\\scripts\\win\\llm-backtest-run.ps1 -Models $MODELS -Start $START -End $END -StepHours $STEP_HOURS"
+PSCMD="powershell -NoProfile -ExecutionPolicy Bypass -File $RREPO\\scripts\\win\\llm-backtest-run.ps1 -Models $MODELS -Start $START -End $END -StepHours $STEP_HOURS -Out $OUT"
+[ -n "$KEEP_RAW" ] && PSCMD="$PSCMD -KeepRaw"
 hssh "schtasks /create /f /tn PF-LLMBacktest /sc once /st 23:59 /tr \"$PSCMD\" & schtasks /run /tn PF-LLMBacktest" \
     || { echo "task launch failed"; exit 1; }
 
