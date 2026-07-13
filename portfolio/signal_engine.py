@@ -733,6 +733,14 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
     # realized_skewness: globally 51.6% (disabled) but XAU 60.3% (572 sam).
     # Bad for XAG (42.9%) — only re-enable for gold.
     ("realized_skewness", "XAU-USD"),
+    # phi4_mini: promoted 2026-07-13 from 3,848+1,924-row historical
+    # backtests (docs/plans/2026-07-12-llm-audit-and-research.md).
+    # BTC/ETH 66.7% @1d, XAU 61.2% all horizons, XAG 63.9% @3h.
+    # MSTR untested — deliberately NOT enabled there.
+    ("phi4_mini", "BTC-USD"),
+    ("phi4_mini", "ETH-USD"),
+    ("phi4_mini", "XAU-USD"),
+    ("phi4_mini", "XAG-USD"),
     # credit_spread_risk: REMOVED 2026-05-26. Was 57.4% per-ticker when added,
     # but signal formally disabled 2026-05-21 at 20% recent blended accuracy.
     # Override was re-enabling a broken signal for BTC/ETH. See tickers.py:119.

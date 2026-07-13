@@ -308,7 +308,7 @@ def compute_phi4_mini_signal(df, context=None):
     # Skip if Plex is transcoding and VRAM is below 7168 MB — a cold-swap of
     # Phi-4-mini would evict Plex's NVENC context. Treat as no-vote, not HOLD.
     try:
-        if not model_load_safe():
+        if not model_load_safe("phi4_mini"):
             logger.warning(
                 "phi4_mini: abstaining — Plex transcoding and VRAM <7168MB; "
                 "skipping inference",

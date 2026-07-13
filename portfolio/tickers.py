@@ -404,6 +404,10 @@ GPU_SIGNALS = frozenset({"ministral", "qwen3", "forecast"})
 
 SIGNAL_NAMES = [
     "rsi",
+    "phi4_mini",  # 2026-07-13: PROMOTED per-ticker (BTC/ETH/XAU/XAG) after
+    # 5-month backtest: crypto 66.7%@1d (n=108), XAU 61.2% (n=49),
+    # XAG 63.9%@3h (n=36). Runs on herc2 via local_llm.remote (:8788).
+    # Kept in DISABLED_SIGNALS; _DISABLED_SIGNAL_OVERRIDES grants tickers.
     "macd",
     "ema",
     "bb",

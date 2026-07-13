@@ -367,8 +367,13 @@ def _plex_transcode_active() -> bool:
 PLEX_SAFE_MIN_FREE_MB = 7168
 
 
-def model_load_safe() -> bool:
+def model_load_safe(model_name=None) -> bool:
     """Return True if it's safe to begin loading an 8B model onto the GPU now.
+
+    Remote mode (config local_llm.remote): nothing loads on this machine —
+    returns True only for whitelisted models (their inference happens on
+    the remote host) and False for everything else, so cold-start
+    subprocess fallbacks can never spawn a local model.
 
     Intended as a pre-flight check for callers that own their own model load
     (subprocess fallbacks in `qwen3_signal._call_qwen3`, `ministral_signal._call_model`,
@@ -388,6 +393,9 @@ def model_load_safe() -> bool:
     pause switch is on, so subprocess-fallback callers abstain cleanly instead
     of cold-starting a model the pause is meant to prevent.
     """
+    remote = _remote_config()
+    if remote:
+        return model_name in remote["models"]
     if not local_llm_enabled():
         return False
     if not _plex_transcode_active():
