@@ -37,10 +37,23 @@ FNG_HISTORY = "https://api.alternative.me/fng/?limit=0"
 TICKERS = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
 FAPI_TICKERS = {"XAU-USD": "XAUUSDT", "XAG-USD": "XAGUSDT"}
 HORIZONS_H = (1, 3, 24)
+# Sweep support: horizons (hours) matched to candle interval, and how many
+# candles ~ 24h for the change_24h context line.
+INTERVAL_HORIZONS = {
+    "15m": (0.25, 1, 3),
+    "1h": (1, 3, 24),
+    "4h": (4, 12, 72),
+    "1d": (24, 72, 168),
+}
+INTERVAL_STEP_HOURS = {"15m": 2, "1h": 8, "4h": 24, "1d": 48}
 
 
 def fetch_klines_1h(
-    symbol: str, start_ms: int, end_ms: int, base_url: str = BINANCE_KLINES
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    base_url: str = BINANCE_KLINES,
+    interval: str = "1h",
 ) -> pd.DataFrame:
     rows = []
     cur = start_ms
@@ -51,7 +64,7 @@ def fetch_klines_1h(
                     base_url,
                     params={
                         "symbol": symbol,
-                        "interval": "1h",
+                        "interval": interval,
                         "startTime": cur,
                         "endTime": end_ms,
                         "limit": 1000,
@@ -102,7 +115,11 @@ def fetch_fng() -> dict:
 
 
 def build_context(
-    df: pd.DataFrame, at: pd.Timestamp, ticker: str, fng: dict
+    df: pd.DataFrame,
+    at: pd.Timestamp,
+    ticker: str,
+    fng: dict,
+    interval: str = "1h",
 ) -> dict | None:
     hist = df[df.index <= at]
     if len(hist) < 120:
@@ -130,6 +147,7 @@ def build_context(
     chg24 = (price / float(day_ago.iloc[-1]) - 1) * 100 if len(day_ago) else 0.0
     return {
         "ticker": ticker,
+        "timeframe": f"{interval} candles",
         "price_usd": price,
         "change_24h": f"{chg24:+.2f}%",
         "rsi": round(rsi_v, 1),
@@ -141,6 +159,10 @@ def build_context(
         "fear_greed": fng.get(at.date(), 50),
         "sentiment": "neutral",
     }
+
+
+def _interval_hours(interval: str) -> float:
+    return {"15m": 0.25, "1h": 1, "4h": 4, "1d": 24}[interval]
 
 
 def outcome_at(df: pd.DataFrame, at: pd.Timestamp, hours: int) -> float | None:
@@ -167,28 +189,32 @@ def run(args):
             sym, url = FAPI_TICKERS[tick], BINANCE_FAPI_KLINES
         else:
             raise SystemExit(f"unknown ticker {tick}")
-        pad = start - pd.Timedelta(days=10)
+        pad = start - pd.Timedelta(hours=200 * _interval_hours(args.interval))
         frames[tick] = fetch_klines_1h(
             sym,
             int(pad.timestamp() * 1000),
-            int((end + pd.Timedelta(days=2)).timestamp() * 1000),
+            int((end + pd.Timedelta(days=8)).timestamp() * 1000),
             base_url=url,
+            interval=args.interval,
         )
-        print(f"{tick}: {len(frames[tick])} candles", flush=True)
+        print(f"{tick}: {len(frames[tick])} {args.interval} candles", flush=True)
 
+    horizons = INTERVAL_HORIZONS[args.interval]
+    step_h = args.step_hours or INTERVAL_STEP_HOURS[args.interval]
     cases = []
     at = start
     while at <= end:
         for tick in frames:
-            ctx = build_context(frames[tick], at, tick, fng)
+            ctx = build_context(frames[tick], at, tick, fng, interval=args.interval)
             outs = {
                 f"outcome_{h}h_pct": outcome_at(frames[tick], at, h)
-                for h in HORIZONS_H
+                for h in horizons
             }
-            if ctx is not None and outs.get("outcome_24h_pct") is not None:
+            main_h = f"outcome_{horizons[-1]}h_pct"
+            if ctx is not None and outs.get(main_h) is not None:
                 outs = {k: (round(v, 3) if v is not None else None) for k, v in outs.items()}
                 cases.append({"at": at.isoformat(), "ctx": ctx, **outs})
-        at += pd.Timedelta(hours=args.step_hours)
+        at += pd.Timedelta(hours=step_h)
     print(f"{len(cases)} cases x {len(args.models.split(','))} models", flush=True)
 
     done = set()
@@ -196,14 +222,16 @@ def run(args):
     if out_path.exists():
         for line in out_path.open():
             r = json.loads(line)
-            done.add((r["model"], r["at"], r["ticker"]))
+            done.add((r["model"], r.get("interval", "1h"), r["at"], r["ticker"]))
         print(f"resume: {len(done)} results already present", flush=True)
 
     tripped = []
     with out_path.open("a") as fh:
         for model in args.models.split(","):
             todo = [
-                c for c in cases if (model, c["at"], c["ctx"]["ticker"]) not in done
+                c
+                for c in cases
+                if (model, args.interval, c["at"], c["ctx"]["ticker"]) not in done
             ]
             print(f"[{model}] {len(todo)} queries", flush=True)
             consec_err = 0
@@ -219,11 +247,12 @@ def run(args):
                     vote, reason, conf = "ERROR", str(e)[:120], None
                 row = {
                     "model": model,
+                    "interval": args.interval,
                     "at": c["at"],
                     "ticker": c["ctx"]["ticker"],
                     "vote": vote,
                     "conf": conf,
-                    "outcome_pct": c["outcome_24h_pct"],
+                    "outcome_pct": c[f"outcome_{INTERVAL_HORIZONS[args.interval][-1]}h_pct"],
                     **{k: c[k] for k in c if k.startswith("outcome_")},
                     "secs": round(time.time() - t0, 1),
                 }
@@ -261,29 +290,29 @@ def run(args):
 
 
 def score(path):
-    stats = defaultdict(lambda: {"hit": 0, "dir": 0, "hold": 0, "err": 0, "n": 0})
-    for line in open(path):
-        r = json.loads(line)
-        s = stats[r["model"]]
-        s["n"] += 1
-        if r["vote"] in ("BUY", "SELL"):
-            s["dir"] += 1
-            if (r["vote"] == "BUY" and r["outcome_pct"] > 0) or (
-                r["vote"] == "SELL" and r["outcome_pct"] < 0
-            ):
-                s["hit"] += 1
-        elif r["vote"] == "ERROR":
-            s["err"] += 1
-        else:
-            s["hold"] += 1
-    print(
-        f"{'model':16s} {'1d dir acc':>10s} {'B/S votes':>9s} {'abstain%':>8s} {'errors':>6s} {'total':>6s}"
-    )
-    for m, s in sorted(stats.items()):
-        acc = s["hit"] / s["dir"] * 100 if s["dir"] else 0
-        print(
-            f"{m:16s} {acc:9.1f}% {s['dir']:9d} {s['hold']/s['n']*100:7.1f}% {s['err']:6d} {s['n']:6d}"
+    rows = [json.loads(line) for line in open(path)]
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r["model"], r.get("interval", "1h"))].append(r)
+    print(f"{'model':12s} {'interval':>8s} {'horizon':>8s} {'dir acc':>8s} {'votes':>6s} {'abstain%':>8s} {'err':>4s}")
+    for (m, iv), rs in sorted(groups.items()):
+        hkeys = sorted(
+            {k for r in rs for k in r if k.startswith("outcome_") and k != "outcome_pct"},
+            key=lambda k: float(k.split("_")[1].rstrip("h")),
         )
+        holds = sum(1 for r in rs if r["vote"] not in ("BUY", "SELL", "ERROR"))
+        errs = sum(1 for r in rs if r["vote"] == "ERROR")
+        for hk in hkeys:
+            hit = dirn = 0
+            for r in rs:
+                o = r.get(hk)
+                if o is None or r["vote"] not in ("BUY", "SELL"):
+                    continue
+                dirn += 1
+                hit += (r["vote"] == "BUY" and o > 0) or (r["vote"] == "SELL" and o < 0)
+            acc = hit / dirn * 100 if dirn else 0.0
+            label = hk.split("_")[1]
+            print(f"{m:12s} {iv:>8s} {label:>8s} {acc:7.1f}% {dirn:6d} {holds/len(rs)*100:7.1f}% {errs:4d}")
 
 
 if __name__ == "__main__":
@@ -291,7 +320,8 @@ if __name__ == "__main__":
     p.add_argument("--models", default="ministral3,qwen3,phi4_mini,fin_r1")
     p.add_argument("--start", default="2026-02-01")
     p.add_argument("--end", default="2026-07-11")
-    p.add_argument("--step-hours", type=int, default=8)
+    p.add_argument("--step-hours", type=int, default=0)
+    p.add_argument("--interval", default="1h", choices=list(INTERVAL_HORIZONS))
     p.add_argument("--tickers", default="BTC-USD,ETH-USD")
     p.add_argument("--out", default="data/llm_backtest_results.jsonl")
     p.add_argument("--keep-raw", action="store_true")

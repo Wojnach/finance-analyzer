@@ -23,6 +23,7 @@ END=${END:-2026-07-11}
 STEP_HOURS=${STEP_HOURS:-8}
 OUT=${OUT:-data\\llm_backtest_results.jsonl}
 TICKERS=${TICKERS:-BTC-USD,ETH-USD}
+INTERVAL=${INTERVAL:-1h}
 KEEP_RAW=${KEEP_RAW:-}
 
 hssh() { timeout 60 ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" "$@"; }
@@ -55,8 +56,8 @@ timeout 90 ssh -o BatchMode=yes "$HOST" "cd /d $RREPO && git -c core.sshCommand=
 echo "== disabling sleep"
 hssh "powercfg /change standby-timeout-ac 0 & powercfg /change hibernate-timeout-ac 0" >/dev/null
 
-echo "== launching PF-LLMBacktest (models=$MODELS $START..$END step=${STEP_HOURS}h)"
-PSCMD="powershell -NoProfile -ExecutionPolicy Bypass -File $RREPO\\scripts\\win\\llm-backtest-run.ps1 -Models $MODELS -Start $START -End $END -StepHours $STEP_HOURS -Out $OUT -Tickers $TICKERS"
+echo "== launching PF-LLMBacktest (models=$MODELS $START..$END interval=$INTERVAL step=${STEP_HOURS}h)"
+PSCMD="powershell -NoProfile -ExecutionPolicy Bypass -File $RREPO\\scripts\\win\\llm-backtest-run.ps1 -Models $MODELS -Start $START -End $END -StepHours $STEP_HOURS -Out $OUT -Tickers $TICKERS -Interval $INTERVAL"
 [ -n "$KEEP_RAW" ] && PSCMD="$PSCMD -KeepRaw"
 hssh "schtasks /create /f /tn PF-LLMBacktest /sc once /st 23:59 /tr \"$PSCMD\" & schtasks /run /tn PF-LLMBacktest" \
     || { echo "task launch failed"; exit 1; }

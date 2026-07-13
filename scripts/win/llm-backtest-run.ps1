@@ -9,6 +9,7 @@ param(
     [int]$StepHours = 8,
     [string]$Out = "data\llm_backtest_results.jsonl",
     [string]$Tickers = "BTC-USD,ETH-USD",
+    [string]$Interval = "1h",
     [switch]$KeepRaw
 )
 
@@ -28,7 +29,7 @@ try {
     if ($KeepRaw) { $extra += "--keep-raw" }
     & .venv\Scripts\python.exe -u scripts\llm_backtest.py `
         --models $Models --start $Start --end $End --step-hours $StepHours `
-        --tickers $Tickers --out $Out @extra
+        --tickers $Tickers --interval $Interval --out $Out @extra
     Write-Host "exit code: $LASTEXITCODE"
 } finally {
     if (Test-Path $gateLifted) {
