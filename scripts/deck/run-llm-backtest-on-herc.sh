@@ -24,7 +24,7 @@ STEP_HOURS=${STEP_HOURS:-8}
 OUT=${OUT:-data\\llm_backtest_results.jsonl}
 KEEP_RAW=${KEEP_RAW:-}
 
-hssh() { ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" "$@"; }
+hssh() { timeout 60 ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" "$@"; }
 
 case "${1:-}" in
 --status)
