@@ -49,7 +49,7 @@ hssh "echo ok" >/dev/null || { echo "herc2 unreachable"; exit 1; }
 echo "== repo safety check + pull"
 BR=$(hssh "cd /d $RREPO && git branch --show-current" | tr -d '\r')
 [ "$BR" = "main" ] || { echo "herc2 repo on '$BR' (another agent?) — abort"; exit 1; }
-hssh "cd /d $RREPO && git pull --ff-only" || { echo "pull failed"; exit 1; }
+timeout 90 ssh -o BatchMode=yes "$HOST" "cd /d $RREPO && git -c core.sshCommand=\"ssh -o BatchMode=yes -o ConnectTimeout=15\" pull --ff-only" || { echo "pull failed/timed out"; exit 1; }
 
 echo "== disabling sleep"
 hssh "powercfg /change standby-timeout-ac 0 & powercfg /change hibernate-timeout-ac 0" >/dev/null
