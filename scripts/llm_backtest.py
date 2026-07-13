@@ -36,6 +36,8 @@ BINANCE_FAPI_KLINES = "https://fapi.binance.com/fapi/v1/klines"
 FNG_HISTORY = "https://api.alternative.me/fng/?limit=0"
 TICKERS = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
 FAPI_TICKERS = {"XAU-USD": "XAUUSDT", "XAG-USD": "XAGUSDT"}
+# Equities via yfinance — market-hours candles, session-aware outcomes.
+YF_TICKERS = {"MSTR": "MSTR", "NVDA": "NVDA", "TSLA": "TSLA", "PLTR": "PLTR"}
 HORIZONS_H = (1, 3, 24)
 # Sweep support: horizons (hours) matched to candle interval, and how many
 # candles ~ 24h for the change_24h context line.
@@ -104,6 +106,36 @@ def fetch_klines_1h(
         df[c] = df[c].astype(float)
     df["ts"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     return df.set_index("ts")
+
+
+def fetch_klines_yf(symbol: str, start: str, end: str, interval: str = "1h") -> pd.DataFrame:
+    import yfinance as yf
+
+    df = yf.download(symbol, start=start, end=end, interval=interval,
+                     progress=False, auto_adjust=True)
+    if df is None or df.empty:
+        raise SystemExit(f"yfinance returned no data for {symbol}")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0].lower() for c in df.columns]
+    else:
+        df.columns = [c.lower() for c in df.columns]
+    df.index = pd.to_datetime(df.index, utc=True)
+    return df[["open", "high", "low", "close", "volume"]]
+
+
+def outcome_sessions(df: pd.DataFrame, at: pd.Timestamp, n_candles: int) -> float | None:
+    """Session-aware outcome: close N candles AFTER the as-of candle.
+
+    Equities gap over nights/weekends — wall-clock horizons silently
+    mis-score. Candle-count horizons follow the trading calendar instead.
+    """
+    hist_idx = df.index[df.index <= at]
+    if len(hist_idx) == 0:
+        return None
+    pos = df.index.get_loc(hist_idx[-1])
+    if pos + n_candles >= len(df):
+        return None
+    return (float(df["close"].iloc[pos + n_candles]) / float(df["close"].iloc[pos]) - 1) * 100
 
 
 def fetch_fng() -> dict:
@@ -183,13 +215,22 @@ def run(args):
     wanted = [t.strip() for t in args.tickers.split(",")]
     frames = {}
     for tick in wanted:
+        pad = start - pd.Timedelta(hours=200 * _interval_hours(args.interval))
         if tick in TICKERS:
             sym, url = TICKERS[tick], BINANCE_KLINES
         elif tick in FAPI_TICKERS:
             sym, url = FAPI_TICKERS[tick], BINANCE_FAPI_KLINES
+        elif tick in YF_TICKERS:
+            frames[tick] = fetch_klines_yf(
+                YF_TICKERS[tick],
+                pad.strftime("%Y-%m-%d"),
+                (end + pd.Timedelta(days=8)).strftime("%Y-%m-%d"),
+                interval=args.interval,
+            )
+            print(f"{tick}: {len(frames[tick])} {args.interval} yf candles", flush=True)
+            continue
         else:
             raise SystemExit(f"unknown ticker {tick}")
-        pad = start - pd.Timedelta(hours=200 * _interval_hours(args.interval))
         frames[tick] = fetch_klines_1h(
             sym,
             int(pad.timestamp() * 1000),
@@ -201,15 +242,29 @@ def run(args):
 
     horizons = INTERVAL_HORIZONS[args.interval]
     step_h = args.step_hours or INTERVAL_STEP_HOURS[args.interval]
+    iv_h = _interval_hours(args.interval)
     cases = []
     at = start
     while at <= end:
         for tick in frames:
+            if tick in YF_TICKERS:
+                # only timestamps that land on an actual session candle
+                near = frames[tick].index[frames[tick].index <= at]
+                if len(near) == 0 or (at - near[-1]) > pd.Timedelta(hours=iv_h):
+                    continue
             ctx = build_context(frames[tick], at, tick, fng, interval=args.interval)
-            outs = {
-                f"outcome_{h}h_pct": outcome_at(frames[tick], at, h)
-                for h in horizons
-            }
+            if tick in YF_TICKERS:
+                outs = {
+                    f"outcome_{h}h_pct": outcome_sessions(
+                        frames[tick], at, max(1, round(h / iv_h * 7 / 24)) if h >= 24 else max(1, round(h / iv_h))
+                    )
+                    for h in horizons
+                }
+            else:
+                outs = {
+                    f"outcome_{h}h_pct": outcome_at(frames[tick], at, h)
+                    for h in horizons
+                }
             main_h = f"outcome_{horizons[-1]}h_pct"
             if ctx is not None and outs.get(main_h) is not None:
                 outs = {k: (round(v, 3) if v is not None else None) for k, v in outs.items()}
