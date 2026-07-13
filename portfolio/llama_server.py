@@ -631,6 +631,71 @@ def _pause_stop_server():
             _stop_server()
 
 
+_remote_cache = {"ts": 0.0, "cfg": None}
+
+
+def _remote_config():
+    """Remote llama-server config from config.json ``local_llm.remote``.
+
+    Shape::
+
+        "local_llm": {"remote": {
+            "url": "http://100.78.196.30:8788",
+            "models": ["phi4_mini"],
+            "connect_timeout": 3,
+            "read_timeout": 180
+        }}
+
+    When set, whitelisted models are queried on the remote host — no local
+    server is ever spawned and the local-LLM gate flag does NOT apply
+    (nothing runs on this machine). Models not in the whitelist return
+    None (clean abstain). Remote unreachable → None after connect_timeout.
+    Re-read every 30s so it is togglable without a loop restart.
+    """
+    now = time.time()
+    if now - _remote_cache["ts"] < 30:
+        return _remote_cache["cfg"]
+    cfg = None
+    try:
+        import json as _json
+
+        path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+        with open(path) as f:
+            remote = _json.load(f).get("local_llm", {}).get("remote")
+        if remote and remote.get("url") and remote.get("models"):
+            cfg = remote
+    except Exception:
+        cfg = None
+    _remote_cache.update(ts=now, cfg=cfg)
+    return cfg
+
+
+def _query_remote(
+    remote, prompt, n_predict=1024, temperature=0.0, top_p=0.2, stop=None
+):
+    body = {
+        "prompt": prompt,
+        "n_predict": n_predict,
+        "temperature": temperature,
+        "top_p": top_p,
+        "cache_prompt": True,
+    }
+    if stop:
+        body["stop"] = stop
+    try:
+        r = _requests.post(
+            f"{remote['url'].rstrip('/')}/completion",
+            json=body,
+            timeout=(remote.get("connect_timeout", 3), remote.get("read_timeout", 180)),
+        )
+        if r.status_code == 200:
+            return r.json().get("content", "").strip()
+        logger.warning("remote llama-server HTTP %s", r.status_code)
+    except Exception as e:
+        logger.info("remote llama-server unreachable: %s", str(e)[:120])
+    return None
+
+
 def query_llama_server(
     name, prompt, n_predict=1024, temperature=0.0, top_p=0.2, stop=None
 ):
@@ -639,6 +704,11 @@ def query_llama_server(
     Thread-safe and cross-process-safe via file lock.
     Returns completion text or None (caller should fall back to subprocess).
     """
+    remote = _remote_config()
+    if remote:
+        if name not in remote["models"]:
+            return None
+        return _query_remote(remote, prompt, n_predict, temperature, top_p, stop)
     if not local_llm_enabled():
         _pause_stop_server()
         return None
@@ -715,6 +785,21 @@ def query_llama_server_batch(name, prompts_and_params):
     Returns:
         list of (completion_text_or_None) in same order as input.
     """
+    remote = _remote_config()
+    if remote:
+        if name not in remote["models"]:
+            return [None] * len(prompts_and_params)
+        return [
+            _query_remote(
+                remote,
+                p["prompt"],
+                n_predict=p.get("n_predict", 1024),
+                temperature=p.get("temperature", 0.0),
+                top_p=p.get("top_p", 0.2),
+                stop=p.get("stop"),
+            )
+            for p in prompts_and_params
+        ]
     if not local_llm_enabled():
         _pause_stop_server()
         return [None] * len(prompts_and_params)
