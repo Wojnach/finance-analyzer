@@ -63,9 +63,11 @@ _MODEL_CONFIGS = {
         ),
         "extra_args": [
             "--lora",
-            r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
-            if platform.system() == "Windows"
-            else "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf",
+            (
+                r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
+                if platform.system() == "Windows"
+                else "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf"
+            ),
         ],
     },
     # phi4_mini: Phi-4-mini-reasoning (3.8B, Q4_K_M). Added 2026-06-01 as shadow
@@ -100,12 +102,25 @@ _MODEL_CONFIGS = {
         ),
         "extra_args": [],
     },
+    # fin_r1: Fin-R1 7B (SUFE-AIFLM-Lab), Qwen2.5-7B-Instruct base, finance
+    # SFT+GRPO, Apache 2.0. Added 2026-07-13 after model research (see
+    # docs/plans/2026-07-12-llm-audit-and-research.md). Dry-run verified on
+    # live BTC via qwen3_trader builders/parsers (HOLD 0.55, clean parse).
+    # Replace-candidate for the ministral slots — shadow A/B before promoting.
+    "fin_r1": {
+        "model": (
+            r"Q:\models\fin-r1-gguf\Fin-R1-q5_k_m.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/fin-r1-gguf/Fin-R1-q5_k_m.gguf"
+        ),
+        "extra_args": [],
+    },
 }
 
 # In-process state (each importing process tracks its own view)
 _thread_lock = threading.Lock()
-_local_proc = None       # Popen if this process started the server
-_local_model = None      # model name this process loaded
+_local_proc = None  # Popen if this process started the server
+_local_model = None  # model name this process loaded
 
 
 def _kill_by_port():
@@ -115,7 +130,9 @@ def _kill_by_port():
             # Find all PIDs on our port
             result = subprocess.run(
                 ["netstat", "-ano"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             pids_to_kill = set()
             for line in result.stdout.splitlines():
@@ -126,15 +143,20 @@ def _kill_by_port():
                             pids_to_kill.add(int(parts[-1]))
             for pid in pids_to_kill:
                 if pid != os.getpid():
-                    logger.info("Killing orphaned process on port %d: PID %d", _PORT, pid)
+                    logger.info(
+                        "Killing orphaned process on port %d: PID %d", _PORT, pid
+                    )
                     subprocess.run(
                         ["taskkill", "/F", "/PID", str(pid)],
-                        capture_output=True, timeout=10,
+                        capture_output=True,
+                        timeout=10,
                     )
         else:
             result = subprocess.run(
                 ["fuser", f"{_PORT}/tcp"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             for pid_str in result.stdout.split():
                 with suppress(ValueError):
@@ -155,7 +177,9 @@ def _is_llama_server_process(pid):
         if platform.system() == "Windows":
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             # CSV format: "name.exe","PID","session","session#","mem"
             # Empty/"INFO: No tasks..." line when PID doesn't exist.
@@ -164,7 +188,9 @@ def _is_llama_server_process(pid):
             with open(f"/proc/{pid}/cmdline") as f:
                 return "llama-server" in f.read()
     except Exception as e:
-        logger.warning("Llama process check failed for PID %s: %s", pid, e, exc_info=True)
+        logger.warning(
+            "Llama process check failed for PID %s: %s", pid, e, exc_info=True
+        )
         return False
 
 
@@ -181,12 +207,15 @@ def _kill_server_by_pid():
             if content:
                 pid = int(content.split(":")[0])
                 if not _is_llama_server_process(pid):
-                    logger.warning("PID %d from pid file is not llama-server, skipping kill", pid)
+                    logger.warning(
+                        "PID %d from pid file is not llama-server, skipping kill", pid
+                    )
                     return
                 if platform.system() == "Windows":
                     subprocess.run(
                         ["taskkill", "/F", "/PID", str(pid)],
-                        capture_output=True, timeout=10,
+                        capture_output=True,
+                        timeout=10,
                     )
                 else:
                     os.kill(pid, 9)
@@ -278,7 +307,9 @@ def _query_free_vram_mb():
         if result.returncode != 0:
             return None
         # Multi-GPU systems return one line per GPU; we only care about GPU 0.
-        first_line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+        first_line = (
+            result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+        )
         return int(first_line)
     except Exception as e:
         logger.debug("nvidia-smi free-VRAM query failed: %s", e)
@@ -304,12 +335,19 @@ def _plex_transcode_active() -> bool:
     """
     global _plex_probe_cache
     now = time.time()
-    if _plex_probe_cache is not None and (now - _plex_probe_cache[0]) < _PLEX_PROBE_TTL_SEC:
+    if (
+        _plex_probe_cache is not None
+        and (now - _plex_probe_cache[0]) < _PLEX_PROBE_TTL_SEC
+    ):
         return _plex_probe_cache[1]
     active = False
     try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=process_name", "--format=csv,noheader"],
+            [
+                "nvidia-smi",
+                "--query-compute-apps=process_name",
+                "--format=csv,noheader",
+            ],
             capture_output=True,
             text=True,
             timeout=2,
@@ -360,8 +398,9 @@ def model_load_safe() -> bool:
     return free >= PLEX_SAFE_MIN_FREE_MB
 
 
-def _wait_for_vram_reclaim(min_free_mb: int = 5632, max_wait: float = 4.0,
-                           plex_safe: bool = False) -> float:
+def _wait_for_vram_reclaim(
+    min_free_mb: int = 5632, max_wait: float = 4.0, plex_safe: bool = False
+) -> float:
     """Poll nvidia-smi until at least `min_free_mb` is free, up to `max_wait` seconds.
 
     Returns the wall-clock seconds spent waiting, for logging/observability.
@@ -448,7 +487,9 @@ def _start_server(name):
     # on why 4 s exists. In steady state most swaps only need 0.5-2 s, so the
     # poll saves ~2-3 s per swap (×3 swaps = ~6-10 s/cycle) while preserving
     # the 4 s ceiling as a hard fallback.
-    waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=4.0, plex_safe=plex_active)
+    waited = _wait_for_vram_reclaim(
+        min_free_mb=5632, max_wait=4.0, plex_safe=plex_active
+    )
     logger.debug("VRAM reclaim poll: %.2fs before launching %s", waited, name)
 
     # Plex-aware abort: if Plex is still transcoding AND we couldn't reach the
@@ -461,27 +502,40 @@ def _start_server(name):
         if free_now < 7168:
             logger.warning(
                 "llama-server: aborting %s swap — Plex transcoding and only %d MB free (<7168)",
-                name, free_now,
+                name,
+                free_now,
             )
             return False
 
     try:
         cmd = [
             _LLAMA_SERVER,
-            "-m", cfg["model"],
-            "--port", str(_PORT),
-            "--host", "127.0.0.1",
-            "-ngl", "99",
-            "-t", "4",
-            "-c", "4096",
+            "-m",
+            cfg["model"],
+            "--port",
+            str(_PORT),
+            "--host",
+            "127.0.0.1",
+            "-ngl",
+            "99",
+            "-t",
+            "4",
+            "-c",
+            "4096",
         ] + cfg.get("extra_args", [])
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
 
         deadline = time.time() + 90
         while time.time() < deadline:
             if proc.poll() is not None:
-                logger.warning("llama-server %s exited during startup (code %s)", name, proc.returncode)
+                logger.warning(
+                    "llama-server %s exited during startup (code %s)",
+                    name,
+                    proc.returncode,
+                )
                 return False
             if _is_server_alive():
                 logger.info("llama-server %s ready on port %d", name, _PORT)
@@ -537,7 +591,9 @@ def _acquire_file_lock(timeout=300):
                 if platform.system() == "Windows":
                     result = subprocess.run(
                         ["tasklist", "/FI", f"PID eq {lock_pid}"],
-                        capture_output=True, text=True, timeout=5,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
                     )
                     if str(lock_pid) not in result.stdout:
                         os.remove(_LOCK_FILE)
@@ -575,8 +631,9 @@ def _pause_stop_server():
             _stop_server()
 
 
-def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
-                       top_p=0.2, stop=None):
+def query_llama_server(
+    name, prompt, n_predict=1024, temperature=0.0, top_p=0.2, stop=None
+):
     """Query the shared llama-server. Swaps model if needed.
 
     Thread-safe and cross-process-safe via file lock.
