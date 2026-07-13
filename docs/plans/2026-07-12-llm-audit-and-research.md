@@ -123,3 +123,21 @@ revived: TimesFM 2.x / Moirai are the successors to evaluate. No change now.
 Refuted-claims note: adversarial verify killed 2 overreach claims (Fin-R1
 "tops ALL models incl. 671B R1 on FinQA/ConvFinQA"; Trading-R1 Sharpe-2.72
 transferability). Treat vendor benchmark tables with that skepticism.
+
+## Execution status (2026-07-13)
+
+- [x] Fin-R1 Q5_K_M (5.44 GB) downloaded to herc2 Q:\models\fin-r1-gguf\
+      (first two attempts failed: IWR silent-fail, then curl error 23 —
+      target dir didn't exist; curl.exe cannot mkdir).
+- [x] Dry-run on herc2 PASSED: live BTC $62,819 → qwen3_trader builders →
+      HOLD conf 0.55, coherent reasoning, clean parse, 21 s incl. load.
+      Gate lifted + restored around the test.
+- [x] `fin_r1` slot committed to portfolio/llama_server.py (both Windows +
+      Deck paths). 43/43 llama_server tests pass.
+- [ ] Shadow A/B wiring in llm_batch rotation — BLOCKED on architecture
+      decision: LLM signals currently run NOWHERE (Deck loop is gated
+      no-LLM by design; herc2 loops are disabled post-migration). Options:
+      (a) llama-server on herc2 serving the Deck loop over Tailscale
+      (code change: llama_server client URL configurable, gate opens only
+      when herc2 reachable), (b) scheduled herc2 LLM-duty windows, (c)
+      leave LLM voters dormant. User decision pending.
