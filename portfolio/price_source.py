@@ -23,6 +23,7 @@ function raises :class:`SourceUnavailableError` if no live alternative
 exists AND the yfinance fallback is not allowed for the requested
 ticker.
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,14 +41,20 @@ logger = logging.getLogger("portfolio.price_source")
 
 _BINANCE_FAPI = {
     # silver
-    "XAG-USD": "XAGUSDT", "SI=F": "XAGUSDT", "XAGUSDT": "XAGUSDT",
+    "XAG-USD": "XAGUSDT",
+    "SI=F": "XAGUSDT",
+    "XAGUSDT": "XAGUSDT",
     # gold
-    "XAU-USD": "XAUUSDT", "GC=F": "XAUUSDT", "XAUUSDT": "XAUUSDT",
+    "XAU-USD": "XAUUSDT",
+    "GC=F": "XAUUSDT",
+    "XAUUSDT": "XAUUSDT",
 }
 
 _BINANCE_SPOT = {
-    "BTC-USD": "BTCUSDT", "BTCUSDT": "BTCUSDT",
-    "ETH-USD": "ETHUSDT", "ETHUSDT": "ETHUSDT",
+    "BTC-USD": "BTCUSDT",
+    "BTCUSDT": "BTCUSDT",
+    "ETH-USD": "ETHUSDT",
+    "ETHUSDT": "ETHUSDT",
 }
 
 # 2026-05-28: yfinance does not recognize the dashed/Binance metal aliases
@@ -58,8 +65,10 @@ _BINANCE_SPOT = {
 # wasn't applied on the fallback path). Translate to the yfinance futures
 # symbol first.
 _YFINANCE_ALIAS = {
-    "XAG-USD": "SI=F", "XAGUSDT": "SI=F",
-    "XAU-USD": "GC=F", "XAUUSDT": "GC=F",
+    "XAG-USD": "SI=F",
+    "XAGUSDT": "SI=F",
+    "XAU-USD": "GC=F",
+    "XAUUSDT": "GC=F",
 }
 
 
@@ -67,35 +76,48 @@ def _to_yfinance_symbol(ticker: str) -> str:
     """Map a Binance/dashed alias to a yfinance-valid symbol (identity if none)."""
     return _YFINANCE_ALIAS.get(ticker, ticker)
 
+
 # CBOE-proprietary volatility indices. No free live alternative exists —
 # these remain on yfinance by design. If you ever find a real-time feed,
 # update this set AND the router.
-_CBOE_VOL_INDICES = frozenset({
-    "^VIX", "^VIX3M", "^OVX", "^GVZ", "^RVX", "^VXN",
-})
+_CBOE_VOL_INDICES = frozenset(
+    {
+        "^VIX",
+        "^VIX3M",
+        "^OVX",
+        "^GVZ",
+        "^RVX",
+        "^VXN",
+    }
+)
 
 # Tickers for which yfinance is the only available free data source.
 # Calls to these emit DEBUG (not WARNING) so legitimate use doesn't
 # pollute the log; calls for non-allowed tickers emit WARNING so we
 # can quantify residual leakage.
-_YFINANCE_LAST_RESORT = frozenset({
-    "HG=F",          # copper — no Binance perpetual
-    "DX-Y.NYB",      # DXY pseudo-ticker (Alpha Vantage FX is paid intraday)
-    "EURUSD=X",      # FX — Alpha Vantage paid intraday
-    "^TNX",          # 10y treasury yield (CBOE; FRED has daily DGS10 fallback)
-    "^TYX",          # 30y treasury yield
-    "2YY=F",         # 2y treasury yield futures pseudo-ticker
-    "^FVX",          # 5y treasury yield
-    # Oil futures — no free real-time alternative (Binance has no oil
-    # perpetual; Alpaca has the USO ETF but not the underlying futures).
-    # 2026-05-01: added when oil_loop went live in DRY_RUN — previously
-    # CL=F/BZ=F routed to Alpaca (futures unsupported) → fallback to
-    # yfinance with WARNING noise every 60s cycle. oil_precompute had
-    # been silently relying on the same fallback path.
-    "CL=F",          # WTI front-month
-    "BZ=F",          # Brent front-month
-    "RB=F",          # RBOB gasoline (used for crack-spread context)
-}) | _CBOE_VOL_INDICES
+_YFINANCE_LAST_RESORT = (
+    frozenset(
+        {
+            "HG=F",  # copper — no Binance perpetual
+            "DX-Y.NYB",  # DXY pseudo-ticker (Alpha Vantage FX is paid intraday)
+            "EURUSD=X",  # FX — Alpha Vantage paid intraday
+            "^TNX",  # 10y treasury yield (CBOE; FRED has daily DGS10 fallback)
+            "^TYX",  # 30y treasury yield
+            "2YY=F",  # 2y treasury yield futures pseudo-ticker
+            "^FVX",  # 5y treasury yield
+            # Oil futures — no free real-time alternative (Binance has no oil
+            # perpetual; Alpaca has the USO ETF but not the underlying futures).
+            # 2026-05-01: added when oil_loop went live in DRY_RUN — previously
+            # CL=F/BZ=F routed to Alpaca (futures unsupported) → fallback to
+            # yfinance with WARNING noise every 60s cycle. oil_precompute had
+            # been silently relying on the same fallback path.
+            "CL=F",  # WTI front-month
+            "BZ=F",  # Brent front-month
+            "RB=F",  # RBOB gasoline (used for crack-spread context)
+        }
+    )
+    | _CBOE_VOL_INDICES
+)
 
 
 class SourceUnavailableError(RuntimeError):
@@ -117,7 +139,7 @@ def _binance_interval(interval: str) -> str:
     """
     mapping = {
         "60m": "1h",
-        "90m": "1h",   # Binance has no 90m — closest down-sample is 1h
+        "90m": "1h",  # Binance has no 90m — closest down-sample is 1h
         "120m": "2h",
     }
     return mapping.get(interval, interval)
@@ -126,7 +148,9 @@ def _binance_interval(interval: str) -> str:
 def _fetch_binance_fapi(symbol: str, interval: str, limit: int) -> pd.DataFrame:
     from portfolio.data_collector import binance_fapi_klines
 
-    return binance_fapi_klines(symbol, interval=_binance_interval(interval), limit=limit)
+    return binance_fapi_klines(
+        symbol, interval=_binance_interval(interval), limit=limit
+    )
 
 
 def _fetch_binance_spot(symbol: str, interval: str, limit: int) -> pd.DataFrame:
@@ -142,7 +166,10 @@ def _fetch_alpaca(ticker: str, interval: str, limit: int) -> pd.DataFrame:
 
 
 def _fetch_yfinance(
-    ticker: str, interval: str, period: str | None = None, limit: int | None = None,
+    ticker: str,
+    interval: str,
+    period: str | None = None,
+    limit: int | None = None,
 ) -> pd.DataFrame:
     """Yfinance fetcher. Allowed-list tickers emit DEBUG; everything else
     emits WARNING so we can quantify residual leakage."""
@@ -151,18 +178,25 @@ def _fetch_yfinance(
     if ticker in _YFINANCE_LAST_RESORT:
         logger.debug(
             "price_source: yfinance for %s (interval=%s, period=%s) — allowed (no live alt)",
-            ticker, interval, period,
+            ticker,
+            interval,
+            period,
         )
     else:
         logger.warning(
             "price_source: falling back to yfinance for %s (interval=%s, period=%s). "
             "This source lags 10-15 min; upstream caller should be on Binance/Alpaca/FRED if possible.",
-            ticker, interval, period,
+            ticker,
+            interval,
+            period,
         )
     p = period or "5d"
     df = yf.download(
-        ticker, period=p, interval=interval,
-        progress=False, auto_adjust=True,
+        ticker,
+        period=p,
+        interval=interval,
+        progress=False,
+        auto_adjust=True,
     )
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
@@ -170,16 +204,52 @@ def _fetch_yfinance(
         raise SourceUnavailableError(f"yfinance returned empty DataFrame for {ticker}")
     # Normalize column casing (yfinance uses capitalized; our downstream
     # code expects lowercase after the alpaca/binance path).
-    df = df.rename(columns={
-        "Open": "open", "High": "high", "Low": "low",
-        "Close": "close", "Volume": "volume",
-    })
+    df = df.rename(
+        columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume",
+        }
+    )
     return df.tail(limit) if limit else df
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+_fail_closed_cache = {"ts": 0.0, "val": None}
+
+
+def _price_fail_closed() -> bool:
+    """Whether traded-instrument price fetches fail closed on primary outage.
+
+    Default True (never serve delayed yfinance into a live trade). Override
+    via config.json ``price_source.fail_closed = false`` to restore the old
+    emergency-fallback behavior. Re-read every 30s — togglable live.
+    """
+    import time as _time
+
+    now = _time.time()
+    if now - _fail_closed_cache["ts"] < 30 and _fail_closed_cache["val"] is not None:
+        return _fail_closed_cache["val"]
+    val = True
+    try:
+        import json as _json
+        import os as _os
+
+        path = _os.path.join(_os.path.dirname(__file__), "..", "config.json")
+        with open(path) as f:
+            cfg = _json.load(f).get("price_source", {})
+        if isinstance(cfg, dict) and "fail_closed" in cfg:
+            val = bool(cfg["fail_closed"])
+    except Exception:
+        val = True
+    _fail_closed_cache.update(ts=now, val=val)
+    return val
 
 
 def resolve_source(ticker: str) -> str:
@@ -236,17 +306,29 @@ def fetch_klines(
         if source == "alpaca":
             return _fetch_alpaca(ticker, interval, limit)
         # yfinance fallback
-        return _fetch_yfinance(_to_yfinance_symbol(ticker), interval, period=period, limit=limit)
+        return _fetch_yfinance(
+            _to_yfinance_symbol(ticker), interval, period=period, limit=limit
+        )
     except Exception as exc:
-        # If a primary source (Binance/Alpaca) fails AND the ticker isn't
-        # explicitly yfinance-only, fall through to yfinance as emergency
-        # backup so the loop doesn't lose data entirely. Emit an error log
-        # so we can see how often the primary is flaking.
+        # Traded instruments (Binance crypto/metals, Alpaca stocks) have a
+        # real-time source. If it fails, FAIL CLOSED — abstain this cycle
+        # rather than silently serving 15-min-delayed yfinance prices into
+        # a live trade decision (user directive 2026-07-14: never trade on
+        # delayed data). yfinance-native context tickers (VIX/yields/DXY/
+        # oil) are unaffected — they take the direct yfinance path above,
+        # never this fallback branch.
         if source in ("binance_fapi", "binance_spot", "alpaca"):
+            if _price_fail_closed():
+                raise SourceUnavailableError(
+                    f"{source} failed for {ticker} ({exc!r}); fail-closed — "
+                    f"refusing stale yfinance fallback for a traded instrument"
+                ) from exc
             logger.error(
                 "price_source: primary source %s FAILED for %s (%r). "
                 "Falling back to yfinance. Investigate the primary outage.",
-                source, ticker, exc,
+                source,
+                ticker,
+                exc,
             )
             try:
                 df = _fetch_yfinance(
@@ -260,9 +342,7 @@ def fetch_klines(
                     f"All sources failed for {ticker}: primary={source} "
                     f"({exc!r}), fallback=yfinance ({exc2!r})"
                 ) from exc2
-        raise SourceUnavailableError(
-            f"yfinance failed for {ticker}: {exc!r}"
-        ) from exc
+        raise SourceUnavailableError(f"yfinance failed for {ticker}: {exc!r}") from exc
 
 
 def is_yfinance_allowed(ticker: str) -> bool:
