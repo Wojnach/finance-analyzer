@@ -58,9 +58,10 @@ hssh "powercfg /change standby-timeout-ac 0 & powercfg /change hibernate-timeout
 
 echo "== launching PF-LLMBacktest (models=$MODELS $START..$END interval=$INTERVAL step=${STEP_HOURS}h)"
 KR=false; [ -n "$KEEP_RAW" ] && KR=true
+HL=false; [ -n "${HEADLINES:-}" ] && HL=true
 OUT_J=${OUT//\\//}
-ARGS_JSON=$(printf '{"models":"%s","start":"%s","end":"%s","step_hours":%s,"out":"%s","tickers":"%s","interval":"%s","keep_raw":%s}' \
-    "$MODELS" "$START" "$END" "$STEP_HOURS" "$OUT_J" "$TICKERS" "$INTERVAL" "$KR")
+ARGS_JSON=$(printf '{"models":"%s","start":"%s","end":"%s","step_hours":%s,"out":"%s","tickers":"%s","interval":"%s","keep_raw":%s,"headlines":%s}' \
+    "$MODELS" "$START" "$END" "$STEP_HOURS" "$OUT_J" "$TICKERS" "$INTERVAL" "$KR" "$HL")
 echo "$ARGS_JSON" | timeout 60 ssh -o BatchMode=yes "$HOST" "cmd /c more > Q:\\finance-analyzer\\data\\llm_backtest_args.json" \
     || { echo "args upload failed"; exit 1; }
 # /tr truncates ~261 chars (bit us 2026-07-13) — keep this SHORT and fixed.

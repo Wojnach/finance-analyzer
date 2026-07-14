@@ -11,6 +11,7 @@ param(
     [string]$Tickers = "BTC-USD,ETH-USD",
     [string]$Interval = "1h",
     [switch]$KeepRaw,
+    [switch]$Headlines,
     [switch]$FromArgsFile
 )
 
@@ -25,6 +26,7 @@ if ($FromArgsFile) {
         $StepHours = [int]$a.step_hours; $Out = $a.out
         $Tickers = $a.tickers; $Interval = $a.interval
         if ($a.keep_raw) { $KeepRaw = $true }
+        if ($a.headlines) { $Headlines = $true }
     } else {
         Write-Host "args file missing: $af"; exit 1
     }
@@ -44,6 +46,7 @@ try {
     Set-Location $repo
     $extra = @()
     if ($KeepRaw) { $extra += "--keep-raw" }
+    if ($Headlines) { $extra += "--headlines" }
     & .venv\Scripts\python.exe -u scripts\llm_backtest.py `
         --models $Models --start $Start --end $End --step-hours $StepHours `
         --tickers $Tickers --interval $Interval --out $Out @extra

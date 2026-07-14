@@ -142,7 +142,7 @@ Technical Indicators:
 Market Context:
 - Fear & Greed: {context.get('fear_greed', 'N/A')}/100 ({context.get('fear_greed_class', '')})
 - Sentiment: {context.get('news_sentiment', 'N/A')} (conf: {context.get('sentiment_confidence', 'N/A')})
-
+{context.get('headlines_block', '')}
 Multi-timeframe: {context.get('timeframe_summary', 'N/A')}
 
 Analyze the data thoroughly, then provide your trading decision as JSON.<|im_end|>

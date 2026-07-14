@@ -138,6 +138,63 @@ def outcome_sessions(df: pd.DataFrame, at: pd.Timestamp, n_candles: int) -> floa
     return (float(df["close"].iloc[pos + n_candles]) / float(df["close"].iloc[pos]) - 1) * 100
 
 
+def fetch_headlines_finnhub(yf_symbol: str, start: str, end: str) -> list:
+    """Fetch + cache company news for the window. Returns [{ts, headline}]."""
+    import portfolio  # noqa: F401 — repo root on path
+
+    cache = Path(f"data/backtest_headlines_{yf_symbol}.json")
+    if cache.exists():
+        return json.loads(cache.read_text())
+    key = json.loads(Path("config.json").read_text()).get("finnhub_key")
+    if not key:
+        raise SystemExit("finnhub_key missing from config.json")
+    out = []
+    cur = pd.Timestamp(start)
+    stop_ts = pd.Timestamp(end)
+    while cur < stop_ts:
+        # Finnhub caps ~250 items/request (newest-first) — small chunks
+        # or busy tickers silently lose older days.
+        chunk_end = min(cur + pd.Timedelta(days=2), stop_ts)
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    "https://finnhub.io/api/v1/company-news",
+                    params={"symbol": yf_symbol, "from": cur.strftime("%Y-%m-%d"),
+                            "to": chunk_end.strftime("%Y-%m-%d"), "token": key},
+                    timeout=20,
+                )
+                r.raise_for_status()
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(2 ** (attempt + 1))
+        out += [{"ts": h["datetime"], "headline": h["headline"]}
+                for h in r.json() if h.get("headline")]
+        cur = chunk_end
+        time.sleep(1.1)  # free tier 60/min
+    seen = set()
+    dedup = []
+    for h in sorted(out, key=lambda h: h["ts"]):
+        k = (h["ts"], h["headline"])
+        if k not in seen:
+            seen.add(k)
+            dedup.append(h)
+    out = dedup
+    cache.write_text(json.dumps(out))
+    return out
+
+
+def headlines_block(headlines: list, at: pd.Timestamp, lookback_h: int = 48, top: int = 5) -> str:
+    lo = (at - pd.Timedelta(hours=lookback_h)).timestamp()
+    hi = at.timestamp()
+    recent = [h for h in headlines if lo <= h["ts"] <= hi][-top:]
+    if not recent:
+        return "Recent Headlines (48h): none available"
+    lines = "\n".join(f"- {h['headline'][:110]}" for h in recent)
+    return f"Recent Headlines (48h):\n{lines}"
+
+
 def fetch_fng() -> dict:
     data = requests.get(FNG_HISTORY, timeout=15).json()["data"]
     return {
@@ -243,6 +300,13 @@ def run(args):
     horizons = INTERVAL_HORIZONS[args.interval]
     step_h = args.step_hours or INTERVAL_STEP_HOURS[args.interval]
     iv_h = _interval_hours(args.interval)
+    news = {}
+    if args.headlines:
+        for tick in frames:
+            if tick in YF_TICKERS:
+                news[tick] = fetch_headlines_finnhub(
+                    YF_TICKERS[tick], args.start, args.end)
+                print(f"{tick}: {len(news[tick])} headlines cached", flush=True)
     cases = []
     at = start
     while at <= end:
@@ -253,6 +317,8 @@ def run(args):
                 if len(near) == 0 or (at - near[-1]) > pd.Timedelta(hours=iv_h):
                     continue
             ctx = build_context(frames[tick], at, tick, fng, interval=args.interval)
+            if ctx is not None and tick in news:
+                ctx["headlines_block"] = headlines_block(news[tick], at)
             if tick in YF_TICKERS:
                 outs = {
                     f"outcome_{h}h_pct": outcome_sessions(
@@ -303,6 +369,7 @@ def run(args):
                 row = {
                     "model": model,
                     "interval": args.interval,
+                    "arm": "B" if args.headlines else "A",
                     "at": c["at"],
                     "ticker": c["ctx"]["ticker"],
                     "vote": vote,
@@ -380,6 +447,8 @@ if __name__ == "__main__":
     p.add_argument("--tickers", default="BTC-USD,ETH-USD")
     p.add_argument("--out", default="data/llm_backtest_results.jsonl")
     p.add_argument("--keep-raw", action="store_true")
+    p.add_argument("--headlines", action="store_true",
+                   help="inject Finnhub historical headlines (yf tickers only)")
     p.add_argument("--score", metavar="RESULTS")
     a = p.parse_args()
     if a.score:
