@@ -3431,9 +3431,19 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         _set_last_signal(ticker, "__pre_dispatch__")
         _reset_phase_log(ticker)
 
-    # Check if GPU-intensive signals should be skipped (stocks outside market hours)
+    # Check if GPU-intensive signals should be skipped. Two reasons, either
+    # forces skip: (1) US stocks outside market hours; (2) GPU inference
+    # unavailable now — on the Deck the remote llama-server (herc2) is
+    # unreachable/asleep (2026-07-15 dynamic LLM voting). When skipped,
+    # GPU_SIGNALS (ministral/qwen3/forecast/phi4_mini) are REMOVED from the
+    # applicable-voter count and their vote blocks skipped — no MIN_VOTERS
+    # contribution, no consensus dilution (removal, not abstain).
+    from portfolio.llama_server import remote_llm_available
     from portfolio.market_timing import should_skip_gpu
     skip_gpu = should_skip_gpu(ticker, config=config) if ticker else False
+    if ticker and not skip_gpu and not remote_llm_available():
+        skip_gpu = True
+        extra_info["_gpu_unavailable"] = True
     if skip_gpu:
         extra_info["_gpu_signals_skipped"] = True
 

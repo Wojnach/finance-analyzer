@@ -400,7 +400,7 @@ def get_disabled_reason(signal_name: str) -> str | None:
 # Signals that require local GPU inference.
 # Skipped for US stocks outside market hours to save GPU resources.
 # claude_fundamental excluded — uses remote API, has its own market-hours gate.
-GPU_SIGNALS = frozenset({"ministral", "qwen3", "forecast"})
+GPU_SIGNALS = frozenset({"ministral", "qwen3", "forecast", "phi4_mini"})
 
 SIGNAL_NAMES = [
     "rsi",

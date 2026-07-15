@@ -640,6 +640,39 @@ def _pause_stop_server():
 
 
 _remote_cache = {"ts": 0.0, "cfg": None}
+_remote_health = {"ts": 0.0, "ok": None}
+
+
+def remote_llm_available() -> bool:
+    """Dynamic LLM participation gate (2026-07-15).
+
+    True only when GPU inference can actually run RIGHT NOW:
+      - No remote configured → local mode; available iff the local gate is
+        not paused (herc2 running the loop itself).
+      - Remote configured (Deck) → herc2 must be reachable and its
+        llama-server healthy. When herc2 is asleep, returns False so the
+        caller REMOVES the LLM signals from the applicable-voter set
+        entirely (not an abstain — they don't count toward MIN_VOTERS or
+        dilute consensus). Cached 60s to avoid per-ticker health pings.
+    """
+    remote = _remote_config()
+    if not remote:
+        return local_llm_enabled()
+    now = time.time()
+    if now - _remote_health["ts"] < 60 and _remote_health["ok"] is not None:
+        return _remote_health["ok"]
+    ok = False
+    try:
+        r = _requests.get(
+            f"{remote['url'].rstrip('/')}/health",
+            timeout=remote.get("connect_timeout", 3),
+        )
+        ok = r.status_code == 200
+    except Exception:
+        ok = False
+    _remote_health.update(ts=now, ok=ok)
+    logger.info("remote_llm_available: %s (%s)", ok, remote["url"])
+    return ok
 
 
 def _remote_config():
