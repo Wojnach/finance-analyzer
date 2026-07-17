@@ -306,6 +306,17 @@ DISABLED_SIGNALS = {
                         # XAU-USD and XAG-USD (only applicable tickers), so vote was always
                         # force-HOLD. Wasting yfinance+FRED API calls every cycle for zero
                         # accuracy data. Formal disable saves I/O.
+    "ministral",        # 2026-07-17: BENCHED. 5-month historical backtest (Feb-Jul
+                        # 2026, same prompts/snapshots): only phi4_mini cleared the
+                        # 60% floor. ministral3 voted just 13x across BTC+ETH (99%
+                        # abstain) — sample too small to trust. Disabled to focus
+                        # GPU time on phi4_mini. Kept in SIGNAL_NAMES for tracking;
+                        # re-enable via _DISABLED_SIGNAL_OVERRIDES if it earns a
+                        # per-ticker slot. Was: 58.0% 1d live (6K sam).
+    "qwen3",            # 2026-07-17: BENCHED. Same backtest — qwen3 50.0% pooled
+                        # BTC+ETH (n=74) = coinflip; no candle/horizon cell cleared
+                        # 60%. Disabled to focus on phi4_mini. Kept in SIGNAL_NAMES
+                        # for tracking. Was: 59.7% 1d live (4K sam, 1.2% activation).
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
