@@ -83,6 +83,20 @@ _MODEL_CONFIGS = {
         ),
         "extra_args": [],
     },
+    # phi4_instruct: Phi-4-mini-INSTRUCT (3.8B, Q4_K_M). Added 2026-07-17 to
+    # A/B against phi4_mini (the -reasoning variant) for finance BUY/SELL. The
+    # reasoning variant is a math specialist whose verbose <think> CoT often
+    # never converges within context on finance prompts; the instruct variant
+    # answers directly (no <think>), faster + parseable. Same chat-token family
+    # (<|system|>/<|user|>/<|assistant|>/<|end|>). bartowski GGUF, 2.49 GB.
+    "phi4_instruct": {
+        "model": (
+            r"Q:\models\phi4-mini-instruct-gguf\microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/phi4-mini-instruct-gguf/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"
+        ),
+        "extra_args": [],
+    },
     # finance-llama-8b: sentiment shadow model. Added 2026-04-09 as part of the
     # fingpt → llm_batch rotation migration. Previously this GGUF was loaded by a
     # bespoke NDJSON daemon (scripts/fingpt_daemon.py), first on GPU all-layers
@@ -529,7 +543,7 @@ def _start_server(name):
             "-t",
             "4",
             "-c",
-            "4096",
+            "16384",
         ] + cfg.get("extra_args", [])
 
         proc = subprocess.Popen(
@@ -812,6 +826,94 @@ def _query_http(prompt, n_predict=1024, temperature=0.0, top_p=0.2, stop=None):
     if r.status_code == 200:
         return r.json().get("content", "").strip()
     return None
+
+
+def _query_remote_chat(remote, messages, max_tokens, temperature, top_p, top_k):
+    """Chat-completions request to the remote server (server applies the GGUF's
+    own chat template). Returns assistant content str or None."""
+    body = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k,
+    }
+    try:
+        r = _requests.post(
+            f"{remote['url'].rstrip('/')}/v1/chat/completions",
+            json=body,
+            timeout=(remote.get("connect_timeout", 3), remote.get("read_timeout", 300)),
+        )
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"]
+        logger.warning("remote llama-server chat HTTP %s", r.status_code)
+    except Exception as e:
+        logger.info("remote llama-server chat unreachable: %s", str(e)[:120])
+    return None
+
+
+def _query_http_chat(messages, max_tokens, temperature, top_p, top_k):
+    """Local chat-completions request. No locking — caller must hold locks.
+
+    The server applies the loaded GGUF's OWN embedded chat template, so callers
+    pass structured messages instead of hand-building special-token markup.
+    """
+    body = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "top_k": top_k,
+        "cache_prompt": True,
+    }
+    r = _requests.post(
+        f"http://127.0.0.1:{_PORT}/v1/chat/completions",
+        json=body,
+        timeout=300,
+    )
+    if r.status_code == 200:
+        return r.json()["choices"][0]["message"]["content"]
+    return None
+
+
+def query_llama_server_chat(
+    name, messages, max_tokens=8192, temperature=0.8, top_p=0.95, top_k=40
+):
+    """Chat-completions query — the server applies the model's OWN embedded chat
+    template (verified against Microsoft's spec), so callers never hand-build
+    prompt markup or risk template drift.
+
+    Use for reasoning/instruct models (phi4_mini, phi4_instruct) where the exact
+    chat template + sampling params matter. Defaults follow Microsoft's Phi-4-mini
+    recommendation (temp 0.8 / top_p 0.95 / top_k 40).
+
+    Returns assistant content str, or None (caller falls back / abstains).
+    """
+    remote = _remote_config()
+    if remote:
+        if name not in remote["models"]:
+            return None
+        return _query_remote_chat(
+            remote, messages, max_tokens, temperature, top_p, top_k
+        )
+    if not local_llm_enabled():
+        _pause_stop_server()
+        return None
+    if name not in _MODEL_CONFIGS:
+        return None
+    with _thread_lock:
+        fh = _acquire_file_lock(timeout=300)
+        if fh is None:
+            return None
+        try:
+            if not _ensure_model(name):
+                return None
+            return _query_http_chat(messages, max_tokens, temperature, top_p, top_k)
+        except Exception as e:
+            logger.warning("llama-server %s chat query failed: %s", name, e)
+            return None
+        finally:
+            _release_file_lock(fh)
 
 
 def query_llama_server_batch(name, prompts_and_params):

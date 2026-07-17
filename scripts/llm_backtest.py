@@ -263,8 +263,18 @@ def outcome_at(df: pd.DataFrame, at: pd.Timestamp, hours: int) -> float | None:
 
 
 def run(args):
-    from portfolio.llama_server import query_llama_server, stop_server
+    from portfolio.llama_server import (
+        query_llama_server,
+        query_llama_server_chat,
+        stop_server,
+    )
     from portfolio.qwen3_trader import _build_prompt, _parse_response
+    from portfolio.signals.phi4_mini_reasoning import (
+        _build_phi4_messages,
+        _parse_phi4_response,
+    )
+
+    PHI4_MODELS = {"phi4_mini", "phi4_instruct"}
 
     start = pd.Timestamp(args.start, tz="UTC")
     end = pd.Timestamp(args.end, tz="UTC")
@@ -360,10 +370,30 @@ def run(args):
                 t0 = time.time()
                 raw = None
                 try:
-                    raw = query_llama_server(
-                        model, _build_prompt(c["ctx"]), n_predict=2048, temperature=0.0
-                    )
-                    vote, reason, conf = _parse_response(raw)
+                    if model in PHI4_MODELS:
+                        # Correct path (2026-07-17): /v1/chat/completions so the
+                        # server applies the GGUF's own verified chat template,
+                        # Microsoft sampling (temp 0.8/top_p 0.95), and 8192
+                        # tokens so the reasoning CoT can close (4096 ctx used to
+                        # truncate it -> forced abstain). phi4's own parser strips
+                        # <think> and guards truncation (None -> ABSTAIN).
+                        raw = query_llama_server_chat(
+                            model,
+                            _build_phi4_messages(c["ctx"]),
+                            max_tokens=8192,
+                            temperature=0.8,
+                            top_p=0.95,
+                        )
+                        action, reason, conf = _parse_phi4_response(raw or "")
+                        vote = action or "ABSTAIN"
+                    else:
+                        raw = query_llama_server(
+                            model,
+                            _build_prompt(c["ctx"]),
+                            n_predict=2048,
+                            temperature=0.0,
+                        )
+                        vote, reason, conf = _parse_response(raw)
                 except Exception as e:
                     vote, reason, conf = "ERROR", str(e)[:120], None
                 row = {

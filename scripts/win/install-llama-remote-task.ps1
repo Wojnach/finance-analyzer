@@ -14,7 +14,7 @@ New-NetFirewallRule -DisplayName "llama-remote-8788-deck-only" `
     -RemoteAddress $deckIp -Action Allow -ErrorAction SilentlyContinue | Out-Null
 
 $action = New-ScheduledTaskAction -Execute $bin -Argument `
-    "-m `"$model`" --host 0.0.0.0 --port 8788 -ngl 99 -c 4096 --no-webui"
+    "-m `"$model`" --host 0.0.0.0 --port 8788 -ngl 99 -c 16384 --no-webui"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `

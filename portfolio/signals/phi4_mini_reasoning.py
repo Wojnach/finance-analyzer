@@ -158,6 +158,49 @@ def _build_phi4_prompt(context: dict) -> str:
     )
 
 
+def _build_phi4_messages(context: dict) -> list[dict]:
+    """Render Phi-4 chat MESSAGES (system + user) from signal context.
+
+    For the ``/v1/chat/completions`` path, where llama-server applies the GGUF's
+    OWN embedded chat template (verified byte-identical to Microsoft's
+    tokenizer_config 2026-07-17) — so we never hand-build special-token markup
+    or risk template drift. Same field layout as ``_build_phi4_prompt``'s user
+    block, so both paths feed the model identical information.
+    """
+    ticker = context.get("ticker", "UNKNOWN")
+    asset_type = context.get("asset_type", "cryptocurrency")
+    price = float(context.get("price_usd", 0) or 0)
+    rsi = context.get("rsi", "N/A")
+    macd_hist = context.get("macd_hist", "N/A")
+    ema_dir = "Bullish (9>21)" if context.get("ema_bullish") else "Bearish (9<21)"
+    ema_gap = context.get("ema_gap_pct", "N/A")
+    bb_pos = context.get("bb_position", "N/A")
+    vol_ratio = context.get("volume_ratio", "N/A")
+    fg = context.get("fear_greed", "N/A")
+    fg_class = context.get("fear_greed_class", "")
+    sentiment = context.get("news_sentiment", "N/A")
+    tf_summary = context.get("timeframe_summary", "N/A")
+    change_24h = context.get("change_24h", "N/A")
+    user = (
+        f"Asset: {ticker} ({asset_type})\n"
+        f"Price: ${price:,.2f}\n"
+        f"RSI(14): {rsi}\n"
+        f"MACD Histogram: {macd_hist}\n"
+        f"EMA(9) vs EMA(21): {ema_dir} (gap: {ema_gap}%)\n"
+        f"Bollinger Bands: Price is {bb_pos}\n"
+        f"Volume Ratio: {vol_ratio}x avg\n"
+        f"Fear & Greed: {fg}/100 ({fg_class})\n"
+        f"News Sentiment: {sentiment}\n"
+        f"Multi-timeframe: {tf_summary}\n"
+        f"24h Change: {change_24h}\n\n"
+        "Analyze carefully, then provide your decision and confidence score."
+    )
+    return [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]
+
+
 def _strip_think_block(text: str) -> str:
     """Remove the <think>…</think> reasoning block emitted by Phi-4-mini.
 
