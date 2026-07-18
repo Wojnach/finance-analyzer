@@ -1,5 +1,5 @@
 /*
- * views/settings.js — settings: theme, polling, /legacy link, logout.
+ * views/settings.js — settings: theme, polling, logout.
  */
 
 import * as router from "../router.js";
@@ -23,7 +23,6 @@ export const view = {
     v.append(_themeRow());
     v.append(_pauseRow());
     v.append(_refreshRow());
-    v.append(_legacyLink());
     v.append(_logoutRow());
 
     rootEl.append(v);
@@ -64,10 +63,12 @@ function _themeRow() {
   btn.className = "icon-btn";
   btn.style.minWidth = "auto";
   btn.style.padding = "var(--sp-2) var(--sp-3)";
-  btn.textContent = state.get(state.Slots.THEME) === "light" ? "→ Dark" : "→ Light";
+  btn.textContent =
+    state.get(state.Slots.THEME) === "light" ? "→ Dark" : "→ Light";
   btn.addEventListener("click", () => {
     toggleTheme();
-    btn.textContent = state.get(state.Slots.THEME) === "light" ? "→ Dark" : "→ Light";
+    btn.textContent =
+      state.get(state.Slots.THEME) === "light" ? "→ Dark" : "→ Light";
   });
   return _row("Theme", btn, "Toggle dark/light. Persists per device.");
 }
@@ -83,8 +84,11 @@ function _pauseRow() {
     polling.setPaused(!polling.isPaused());
     btn.textContent = polling.isPaused() ? "Resume" : "Pause";
   });
-  return _row("Auto-refresh", btn,
-    "Pause to stop polling everywhere. Visibility-aware regardless.");
+  return _row(
+    "Auto-refresh",
+    btn,
+    "Pause to stop polling everywhere. Visibility-aware regardless.",
+  );
 }
 
 function _refreshRow() {
@@ -112,20 +116,11 @@ function _refreshRow() {
       resetTimer = null;
     }, 1400);
   });
-  return _row("Force refresh", btn,
-    "Drops the in-memory ttl cache and refires every active polling task.");
-}
-
-function _legacyLink() {
-  const a = document.createElement("a");
-  a.href = "/legacy";
-  a.className = "icon-btn";
-  a.style.textDecoration = "none";
-  a.style.minWidth = "auto";
-  a.style.padding = "var(--sp-2) var(--sp-3)";
-  a.textContent = "Open →";
-  return _row("Legacy view", a,
-    "Pre-redesign single-file dashboard. Useful if something on mobile breaks.");
+  return _row(
+    "Force refresh",
+    btn,
+    "Drops the in-memory ttl cache and refires every active polling task.",
+  );
 }
 
 function _logoutRow() {
@@ -143,6 +138,9 @@ function _logoutRow() {
     // and redirects to /. Pure JS document.cookie cannot do this.
     location.href = "/logout";
   });
-  return _row("Sign out", btn,
-    "Server-side logout: clears the HttpOnly auth cookie and redirects to /. CF Access still applies.");
+  return _row(
+    "Sign out",
+    btn,
+    "Server-side logout: clears the HttpOnly auth cookie and redirects to /. CF Access still applies.",
+  );
 }

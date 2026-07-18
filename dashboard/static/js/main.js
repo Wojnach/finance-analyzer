@@ -29,7 +29,7 @@ import { showToast } from "./components/toast.js";
 //
 // Batch 4: views/home.js
 // Batch 5+: decisions, signals, more, etc.
-// Until a route is implemented, router.js renders a fallback that links to /legacy.
+// Until a route is implemented, router.js renders a fallback linking back home.
 
 import "./views/home.js";
 import "./views/decisions.js"; // also imports decision-detail.js internally

@@ -22,7 +22,7 @@ const ITEMS = [
   { route: "metals",     label: "Metals",      hint: "XAG/XAU warrants" },
   { route: "golddigger", label: "GoldDigger",  hint: "Gold-cert bot" },
   { route: "equity",     label: "Equity",      hint: "P&L curve + trade marks" },
-  { route: "settings",   label: "Settings",    hint: "Theme, polling, /legacy" },
+  { route: "settings",   label: "Settings",    hint: "Theme, polling, logout" },
 ];
 
 export const view = {

@@ -325,7 +325,7 @@ function _detailNode(
   note.style.marginTop = "var(--sp-2)";
   note.textContent =
     "Tip: drill into Per-signal accuracy (sub-tab above) for the full sample size + " +
-    "calibration. Underlying timeframe-by-timeframe alignment is on /legacy.";
+    "calibration.";
   wrap.append(note);
   return wrap;
 }

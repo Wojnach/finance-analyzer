@@ -837,16 +837,6 @@ def index():
     return send_from_directory("static", "index.html")
 
 
-@app.route("/legacy")
-@require_auth
-def index_legacy():
-    # Pre-redesign single-file dashboard preserved as a fallback during the
-    # 2026-05-03 mobile-first rollout. See docs/PLAN.md.
-    if request.args.get("token"):
-        return redirect("/legacy", code=302)
-    return send_from_directory("static", "index_legacy.html")
-
-
 @app.route("/logout")
 def logout():
     """Clear the pf_dashboard_token cookie and redirect to /.
@@ -2566,7 +2556,7 @@ app.register_blueprint(_silver_bp)
 
 
 # Short vanity aliases for the househunting viewer. Gated by require_auth like
-# /legacy (NOT bare like /logout): a first-visit bootstrap via /hh?token=XXX
+# the SPA root (NOT bare like /logout): a first-visit bootstrap via /hh?token=XXX
 # must reach require_auth so the token is converted to the pf_dashboard_token
 # cookie before we redirect — otherwise the bare redirect drops the query
 # string and the token-less /house/ 401s on a fresh device. The redirect

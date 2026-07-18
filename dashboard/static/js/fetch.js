@@ -25,7 +25,7 @@ export async function fj(url, opts = {}) {
   if (ttl > 0) {
     const key = cacheKey || url;
     const cached = _ttlCache.get(key);
-    if (cached && (Date.now() - cached.at) < ttl) {
+    if (cached && Date.now() - cached.at < ttl) {
       return cached.value;
     }
   }
@@ -40,15 +40,18 @@ export async function fj(url, opts = {}) {
       });
       if (!r.ok) {
         if (r.status === 401 || r.status === 403) {
-          // Auth failed — let the caller handle (UI may redirect to /legacy
-          // or show a re-auth hint).
-          state.set(state.Slots.ERROR, `Auth failed (${r.status}). Try /legacy?token=...`);
+          // Auth failed — let the caller handle (show a re-auth hint).
+          state.set(
+            state.Slots.ERROR,
+            `Auth failed (${r.status}). Try /?token=...`,
+          );
           return null;
         }
         throw new Error(`HTTP ${r.status} ${r.statusText}`);
       }
       const data = await r.json();
-      if (ttl > 0) _ttlCache.set(cacheKey || url, { at: Date.now(), value: data });
+      if (ttl > 0)
+        _ttlCache.set(cacheKey || url, { at: Date.now(), value: data });
       // Clear any prior error on first successful call
       if (state.get(state.Slots.ERROR)) state.set(state.Slots.ERROR, null);
       return data;
@@ -73,7 +76,10 @@ export async function fpost(url, body, opts = {}) {
     const r = await fetch(url, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
       body: JSON.stringify(body),
       signal: opts.signal,
     });

@@ -17,7 +17,7 @@ import * as state from "./state.js";
 
 const _views = new Map(); // name -> {mount, unmount}
 let _root = null;
-let _current = null;       // {name, params, view}
+let _current = null; // {name, params, view}
 let _onChange = null;
 
 /**
@@ -36,7 +36,7 @@ export function init(rootEl, opts = {}) {
   _root = rootEl;
   _onChange = opts.onChange || null;
   window.addEventListener("hashchange", _handleChange);
-  window.addEventListener("popstate",   _handleChange);
+  window.addEventListener("popstate", _handleChange);
   // Initial mount
   _handleChange();
 }
@@ -65,8 +65,16 @@ function _handleChange() {
   if (!_root) return;
   const parsed = _parseHash(location.hash);
   // Unmount previous
-  if (_current && _current.view && typeof _current.view.unmount === "function") {
-    try { _current.view.unmount(); } catch (e) { console.error("unmount error", e); }
+  if (
+    _current &&
+    _current.view &&
+    typeof _current.view.unmount === "function"
+  ) {
+    try {
+      _current.view.unmount();
+    } catch (e) {
+      console.error("unmount error", e);
+    }
   }
   _clearRoot();
 
@@ -80,7 +88,9 @@ function _handleChange() {
       _current = { name: parsed.name, params: parsed.params, view };
     } catch (e) {
       console.error(`mount error: ${parsed.name}`, e);
-      _renderError(`Failed to mount "${parsed.name}": ${e?.message || "unknown error"}`);
+      _renderError(
+        `Failed to mount "${parsed.name}": ${e?.message || "unknown error"}`,
+      );
       _current = { name: parsed.name, params: parsed.params, view: null };
     }
   }
@@ -100,10 +110,10 @@ function _renderFallback(message) {
   const p1 = document.createElement("p");
   p1.textContent = message;
   const p2 = document.createElement("p");
-  p2.append("Visit the ");
+  p2.append("This view is not implemented — ");
   const a = document.createElement("a");
-  a.href = "/legacy";
-  a.textContent = "legacy view";
+  a.href = "#home";
+  a.textContent = "go home";
   p2.append(a, ".");
   wrap.append(p1, p2);
   _root.append(wrap);

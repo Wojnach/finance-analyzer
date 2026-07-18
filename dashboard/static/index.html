@@ -2,19 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f0f2f5" media="(prefers-color-scheme: light)" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="theme-color"
+      content="#1a1a2e"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
+      name="theme-color"
+      content="#f0f2f5"
+      media="(prefers-color-scheme: light)"
+    />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <meta name="apple-mobile-web-app-title" content="Portfolio" />
     <meta name="format-detection" content="telephone=no" />
 
     <title>Portfolio Intelligence</title>
 
     <link rel="manifest" href="/static/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon-180.png" />
+    <link
+      rel="apple-touch-icon"
+      href="/static/icons/apple-touch-icon-180.png"
+    />
     <link rel="icon" type="image/png" href="/static/icons/icon-192.png" />
 
     <link rel="stylesheet" href="/static/css/tokens.css" />
@@ -24,8 +40,10 @@
     <link rel="stylesheet" href="/static/css/responsive.css" />
 
     <!-- Chart.js stays UMD (Track 6 decision: avoids ESM tree-shake registration). -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
-            defer></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+      defer
+    ></script>
   </head>
   <body>
     <div class="app" id="app">
@@ -36,15 +54,25 @@
         </div>
         <div class="app-header__pnl flat" id="header-pnl">--</div>
         <div class="app-header__icons" id="header-icons">
-          <button class="icon-btn desktop-mode-toggle" id="desktop-mode-toggle"
-                  type="button"
-                  title="Layout: Auto — tap for Desktop">
+          <button
+            class="icon-btn desktop-mode-toggle"
+            id="desktop-mode-toggle"
+            type="button"
+            title="Layout: Auto — tap for Desktop"
+          >
             <span class="glyph" aria-hidden="true">⊞</span>
             <span class="label">Auto</span>
-            <span class="sr-only">Cycle layout mode: Auto, Desktop, Mobile</span>
+            <span class="sr-only"
+              >Cycle layout mode: Auto, Desktop, Mobile</span
+            >
           </button>
-          <span class="refresh-dot" id="refresh-dot" title="auto-refresh"
-                role="button" tabindex="0"></span>
+          <span
+            class="refresh-dot"
+            id="refresh-dot"
+            title="auto-refresh"
+            role="button"
+            tabindex="0"
+          ></span>
         </div>
       </header>
 
@@ -53,13 +81,18 @@
           Loading dashboard…
           <br />
           <small>
-            If this stays for more than a few seconds,
-            visit the <a href="/legacy">legacy view</a>.
+            If this stays for more than a few seconds, hard-refresh the page
+            (the service-worker cache may be stale).
           </small>
         </div>
       </main>
 
-      <nav class="bottom-nav" id="bottom-nav" role="navigation" aria-label="Primary">
+      <nav
+        class="bottom-nav"
+        id="bottom-nav"
+        role="navigation"
+        aria-label="Primary"
+      >
         <button class="bottom-nav__item active" data-route="home" type="button">
           <span class="glyph" aria-hidden="true">⌂</span>
           <span>Home</span>
@@ -89,7 +122,6 @@
 
     <!--
       Mobile-first redesign — see docs/superpowers/specs/2026-05-03-mobile-dashboard-redesign-design.md.
-      Legacy single-file dashboard preserved at /legacy for the rollout window.
       JS bootstraps from /static/js/main.js (loaded as a module). Modules
       under /static/js/{components,views,render,charts}/ are added in
       subsequent batches per docs/PLAN.md.
