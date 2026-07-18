@@ -4206,15 +4206,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 votes["candlestick"] = cs_vote
                 extra_info["_soft_conf_candlestick"] = cs_soft_conf
                 extra_info["candlestick_action"] = cs_vote
-        if "forecast" in votes and votes["forecast"] == "HOLD" \
-                and not _sig_globally_disabled("forecast", ticker, config) \
-                and "forecast" not in _default_disabled_for_ticker:
-            fc_indicators = extra_info.get("forecast_indicators") or {}
-            fc_vote, fc_soft_conf = _forecast_dead_zone_vote(df, fc_indicators)
-            if fc_vote != "HOLD":
-                votes["forecast"] = fc_vote
-                extra_info["_soft_conf_forecast"] = fc_soft_conf
-                extra_info["forecast_action"] = fc_vote
+        # 2026-07-18: forecast dead-zone substitution REMOVED. Unlike the
+        # EMA/BB/MACD/candlestick soft votes (same indicator family as
+        # their signal name), this one logged a price+EMA21 slope vote
+        # under the MODEL signal "forecast" — signal_log accuracy then
+        # measured the fallback, not Chronos (~87% of samples), which
+        # helped invalidate the model's retirement verdict. A model
+        # signal's HOLD must stay HOLD; a slope tiebreaker belongs
+        # under its own signal name if ever wanted.
     else:
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
