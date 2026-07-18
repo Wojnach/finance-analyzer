@@ -214,22 +214,37 @@ def test_scan_path_separator_normalisation(monkeypatch):
     assert crypto["count"] == 1
 
 
-def test_scan_omits_own_pid(monkeypatch):
-    """Dashboard process must not self-match `dashboard/app.py`."""
+def test_scan_counts_own_process(monkeypatch):
+    """scan() runs inside the dashboard; the dashboard is a known loop,
+    so its own process must count (2026-07-18: the old own-pid guard
+    made `dashboard: count=0` permanent on the single-process Deck)."""
     import os
     own = os.getpid()
     procs = [
-        _fake_proc(own, ["py", "-m", "dashboard.app"]),  # this is us
-        _fake_proc(999, ["py", "-m", "dashboard.app"]),  # the real dashboard
+        _fake_proc(own, ["py", "dashboard/app.py"]),  # us == the dashboard
     ]
     _patch_processes(monkeypatch, procs)
     payload = loop_processes.scan()
     dash = next(L for L in payload["loops"] if L["name"] == "dashboard")
-    # Own pid excluded → count is 1, not 2 → not a false-positive
-    # duplicate.
-    assert own not in dash["pids"]
+    assert own in dash["pids"]
     assert dash["count"] == 1
     assert dash["duplicate"] is False
+
+
+def test_scan_two_dashboards_is_real_duplicate(monkeypatch):
+    """Two dashboard processes (self + another) is a genuine duplicate
+    and must alarm — not be masked by an own-pid exclusion."""
+    import os
+    own = os.getpid()
+    procs = [
+        _fake_proc(own, ["py", "-m", "dashboard.app"]),
+        _fake_proc(999, ["py", "-m", "dashboard.app"]),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    dash = next(L for L in payload["loops"] if L["name"] == "dashboard")
+    assert dash["count"] == 2
+    assert dash["duplicate"] is True
 
 
 def test_scan_uptime_uses_oldest_create_time(monkeypatch):

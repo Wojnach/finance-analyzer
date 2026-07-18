@@ -145,18 +145,19 @@ def scan(now_utc: datetime | None = None) -> dict[str, Any]:
 
     procs = _iter_processes()
 
-    # OWN-PROCESS GUARD: omit the dashboard's own self-match. Without
-    # this the dashboard always reports `dashboard: count=1` (us) plus
-    # whatever real dashboard exists, mis-flagging as duplicate.
-    own_pid = os.getpid()
-
+    # SELF-MATCH IS LEGITIMATE (changed 2026-07-18): scan() runs inside
+    # the dashboard, and the dashboard is itself a known loop — on the
+    # Deck it is a single process, so the old own-pid guard forced
+    # `dashboard: count=0` forever while the page was clearly serving.
+    # The Windows py.exe launcher parent/child pair is already deduped
+    # by the venv-launcher collapse below, so counting ourselves cannot
+    # mis-flag a lone dashboard as duplicate. Two genuine dashboard
+    # processes SHOULD flag duplicate=True.
     loops: list[dict[str, Any]] = []
     for name, patterns in KNOWN_LOOPS.items():
         pats = tuple(p.replace("\\", "/").lower() for p in patterns)
         matches = []
         for proc in procs:
-            if proc["pid"] == own_pid:
-                continue
             hay = _normalise_cmdline(proc["cmdline"])
             if not hay:
                 continue
