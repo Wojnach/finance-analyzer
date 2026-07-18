@@ -725,7 +725,7 @@ def _verify_position_holdings(page, positions):
     # Fish engine position cannot be reconciled without holdings API
     if _fish_engine is not None and _fish_engine.has_position:
         log("  WARNING: Positions API failed — cannot verify fish engine position. State unchanged.")
-        send_telegram("*FISH WARNING*\nPositions API unavailable at startup — cannot confirm whether position still held.")
+        send_telegram("*FISH WARNING*\nPositions API unavailable at startup — cannot confirm whether position still held.", category="error")
 
 # Load positions (persisted state overrides defaults)
 POSITIONS = _load_positions()
@@ -980,12 +980,15 @@ def _safe_print(msg):
         pass
 
 
-def send_telegram(msg):
+def send_telegram(msg, category=None):
     if not TG_TOKEN or not TG_CHAT:
         return
     if telegram_cfg.get("mute_all", False):
-        log("[TG muted] " + msg[:80].replace("\n", " "))
-        return
+        _raw = telegram_cfg.get("unmuted_categories", [])
+        _unmuted = set(_raw) if isinstance(_raw, list) else set()
+        if category not in _unmuted:
+            log("[TG muted] " + msg[:80].replace("\n", " "))
+            return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
@@ -3072,7 +3075,7 @@ def _fish_engine_execute_buy(decision, price):
 
         if success:
             _fish_engine.confirm_entry(direction, ask, volume, price)
-            send_telegram(f"FISH BUY: {nm} {volume}u@{ask} = {volume*ask:.0f} SEK ({tactic})")
+            send_telegram(f"FISH BUY: {nm} {volume}u@{ask} = {volume*ask:.0f} SEK ({tactic})", category="trade")
     except Exception:
         # 2026-04-09 Stage 3: ERROR — fish BUY failure in a live-trading
         # path. May be recoverable next cycle but we want the stack trace
@@ -3139,11 +3142,11 @@ def _fish_engine_execute_sell(decision):
 
         if success:
             _fish_engine.confirm_exit(pnl, exit_cert_price=bid, exit_reason=reason)
-            send_telegram(f"FISH EXIT: {nm} {volume}u@{bid} P&L:{pnl:+.0f} SEK ({reason})")
+            send_telegram(f"FISH EXIT: {nm} {volume}u@{bid} P&L:{pnl:+.0f} SEK ({reason})", category="trade")
             sl_snapshot = []  # sell filled, no rollback needed
         else:
             log(f"[fish] SELL FAILED: {result}")
-            send_telegram(f"FISH SELL BLOCKED: {volume}u {nm}@{bid} ({reason}). Manual intervention needed!")
+            send_telegram(f"FISH SELL BLOCKED: {volume}u {nm}@{bid} ({reason}). Manual intervention needed!", category="error")
             # Sell failed → restore the stops we just cancelled so the
             # position is not left naked at the broker.
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
@@ -3154,7 +3157,7 @@ def _fish_engine_execute_sell(decision):
         # re-arm). Telegram keeps the short form with the operator-
         # visible exception; logger.exception captures the full trace.
         logger.exception("_fish_engine_execute_sell: fish SELL path raised ob_id=%s", ob_id)
-        send_telegram(f"FISH SELL ERROR: {e}. Position may be stuck!")
+        send_telegram(f"FISH SELL ERROR: {e}. Position may be stuck!", category="error")
     finally:
         # CODEX-7 finding 2: if anything raised AFTER stops were cancelled
         # but BEFORE the sell was acknowledged (or even after acknowledgment
@@ -3770,7 +3773,7 @@ def emergency_sell(page, key, pos, bid):
         return False
 
     log(f"!!! L3 EMERGENCY SELL: {key} at {bid} (entry: {pos['entry']}, stop: {pos['stop']})")
-    send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units")
+    send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units", category="trade")
 
     sl_snapshot = []
     try:
@@ -3851,7 +3854,7 @@ def emergency_sell(page, key, pos, bid):
 
         if order_status == "SUCCESS":
             # Sell order placed successfully
-            send_telegram(f"*L3 SELL OK* {pos['name']} — order placed")
+            send_telegram(f"*L3 SELL OK* {pos['name']} — order placed", category="trade")
             pos["active"] = False
             pos["sold_ts"] = now_ts
             pos["sold_price"] = bid
@@ -3907,7 +3910,7 @@ def emergency_sell(page, key, pos, bid):
 
             if held_confirmed:
                 log(f"  {key}: short-sell-not-allowed but position still held — keeping active")
-                send_telegram(f"*L3 WARNING* {pos['name']}: SELL rejected but holding is still live. Kept active.")
+                send_telegram(f"*L3 WARNING* {pos['name']}: SELL rejected but holding is still live. Kept active.", category="error")
                 # Position still live AND we cancelled stops earlier → re-arm
                 # to restore protection. Without this the position is naked.
                 _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
@@ -3930,7 +3933,7 @@ def emergency_sell(page, key, pos, bid):
             # not left naked at the broker.
             error_msg = body.get("message", body_str[:100])
             log(f"  {key}: sell failed with: {error_msg}")
-            send_telegram(f"*L3 SELL FAILED* {pos['name']}: {error_msg}")
+            send_telegram(f"*L3 SELL FAILED* {pos['name']}: {error_msg}", category="error")
             _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
             return False
 
@@ -3943,7 +3946,7 @@ def emergency_sell(page, key, pos, bid):
         # post-mortem root-cause. ob_id + key extras help match the stack
         # to the affected position in state files.
         logger.exception("emergency_sell: top-level failure key=%s ob_id=%s", key, pos.get("ob_id"))
-        send_telegram(f"*L3 SELL FAILED*: {e}")
+        send_telegram(f"*L3 SELL FAILED*: {e}", category="error")
         # Outer exception: we don't know if the sell went through. The stops
         # we may have cancelled at the top of the function need restoring.
         try:
@@ -4434,7 +4437,7 @@ def _check_session_and_alert(page):
         session_healthy = True
         session_alert_sent = False
         log("Avanza session recovered")
-        send_telegram("*METALS SESSION* Avanza session recovered — API responding normally.")
+        send_telegram("*METALS SESSION* Avanza session recovered — API responding normally.", category="error")
     elif alive and session_healthy:
         # All good, reset alert flag if it was set
         if session_alert_sent:
@@ -4450,7 +4453,8 @@ def _check_session_and_alert(page):
                 "API returning 401 — BankID session is dead.\n"
                 "Price fetching and trade execution will FAIL.\n\n"
                 "*Action needed:* Run `scripts/avanza_login.py` to re-authenticate via BankID, "
-                "then restart the metals loop."
+                "then restart the metals loop.",
+                category="error",
             )
     elif not alive and not session_healthy:
         # Still dead — don't spam, already alerted
@@ -4468,7 +4472,8 @@ def _check_session_and_alert(page):
                     f"*AVANZA SESSION WARNING*\n"
                     f"Storage state is *{age_h:.1f}h* old (expires at ~24h).\n"
                     f"Session will die in ~{24 - age_h:.1f}h.\n\n"
-                    f"*Renew soon:* Run `scripts/avanza_login.py` to refresh BankID session."
+                    f"*Renew soon:* Run `scripts/avanza_login.py` to refresh BankID session.",
+                    category="error",
                 )
             elif age_h < SESSION_EXPIRY_WARNING_H and session_expiry_warned:
                 # File was renewed — reset warning
@@ -4559,7 +4564,7 @@ def process_trade_queue(page):
     # Session health check (once per batch)
     if not check_session_alive(page):
         log("Trade queue: Avanza session unhealthy (401), skipping execution")
-        send_telegram("*TRADE QUEUE* Session expired — cannot execute orders. Re-login needed.")
+        send_telegram("*TRADE QUEUE* Session expired — cannot execute orders. Re-login needed.", category="error")
         # Mark all pending as failed
         for order in pending:
             order["status"] = "failed"
@@ -4898,11 +4903,11 @@ def _handle_buy_fill(page, order, exec_price, price_data):
                 log(f"  HW trailing stop placed for {pos_key}: {HARDWARE_TRAILING_PCT}% trail, "
                     f"vol={vol} [stoploss {hw_stop_id}]")
                 send_telegram(f"Trailing stop placed: {POSITIONS[pos_key]['name']} "
-                              f"{HARDWARE_TRAILING_PCT}% trail, {vol}u")
+                              f"{HARDWARE_TRAILING_PCT}% trail, {vol}u", category="trade")
             else:
                 log(f"  HW trailing stop FAILED for {pos_key}: {result}")
                 send_telegram(f"*WARNING* Hardware trailing stop failed for "
-                              f"{POSITIONS[pos_key]['name']} — set manually!")
+                              f"{POSITIONS[pos_key]['name']} — set manually!", category="error")
 
     # Legacy cascade stop-loss (only if hardware trailing is OFF)
     if STOP_ORDER_ENABLED and not HARDWARE_TRAILING_ENABLED:
@@ -4915,7 +4920,7 @@ def _handle_buy_fill(page, order, exec_price, price_data):
                 log(f"  Stop-loss placed for {pos_key}: trigger={stop_trigger}, sell={stop_sell}")
             else:
                 log(f"  Stop-loss FAILED for {pos_key} — manual intervention needed")
-                send_telegram(f"*WARNING* Stop-loss failed for {POSITIONS[pos_key]['name']} — set manually!")
+                send_telegram(f"*WARNING* Stop-loss failed for {POSITIONS[pos_key]['name']} — set manually!", category="error")
 
 
 def _handle_sell_fill(page, order, exec_price):
@@ -7594,7 +7599,7 @@ Positions: {pos_summary}{prob_summary}""")
                             send_telegram(f"_Holdings check: {lost} position(s) sold by broker_")
                             if active_after == 0 and not swing_trader and not TRADE_QUEUE_ENABLED:
                                 log("All positions sold — exiting loop")
-                                send_telegram("*METALS LOOP* All positions sold by broker. Stopping.")
+                                send_telegram("*METALS LOOP* All positions sold by broker. Stopping.", category="error")
                                 return
 
                 # Check momentum exit
@@ -7604,7 +7609,7 @@ Positions: {pos_summary}{prob_summary}""")
                         mbid = prices.get(mkey, {}).get("bid") or 0
                         if mbid > 0:
                             log(f"!!! MOMENTUM SELL: {mkey} at {mbid}")
-                            send_telegram(f"*MOMENTUM EXIT* {POSITIONS[mkey]['name']}\nBid: {mbid} | Accelerating decline detected")
+                            send_telegram(f"*MOMENTUM EXIT* {POSITIONS[mkey]['name']}\nBid: {mbid} | Accelerating decline detected", category="trade")
                             emergency_sell(page, mkey, POSITIONS[mkey], mbid)
 
                 # Smart trailing stop updates (every 3rd check — more responsive)
@@ -7733,7 +7738,7 @@ Positions: {pos_summary}{prob_summary}""")
                             dist = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
                             if dist < STOP_L2_PCT:
                                 log(f"!!! AUTO-EXIT SELL: {key} at {bid} (L2+ for {l2_zone_checks.get(key, 0)} checks)")
-                                send_telegram(f"*AUTO-EXIT* {pos['name']}\nBid: {bid} | L2 zone {l2_zone_checks.get(key, 0)} checks, declining")
+                                send_telegram(f"*AUTO-EXIT* {pos['name']}\nBid: {bid} | L2 zone {l2_zone_checks.get(key, 0)} checks, declining", category="trade")
                                 emergency_sell(page, key, pos, bid)
                         break
 
@@ -7968,7 +7973,7 @@ Positions: {pos_summary}{prob_summary}""")
                 logger.error("Cycle %d failed", check_count, exc_info=True)
                 if _consecutive_cycle_errors >= 5:
                     log(f"FATAL: {_consecutive_cycle_errors} consecutive cycle errors — stopping")
-                    send_telegram(f"*METALS LOOP*: {_consecutive_cycle_errors} consecutive cycle errors — stopping")
+                    send_telegram(f"*METALS LOOP*: {_consecutive_cycle_errors} consecutive cycle errors — stopping", category="error")
                     return 1
                 time.sleep(min(10 * _consecutive_cycle_errors, 60))
 
@@ -7977,7 +7982,7 @@ Positions: {pos_summary}{prob_summary}""")
         except Exception as e:
             log(f"FATAL: {e}")
             traceback.print_exc()
-            send_telegram(f"*METALS LOOP CRASH*: {e}")
+            send_telegram(f"*METALS LOOP CRASH*: {e}", category="error")
             return 1
         finally:
             _kill_claude()
