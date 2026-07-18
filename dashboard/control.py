@@ -43,6 +43,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from dashboard.auth import require_auth
+from portfolio.component_registry import get_registry
 from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from portfolio.local_llm_gate import DISABLE_FLAG
 from portfolio.tickers import ALL_TICKERS
@@ -228,6 +229,49 @@ def api_control_loop():
     _audit("loop", data, result)
     return jsonify({"unit": unit, "action": action, **result}), (
         200 if result["ok"] else 502
+    )
+
+
+@bp.route("/registry", methods=["GET"])
+@require_auth
+def api_control_registry():
+    """Component registry snapshot (Phase 4.1) — read-only, no rate-limit hit.
+
+    No ``?ticker=``: the full ``{ticker: {signal: {...}}}`` dump from
+    ``ComponentRegistry.snapshot()``. With ``?ticker=<TICKER>``: that
+    ticker's slice reshaped into ``applicable`` (enabled signal names) +
+    ``disabled`` (``{signal, reason}`` pairs) + the full per-signal
+    ``signals`` detail — built for the #silver page's component-health
+    pill grid (Phase 6), which needs both the compact sets and the
+    per-signal ``voter_state``/``horizons`` detail in one round trip.
+    """
+    snapshot = get_registry().snapshot()
+    ticker = request.args.get("ticker")
+    if not ticker:
+        return jsonify({"ticker": None, "registry": snapshot})
+
+    if ticker not in ALL_TICKERS:
+        return jsonify({"error": f"unknown ticker: {ticker!r}"}), 400
+
+    signals = snapshot.get(ticker, {})
+    applicable = sorted(s for s, info in signals.items() if info.get("enabled_default"))
+    disabled = sorted(
+        (
+            {"signal": s, "reason": info.get("disabled_reason")}
+            for s, info in signals.items()
+            if not info.get("enabled_default")
+        ),
+        key=lambda d: d["signal"],
+    )
+    return jsonify(
+        {
+            "ticker": ticker,
+            "registry": {
+                "applicable": applicable,
+                "disabled": disabled,
+                "signals": signals,
+            },
+        }
     )
 
 

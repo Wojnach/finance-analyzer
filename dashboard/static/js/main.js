@@ -50,6 +50,7 @@ import "./views/llm_leaderboard.js";
 import "./views/loop_processes.js";
 import "./views/pickups.js";
 import "./views/control.js";
+import "./views/silver.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();

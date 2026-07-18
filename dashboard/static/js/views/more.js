@@ -7,6 +7,7 @@
 import * as router from "../router.js";
 
 const ITEMS = [
+  { route: "silver",     label: "Silver",      hint: "XAG-USD command page — pipeline, signals, accuracy, trades" },
   { route: "avanza",     label: "Avanza",      hint: "Live broker sync — cash, positions, orders, stops" },
   { route: "prices",     label: "Live prices", hint: "What the system reads — verify against Avanza app" },
   { route: "assets",     label: "Assets",      hint: "Tradeable warrant catalog — what the loops can buy/sell" },

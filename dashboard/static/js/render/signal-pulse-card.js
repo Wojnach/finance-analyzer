@@ -71,11 +71,32 @@ function _tickerRow(t) {
   left.style.flex = "1";
   left.style.minWidth = "0";
 
-  const ticker = document.createElement("div");
+  const tickerRow = document.createElement("div");
+  tickerRow.style.display = "flex";
+  tickerRow.style.alignItems = "center";
+  tickerRow.style.gap = "6px";
+  const ticker = document.createElement("span");
   ticker.style.fontWeight = "600";
   ticker.style.color = "var(--tx)";
   ticker.textContent = t.ticker;
-  left.append(ticker);
+  tickerRow.append(ticker);
+
+  // 2026-07-18: XAG is the user's stated main instrument focus — a direct
+  // link to its dedicated command page (#silver), separate from the
+  // generic #signals drill-down the rest of the row triggers on tap.
+  if (t.ticker === "XAG-USD") {
+    const link = document.createElement("span");
+    link.style.fontSize = "var(--ty-xs)";
+    link.style.fontWeight = "700";
+    link.style.color = "var(--blu)";
+    link.textContent = "Silver →";
+    link.addEventListener("click", (e) => {
+      e.stopPropagation();
+      router.navigate("silver");
+    });
+    tickerRow.append(link);
+  }
+  left.append(tickerRow);
 
   const detail = document.createElement("div");
   detail.style.display = "flex";

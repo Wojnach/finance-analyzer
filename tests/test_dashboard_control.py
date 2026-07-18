@@ -76,6 +76,10 @@ class TestAuthRequired:
         resp = client.get("/api/control/state")
         assert resp.status_code == 401
 
+    def test_registry_requires_auth(self, client):
+        resp = client.get("/api/control/registry")
+        assert resp.status_code == 401
+
 
 # ---------------------------------------------------------------------------
 # LLM toggle
@@ -235,6 +239,12 @@ class TestRateLimit:
         # The write budget must still be fully available afterwards.
         assert control._rate_limit_remaining() == control._RATE_LIMIT_MAX
 
+    def test_registry_get_does_not_consume_budget(self, client):
+        for _ in range(control._RATE_LIMIT_MAX + 2):
+            resp = client.get("/api/control/registry", headers=_AUTH_HEADERS)
+            assert resp.status_code == 200
+        assert control._rate_limit_remaining() == control._RATE_LIMIT_MAX
+
 
 # ---------------------------------------------------------------------------
 # Audit log
@@ -303,3 +313,50 @@ class TestStateEndpoint:
             resp = client.get("/api/control/state", headers=_AUTH_HEADERS)
         data = resp.get_json()
         assert data["instruments"]["MSTR"] == {"tracked": False}
+
+
+# ---------------------------------------------------------------------------
+# /registry (Phase 6, 2026-07-18) — component_registry snapshot
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryEndpoint:
+    def test_no_ticker_returns_full_snapshot(self, client):
+        resp = client.get("/api/control/registry", headers=_AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ticker"] is None
+        assert "XAG-USD" in data["registry"]
+        # Full-dump shape is the raw snapshot() output: signal -> per-signal
+        # dict, not the ticker-filtered applicable/disabled/signals shape.
+        xag = data["registry"]["XAG-USD"]
+        assert xag  # at least one signal
+        sample = next(iter(xag.values()))
+        assert "enabled_default" in sample
+        assert "disabled_reason" in sample
+
+    def test_ticker_filter_shape(self, client):
+        resp = client.get("/api/control/registry?ticker=XAG-USD", headers=_AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ticker"] == "XAG-USD"
+        reg = data["registry"]
+        assert set(reg.keys()) == {"applicable", "disabled", "signals"}
+        assert isinstance(reg["applicable"], list)
+        assert isinstance(reg["disabled"], list)
+        # Every applicable name must be a known signal, marked enabled there.
+        for name in reg["applicable"]:
+            assert reg["signals"][name]["enabled_default"] is True
+        # Every disabled entry carries a non-empty reason and a known signal.
+        for entry in reg["disabled"]:
+            assert set(entry.keys()) == {"signal", "reason"}
+            assert entry["reason"]
+            assert reg["signals"][entry["signal"]]["enabled_default"] is False
+        # applicable + disabled partitions the full per-signal dict exactly.
+        assert len(reg["applicable"]) + len(reg["disabled"]) == len(reg["signals"])
+
+    def test_unknown_ticker_is_400(self, client):
+        resp = client.get(
+            "/api/control/registry?ticker=NOPE-USD", headers=_AUTH_HEADERS
+        )
+        assert resp.status_code == 400

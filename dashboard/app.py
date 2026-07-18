@@ -2558,6 +2558,12 @@ from dashboard.control import bp as _control_bp  # noqa: E402
 
 app.register_blueprint(_control_bp)
 
+# Blueprint: /api/silver — XAG-USD per-signal-per-horizon accuracy for the
+# #silver command page (Phase 6, 2026-07-18). See dashboard/silver.py.
+from dashboard.silver import bp as _silver_bp  # noqa: E402
+
+app.register_blueprint(_silver_bp)
+
 
 # Short vanity aliases for the househunting viewer. Gated by require_auth like
 # /legacy (NOT bare like /logout): a first-visit bootstrap via /hh?token=XXX
