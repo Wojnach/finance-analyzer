@@ -46,11 +46,15 @@ export function equityChart({ curve = [], trades = [], height = 260 } = {}) {
   ];
 
   // BUY/SELL trade marks (small triangles)
-  const trades_buy  = trades.filter((t) => (t.action || "").toUpperCase() === "BUY");
-  const trades_sell = trades.filter((t) => (t.action || "").toUpperCase() === "SELL");
+  const trades_buy = trades.filter(
+    (t) => (t.action || "").toUpperCase() === "BUY",
+  );
+  const trades_sell = trades.filter(
+    (t) => (t.action || "").toUpperCase() === "SELL",
+  );
   if (trades_buy.length || trades_sell.length) {
-    datasets.push(_tradeMarks(trades_buy,  c.green, "BUY"));
-    datasets.push(_tradeMarks(trades_sell, c.red,   "SELL"));
+    datasets.push(_tradeMarks(trades_buy, c.green, "BUY"));
+    datasets.push(_tradeMarks(trades_sell, c.red, "SELL"));
   }
 
   return miniChart({
@@ -58,10 +62,19 @@ export function equityChart({ curve = [], trades = [], height = 260 } = {}) {
     data: { labels, datasets },
     options: {
       plugins: {
-        legend: { display: true, position: "bottom",
-                  labels: { color: c.dim, font: { size: 11 }, boxWidth: 8 } },
+        legend: {
+          display: true,
+          position: "bottom",
+          labels: { color: c.dim, font: { size: 11 }, boxWidth: 8 },
+        },
       },
-      scales: { x: { ticks: { maxTicksLimit: 6 } } },
+      scales: {
+        x: {
+          ticks: { maxTicksLimit: 6 },
+          title: { display: true, text: "Time", color: c.muted },
+        },
+        y: { title: { display: true, text: "SEK", color: c.muted } },
+      },
     },
     height,
   });

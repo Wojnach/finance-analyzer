@@ -13,7 +13,7 @@
  * clients.claim activates the new SW immediately.
  */
 
-const VERSION = "v2-2026-07-18";
+const VERSION = "v3-2026-07-18";
 const SHELL_CACHE = `pi-shell-${VERSION}`;
 
 const SHELL_ASSETS = [
@@ -37,27 +37,35 @@ const SHELL_ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(SHELL_CACHE);
-    // Best-effort precache — individual failures are tolerated.
-    await Promise.allSettled(SHELL_ASSETS.map((url) =>
-      cache.add(new Request(url, { credentials: "same-origin" }))
-        .catch((e) => console.warn("sw: precache failed", url, e))
-    ));
-    await self.skipWaiting();
-  })());
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      // Best-effort precache — individual failures are tolerated.
+      await Promise.allSettled(
+        SHELL_ASSETS.map((url) =>
+          cache
+            .add(new Request(url, { credentials: "same-origin" }))
+            .catch((e) => console.warn("sw: precache failed", url, e)),
+        ),
+      );
+      await self.skipWaiting();
+    })(),
+  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil((async () => {
-    // Drop old caches.
-    const keys = await caches.keys();
-    await Promise.all(
-      keys.filter((k) => k.startsWith("pi-shell-") && k !== SHELL_CACHE)
-          .map((k) => caches.delete(k))
-    );
-    await self.clients.claim();
-  })());
+  event.waitUntil(
+    (async () => {
+      // Drop old caches.
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => k.startsWith("pi-shell-") && k !== SHELL_CACHE)
+          .map((k) => caches.delete(k)),
+      );
+      await self.clients.claim();
+    })(),
+  );
 });
 
 self.addEventListener("fetch", (event) => {
@@ -65,7 +73,10 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
-  if (url.origin !== location.origin && !url.host.includes("cdn.jsdelivr.net")) {
+  if (
+    url.origin !== location.origin &&
+    !url.host.includes("cdn.jsdelivr.net")
+  ) {
     return;
   }
 
@@ -78,7 +89,10 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Chart.js CDN — cache-first, long-lived.
-  if (url.host.includes("cdn.jsdelivr.net") && url.pathname.includes("chart.js")) {
+  if (
+    url.host.includes("cdn.jsdelivr.net") &&
+    url.pathname.includes("chart.js")
+  ) {
     event.respondWith(_cacheFirst(req, SHELL_CACHE));
     return;
   }

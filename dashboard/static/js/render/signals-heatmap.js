@@ -10,10 +10,22 @@
  * Earlier (uncommitted) drafts assumed per-timeframe nested cell objects,
  * which left every cell as cell--hold against the live data.  Codex P1
  * finding 2026-05-03 — fixed here.
+ *
+ * 2026-07-18: rows where every ticker cell is HOLD/absent (mostly the 76
+ * force-HOLD'd disabled signals) sort below rows with at least one live
+ * BUY/SELL — scrolling past dead rows to find the ~15 active signals was
+ * the standing complaint. A "Hide inactive" toggle (persisted in
+ * localStorage) lets the user drop those rows entirely.
  */
 
-import { open as openSheet, bindLongPress } from "../components/bottom-sheet.js";
+import {
+  open as openSheet,
+  bindLongPress,
+} from "../components/bottom-sheet.js";
+import { filterChip } from "../components/filter-chip.js";
 import { fDurationShort } from "../format.js";
+
+const HIDE_INACTIVE_KEY = "pi-heatmap-hide-inactive";
 
 /**
  * @param {{
@@ -25,7 +37,13 @@ import { fDurationShort } from "../format.js";
  * }} props
  * @returns {HTMLElement}
  */
-export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = new Set(), disabledReasons = {} }) {
+export function renderHeatmap({
+  data,
+  tickers = null,
+  accuracy = {},
+  disabled = new Set(),
+  disabledReasons = {},
+}) {
   const wrap = document.createElement("div");
   wrap.className = "heatmap-wrap";
 
@@ -37,11 +55,12 @@ export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = 
     return wrap;
   }
 
-  const colTickers = (Array.isArray(tickers) && tickers.length)
-    ? tickers
-    : (Array.isArray(data.tickers) && data.tickers.length)
-      ? data.tickers
-      : Object.keys(data.heatmap);
+  const colTickers =
+    Array.isArray(tickers) && tickers.length
+      ? tickers
+      : Array.isArray(data.tickers) && data.tickers.length
+        ? data.tickers
+        : Object.keys(data.heatmap);
 
   const allSignals = _signalOrder(data);
   if (!allSignals.length || !colTickers.length) {
@@ -52,77 +71,165 @@ export function renderHeatmap({ data, tickers = null, accuracy = {}, disabled = 
     return wrap;
   }
 
-  const table = document.createElement("table");
-  table.className = "heatmap";
-
-  const thead = document.createElement("thead");
-  const trH = document.createElement("tr");
-  const corner = document.createElement("th");
-  corner.textContent = "Signal";
-  trH.append(corner);
-  for (const t of colTickers) {
-    const th = document.createElement("th");
-    th.textContent = t.replace(/-USD$/, "");
-    th.title = t;
-    trH.append(th);
+  // Partition once: active rows keep their original order, inactive rows
+  // (every ticker cell HOLD/absent) sort after them.
+  const activeSignals = [];
+  const inactiveSignals = [];
+  for (const sig of allSignals) {
+    (_isActiveRow(data, colTickers, sig)
+      ? activeSignals
+      : inactiveSignals
+    ).push(sig);
   }
-  thead.append(trH);
-  table.append(thead);
 
-  const tbody = document.createElement("tbody");
-  for (const sigName of allSignals) {
-    const tr = document.createElement("tr");
+  const toolbar = document.createElement("div");
+  toolbar.className = "chip-strip";
+  toolbar.style.marginBottom = "var(--sp-2)";
+  toolbar.append(
+    filterChip({
+      label: `Hide inactive (${inactiveSignals.length})`,
+      active: _getHideInactive(),
+      onToggle: (next) => {
+        _setHideInactive(next);
+        renderRows(next);
+      },
+    }),
+  );
+  wrap.append(toolbar);
 
-    const tdName = document.createElement("td");
-    tdName.textContent = _truncate(sigName, 14);
-    tdName.title = sigName;
-    tr.append(tdName);
+  const tableSlot = document.createElement("div");
+  wrap.append(tableSlot);
+  renderRows(_getHideInactive());
 
-    for (const ticker of colTickers) {
-      const cell = document.createElement("td");
-      const value = data.heatmap?.[ticker]?.[sigName];
-      const isDisabled = disabled.has(sigName) || _looksDisabled(value);
-      cell.className = _classForValue(value, isDisabled);
-      cell.dataset.signal = sigName;
-      cell.dataset.ticker = ticker;
-
-      const sinceTs = data.since?.[ticker]?.[sigName];
-      const durLabel = !isDisabled ? fDurationShort(sinceTs) : "";
-      cell.title = durLabel
-        ? `${sigName} · ${ticker}: ${value || "—"} · ${durLabel} in state`
-        : `${sigName} · ${ticker}: ${value || "—"}`;
-      if (durLabel) {
-        const since = document.createElement("span");
-        since.className = "cell-since";
-        since.textContent = durLabel;
-        cell.append(since);
-      }
-
-      bindLongPress(cell, () => ({
-        title: `${sigName} — ${ticker}`,
-        content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs, isDisabled, disabledReasons[sigName]),
-      }));
-      cell.addEventListener("click", () => {
-        openSheet({
-          title: `${sigName} — ${ticker}`,
-          content: _detailNode(sigName, ticker, value, accuracy[sigName], sinceTs, isDisabled, disabledReasons[sigName]),
-        });
-      });
-      tr.append(cell);
-    }
-    tbody.append(tr);
-  }
-  table.append(tbody);
-  wrap.append(table);
   return wrap;
+
+  function renderRows(hideInactive) {
+    while (tableSlot.firstChild) tableSlot.removeChild(tableSlot.firstChild);
+    const rows = hideInactive
+      ? activeSignals
+      : [...activeSignals, ...inactiveSignals];
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No active signals right now.";
+      tableSlot.append(empty);
+      return;
+    }
+    tableSlot.append(buildTable(rows));
+  }
+
+  function buildTable(signalRows) {
+    const table = document.createElement("table");
+    table.className = "heatmap";
+
+    const thead = document.createElement("thead");
+    const trH = document.createElement("tr");
+    const corner = document.createElement("th");
+    corner.textContent = "Signal";
+    trH.append(corner);
+    for (const t of colTickers) {
+      const th = document.createElement("th");
+      th.textContent = t.replace(/-USD$/, "");
+      th.title = t;
+      trH.append(th);
+    }
+    thead.append(trH);
+    table.append(thead);
+
+    const tbody = document.createElement("tbody");
+    for (const sigName of signalRows) {
+      const tr = document.createElement("tr");
+
+      const tdName = document.createElement("td");
+      tdName.textContent = _truncate(sigName, 14);
+      tdName.title = sigName;
+      tr.append(tdName);
+
+      for (const ticker of colTickers) {
+        const cell = document.createElement("td");
+        const value = data.heatmap?.[ticker]?.[sigName];
+        const isDisabled = disabled.has(sigName) || _looksDisabled(value);
+        cell.className = _classForValue(value, isDisabled);
+        cell.dataset.signal = sigName;
+        cell.dataset.ticker = ticker;
+
+        const sinceTs = data.since?.[ticker]?.[sigName];
+        const durLabel = !isDisabled ? fDurationShort(sinceTs) : "";
+        cell.title = durLabel
+          ? `${sigName} · ${ticker}: ${value || "—"} · ${durLabel} in state`
+          : `${sigName} · ${ticker}: ${value || "—"}`;
+        if (durLabel) {
+          const since = document.createElement("span");
+          since.className = "cell-since";
+          since.textContent = durLabel;
+          cell.append(since);
+        }
+
+        bindLongPress(cell, () => ({
+          title: `${sigName} — ${ticker}`,
+          content: _detailNode(
+            sigName,
+            ticker,
+            value,
+            accuracy[sigName],
+            sinceTs,
+            isDisabled,
+            disabledReasons[sigName],
+          ),
+        }));
+        cell.addEventListener("click", () => {
+          openSheet({
+            title: `${sigName} — ${ticker}`,
+            content: _detailNode(
+              sigName,
+              ticker,
+              value,
+              accuracy[sigName],
+              sinceTs,
+              isDisabled,
+              disabledReasons[sigName],
+            ),
+          });
+        });
+        tr.append(cell);
+      }
+      tbody.append(tr);
+    }
+    table.append(tbody);
+    return table;
+  }
 }
 
 // ---------------------------------------------------------------------------
 
+function _getHideInactive() {
+  return localStorage.getItem(HIDE_INACTIVE_KEY) === "1";
+}
+
+function _setHideInactive(v) {
+  localStorage.setItem(HIDE_INACTIVE_KEY, v ? "1" : "0");
+}
+
+function _isActiveRow(data, tickers, sigName) {
+  for (const t of tickers) {
+    const v = String(data.heatmap?.[t]?.[sigName] || "").toUpperCase();
+    if (
+      v === "BUY" ||
+      v === "SELL" ||
+      v === "STRONG_BUY" ||
+      v === "STRONG_SELL"
+    )
+      return true;
+  }
+  return false;
+}
+
 function _signalOrder(data) {
   if (Array.isArray(data?.signals) && data.signals.length) return data.signals;
   const core = Array.isArray(data?.core_signals) ? data.core_signals : [];
-  const enh  = Array.isArray(data?.enhanced_signals) ? data.enhanced_signals : [];
+  const enh = Array.isArray(data?.enhanced_signals)
+    ? data.enhanced_signals
+    : [];
   if (core.length || enh.length) return [...core, ...enh];
 
   // Fallback: union of signal keys across tickers.
@@ -136,11 +243,11 @@ function _signalOrder(data) {
 function _classForValue(value, isDisabled) {
   if (isDisabled) return "cell--disabled";
   const v = String(value || "").toUpperCase();
-  if (v === "STRONG_BUY")  return "cell--strong-buy";
-  if (v === "BUY")          return "cell--buy";
-  if (v === "SELL")         return "cell--sell";
-  if (v === "STRONG_SELL")  return "cell--strong-sell";
-  if (v === "HOLD")         return "cell--hold";
+  if (v === "STRONG_BUY") return "cell--strong-buy";
+  if (v === "BUY") return "cell--buy";
+  if (v === "SELL") return "cell--sell";
+  if (v === "STRONG_SELL") return "cell--strong-sell";
+  if (v === "HOLD") return "cell--hold";
   return "cell--hold";
 }
 
@@ -153,7 +260,15 @@ function _truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function _detailNode(signal, ticker, value, accPct, sinceTs, isDisabled = false, disabledReason = null) {
+function _detailNode(
+  signal,
+  ticker,
+  value,
+  accPct,
+  sinceTs,
+  isDisabled = false,
+  disabledReason = null,
+) {
   const wrap = document.createElement("div");
   const meta = document.createElement("div");
   meta.style.fontSize = "var(--ty-sm)";
