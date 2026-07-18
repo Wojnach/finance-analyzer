@@ -528,6 +528,22 @@ class TestLogSignalSnapshot:
 
     @patch("portfolio.outcome_tracker.atomic_append_jsonl")
     @patch("portfolio.outcome_tracker.SignalDB", create=True)
+    def test_horizon_persisted_from_extra(self, mock_db_cls, mock_append):
+        """extra["_horizon"] lands as tickers[t]["horizon"]; None when absent."""
+        mock_db_cls.side_effect = ImportError("no db")
+
+        signals_dict = {
+            "XAG-USD": {"indicators": {}, "extra": {"_horizon": "3h"}, "action": "BUY"},
+            "BTC-USD": {"indicators": {}, "extra": {}, "action": "HOLD"},
+        }
+        entry = log_signal_snapshot(
+            signals_dict, {"XAG-USD": 39.0, "BTC-USD": 67000}, 10.5, ["test"]
+        )
+        assert entry["tickers"]["XAG-USD"]["horizon"] == "3h"
+        assert entry["tickers"]["BTC-USD"]["horizon"] is None
+
+    @patch("portfolio.outcome_tracker.atomic_append_jsonl")
+    @patch("portfolio.outcome_tracker.SignalDB", create=True)
     def test_atomic_append_called(self, mock_db_cls, mock_append):
         """Verify atomic_append_jsonl is called with the SIGNAL_LOG path and entry."""
         mock_db_cls.side_effect = ImportError("no db")

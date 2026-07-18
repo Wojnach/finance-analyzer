@@ -160,6 +160,10 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
             "signals": signals,
             "regime": regime,
             "shadow_signals": shadow_signals,
+            # 2026-07-18: persist the vote's target horizon (signal_engine
+            # sets extra["_horizon"]; None on legacy paths) so the dashboard
+            # pulse can label which timeframe a consensus refers to.
+            "horizon": extra.get("_horizon"),
         }
         # 2026-06-11 (B6 audit, premortem hook 11): metals rows carry the
         # post-persistence voter count Stage 4 actually gated on, so the
