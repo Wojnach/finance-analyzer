@@ -263,18 +263,25 @@ def outcome_at(df: pd.DataFrame, at: pd.Timestamp, hours: int) -> float | None:
 
 
 def run(args):
-    from portfolio.llama_server import (
-        query_llama_server,
-        query_llama_server_chat,
-        stop_server,
-    )
-    from portfolio.qwen3_trader import _build_prompt, _parse_response
+    from portfolio.llama_server import query_llama_server_chat, stop_server
     from portfolio.signals.phi4_mini_reasoning import (
         _build_phi4_messages,
         _parse_phi4_response,
     )
 
-    PHI4_MODELS = {"phi4_mini", "phi4_instruct"}
+    # Per-model official sampling recommendations (temperature, top_p, top_k).
+    # All models share the same context/messages builder; the chat endpoint
+    # applies each GGUF's own template server-side.
+    MODEL_SAMPLING = {
+        "phi4_mini": (0.8, 0.95, 40),
+        "phi4_instruct": (0.8, 0.95, 40),
+        "qwen3": (0.6, 0.95, 20),
+        "fin_r1": (0.7, 0.8, 20),
+        "ministral3": (0.15, 1.0, 40),
+        "ministral8_lora": (0.15, 1.0, 40),
+        "finance-llama-8b": (0.6, 0.9, 40),
+    }
+    DEFAULT_SAMPLING = (0.7, 0.95, 40)
 
     start = pd.Timestamp(args.start, tz="UTC")
     end = pd.Timestamp(args.end, tz="UTC")
@@ -370,30 +377,24 @@ def run(args):
                 t0 = time.time()
                 raw = None
                 try:
-                    if model in PHI4_MODELS:
-                        # Correct path (2026-07-17): /v1/chat/completions so the
-                        # server applies the GGUF's own verified chat template,
-                        # Microsoft sampling (temp 0.8/top_p 0.95), and 8192
-                        # tokens so the reasoning CoT can close (4096 ctx used to
-                        # truncate it -> forced abstain). phi4's own parser strips
-                        # <think> and guards truncation (None -> ABSTAIN).
-                        raw = query_llama_server_chat(
-                            model,
-                            _build_phi4_messages(c["ctx"]),
-                            max_tokens=8192,
-                            temperature=0.8,
-                            top_p=0.95,
-                        )
-                        action, reason, conf = _parse_phi4_response(raw or "")
-                        vote = action or "ABSTAIN"
-                    else:
-                        raw = query_llama_server(
-                            model,
-                            _build_prompt(c["ctx"]),
-                            n_predict=2048,
-                            temperature=0.0,
-                        )
-                        vote, reason, conf = _parse_response(raw)
+                    # Unified path (2026-07-18): every model goes through
+                    # /v1/chat/completions so the server applies each GGUF's OWN
+                    # embedded chat template (the hand-built qwen3 template fed to
+                    # other models was the same bug class that invalidated phi4's
+                    # 66.7%). Same context builder for all -> identical information;
+                    # per-model official sampling; 8192 tokens so reasoning CoT can
+                    # close. Parser strips <think> and guards truncation -> ABSTAIN.
+                    temp, top_p, top_k = MODEL_SAMPLING.get(model, DEFAULT_SAMPLING)
+                    raw = query_llama_server_chat(
+                        model,
+                        _build_phi4_messages(c["ctx"]),
+                        max_tokens=8192,
+                        temperature=temp,
+                        top_p=top_p,
+                        top_k=top_k,
+                    )
+                    action, reason, conf = _parse_phi4_response(raw or "")
+                    vote = action or "ABSTAIN"
                 except Exception as e:
                     vote, reason, conf = "ERROR", str(e)[:120], None
                 row = {
