@@ -27,3 +27,4 @@ pytest
 # transformers
 # datasets
 # peft
+psutil
