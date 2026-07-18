@@ -345,6 +345,18 @@
   border: 1px solid rgba(59,130,246,0.3);
   color: var(--blu);
 }
+.banner--warn {
+  background: rgba(255,194,51,0.10);
+  border: 1px solid rgba(255,194,51,0.35);
+  color: var(--yel);
+}
+/* Sticky variant — docks just below the sticky header instead of
+ * scrolling away (home page freshness banner, js/render/freshness-banner.js). */
+.banner--sticky {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 45;
+}
 
 .empty {
   color: var(--txm);
@@ -397,6 +409,32 @@
   height: 40px !important;
   display: block;
 }
+
+/* ================================================================
+   Toast (transient tap feedback — components/toast.js)
+   ================================================================ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 84px);
+  transform: translate(-50%, 8px);
+  background: var(--card2);
+  color: var(--tx);
+  border: 1px solid var(--bdr2);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--ty-sm);
+  border-radius: var(--rad-md);
+  opacity: 0;
+  pointer-events: none;
+  z-index: var(--z-toast);
+  transition: opacity var(--dur-base) var(--ease-out),
+              transform var(--dur-base) var(--ease-out);
+  white-space: nowrap;
+  max-width: calc(100vw - var(--sp-6));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* ================================================================
    Filter / chip strip

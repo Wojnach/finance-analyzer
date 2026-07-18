@@ -11,6 +11,7 @@
  */
 
 import * as router from "../router.js";
+import { sectionErrorChip } from "../components/section-error-chip.js";
 
 const STATE_COLORS = {
   TRADING:       "var(--grn)",
@@ -55,13 +56,17 @@ export function tradingStatusCard(payload) {
 
   card.append(titleRow);
 
+  if (payload?.error) card.append(sectionErrorChip(payload.error));
+
   const bots = Array.isArray(payload?.bots) ? payload.bots : [];
   if (!bots.length) {
-    const empty = document.createElement("div");
-    empty.style.color = "var(--txm)";
-    empty.style.fontSize = "var(--ty-sm)";
-    empty.textContent = "no bot state available";
-    card.append(empty);
+    if (!payload?.error) {
+      const empty = document.createElement("div");
+      empty.style.color = "var(--txm)";
+      empty.style.fontSize = "var(--ty-sm)";
+      empty.textContent = "no bot state available";
+      card.append(empty);
+    }
     return card;
   }
 

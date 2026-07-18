@@ -42,6 +42,13 @@ _ESCALATED_PREFIX_RE = re.compile(r"^ESCALATED \(\d+x consecutive\): ")
 # both the main checkout and a worktree without further config.
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
+# config.json lives at repo root, a sibling of ``data/`` — NOT inside it,
+# so it can't be derived from a caller-supplied ``dd`` the way every other
+# section's files are (``dd`` is a test tmp_path in most callers, and its
+# parent is an untrusted shared pytest tmp root, not the repo). Fixed like
+# DATA_DIR; tests override via _avanza_status's ``config_path`` kwarg.
+_CONFIG_FILE = DATA_DIR.parent / "config.json"
+
 # Severity thresholds — tune freely, no schema migration needed.
 HEARTBEAT_GREEN_S = 120
 HEARTBEAT_YELLOW_S = 600
@@ -87,6 +94,7 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
         "sources": _sources(dd),
         "layer1": _layer1(dd),
         "voters": _voters(dd),
+        "avanza": _avanza_status(dd),
     }
     # 2026-06-06: attach Claude-gate state into the layer2 section so the home
     # page shows when Layer 2 / Claude trading is intentionally FROZEN
@@ -95,6 +103,8 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
     # the badge with no home.js rewiring. See _claude_gate + SESSION_PROGRESS.
     if isinstance(out.get("layer2"), dict):
         out["layer2"]["gate"] = _claude_gate(dd)
+    if isinstance(out.get("avanza"), dict) and isinstance(out.get("errors"), dict):
+        out["avanza"]["unresolved_errors"] = out["errors"].get("avanza_unresolved", 0)
     overall, reasons = _color(out)
     out["overall"] = overall
     out["reasons"] = reasons
@@ -208,6 +218,28 @@ def _hb_default(error: str | None = None) -> dict[str, Any]:
     return out
 
 
+# Avanza-session categories the home page's "system" errors panel excludes
+# in favour of a dedicated Avanza chip (2026-07-18 — 267+ consecutive
+# avanza_session_consecutive_failures entries alone were drowning out real
+# system errors). Prefix match only. ``auth_failure`` is deliberately NOT
+# included: the 2026-07-18 redesign plan's recon miscategorised it as
+# Avanza noise, but it's raised by portfolio/claude_gate.py on `claude` CLI
+# OAuth login failures — exactly the silent-outage class CLAUDE.md's
+# startup check exists to catch (the March-April 2026 3-week Layer 2 auth
+# outage). Hiding it under "Avanza" would bury a real Claude-auth failure.
+def _is_avanza_category(category: Any) -> bool:
+    return isinstance(category, str) and category.startswith("avanza_")
+
+
+def _error_row(e: dict) -> dict[str, Any]:
+    return {
+        "ts": e.get("ts"),
+        "category": e.get("category"),
+        "caller": e.get("caller"),
+        "message": (e.get("message") or "")[:200],
+    }
+
+
 def _errors_unresolved(dd: Path) -> dict[str, Any]:
     """Count unresolved critical errors using the SAME semantics as
     scripts/check_critical_errors.py (the CLI startup gate), so the home
@@ -223,6 +255,14 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
     The full file is still scanned (Codex P1 finding 2026-05-04: never a
     fixed tail — newer info/resolution rows must not hide older unresolved
     criticals). The file is small and this sits behind the 30s TTL cache.
+
+    2026-07-18: also splits the unresolved set by Avanza-vs-system category
+    (see ``_is_avanza_category``) so the home page can show a dedicated
+    Avanza chip without it drowning out real system errors. ``recent``
+    stays as-is (top 5 overall, back-compat); ``recent_system`` is the same
+    shape filtered to non-Avanza rows, computed from the FULL unresolved
+    list (not the pre-capped ``recent``) so a system error doesn't get
+    hidden just because Avanza noise is more recent.
     """
     try:
         entries = load_jsonl(dd / "critical_errors.jsonl")
@@ -240,16 +280,18 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
         clean = [e for e in entries if isinstance(e, dict)]
         unresolved = find_unresolved(clean, days=CRITICAL_ERRORS_LOOKBACK_DAYS)
         unresolved.sort(key=lambda x: x.get("ts", ""), reverse=True)
-        recent = [
-            {
-                "ts": e.get("ts"),
-                "category": e.get("category"),
-                "caller": e.get("caller"),
-                "message": (e.get("message") or "")[:200],
-            }
-            for e in unresolved[:5]
-        ]
-        return {"unresolved": len(unresolved), "recent": recent}
+        recent = [_error_row(e) for e in unresolved[:5]]
+        recent_system = [
+            _error_row(e) for e in unresolved if not _is_avanza_category(e.get("category"))
+        ][:5]
+        avanza_unresolved = sum(1 for e in unresolved if _is_avanza_category(e.get("category")))
+        return {
+            "unresolved": len(unresolved),
+            "recent": recent,
+            "recent_system": recent_system,
+            "avanza_unresolved": avanza_unresolved,
+            "system_unresolved": len(unresolved) - avanza_unresolved,
+        }
     except Exception as e:
         # unresolved=None (NOT 0): if the gate import/logic fails, do NOT report
         # a clean zero — that is exactly the "silently flipped to GREEN" class
@@ -885,6 +927,34 @@ def _layer1(dd: Path) -> dict[str, Any]:
             "last_cycle_ts": None,
             "error": f"layer1: {type(e).__name__}: {e}",
         }
+
+
+def _avanza_status(dd: Path, *, config_path: Path | None = None) -> dict[str, Any]:
+    """Avanza credential/session truth for the home page's Avanza chip.
+
+    Config-only (no Avanza network calls — that's the expensive
+    Playwright-backed /api/avanza_account path, unsuitable for a 30s home
+    poll). Never exposes credential VALUES, only whether they're populated.
+    ``unresolved_errors`` is filled in by ``compute()`` from the errors
+    section's ``avanza_unresolved`` count (kept out of here to avoid this
+    function depending on ``_errors_unresolved``'s return shape).
+
+    ``config_path`` defaults to the real repo config.json (via
+    ``_CONFIG_FILE``, a sibling of ``data/``); tests override it explicitly
+    so they never read/depend on a shared pytest tmp root.
+    """
+    cfg_file = config_path if config_path is not None else _CONFIG_FILE
+    try:
+        cfg = load_json(cfg_file, default={}) or {}
+        av_cfg = cfg.get("avanza") if isinstance(cfg, dict) else None
+        if not isinstance(av_cfg, dict):
+            av_cfg = {}
+        creds_configured = bool(
+            av_cfg.get("username") and av_cfg.get("password") and av_cfg.get("totp_secret")
+        )
+        return {"creds_configured": creds_configured}
+    except Exception as e:
+        return {"creds_configured": None, "error": f"avanza status: {type(e).__name__}: {e}"}
 
 
 # Curated voter watch-list — the signals whose "green" health has

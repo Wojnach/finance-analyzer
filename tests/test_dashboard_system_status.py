@@ -102,10 +102,20 @@ class TestErrors:
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": ts1, "level": "critical", "category": "contract_violation",
-                 "caller": "x", "message": "bad"},
-                {"ts": _ts(-1800), "level": "info", "category": "resolution",
-                 "resolves_ts": ts1, "message": "fixed"},
+                {
+                    "ts": ts1,
+                    "level": "critical",
+                    "category": "contract_violation",
+                    "caller": "x",
+                    "message": "bad",
+                },
+                {
+                    "ts": _ts(-1800),
+                    "level": "info",
+                    "category": "resolution",
+                    "resolves_ts": ts1,
+                    "message": "fixed",
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -116,10 +126,20 @@ class TestErrors:
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": _ts(-3600), "level": "critical", "category": "x",
-                 "caller": "a", "message": "first"},
-                {"ts": _ts(-1800), "level": "critical", "category": "y",
-                 "caller": "b", "message": "second"},
+                {
+                    "ts": _ts(-3600),
+                    "level": "critical",
+                    "category": "x",
+                    "caller": "a",
+                    "message": "first",
+                },
+                {
+                    "ts": _ts(-1800),
+                    "level": "critical",
+                    "category": "y",
+                    "caller": "b",
+                    "message": "second",
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -133,8 +153,15 @@ class TestErrors:
         path = tmp_path / "critical_errors.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"ts": _ts(-100), "level": "critical", "category": "x",
-                        "caller": "a", "message": "ok"})
+            json.dumps(
+                {
+                    "ts": _ts(-100),
+                    "level": "critical",
+                    "category": "x",
+                    "caller": "a",
+                    "message": "ok",
+                }
+            )
             + "\nNOT-JSON-LINE\n",
             encoding="utf-8",
         )
@@ -150,21 +177,31 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-3600), "severity": "CRITICAL",
-                 "invariant": "x", "message": "recent"},
-                {"ts": _ts(-200000), "severity": "CRITICAL",
-                 "invariant": "x", "message": "stale"},
-                {"ts": _ts(-100), "severity": "WARNING",
-                 "invariant": "y", "message": "noise"},
+                {
+                    "ts": _ts(-3600),
+                    "severity": "CRITICAL",
+                    "invariant": "x",
+                    "message": "recent",
+                },
+                {
+                    "ts": _ts(-200000),
+                    "severity": "CRITICAL",
+                    "invariant": "x",
+                    "message": "stale",
+                },
+                {
+                    "ts": _ts(-100),
+                    "severity": "WARNING",
+                    "invariant": "y",
+                    "message": "noise",
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
         assert out["contract_violations"]["unresolved"] == 1
         assert out["contract_violations"]["recent"][0]["message"] == "recent"
 
-    def test_layer2_journal_activity_resolved_by_journal_entry(
-        self, tmp_path: Path
-    ):
+    def test_layer2_journal_activity_resolved_by_journal_entry(self, tmp_path: Path):
         """If a layer2_journal.jsonl entry exists with ts >= the violation's
         details.trigger_time, the violation has been implicitly resolved."""
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
@@ -225,14 +262,20 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-3600), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "2 signal(s) dropped >15pp (33.7% -> 33.2%)",
-                 "details": {"alerts": alerts}},
-                {"ts": _ts(-1800), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "2 signal(s) dropped >15pp (33.5% -> 32.9%)",
-                 "details": {"alerts": alerts}},
+                {
+                    "ts": _ts(-3600),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "2 signal(s) dropped >15pp (33.7% -> 33.2%)",
+                    "details": {"alerts": alerts},
+                },
+                {
+                    "ts": _ts(-1800),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "2 signal(s) dropped >15pp (33.5% -> 32.9%)",
+                    "details": {"alerts": alerts},
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -247,29 +290,37 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-3600), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "2 signal(s) dropped >15pp...",
-                 "details": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                     {"scope": "signal", "key": "momentum_factors"},
-                 ]}},
-                {"ts": _ts(-1800), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "3 signal(s) dropped >15pp...",
-                 "details": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                     {"scope": "signal", "key": "momentum_factors"},
-                     {"scope": "signal", "key": "structure"},
-                 ]}},
+                {
+                    "ts": _ts(-3600),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "2 signal(s) dropped >15pp...",
+                    "details": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                            {"scope": "signal", "key": "momentum_factors"},
+                        ]
+                    },
+                },
+                {
+                    "ts": _ts(-1800),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "3 signal(s) dropped >15pp...",
+                    "details": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                            {"scope": "signal", "key": "momentum_factors"},
+                            {"scope": "signal", "key": "structure"},
+                        ]
+                    },
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
         assert out["contract_violations"]["unresolved"] == 2
 
-    def test_layer2_distinct_trigger_times_both_surface(
-        self, tmp_path: Path
-    ):
+    def test_layer2_distinct_trigger_times_both_surface(self, tmp_path: Path):
         """Two layer2_journal_activity violations on different triggers
         whose messages happen to round to the same minute count must
         stay separate. Earlier dedup-by-message[:200] would have merged
@@ -278,14 +329,20 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-3600), "severity": "CRITICAL",
-                 "invariant": "layer2_journal_activity",
-                 "message": "Layer 2 trigger fired 5m ago (X)",
-                 "details": {"trigger_time": _ts(-3900)}},
-                {"ts": _ts(-1800), "severity": "CRITICAL",
-                 "invariant": "layer2_journal_activity",
-                 "message": "Layer 2 trigger fired 5m ago (X)",
-                 "details": {"trigger_time": _ts(-2100)}},
+                {
+                    "ts": _ts(-3600),
+                    "severity": "CRITICAL",
+                    "invariant": "layer2_journal_activity",
+                    "message": "Layer 2 trigger fired 5m ago (X)",
+                    "details": {"trigger_time": _ts(-3900)},
+                },
+                {
+                    "ts": _ts(-1800),
+                    "severity": "CRITICAL",
+                    "invariant": "layer2_journal_activity",
+                    "message": "Layer 2 trigger fired 5m ago (X)",
+                    "details": {"trigger_time": _ts(-2100)},
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -310,36 +367,49 @@ class TestContractViolations:
             tmp_path / "contract_violations.jsonl",
             [
                 # CV row: ``details`` (matches loop_contract._log_violations)
-                {"ts": _ts(-3500), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp...",
-                 "details": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                 ]}},
+                {
+                    "ts": _ts(-3500),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "12 signal(s) dropped >15pp...",
+                    "details": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                        ]
+                    },
+                },
             ],
         )
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
                 # CE row: ``context`` (matches claude_gate.record_critical_error)
-                {"ts": crit_err_ts, "level": "critical",
-                 "caller": "accuracy_degradation",
-                 "category": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp...",
-                 "context": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                 ]},
-                 "resolution": None},
-                {"ts": _ts(-300), "level": "info", "category": "resolution",
-                 "resolves_ts": crit_err_ts, "message": "fixed"},
+                {
+                    "ts": crit_err_ts,
+                    "level": "critical",
+                    "caller": "accuracy_degradation",
+                    "category": "accuracy_degradation",
+                    "message": "12 signal(s) dropped >15pp...",
+                    "context": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                        ]
+                    },
+                    "resolution": None,
+                },
+                {
+                    "ts": _ts(-300),
+                    "level": "info",
+                    "category": "resolution",
+                    "resolves_ts": crit_err_ts,
+                    "message": "fixed",
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
         assert out["contract_violations"]["unresolved"] == 0
 
-    def test_layer2_cross_stream_match_uses_context_trigger_time(
-        self, tmp_path: Path
-    ):
+    def test_layer2_cross_stream_match_uses_context_trigger_time(self, tmp_path: Path):
         """layer2_journal_activity CE rows carry ``trigger_time`` under
         ``context``, not ``details``. (Claude review P1-1.)"""
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
@@ -347,30 +417,34 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-2400), "severity": "CRITICAL",
-                 "invariant": "layer2_journal_activity",
-                 "message": "Layer 2 trigger fired 5m ago (X)",
-                 "details": {"trigger_time": trigger_ts}},
+                {
+                    "ts": _ts(-2400),
+                    "severity": "CRITICAL",
+                    "invariant": "layer2_journal_activity",
+                    "message": "Layer 2 trigger fired 5m ago (X)",
+                    "details": {"trigger_time": trigger_ts},
+                },
             ],
         )
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": _ts(-2300), "level": "critical",
-                 "caller": "layer2_journal_activity",
-                 "category": "contract_violation",  # inline path's actual shape
-                 "message": "Layer 2 trigger fired 5m ago (X)",
-                 "context": {"trigger_time": trigger_ts},
-                 "resolution": None},
+                {
+                    "ts": _ts(-2300),
+                    "level": "critical",
+                    "caller": "layer2_journal_activity",
+                    "category": "contract_violation",  # inline path's actual shape
+                    "message": "Layer 2 trigger fired 5m ago (X)",
+                    "context": {"trigger_time": trigger_ts},
+                    "resolution": None,
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
         assert out["errors"]["unresolved"] == 1
         assert out["contract_violations"]["unresolved"] == 0
 
-    def test_escalated_prefix_does_not_break_cross_stream_dedup(
-        self, tmp_path: Path
-    ):
+    def test_escalated_prefix_does_not_break_cross_stream_dedup(self, tmp_path: Path):
         """ViolationTracker promotes a warning by prepending
         ``ESCALATED (Nx consecutive): `` to the message. The source
         strips this before hashing; the dashboard must too, otherwise
@@ -380,26 +454,36 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-1800), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "ESCALATED (3x consecutive): 12 signal(s) "
-                            "dropped >15pp...",
-                 "details": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                 ]}},
+                {
+                    "ts": _ts(-1800),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "ESCALATED (3x consecutive): 12 signal(s) "
+                    "dropped >15pp...",
+                    "details": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                        ]
+                    },
+                },
             ],
         )
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": _ts(-3000), "level": "critical",
-                 "caller": "accuracy_degradation",
-                 "category": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp...",  # un-prefixed
-                 "context": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                 ]},
-                 "resolution": None},
+                {
+                    "ts": _ts(-3000),
+                    "level": "critical",
+                    "caller": "accuracy_degradation",
+                    "category": "accuracy_degradation",
+                    "message": "12 signal(s) dropped >15pp...",  # un-prefixed
+                    "context": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                        ]
+                    },
+                    "resolution": None,
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -407,9 +491,7 @@ class TestContractViolations:
         # Without the prefix strip, the CV row would surface as a duplicate.
         assert out["contract_violations"]["unresolved"] == 0
 
-    def test_violation_dedupes_against_unresolved_critical_error(
-        self, tmp_path: Path
-    ):
+    def test_violation_dedupes_against_unresolved_critical_error(self, tmp_path: Path):
         """Cross-stream noise reduction: when both streams represent the
         same incident, surface it only once (under ERR, since that side
         is already resolution-aware). The CV side stays quiet."""
@@ -417,25 +499,35 @@ class TestContractViolations:
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-3500), "severity": "CRITICAL",
-                 "invariant": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp...",
-                 "details": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                 ]}},
+                {
+                    "ts": _ts(-3500),
+                    "severity": "CRITICAL",
+                    "invariant": "accuracy_degradation",
+                    "message": "12 signal(s) dropped >15pp...",
+                    "details": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                        ]
+                    },
+                },
             ],
         )
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": _ts(-3000), "level": "critical",
-                 "caller": "accuracy_degradation",
-                 "category": "accuracy_degradation",
-                 "message": "12 signal(s) dropped >15pp...",
-                 "context": {"alerts": [
-                     {"scope": "signal", "key": "sentiment"},
-                 ]},
-                 "resolution": None},
+                {
+                    "ts": _ts(-3000),
+                    "level": "critical",
+                    "caller": "accuracy_degradation",
+                    "category": "accuracy_degradation",
+                    "message": "12 signal(s) dropped >15pp...",
+                    "context": {
+                        "alerts": [
+                            {"scope": "signal", "key": "sentiment"},
+                        ]
+                    },
+                    "resolution": None,
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -444,17 +536,23 @@ class TestContractViolations:
         # Violations panel: 0 (already counted under errors).
         assert out["contract_violations"]["unresolved"] == 0
 
-    def test_two_distinct_unresolved_violations_both_surface(
-        self, tmp_path: Path
-    ):
+    def test_two_distinct_unresolved_violations_both_surface(self, tmp_path: Path):
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         _write_jsonl(
             tmp_path / "contract_violations.jsonl",
             [
-                {"ts": _ts(-3600), "severity": "CRITICAL",
-                 "invariant": "min_success_rate", "message": "0% rate"},
-                {"ts": _ts(-1800), "severity": "CRITICAL",
-                 "invariant": "session_alive", "message": "dead session"},
+                {
+                    "ts": _ts(-3600),
+                    "severity": "CRITICAL",
+                    "invariant": "min_success_rate",
+                    "message": "0% rate",
+                },
+                {
+                    "ts": _ts(-1800),
+                    "severity": "CRITICAL",
+                    "invariant": "session_alive",
+                    "message": "dead session",
+                },
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -471,16 +569,30 @@ class TestLLMInference:
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         _write_json(
             tmp_path / "local_llm_report_latest.json",
-            {"health": {
-                "chronos": {"ok": 99, "fail": 1, "total": 100, "success_rate": 0.99},
-                "kronos": {"ok": 80, "fail": 20, "total": 100, "success_rate": 0.80},
-            }},
+            {
+                "health": {
+                    "chronos": {
+                        "ok": 99,
+                        "fail": 1,
+                        "total": 100,
+                        "success_rate": 0.99,
+                    },
+                    "kronos": {
+                        "ok": 80,
+                        "fail": 20,
+                        "total": 100,
+                        "success_rate": 0.80,
+                    },
+                }
+            },
         )
         out = ss.compute(data_dir=tmp_path)
         keys = [m["key"] for m in out["llm_inference"]["models"]]
         assert "chronos" in keys
         assert "kronos" in keys
-        chronos = next(m for m in out["llm_inference"]["models"] if m["key"] == "chronos")
+        chronos = next(
+            m for m in out["llm_inference"]["models"] if m["key"] == "chronos"
+        )
         assert chronos["success_pct"] == 99.0
         # Weighted average: (99*100 + 80*100) / 200 = 89.5
         assert out["llm_inference"]["overall_pct"] == 89.5
@@ -524,14 +636,34 @@ class TestLayer2:
         _write_jsonl(
             tmp_path / "claude_invocations.jsonl",
             [
-                {"timestamp": _ts(-3600), "caller": "x", "status": "invoked",
-                 "model": "sonnet", "duration_seconds": 30},
-                {"timestamp": _ts(-1800), "caller": "x", "status": "timeout",
-                 "model": "sonnet", "duration_seconds": 184},
-                {"timestamp": _ts(-600), "caller": "x", "status": "invoked",
-                 "model": "sonnet", "duration_seconds": 22},
-                {"timestamp": _ts(-90000), "caller": "x", "status": "invoked",
-                 "model": "sonnet", "duration_seconds": 12},  # > 24h, ignored
+                {
+                    "timestamp": _ts(-3600),
+                    "caller": "x",
+                    "status": "invoked",
+                    "model": "sonnet",
+                    "duration_seconds": 30,
+                },
+                {
+                    "timestamp": _ts(-1800),
+                    "caller": "x",
+                    "status": "timeout",
+                    "model": "sonnet",
+                    "duration_seconds": 184,
+                },
+                {
+                    "timestamp": _ts(-600),
+                    "caller": "x",
+                    "status": "invoked",
+                    "model": "sonnet",
+                    "duration_seconds": 22,
+                },
+                {
+                    "timestamp": _ts(-90000),
+                    "caller": "x",
+                    "status": "invoked",
+                    "model": "sonnet",
+                    "duration_seconds": 12,
+                },  # > 24h, ignored
             ],
         )
         out = ss.compute(data_dir=tmp_path)
@@ -547,8 +679,11 @@ class TestLayer2:
         _write_jsonl(
             tmp_path / "claude_invocations.jsonl",
             [
-                {"timestamp": _ts(-1000 - i * 60), "caller": "x",
-                 "status": "invoked" if i < 7 else "timeout"}
+                {
+                    "timestamp": _ts(-1000 - i * 60),
+                    "caller": "x",
+                    "status": "invoked" if i < 7 else "timeout",
+                }
                 for i in range(10)
             ],
         )
@@ -580,21 +715,23 @@ class TestSignalAggregate:
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         _write_jsonl(
             tmp_path / "signal_log.jsonl",
-            [{
-                "ts": _ts(-30),
-                "tickers": {
-                    "BTC-USD": {
-                        "consensus": "HOLD",
-                        "buy_count": 3,
-                        "sell_count": 1,
-                        "total_voters": 4,
-                        "regime": "ranging",
-                        "signals": {f"sig{i}": "BUY" for i in range(3)} |
-                                   {"sigS": "SELL"} |
-                                   {f"sigH{i}": "HOLD" for i in range(20)},
+            [
+                {
+                    "ts": _ts(-30),
+                    "tickers": {
+                        "BTC-USD": {
+                            "consensus": "HOLD",
+                            "buy_count": 3,
+                            "sell_count": 1,
+                            "total_voters": 4,
+                            "regime": "ranging",
+                            "signals": {f"sig{i}": "BUY" for i in range(3)}
+                            | {"sigS": "SELL"}
+                            | {f"sigH{i}": "HOLD" for i in range(20)},
+                        },
                     },
-                },
-            }],
+                }
+            ],
         )
         out = ss.compute(data_dir=tmp_path)
         tickers = out["signal_aggregate"]["tickers"]
@@ -623,7 +760,9 @@ class TestColor:
         import portfolio.claude_gate as cg
 
         monkeypatch.setattr(cg, "CLAUDE_ENABLED", True, raising=False)
-        monkeypatch.setattr(cg, "_load_config_layer2_enabled", lambda: True, raising=False)
+        monkeypatch.setattr(
+            cg, "_load_config_layer2_enabled", lambda: True, raising=False
+        )
         _write_metals_loop(tmp_path, "True")
         out = ss.compute(data_dir=tmp_path)
         assert out["overall"] == "GREEN"
@@ -634,8 +773,13 @@ class TestColor:
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": _ts(-i * 60), "level": "critical", "category": "x",
-                 "caller": "a", "message": f"err{i}"}
+                {
+                    "ts": _ts(-i * 60),
+                    "level": "critical",
+                    "category": "x",
+                    "caller": "a",
+                    "message": f"err{i}",
+                }
                 for i in range(10)
             ],
         )
@@ -647,9 +791,16 @@ class TestColor:
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         out = ss.compute(data_dir=tmp_path)
         for k in (
-            "ts", "overall", "reasons", "heartbeat", "errors",
-            "contract_violations", "llm_inference", "layer2",
-            "signal_aggregate", "pnl_footer",
+            "ts",
+            "overall",
+            "reasons",
+            "heartbeat",
+            "errors",
+            "contract_violations",
+            "llm_inference",
+            "layer2",
+            "signal_aggregate",
+            "pnl_footer",
         ):
             assert k in out, f"missing key: {k}"
 
@@ -692,23 +843,27 @@ class TestCodex20260504Regressions:
         rows = []
         # 4 unresolved criticals near the start of the file
         for i in range(4):
-            rows.append({
-                "ts": _ts(-3600 - i),
-                "level": "critical",
-                "category": "x",
-                "caller": "old",
-                "message": f"older critical {i}",
-            })
+            rows.append(
+                {
+                    "ts": _ts(-3600 - i),
+                    "level": "critical",
+                    "category": "x",
+                    "caller": "old",
+                    "message": f"older critical {i}",
+                }
+            )
         # Then 600 newer info rows that would push older entries out
         # of any 500-line tail.
         for i in range(600):
-            rows.append({
-                "ts": _ts(-100 - i / 100),
-                "level": "info",
-                "category": "noise",
-                "caller": "n/a",
-                "message": "fluff",
-            })
+            rows.append(
+                {
+                    "ts": _ts(-100 - i / 100),
+                    "level": "info",
+                    "category": "noise",
+                    "caller": "n/a",
+                    "message": "fluff",
+                }
+            )
         _write_jsonl(tmp_path / "critical_errors.jsonl", rows)
         out = ss.compute(data_dir=tmp_path)
         assert out["errors"]["unresolved"] == 4
@@ -723,12 +878,14 @@ class TestCodex20260504Regressions:
         rows = []
         for i in range(3000):
             offset = -82_800 * (i / 2999)  # 0 to 23h ago, evenly spaced
-            rows.append({
-                "timestamp": _ts(offset),
-                "caller": "x",
-                "status": "invoked",
-                "model": "sonnet",
-            })
+            rows.append(
+                {
+                    "timestamp": _ts(offset),
+                    "caller": "x",
+                    "status": "invoked",
+                    "model": "sonnet",
+                }
+            )
         _write_jsonl(tmp_path / "claude_invocations.jsonl", rows)
         out = ss.compute(data_dir=tmp_path)
         assert out["layer2"]["triggers_24h"] == 3000
@@ -753,15 +910,17 @@ class TestCodex20260504Regressions:
         _write_json(tmp_path / "health_state.json", {"last_heartbeat": _ts(-10)})
         _write_json(
             tmp_path / "local_llm_report_latest.json",
-            {"health": {
-                "chronos": {"ok": "oops", "fail": 0},
-                "kronos": {"ok": 100, "fail": 5},
-            }},
+            {
+                "health": {
+                    "chronos": {"ok": "oops", "fail": 0},
+                    "kronos": {"ok": 100, "fail": 5},
+                }
+            },
         )
         out = ss.compute(data_dir=tmp_path)
         keys = [m["key"] for m in out["llm_inference"]["models"]]
         assert "chronos" not in keys  # skipped
-        assert "kronos" in keys       # still works
+        assert "kronos" in keys  # still works
 
 
 class TestDashboardSourceIdentityEquivalence:
@@ -790,18 +949,22 @@ class TestDashboardSourceIdentityEquivalence:
             (
                 "accuracy_degradation",
                 "12 signal(s) dropped >15pp 33.7%->33.2%",
-                {"alerts": [
-                    {"scope": "signal", "key": "sentiment"},
-                    {"scope": "signal", "key": "structure"},
-                ]},
+                {
+                    "alerts": [
+                        {"scope": "signal", "key": "sentiment"},
+                        {"scope": "signal", "key": "structure"},
+                    ]
+                },
             ),
             (
                 "accuracy_degradation",
                 "different drift text 99.9%->10%",
-                {"alerts": [
-                    {"scope": "signal", "key": "sentiment"},
-                    {"scope": "signal", "key": "structure"},
-                ]},
+                {
+                    "alerts": [
+                        {"scope": "signal", "key": "sentiment"},
+                        {"scope": "signal", "key": "structure"},
+                    ]
+                },
             ),
             (
                 "layer2_journal_activity",
@@ -810,9 +973,7 @@ class TestDashboardSourceIdentityEquivalence:
             ),
         ],
     )
-    def test_identity_payload_matches_source(
-        self, invariant, message, details
-    ):
+    def test_identity_payload_matches_source(self, invariant, message, details):
         from portfolio.loop_contract import (
             Violation,
             _hash_violation_identity,
@@ -821,8 +982,10 @@ class TestDashboardSourceIdentityEquivalence:
         import hashlib
 
         v = Violation(
-            invariant=invariant, severity="CRITICAL",
-            message=message, details=details,
+            invariant=invariant,
+            severity="CRITICAL",
+            message=message,
+            details=details,
         )
         # Source side: tracker may have prepended the prefix; use
         # the raw constructor message here (no prefix).
@@ -841,7 +1004,9 @@ class TestDashboardSourceIdentityEquivalence:
         # Sanity: the shared helper directly returns the same payload
         # for the source-side input.
         assert dash_payload == violation_identity_payload(
-            invariant, message, details,
+            invariant,
+            message,
+            details,
         )
 
     def test_escalated_message_strips_to_pre_promotion_payload(self):
@@ -853,13 +1018,17 @@ class TestDashboardSourceIdentityEquivalence:
             "severity": "WARNING",
             "invariant": "accuracy_degradation",
             "message": "2 signal(s) dropped >15pp...",
-            "details": {"alerts": [
-                {"scope": "signal", "key": "sentiment"},
-            ]},
+            "details": {
+                "alerts": [
+                    {"scope": "signal", "key": "sentiment"},
+                ]
+            },
         }
-        post = {**pre, "severity": "CRITICAL",
-                "message": "ESCALATED (3x consecutive): "
-                           + pre["message"]}
+        post = {
+            **pre,
+            "severity": "CRITICAL",
+            "message": "ESCALATED (3x consecutive): " + pre["message"],
+        }
         assert ss._identity_key_for_dict(pre) == ss._identity_key_for_dict(post)
 
     def test_critical_errors_context_payload_matches_source(self):
@@ -872,13 +1041,17 @@ class TestDashboardSourceIdentityEquivalence:
         )
         import hashlib
 
-        details = {"alerts": [
-            {"scope": "signal", "key": "sentiment"},
-        ]}
+        details = {
+            "alerts": [
+                {"scope": "signal", "key": "sentiment"},
+            ]
+        }
         message = "12 signal(s) dropped >15pp..."
         v = Violation(
-            invariant="accuracy_degradation", severity="CRITICAL",
-            message=message, details=details,
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message=message,
+            details=details,
         )
         source_hash = _hash_violation_identity(v)
         ce_entry = {
@@ -893,7 +1066,6 @@ class TestDashboardSourceIdentityEquivalence:
         ce_payload = ss._identity_key_for_dict(ce_entry)
         ce_hash = hashlib.sha256(ce_payload.encode("utf-8")).hexdigest()
         assert ce_hash == source_hash
-
 
 
 # ---------------------------------------------------------------------------
@@ -1012,16 +1184,30 @@ class TestErrorsUnresolvedWindow:
         # RED forever (the 4 May avanza alerts). The window must drop it.
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
-            [{"ts": _ts(-86400 * 15), "level": "critical",
-              "category": "avanza_account_mismatch", "caller": "x", "message": "old"}],
+            [
+                {
+                    "ts": _ts(-86400 * 15),
+                    "level": "critical",
+                    "category": "avanza_account_mismatch",
+                    "caller": "x",
+                    "message": "old",
+                }
+            ],
         )
         assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
 
     def test_recent_critical_counted(self, tmp_path: Path):
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
-            [{"ts": _ts(-3600), "level": "critical",
-              "category": "foo", "caller": "x", "message": "fresh"}],
+            [
+                {
+                    "ts": _ts(-3600),
+                    "level": "critical",
+                    "category": "foo",
+                    "caller": "x",
+                    "message": "fresh",
+                }
+            ],
         )
         assert ss._errors_unresolved(tmp_path)["unresolved"] == 1
 
@@ -1030,10 +1216,20 @@ class TestErrorsUnresolvedWindow:
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": orig, "level": "critical", "category": "foo",
-                 "caller": "x", "message": "f"},
-                {"ts": _ts(-60), "level": "info", "category": "resolution",
-                 "resolves_ts": orig, "message": "r"},
+                {
+                    "ts": orig,
+                    "level": "critical",
+                    "category": "foo",
+                    "caller": "x",
+                    "message": "f",
+                },
+                {
+                    "ts": _ts(-60),
+                    "level": "info",
+                    "category": "resolution",
+                    "resolves_ts": orig,
+                    "message": "r",
+                },
             ],
         )
         assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
@@ -1044,10 +1240,20 @@ class TestErrorsUnresolvedWindow:
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
             [
-                {"ts": _ts(-86400 * 5), "level": "critical", "category": "bar",
-                 "caller": "x", "message": "old-but-in-window"},
-                {"ts": _ts(-86400 * 1), "level": "info", "category": "bar",
-                 "caller": "x", "message": "later activity"},
+                {
+                    "ts": _ts(-86400 * 5),
+                    "level": "critical",
+                    "category": "bar",
+                    "caller": "x",
+                    "message": "old-but-in-window",
+                },
+                {
+                    "ts": _ts(-86400 * 1),
+                    "level": "info",
+                    "category": "bar",
+                    "caller": "x",
+                    "message": "later activity",
+                },
             ],
         )
         assert ss._errors_unresolved(tmp_path)["unresolved"] == 0
@@ -1063,8 +1269,15 @@ class TestErrorsReaderDegraded:
     def test_aggregate_failure_returns_none_not_zero(self, tmp_path: Path, monkeypatch):
         _write_jsonl(
             tmp_path / "critical_errors.jsonl",
-            [{"ts": _ts(-3600), "level": "critical", "category": "foo",
-              "caller": "x", "message": "live"}],
+            [
+                {
+                    "ts": _ts(-3600),
+                    "level": "critical",
+                    "category": "foo",
+                    "caller": "x",
+                    "message": "live",
+                }
+            ],
         )
         import scripts.check_critical_errors as cce
 
@@ -1079,7 +1292,10 @@ class TestErrorsReaderDegraded:
     def test_color_yellow_on_errors_error_field(self):
         payload = {
             "heartbeat": {"age_seconds": 10},
-            "errors": {"unresolved": None, "error": "errors aggregate: RuntimeError: x"},
+            "errors": {
+                "unresolved": None,
+                "error": "errors aggregate: RuntimeError: x",
+            },
             "contract_violations": {"unresolved": 0},
             "llm_inference": {},
             "layer2": {},
@@ -1242,14 +1458,18 @@ class TestVoters:
             monkeypatch,
             disabled={"claude_fundamental"},
             overrides=set(),
-            get_reason=lambda name: "test reason" if name == "claude_fundamental" else None,
+            get_reason=lambda name: (
+                "test reason" if name == "claude_fundamental" else None
+            ),
         )
         out = ss._voters(tmp_path)
         assert out["claude_fundamental"]["state"] == "DISABLED"
         assert out["claude_fundamental"]["reason"] == "test reason"
         assert out["claude_fundamental"]["last_activity_ts"] is None
 
-    def test_disabled_signal_mentions_shadow_registry(self, tmp_path: Path, monkeypatch):
+    def test_disabled_signal_mentions_shadow_registry(
+        self, tmp_path: Path, monkeypatch
+    ):
         self._patch_common(
             monkeypatch,
             disabled={"ministral"},
@@ -1329,7 +1549,9 @@ class TestVoters:
             },
         )
         out = ss._voters(tmp_path)
-        assert out["claude_fundamental"]["last_activity_ts"] == "2026-07-18T00:00:00+00:00"
+        assert (
+            out["claude_fundamental"]["last_activity_ts"] == "2026-07-18T00:00:00+00:00"
+        )
 
     def test_bad_import_does_not_blank_hero(self, tmp_path: Path, monkeypatch):
         self._patch_common(
@@ -1346,3 +1568,184 @@ class TestVoters:
         payload = ss.compute(tmp_path)
         assert set(payload["voters"].keys()) == set(ss._VOTER_NAMES)
 
+
+# ---------------------------------------------------------------------------
+# Avanza-vs-system error split + Avanza chip (2026-07-18 Phase 2 home redesign)
+# ---------------------------------------------------------------------------
+
+
+class TestIsAvanzaCategory:
+    def test_avanza_prefixed_categories_match(self):
+        assert ss._is_avanza_category("avanza_session_expired")
+        assert ss._is_avanza_category("avanza_account_mismatch")
+        assert ss._is_avanza_category("avanza_session_consecutive_failures")
+
+    def test_auth_failure_is_not_avanza(self):
+        # auth_failure is raised by portfolio/claude_gate.py on `claude` CLI
+        # OAuth failures, NOT Avanza — see the comment above
+        # _is_avanza_category. Must stay in the system errors panel.
+        assert not ss._is_avanza_category("auth_failure")
+
+    def test_other_categories_not_avanza(self):
+        assert not ss._is_avanza_category("accuracy_degradation")
+        assert not ss._is_avanza_category("contract_violation")
+
+    def test_non_string_input_is_not_avanza(self):
+        assert not ss._is_avanza_category(None)
+
+
+class TestErrorsAvanzaSplit:
+    def test_avanza_and_system_counted_separately(self, tmp_path: Path):
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {
+                    "ts": _ts(-3600),
+                    "level": "critical",
+                    "category": "avanza_session_expired",
+                    "caller": "x",
+                    "message": "a1",
+                },
+                {
+                    "ts": _ts(-3500),
+                    "level": "critical",
+                    "category": "avanza_account_mismatch",
+                    "caller": "x",
+                    "message": "a2",
+                },
+                {
+                    "ts": _ts(-3400),
+                    "level": "critical",
+                    "category": "accuracy_degradation",
+                    "caller": "y",
+                    "message": "s1",
+                },
+            ],
+        )
+        out = ss._errors_unresolved(tmp_path)
+        assert out["unresolved"] == 3
+        assert out["avanza_unresolved"] == 2
+        assert out["system_unresolved"] == 1
+        assert [r["category"] for r in out["recent_system"]] == ["accuracy_degradation"]
+
+    def test_auth_failure_stays_in_recent_system(self, tmp_path: Path):
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {
+                    "ts": _ts(-3600),
+                    "level": "critical",
+                    "category": "auth_failure",
+                    "caller": "claude_gate",
+                    "message": "oauth",
+                }
+            ],
+        )
+        out = ss._errors_unresolved(tmp_path)
+        assert out["avanza_unresolved"] == 0
+        assert out["system_unresolved"] == 1
+        assert out["recent_system"][0]["category"] == "auth_failure"
+
+    def test_recent_system_not_hidden_by_avanza_recency(self, tmp_path: Path):
+        # 6 recent Avanza rows (more recent than the single system row) must
+        # not push the system row out of recent_system — recent_system is
+        # computed from the full unresolved list, not the pre-capped
+        # top-5-overall `recent`.
+        rows = [
+            {
+                "ts": _ts(-100 + i),
+                "level": "critical",
+                "category": "avanza_session_consecutive_failures",
+                "caller": "x",
+                "message": f"a{i}",
+            }
+            for i in range(6)
+        ]
+        rows.append(
+            {
+                "ts": _ts(-9000),
+                "level": "critical",
+                "category": "accuracy_degradation",
+                "caller": "y",
+                "message": "old-system",
+            }
+        )
+        _write_jsonl(tmp_path / "critical_errors.jsonl", rows)
+        out = ss._errors_unresolved(tmp_path)
+        assert out["unresolved"] == 7
+        assert out["avanza_unresolved"] == 6
+        assert out["system_unresolved"] == 1
+        assert any(
+            r["category"] == "accuracy_degradation" for r in out["recent_system"]
+        )
+        # ...but the back-compat top-5-overall `recent` list is all Avanza,
+        # since it's newer and the cap is applied before filtering.
+        assert all(ss._is_avanza_category(r["category"]) for r in out["recent"])
+
+    def test_no_errors_all_zero(self, tmp_path: Path):
+        out = ss._errors_unresolved(tmp_path)
+        assert out["avanza_unresolved"] == 0
+        assert out["system_unresolved"] == 0
+        assert out["recent_system"] == []
+
+
+class TestAvanzaStatus:
+    def test_creds_configured_true(self, tmp_path: Path):
+        cfg_path = tmp_path / "config.json"
+        _write_json(
+            cfg_path, {"avanza": {"username": "u", "password": "p", "totp_secret": "t"}}
+        )
+        out = ss._avanza_status(tmp_path, config_path=cfg_path)
+        assert out["creds_configured"] is True
+
+    def test_creds_configured_false_when_empty(self, tmp_path: Path):
+        cfg_path = tmp_path / "config.json"
+        _write_json(
+            cfg_path, {"avanza": {"username": "", "password": "", "totp_secret": ""}}
+        )
+        out = ss._avanza_status(tmp_path, config_path=cfg_path)
+        assert out["creds_configured"] is False
+
+    def test_creds_configured_false_when_partial(self, tmp_path: Path):
+        cfg_path = tmp_path / "config.json"
+        _write_json(
+            cfg_path, {"avanza": {"username": "u", "password": "", "totp_secret": "t"}}
+        )
+        out = ss._avanza_status(tmp_path, config_path=cfg_path)
+        assert out["creds_configured"] is False
+
+    def test_missing_config_file_is_false_not_error(self, tmp_path: Path):
+        out = ss._avanza_status(tmp_path, config_path=tmp_path / "does-not-exist.json")
+        assert out["creds_configured"] is False
+        assert "error" not in out
+
+    def test_missing_avanza_key_is_false(self, tmp_path: Path):
+        cfg_path = tmp_path / "config.json"
+        _write_json(cfg_path, {})
+        out = ss._avanza_status(tmp_path, config_path=cfg_path)
+        assert out["creds_configured"] is False
+
+    def test_compute_attaches_avanza_and_unresolved_errors(self, tmp_path: Path):
+        cfg_path = tmp_path / "config.json"
+        _write_json(
+            cfg_path, {"avanza": {"username": "u", "password": "p", "totp_secret": "t"}}
+        )
+        _write_jsonl(
+            tmp_path / "critical_errors.jsonl",
+            [
+                {
+                    "ts": _ts(-3600),
+                    "level": "critical",
+                    "category": "avanza_session_expired",
+                    "caller": "x",
+                    "message": "a",
+                }
+            ],
+        )
+        # compute() always uses the real _CONFIG_FILE constant (production
+        # config.json), not the tmp_path data dir — so creds_configured here
+        # reflects the actual repo config, not this test's fixture. Only
+        # assert the shape + the errors-derived count, which IS wired to dd.
+        payload = ss.compute(tmp_path)
+        assert "creds_configured" in payload["avanza"]
+        assert payload["avanza"]["unresolved_errors"] == 1

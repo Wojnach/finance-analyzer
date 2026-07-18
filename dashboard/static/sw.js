@@ -13,7 +13,7 @@
  * clients.claim activates the new SW immediately.
  */
 
-const VERSION = "v1-2026-05-03";
+const VERSION = "v2-2026-07-18";
 const SHELL_CACHE = `pi-shell-${VERSION}`;
 
 const SHELL_ASSETS = [

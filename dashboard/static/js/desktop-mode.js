@@ -1,35 +1,43 @@
 /*
- * desktop-mode.js — opt-in wide layout for desktop browsers.
+ * desktop-mode.js — layout override: Auto / Desktop / Mobile.
  *
- * Mobile-first remains the default. When the user clicks the "Desktop"
- * header button, we add `html.desktop-mode`. CSS mirrors all
- * `@media (min-width: 1024px)` rules under `:root.desktop-mode { ... }`
- * so the toggle promotes the layout regardless of viewport width.
+ * Mobile-first remains the default ("Auto" — viewport media queries
+ * decide, exactly like before this file grew a third state). The header
+ * toggle cycles Auto -> Desktop -> Mobile -> Auto:
+ *   - Desktop: `html.desktop-mode` forces the wide layout regardless of
+ *     viewport (pre-2026-07-18 behaviour, unchanged).
+ *   - Mobile (new, 2026-07-18): `html.mobile-mode` forces the phone
+ *     layout even when the real viewport is >=1024px — lets the user
+ *     check the mobile experience without shrinking a desktop browser
+ *     window. CSS neutralizes the native @media(min-width:1024px)
+ *     promotions under `:root.mobile-mode` (see layout.css/responsive.css).
  *
- * Persists choice to localStorage("pi-desktop-mode") = "on" | "off".
- * Default = "off" (mobile-first stays).
+ * Persists choice to localStorage("pi-desktop-mode") = "auto" | "desktop"
+ * | "mobile". Back-compat: pre-2026-07-18 binary values ("on"/"off") map
+ * to "desktop"/"auto" on first read.
  */
 
-import * as state from "./state.js";
-
 const KEY = "pi-desktop-mode";
+const MODES = ["auto", "desktop", "mobile"];
 
-// New state slot. Not part of state.Slots enum because the slot list is
-// a frozen object; we expose only a getter/setter to keep this scoped.
-let _current = "off";
+let _current = "auto";
 const _listeners = new Set();
 
-/** Init from localStorage. Idempotent. Returns "on" | "off". */
+/** Init from localStorage. Idempotent. Returns "auto" | "desktop" | "mobile". */
 export function initDesktopMode() {
   const saved = localStorage.getItem(KEY);
-  _current = saved === "on" ? "on" : "off";
+  if (saved === "on") _current = "desktop";
+  else if (saved === "off") _current = "auto";
+  else if (MODES.includes(saved)) _current = saved;
+  else _current = "auto";
   _apply(_current);
   return _current;
 }
 
-/** Toggle between on/off, persist, notify listeners, return new mode. */
-export function toggleDesktopMode() {
-  const next = _current === "on" ? "off" : "on";
+/** Cycle Auto -> Desktop -> Mobile -> Auto, persist, notify, return new mode. */
+export function cycleDesktopMode() {
+  const idx = MODES.indexOf(_current);
+  const next = MODES[(idx + 1) % MODES.length];
   _current = next;
   localStorage.setItem(KEY, next);
   _apply(next);
@@ -46,6 +54,6 @@ export function subscribeDesktopMode(fn) {
 
 function _apply(mode) {
   const html = document.documentElement;
-  if (mode === "on") html.classList.add("desktop-mode");
-  else html.classList.remove("desktop-mode");
+  html.classList.toggle("desktop-mode", mode === "desktop");
+  html.classList.toggle("mobile-mode", mode === "mobile");
 }

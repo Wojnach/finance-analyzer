@@ -11,6 +11,7 @@
  */
 
 import * as router from "../router.js";
+import { sectionErrorChip } from "../components/section-error-chip.js";
 
 const ACTION_COLORS = {
   BUY: "var(--grn)",
@@ -30,13 +31,17 @@ export function signalPulseCard(signalAgg) {
   title.textContent = "Signal pulse";
   card.append(title);
 
+  if (signalAgg?.error) card.append(sectionErrorChip(signalAgg.error));
+
   const tickers = Array.isArray(signalAgg?.tickers) ? signalAgg.tickers : [];
   if (!tickers.length) {
-    const empty = document.createElement("div");
-    empty.style.color = "var(--txm)";
-    empty.style.fontSize = "var(--ty-sm)";
-    empty.textContent = "no signal snapshot yet";
-    card.append(empty);
+    if (!signalAgg?.error) {
+      const empty = document.createElement("div");
+      empty.style.color = "var(--txm)";
+      empty.style.fontSize = "var(--ty-sm)";
+      empty.textContent = "no signal snapshot yet";
+      card.append(empty);
+    }
     return card;
   }
 
@@ -73,16 +78,36 @@ function _tickerRow(t) {
   left.append(ticker);
 
   const detail = document.createElement("div");
+  detail.style.display = "flex";
+  detail.style.alignItems = "center";
+  detail.style.gap = "6px";
   detail.style.fontSize = "var(--ty-sm)";
   detail.style.color = "var(--txm)";
+
+  // horizon = vote target timeframe (2026-07-18); older snapshots lack it.
+  // Broken out into its own pill (rather than inline text) so it reads as
+  // a distinct dimension, not just another number in the B/S/H tally.
+  const horizon = t.horizon || "1d (default)";
+  const hPill = document.createElement("span");
+  hPill.textContent = horizon;
+  hPill.style.fontSize = "var(--ty-xs)";
+  hPill.style.fontWeight = "600";
+  hPill.style.padding = "0 4px";
+  hPill.style.border = "1px solid var(--bdr2)";
+  hPill.style.borderRadius = "3px";
+  hPill.style.color = "var(--txd)";
+  hPill.style.whiteSpace = "nowrap";
+  detail.append(hPill);
+
   const total = t.total ?? 0;
   const buy = t.buy ?? 0;
   const sell = t.sell ?? 0;
   const hold = t.hold ?? 0;
   const abstainPct = total > 0 ? Math.round((hold / total) * 100) : 0;
-  // horizon = vote target timeframe (2026-07-18); older snapshots lack it.
-  const horizon = t.horizon || "1d (default)";
-  detail.textContent = `${horizon} · ${buy}B · ${sell}S · ${hold}H — ${abstainPct}% abstaining`;
+  const rest = document.createElement("span");
+  rest.textContent = `${buy}B · ${sell}S · ${hold}H — ${abstainPct}% abstaining`;
+  detail.append(rest);
+
   left.append(detail);
   row.append(left);
 

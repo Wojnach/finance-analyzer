@@ -72,15 +72,23 @@
   gap: var(--sp-1);
 }
 
-/* Refresh dot */
+/* Refresh dot. Visually stays an 8px dot, but ::before gives it a >=44px
+ * invisible hit area (tap-target floor) without changing appearance. */
 .refresh-dot {
   display: inline-block;
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 1px;
   background: var(--grn);
   box-shadow: 0 0 5px var(--grn);
   animation: pulse 2s infinite;
+  cursor: pointer;
+}
+.refresh-dot::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
 }
 .refresh-dot.paused { background: var(--yel); animation: none; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -236,7 +244,52 @@
 }
 :root.desktop-mode .bottom-nav__item .glyph { font-size: 14px; }
 
+/* Explicit "Mobile" override (2026-07-18) — forces the phone layout even
+ * when the real viewport is >=1024px (testing mobile on a wide desktop
+ * browser window). Neutralizes the native @media(min-width:1024px)
+ * promotions above by mirroring them back to their phone-default values —
+ * the same technique :root.desktop-mode already uses in the other
+ * direction. */
+:root.mobile-mode .app { padding-bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom)); }
+:root.mobile-mode .app-main { padding: var(--sp-3); order: 0; }
+:root.mobile-mode .bottom-nav {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  height: calc(var(--bottomnav-h) + env(safe-area-inset-bottom));
+  padding: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--bdr);
+  border-bottom: 0;
+}
+:root.mobile-mode .bottom-nav__item {
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1) 0;
+  min-height: var(--bottomnav-h);
+  border-bottom: 0;
+}
+:root.mobile-mode .bottom-nav__item.active {
+  border-bottom-color: transparent;
+  box-shadow: inset 0 2px 0 var(--grn);
+}
+:root.mobile-mode .bottom-nav__item .glyph { font-size: 18px; }
+
 /* Toggle button itself sits in the header icons row. Reuse .icon-btn
-   from the existing header styling; .active marks the toggle as ON. */
+   from the existing header styling; .active marks the toggle as ON
+   (Desktop or Mobile — anything other than Auto). Text label added
+   2026-07-18 alongside the 3-state cycle; hidden below 360px (see
+   responsive.css) to keep the header from crowding on the smallest phones. */
+.desktop-mode-toggle {
+  width: auto;
+  gap: 4px;
+  padding: 0 var(--sp-2);
+}
 .desktop-mode-toggle .glyph { font-size: 16px; }
+.desktop-mode-toggle .label {
+  font-size: var(--ty-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
 .desktop-mode-toggle.active { color: var(--grn); }

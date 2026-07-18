@@ -58,6 +58,25 @@
 :root.desktop-mode .heatmap td { height: 28px; min-width: 44px; }
 :root.desktop-mode .desktop-only { display: block !important; }
 
+/* Mirrors the block above in reverse — explicit "Mobile" mode forces the
+ * phone-scale values regardless of real viewport width. See
+ * js/desktop-mode.js + layout.css's matching :root.mobile-mode block. */
+:root.mobile-mode .app-main { padding: var(--sp-3); }
+:root.mobile-mode .home-grid { display: block; }
+:root.mobile-mode .home-grid > .home-cell--full { grid-column: auto; }
+:root.mobile-mode .scroll-strip {
+  margin: 0 calc(-1 * var(--sp-3));
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+:root.mobile-mode .heatmap td { height: 24px; min-width: 40px; }
+:root.mobile-mode .desktop-only { display: none !important; }
+
+/* Desktop-mode-toggle text label — hidden on the narrowest phones so the
+ * header doesn't crowd; glyph + tooltip still convey state. */
+@media (max-width: 359px) {
+  .desktop-mode-toggle .label { display: none; }
+}
+
 /* Tap-target floor escapes — dense table rows are allowed to drop to
    --tap-tight (36px) when row spacing is adequate. Apply this opt-in
    only inside .dense-table. */

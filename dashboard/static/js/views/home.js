@@ -1,5 +1,6 @@
 /*
- * views/home.js — system-health-first home (2026-05-04 redesign).
+ * views/home.js — system-health-first home (2026-05-04 redesign; mobile
+ * home redesign 2026-07-18).
  *
  * The previous home led with simulated-portfolio P&L. The user
  * deprioritised that — the Patient/Bold portfolios almost never trade
@@ -8,12 +9,13 @@
  * under More.
  *
  * Card stack (top → bottom):
+ *   0. Freshness banner        (amber, only when Layer 1/signal data is stale)
  *   1. System status hero      (GREEN/YELLOW/RED + reasons)
  *   2. Trading status          (per-Avanza-bot state with reason)
- *   3. LLM inference health    (per-model success bars)
- *   4. Layer 2 activity        (24h spark + latest invocation)
- *   5. Signal pulse            (abstain rate per ticker)
- *   6. Errors & violations     (unresolved tail)
+ *   3. Voters                  (per-signal voting truth, was "LLM inference")
+ *   4. Command Central         (Layer 1 + Layer 2 + voters summary, was "Layer 2 activity")
+ *   5. Signal pulse            (abstain rate per ticker, horizon-labelled)
+ *   6. Errors & violations     (system errors only, + Avanza status chip)
  *   7. P&L footer              (tiny line linking to /portfolio)
  *
  * Polls /api/system_status (30s) and /api/trading_status (30s). Both
@@ -29,10 +31,11 @@ import { fpct, fs } from "../format.js";
 
 import { systemStatusHero }    from "../render/system-status-hero.js";
 import { tradingStatusCard }   from "../render/trading-status-card.js";
-import { llmInferenceCard }    from "../render/llm-inference-card.js";
-import { layer2ActivityCard }  from "../render/layer2-activity-card.js";
+import { votersCard }          from "../render/voters-card.js";
+import { commandCentralCard }  from "../render/command-central-card.js";
 import { signalPulseCard }     from "../render/signal-pulse-card.js";
 import { errorsPanel }         from "../render/errors-panel.js";
+import { freshnessBanner }     from "../render/freshness-banner.js";
 
 const POLL_KEY_SYS = "home.system_status";
 const POLL_KEY_TRD = "home.trading_status";
@@ -76,7 +79,7 @@ function _renderShell() {
   const view = document.createElement("section");
   view.className = "view view--home";
 
-  const slots = ["hero", "trading", "llm", "layer2", "signals", "errors", "footer"];
+  const slots = ["freshness", "hero", "trading", "voters", "command", "signals", "errors", "footer"];
   for (const id of slots) {
     const slot = document.createElement("div");
     slot.dataset.slot = id;
@@ -91,10 +94,11 @@ function _renderAll() {
   const sys = state.get(state.Slots.SYSTEM_STATUS);
   const trd = state.get(state.Slots.TRADING_STATUS);
 
+  _replaceSlot("freshness", sys ? freshnessBanner(sys) : null);
   _replaceSlot("hero",    sys ? systemStatusHero(sys)             : _placeholder("Loading system status…"));
   _replaceSlot("trading", trd ? tradingStatusCard(trd)            : _placeholder("Loading bot states…"));
-  _replaceSlot("llm",     sys ? llmInferenceCard(sys.llm_inference)        : _placeholder("Loading LLM telemetry…"));
-  _replaceSlot("layer2",  sys ? layer2ActivityCard(sys.layer2)             : _placeholder("Loading Layer 2 activity…"));
+  _replaceSlot("voters",  sys ? votersCard(sys.voters, sys.llm_inference) : _placeholder("Loading voter states…"));
+  _replaceSlot("command", sys ? commandCentralCard(sys)           : _placeholder("Loading Command Central…"));
   _replaceSlot("signals", sys ? signalPulseCard(sys.signal_aggregate)      : _placeholder("Loading signals…"));
   _replaceSlot("errors",  sys ? errorsPanel(sys)                            : _placeholder("Loading error log…"));
   _replaceSlot("footer",  sys ? _pnlFooter(sys.pnl_footer)                  : _placeholder(""));

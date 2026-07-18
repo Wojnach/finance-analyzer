@@ -1,30 +1,64 @@
 /*
- * render/errors-panel.js — unresolved errors + contract violations.
+ * render/errors-panel.js — unresolved system errors + contract violations,
+ * plus a compact Avanza status chip.
  *
- * Reads `/api/system_status` payload's `errors` and `contract_violations`
- * sections. Tap → /health for full triage.
+ * Reads `/api/system_status` payload's `errors`, `contract_violations`,
+ * and `avanza` sections. Tap the main panel -> /health for full triage;
+ * tap the Avanza chip -> /avanza.
+ *
+ * 2026-07-18: split system errors from Avanza-session noise. Avanza
+ * session/account-mismatch failures (BankID re-auth pending) used to
+ * flood this panel — 267+ avanza_session_consecutive_failures entries
+ * alone. `avanza_*`-category errors now get their own chip; everything
+ * else (including `auth_failure`, which is a Claude CLI OAuth failure,
+ * NOT Avanza — see system_status.py::_is_avanza_category) stays here.
+ * Also: a degraded errors/violations reader (backend `error` field) now
+ * shows a chip instead of silently rendering as "0 unresolved" — that
+ * used to look identical to a genuinely clean state.
  */
 
 import * as router from "../router.js";
 import { ft } from "../format.js";
+import { sectionErrorChip } from "../components/section-error-chip.js";
 
 /** @returns {HTMLElement} */
 export function errorsPanel(payload) {
-  const card = document.createElement("button");
-  card.type = "button";
-  card.className = "card card--tap";
-  card.style.display = "block";
-  card.style.width = "100%";
-  card.style.textAlign = "left";
+  const card = document.createElement("section");
+  card.className = "card";
   card.style.padding = "var(--sp-3)";
-  card.style.minHeight = "var(--tap-min)";
-  card.addEventListener("click", () => router.navigate("health"));
 
   const errs = payload?.errors || {};
   const cvs = payload?.contract_violations || {};
-  const errCount = errs.unresolved ?? 0;
+
+  const main = document.createElement("button");
+  main.type = "button";
+  main.className = "card--tap";
+  main.style.display = "block";
+  main.style.width = "100%";
+  main.style.textAlign = "left";
+  main.style.background = "transparent";
+  main.style.border = "0";
+  main.style.padding = "0";
+  main.style.minHeight = "var(--tap-min)";
+  main.addEventListener("click", () => router.navigate("health"));
+
+  // recent_system: non-Avanza rows, computed backend-side from the FULL
+  // unresolved list (not the pre-capped `recent`) so a system error can't
+  // get pushed out just because Avanza noise is more recent. Fall back to
+  // client-side filtering of `recent` for resilience if an older backend
+  // build hasn't shipped the field yet.
+  const recentSystem = Array.isArray(errs.recent_system)
+    ? errs.recent_system
+    : (Array.isArray(errs.recent) ? errs.recent : [])
+        .filter((e) => !String(e?.category || "").startsWith("avanza_"));
+
+  const errCount = errs.system_unresolved ?? (
+    errs.unresolved != null && errs.avanza_unresolved != null
+      ? errs.unresolved - errs.avanza_unresolved
+      : errs.unresolved ?? 0
+  );
   const cvCount = cvs.unresolved ?? 0;
-  const total = errCount + cvCount;
+  const total = (errCount || 0) + cvCount;
 
   const header = document.createElement("div");
   header.style.display = "flex";
@@ -46,34 +80,48 @@ export function errorsPanel(payload) {
     ? `${errCount} err · ${cvCount} cv (24h)`
     : "0 unresolved";
   header.append(tally);
-  card.append(header);
+  main.append(header);
 
-  if (!total) {
+  // A degraded reader (errs.error / cvs.error) must never look like the
+  // "0 unresolved" clean state above — surface it explicitly.
+  if (errs.error) main.append(sectionErrorChip(`errors check degraded — ${errs.error}`));
+  if (cvs.error) main.append(sectionErrorChip(`violations check degraded — ${cvs.error}`));
+
+  if (total > 0) {
+    const items = [];
+    for (const e of recentSystem) {
+      items.push({ kind: "err", ts: e.ts, label: e.category || e.caller || "error", msg: e.message });
+    }
+    for (const v of (cvs.recent || [])) {
+      items.push({ kind: "cv", ts: v.ts, label: v.invariant || "violation", msg: v.message });
+    }
+    items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+
+    if (items.length) {
+      const list = document.createElement("div");
+      list.style.display = "flex";
+      list.style.flexDirection = "column";
+      list.style.gap = "var(--sp-1)";
+      for (const it of items.slice(0, 5)) list.append(_errorRow(it));
+      main.append(list);
+    }
+  } else if (!errs.error && !cvs.error) {
+    // total (system errs + cv) is 0 here, but that must NOT be conflated
+    // with "nothing unresolved anywhere" — Avanza-category errors are
+    // counted separately and can still be nonzero (jsdom smoke test
+    // caught this: this branch used to say "all clear" while the Avanza
+    // chip below showed unresolved errors in the same render).
     const ok = document.createElement("div");
     ok.style.color = "var(--txm)";
     ok.style.fontSize = "var(--ty-sm)";
-    ok.textContent = "all clear";
-    card.append(ok);
-    return card;
+    ok.textContent = (errs.avanza_unresolved ?? 0) > 0
+      ? "no system errors — see Avanza chip below"
+      : "all clear";
+    main.append(ok);
   }
 
-  // Combine and sort by ts (newest first), cap at 5.
-  const items = [];
-  for (const e of (errs.recent || [])) {
-    items.push({ kind: "err", ts: e.ts, label: e.category || e.caller || "error", msg: e.message });
-  }
-  for (const v of (cvs.recent || [])) {
-    items.push({ kind: "cv", ts: v.ts, label: v.invariant || "violation", msg: v.message });
-  }
-  items.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
-
-  const list = document.createElement("div");
-  list.style.display = "flex";
-  list.style.flexDirection = "column";
-  list.style.gap = "var(--sp-1)";
-  for (const it of items.slice(0, 5)) list.append(_errorRow(it));
-  card.append(list);
-
+  card.append(main);
+  card.append(_avanzaChip(payload?.avanza));
   return card;
 }
 
@@ -81,7 +129,7 @@ function _errorRow(it) {
   const row = document.createElement("div");
   row.style.fontSize = "var(--ty-sm)";
   row.style.color = "var(--tx)";
-  row.style.borderTop = "1px solid var(--bd)";
+  row.style.borderTop = "1px solid var(--bdr)";
   row.style.paddingTop = "var(--sp-1)";
 
   const top = document.createElement("div");
@@ -112,4 +160,38 @@ function _errorRow(it) {
   row.append(msg);
 
   return row;
+}
+
+function _avanzaChip(av) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "chip";
+  chip.style.marginTop = "var(--sp-2)";
+  chip.style.minHeight = "var(--tap-min)";
+  chip.addEventListener("click", (e) => {
+    e.stopPropagation();
+    router.navigate("avanza");
+  });
+
+  const info = av || {};
+  const n = info.unresolved_errors ?? 0;
+  let color = "var(--grn)";
+  let label = "Avanza: OK";
+  if (info.creds_configured === false) {
+    color = "var(--red)";
+    label = "Avanza: not configured";
+  } else if (info.creds_configured == null) {
+    color = "var(--txm)";
+    label = "Avanza: unknown";
+  } else if (n > 5) {
+    color = "var(--red)";
+    label = `Avanza: ${n} unresolved`;
+  } else if (n > 0) {
+    color = "var(--yel)";
+    label = `Avanza: ${n} unresolved`;
+  }
+  chip.style.color = color;
+  chip.style.borderColor = color;
+  chip.textContent = label;
+  return chip;
 }

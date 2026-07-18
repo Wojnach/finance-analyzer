@@ -18,8 +18,10 @@ import * as router from "./router.js";
 import * as polling from "./polling.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import {
-  initDesktopMode, toggleDesktopMode, getDesktopMode, subscribeDesktopMode,
+  initDesktopMode, cycleDesktopMode, getDesktopMode, subscribeDesktopMode,
 } from "./desktop-mode.js";
+import { fAgo } from "./format.js";
+import { showToast } from "./components/toast.js";
 
 // ---- View imports ---------------------------------------------------------
 // Each view module self-registers with router.register() on import.
@@ -52,24 +54,54 @@ document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initDesktopMode();
 
-  // Wire desktop-mode toggle button (header). Mobile remains the default;
-  // click promotes the page to the wider desktop layout regardless of
-  // viewport width. Choice persists in localStorage.
+  // Wire desktop-mode toggle button (header). Mobile ("Auto") remains the
+  // default; tapping cycles Auto -> Desktop -> Mobile -> Auto. Choice
+  // persists in localStorage. The visible label shows the CURRENT mode
+  // (not the mode a tap would switch to) — matches how the glyph/active
+  // state already worked pre-2026-07-18 and avoids "guess what tapping
+  // does" ambiguity; the title tooltip spells out what a tap does next.
   const dmBtn = document.getElementById("desktop-mode-toggle");
   if (dmBtn) {
+    const GLYPH = { auto: "⊞", desktop: "▤", mobile: "▥" };
+    const LABEL = { auto: "Auto", desktop: "Desktop", mobile: "Mobile" };
+    const NEXT_LABEL = { auto: "Desktop", desktop: "Mobile", mobile: "Auto" };
     const syncBtn = (mode) => {
-      const on = mode === "on";
-      dmBtn.setAttribute("aria-pressed", on ? "true" : "false");
-      dmBtn.classList.toggle("active", on);
+      dmBtn.classList.toggle("active", mode !== "auto");
       const glyph = dmBtn.querySelector(".glyph");
-      if (glyph) glyph.textContent = on ? "▤" : "⊞";
-      dmBtn.title = on
-        ? "Desktop layout active — click for mobile"
-        : "Toggle desktop layout (mobile is default)";
+      if (glyph) glyph.textContent = GLYPH[mode] || GLYPH.auto;
+      let label = dmBtn.querySelector(".label");
+      if (!label) {
+        label = document.createElement("span");
+        label.className = "label";
+        dmBtn.append(label);
+      }
+      label.textContent = LABEL[mode] || LABEL.auto;
+      dmBtn.title = `Layout: ${LABEL[mode] || LABEL.auto} — tap for ${NEXT_LABEL[mode] || NEXT_LABEL.auto}`;
     };
     syncBtn(getDesktopMode());
     subscribeDesktopMode(syncBtn);
-    dmBtn.addEventListener("click", () => toggleDesktopMode());
+    dmBtn.addEventListener("click", () => cycleDesktopMode());
+  }
+
+  // Wire refresh-dot (header). Tooltip shows "last refresh Xs ago"; tap
+  // shows the same as a toast (useful on touch devices where hover/title
+  // never fires). Reflects state.Slots.LAST_REFRESH, which every view's
+  // polling task bumps on each completed fetch (js/polling.js) — global
+  // chrome, so wired once here rather than per-view.
+  const refreshDot = document.getElementById("refresh-dot");
+  if (refreshDot) {
+    const tooltipText = () => {
+      const last = state.get(state.Slots.LAST_REFRESH);
+      return last ? `last refresh ${fAgo(last)}` : "auto-refresh — no refresh yet";
+    };
+    const updateTooltip = () => { refreshDot.title = tooltipText(); };
+    updateTooltip();
+    state.subscribe(state.Slots.LAST_REFRESH, updateTooltip);
+    const showRefreshToast = () => showToast(tooltipText());
+    refreshDot.addEventListener("click", showRefreshToast);
+    refreshDot.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showRefreshToast(); }
+    });
   }
 
   // Wire bottom-nav buttons → hash routes.
@@ -137,6 +169,6 @@ window.__pi = Object.freeze({
   router,
   polling,
   toggleTheme,
-  toggleDesktopMode,
+  cycleDesktopMode,
   getDesktopMode,
 });
