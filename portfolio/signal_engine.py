@@ -1,6 +1,7 @@
 """Signal generation engine — 32-signal voting system with weighted consensus."""
 
 import logging
+import os
 import threading
 import time
 from datetime import UTC, datetime
@@ -1773,7 +1774,15 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
 # bypass the ticker/horizon blacklist too -- a correctness regression this
 # split avoids.
 def _use_registry(config: dict | None) -> bool:
-    """Feature flag: config `signals.use_registry` (default False)."""
+    """Feature flag: config `signals.use_registry` (default False).
+
+    Env override PF_USE_REGISTRY=1 forces the flag on regardless of
+    config — used by the pre-flip full-suite gate (run the whole test
+    suite with the registry path active without touching any config
+    fixture) and available as a prod escape hatch.
+    """
+    if os.environ.get("PF_USE_REGISTRY") == "1":
+        return True
     return bool(((config or {}).get("signals") or {}).get("use_registry", False))
 
 

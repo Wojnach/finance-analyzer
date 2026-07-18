@@ -36,6 +36,15 @@ OFF: dict = {"signals": {"use_registry": False}}
 ON: dict = {"signals": {"use_registry": True}}
 
 
+@pytest.fixture(autouse=True)
+def _clear_registry_env(monkeypatch):
+    """These tests exercise CONFIG semantics via the explicit ON/OFF dicts.
+    The PF_USE_REGISTRY env override (pre-flip full-suite gate) would force
+    the flag on and break every default-off assertion -- clear it so the
+    file is deterministic in both gate runs."""
+    monkeypatch.delenv("PF_USE_REGISTRY", raising=False)
+
+
 class TestUseRegistryFlag:
     def test_missing_config_defaults_off(self):
         assert signal_engine._use_registry(None) is False
