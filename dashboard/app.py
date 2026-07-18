@@ -1548,8 +1548,12 @@ def api_decisions():
         # Apply action/strategy filters
         if action_filter or strategy_filter:
             decisions = entry.get("decisions", {})
+            if not isinstance(decisions, dict):
+                decisions = {}
             matched = False
             for strat, dec in decisions.items():
+                if not isinstance(dec, dict):
+                    continue
                 if strategy_filter and strat != strategy_filter:
                     continue
                 if action_filter and dec.get("action", "").upper() != action_filter:

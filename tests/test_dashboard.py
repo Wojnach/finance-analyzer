@@ -1134,6 +1134,20 @@ class TestApiDecisions:
         assert resp.status_code == 200
         assert resp.get_json() == []
 
+    def test_action_filter_tolerates_malformed_entries(self, client, tmp_data):
+        """Entries where decisions (or a strategy value) is a string must not 500."""
+        good = _sample_journal_entry(patient_action="BUY")
+        bad_dec = _sample_journal_entry()
+        bad_dec["decisions"]["patient"] = "corrupted-string"
+        bad_root = _sample_journal_entry()
+        bad_root["decisions"] = "not-a-dict"
+        self._write_journal(tmp_data, [good, bad_dec, bad_root])
+        with _no_auth():
+            resp = client.get("/api/decisions?action=BUY")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+
     def test_newest_first(self, client, tmp_data):
         entries = [
             _sample_journal_entry(ts="2026-02-22T08:00:00+00:00"),
