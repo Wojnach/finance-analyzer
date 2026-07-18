@@ -41,12 +41,21 @@ class TestTrustedSignals:
         trusted = get_trusted_signals("XAG-USD")
         assert len(trusted) >= 5
         assert "econ_calendar" in trusted
-        assert "claude_fundamental" in trusted
 
     def test_silver_ignored_includes_noise(self):
         ignored = get_ignored_signals("XAG-USD")
         assert "sentiment" in ignored
-        assert "ministral" in ignored
+
+    def test_trusted_excludes_globally_disabled_signals(self):
+        # Phase 4.4: trusted_signals is now registry-derived, so it can no
+        # longer contain signals DISABLED_SIGNALS force-HOLDs everywhere —
+        # the old hand-curated list contradicted this (claude_fundamental,
+        # momentum_factors/momentum, structure, fibonacci were all listed
+        # as "trusted" while globally disabled).
+        for ticker in ("XAG-USD", "XAU-USD"):
+            trusted = set(get_trusted_signals(ticker))
+            for signal in ("claude_fundamental", "structure", "fibonacci"):
+                assert signal not in trusted, f"{signal} still trusted for {ticker}"
 
     def test_trusted_and_ignored_dont_overlap(self):
         for ticker in ("XAG-USD", "XAU-USD"):

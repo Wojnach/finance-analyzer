@@ -1,12 +1,21 @@
 """Instrument profiles for smart fishing — per-metal signal trust and behavior.
 
 Each metal gets a "personality" defining:
-- Which signals to trust (>70% historical accuracy on this ticker)
-- Which signals to ignore (<45% accuracy, noise)
+- Which signals to trust (component_registry's currently-enabled set)
+- Which signals to ignore (everything else the registry knows about)
 - Cross-asset drivers with correlation and lead time
 - Regime-specific behavior (direction bias, TP multiplier)
 - Precomputed context file path
 - Typical volatility characteristics
+
+As of 2026-07-18 (Phase 4.4), trusted_signals/ignored_signals are no longer
+hand-curated accuracy snapshots — they're derived live from
+portfolio.component_registry (single source of truth for signal
+enablement), so they can't drift out of sync with DISABLED_SIGNALS the way
+the old hardcoded lists did (see component_registry.py's module docstring
+for the contradiction this replaces). Everything else in a profile
+(cross_asset_drivers, regime_behaviors, precompute_file, prophecy_key,
+volatility stats) has no registry home and stays hardcoded here.
 
 Usage:
     from portfolio.instrument_profile import get_profile
@@ -18,43 +27,8 @@ from __future__ import annotations
 
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Signal trust tiers — derived from signal_reliability in agent_summary
-# Updated periodically based on accuracy_cache.json
-# ---------------------------------------------------------------------------
-
-_SILVER_TRUSTED = [
-    "econ_calendar",       # 94.7% (396 samples)
-    "fear_greed",          # 91.5% (212)
-    "claude_fundamental",  # 85.4% (247)
-    "momentum_factors",    # 76.7% (630)
-    "structure",           # 76.4% (467)
-    "mean_reversion",      # 72.9% (3d horizon)
-    "fibonacci",           # 68.2% (decent, context-dependent)
-]
-
-_SILVER_IGNORED = [
-    "sentiment",           # 4.5% (89) — noise
-    "ministral",           # 18.9% (95) — LLM fails on silver
-    "oscillators",         # 40.6% (143) — below gate
-    "custom_lora",         # disabled globally
-    "ml",                  # disabled globally
-]
-
-_GOLD_TRUSTED = [
-    "econ_calendar",       # high accuracy on metals broadly
-    "macro_regime",        # gold responds to macro shifts
-    "claude_fundamental",  # LLM analysis works for gold
-    "fibonacci",           # structural levels reliable
-    "structure",           # breakout detection
-    "smart_money",         # institutional flow detection
-]
-
-_GOLD_IGNORED = [
-    "sentiment",           # noise for metals
-    "custom_lora",         # disabled
-    "ml",                  # disabled
-]
+from portfolio.component_registry import get_registry
+from portfolio.registry_defaults import SIGNALS
 
 # ---------------------------------------------------------------------------
 # Cross-asset drivers — what moves this instrument and how fast
@@ -129,6 +103,23 @@ _GOLD_CROSS_ASSETS = {
 }
 
 # ---------------------------------------------------------------------------
+# Signal trust — derived live from component_registry (Phase 4.4, 2026-07-18)
+# ---------------------------------------------------------------------------
+
+
+def _derive_signal_lists(ticker: str) -> tuple[list[str], list[str]]:
+    """trusted = registry's applicable_signals(ticker) (actually-enabled,
+    currently-voting set). ignored = every signal the registry knows about
+    that isn't in that set (globally disabled, ticker/horizon-blacklisted,
+    or asset-class restricted). Replaces the old hand-curated accuracy-
+    snapshot lists, which had drifted out of sync with DISABLED_SIGNALS.
+    """
+    trusted = sorted(get_registry().applicable_signals(ticker))
+    ignored = sorted(set(SIGNALS) - set(trusted))
+    return trusted, ignored
+
+
+# ---------------------------------------------------------------------------
 # Full instrument profiles
 # ---------------------------------------------------------------------------
 
@@ -136,8 +127,6 @@ PROFILES: dict[str, dict[str, Any]] = {
     "XAG-USD": {
         "name": "Silver",
         "binance_symbol": "XAGUSDT",
-        "trusted_signals": _SILVER_TRUSTED,
-        "ignored_signals": _SILVER_IGNORED,
         "cross_asset_drivers": _SILVER_CROSS_ASSETS,
         "regime_behaviors": {
             "trending-up": {
@@ -171,8 +160,6 @@ PROFILES: dict[str, dict[str, Any]] = {
     "XAU-USD": {
         "name": "Gold",
         "binance_symbol": "XAUUSDT",
-        "trusted_signals": _GOLD_TRUSTED,
-        "ignored_signals": _GOLD_IGNORED,
         "cross_asset_drivers": _GOLD_CROSS_ASSETS,
         "regime_behaviors": {
             "trending-up": {
@@ -207,20 +194,32 @@ PROFILES: dict[str, dict[str, Any]] = {
 
 
 def get_profile(ticker: str) -> dict[str, Any] | None:
-    """Get instrument profile for a ticker, or None if not profiled."""
-    return PROFILES.get(ticker)
+    """Get instrument profile for a ticker, or None if not profiled.
+
+    trusted_signals/ignored_signals are computed live via
+    _derive_signal_lists rather than stored in PROFILES (Phase 4.4).
+    """
+    profile = PROFILES.get(ticker)
+    if profile is None:
+        return None
+    trusted, ignored = _derive_signal_lists(ticker)
+    return {**profile, "trusted_signals": trusted, "ignored_signals": ignored}
 
 
 def get_trusted_signals(ticker: str) -> list[str]:
-    """Get list of trusted signal names for this ticker."""
-    profile = PROFILES.get(ticker)
-    return profile["trusted_signals"] if profile else []
+    """Get list of trusted signal names for this ticker (registry-derived)."""
+    if ticker not in PROFILES:
+        return []
+    trusted, _ignored = _derive_signal_lists(ticker)
+    return trusted
 
 
 def get_ignored_signals(ticker: str) -> list[str]:
-    """Get list of signals to ignore for this ticker."""
-    profile = PROFILES.get(ticker)
-    return profile["ignored_signals"] if profile else []
+    """Get list of signals to ignore for this ticker (registry-derived)."""
+    if ticker not in PROFILES:
+        return []
+    _trusted, ignored = _derive_signal_lists(ticker)
+    return ignored
 
 
 def get_cross_asset_drivers(ticker: str) -> dict[str, dict]:
@@ -255,7 +254,7 @@ def format_profile_briefing(ticker: str, signal_data: dict | None = None) -> str
     str
         Formatted briefing text
     """
-    profile = PROFILES.get(ticker)
+    profile = get_profile(ticker)
     if not profile:
         return f"No profile available for {ticker}"
 
