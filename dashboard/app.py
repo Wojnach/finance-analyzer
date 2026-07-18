@@ -1351,6 +1351,16 @@ def api_accuracy_history():
     can dim/exclude force-HOLD'd signals. Tag is derived at response
     time from DISABLED_SIGNALS so historical snapshots written before
     the flag existed are also tagged correctly.
+
+    2026-07-18 (Phase 4.5): intentionally NOT migrated to
+    component_registry — unlike this file's other two DISABLED_SIGNALS
+    reads. These are archival snapshot rows, some containing retired
+    signal names (e.g. kronos) that never made it into registry_defaults
+    SIGNALS (only current SIGNAL_NAMES are snapshotted). The registry's
+    unknown-signal default is "disabled", which would mislabel that
+    archival data as force-HOLD rather than leaving it untagged/enabled.
+    Revisit only if/when the registry gains a real historical-signal
+    table.
     """
     entries = _read_jsonl(DATA_DIR / "accuracy_snapshots.jsonl", limit=500)
     try:

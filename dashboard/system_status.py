@@ -982,8 +982,7 @@ _LLM_FLAG_GATED_SIGNALS: frozenset[str] = frozenset({"ministral", "qwen3", "sent
 def _voter_state(
     name: str,
     *,
-    disabled_signals: Any,
-    get_disabled_reason: Any,
+    registry: Any,
     overrides: Any,
     signal_health: dict[str, Any],
     shadows: dict[str, Any],
@@ -992,7 +991,7 @@ def _voter_state(
     h = signal_health.get(name)
     last_activity_ts = h.get("last_success") if isinstance(h, dict) else None
 
-    if name not in disabled_signals:
+    if not registry.is_globally_disabled(name, ticker=None):
         # None of the curated names are expected to be globally enabled
         # today; stay truthful if that ever changes rather than mislabel.
         return {"state": "VOTING", "reason": None, "last_activity_ts": last_activity_ts}
@@ -1035,7 +1034,7 @@ def _voter_state(
             "last_activity_ts": last_activity_ts,
         }
 
-    reason = get_disabled_reason(name)
+    reason = registry.disabled_reason(name)
     shadow = shadows.get(name)
     if isinstance(shadow, dict) and shadow.get("status"):
         note = f"shadow_registry status={shadow['status']}"
@@ -1044,30 +1043,57 @@ def _voter_state(
     return {"state": "DISABLED", "reason": reason, "last_activity_ts": last_activity_ts}
 
 
+def _get_registry() -> Any:
+    """Indirection so tests can inject a synthetic registry stub without
+    needing a full portfolio.registry_defaults SIGNALS table — see
+    tests/test_dashboard_system_status.py TestVoters.
+    """
+    from portfolio.component_registry import get_registry
+
+    return get_registry()
+
+
+def _voter_overrides() -> Any:
+    """(signal, ticker) pairs rescued from a global disable.
+
+    Same source component_registry.py reads (portfolio.registry_defaults),
+    imported separately here because ComponentRegistry exposes this as a
+    plain module-level table, not through an instance method.
+    """
+    from portfolio.registry_defaults import DISABLED_SIGNAL_OVERRIDES
+
+    return DISABLED_SIGNAL_OVERRIDES
+
+
 def _voters(dd: Path) -> dict[str, Any]:
     """Per-signal voting truth for the curated LLM/ML watch-list.
 
     Kills the "100% green but force-HOLD" confusion: a signal's lifetime
     call-success counter (health_state.json) says nothing about whether
     it's actually in the consensus vote today. Wrapped whole so one bad
-    import (e.g. signal_engine's private override table moving) can't
-    blank the rest of the hero.
+    import/accessor (e.g. component_registry failing to load) can't blank
+    the rest of the hero.
+
+    Base enabled/disabled state + the global disabled-reason string come
+    from the Phase 4.1 component registry (``_get_registry()`` /
+    ``_voter_overrides()`` — both a thin indirection so tests can
+    substitute a synthetic registry instead of the real
+    portfolio.registry_defaults tables). Everything else here stays a
+    live, dynamic read that the registry deliberately does not model:
+    remote-LLM gate (remote_llm_available), the local_llm.disabled flag,
+    shadow_registry status, and health_state.json activity timestamps.
     """
     try:
-        from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
-
-        try:
-            from portfolio.signal_engine import _DISABLED_SIGNAL_OVERRIDES
-        except Exception:
-            _DISABLED_SIGNAL_OVERRIDES = frozenset()
+        registry = _get_registry()
+        overrides = _voter_overrides()
 
         health = load_json(dd / "health_state.json", default={}) or {}
         signal_health = health.get("signal_health", {}) if isinstance(health, dict) else {}
         if not isinstance(signal_health, dict):
             signal_health = {}
 
-        registry = load_json(dd / "shadow_registry.json", default={}) or {}
-        shadows = registry.get("shadows", {}) if isinstance(registry, dict) else {}
+        shadow_registry = load_json(dd / "shadow_registry.json", default={}) or {}
+        shadows = shadow_registry.get("shadows", {}) if isinstance(shadow_registry, dict) else {}
         if not isinstance(shadows, dict):
             shadows = {}
 
@@ -1076,9 +1102,8 @@ def _voters(dd: Path) -> dict[str, Any]:
         return {
             name: _voter_state(
                 name,
-                disabled_signals=DISABLED_SIGNALS,
-                get_disabled_reason=get_disabled_reason,
-                overrides=_DISABLED_SIGNAL_OVERRIDES,
+                registry=registry,
+                overrides=overrides,
                 signal_health=signal_health,
                 shadows=shadows,
                 llm_flag_paused=llm_flag_paused,

@@ -1506,14 +1506,39 @@ class TestLayer1:
 
 
 class TestVoters:
-    def _patch_common(self, monkeypatch, *, disabled, overrides, get_reason=None):
-        import portfolio.signal_engine as se_mod
-        import portfolio.tickers as tickers_mod
+    """Base enabled/disabled state now comes from the Phase 4.1 component
+    registry (portfolio.component_registry / portfolio.registry_defaults)
+    instead of live tickers.DISABLED_SIGNALS / signal_engine private
+    tables — see docs/plans/2026-07-18-dashboard-redesign-and-modular-
+    engine.md Phase 4.5. Tests substitute a synthetic ``_FakeRegistry``
+    via the ``ss._get_registry`` / ``ss._voter_overrides`` indirection
+    rather than monkeypatching the real registry tables, so scenarios
+    don't need a full portfolio.registry_defaults.SIGNALS fixture.
+    """
 
-        monkeypatch.setattr(tickers_mod, "DISABLED_SIGNALS", frozenset(disabled))
-        if get_reason is not None:
-            monkeypatch.setattr(tickers_mod, "get_disabled_reason", get_reason)
-        monkeypatch.setattr(se_mod, "_DISABLED_SIGNAL_OVERRIDES", frozenset(overrides))
+    class _FakeRegistry:
+        """Mirrors the two ComponentRegistry calls _voter_state makes:
+        ``is_globally_disabled`` (pure membership — drives the VOTING
+        short-circuit) and ``disabled_reason`` (the reason string, which
+        the real registry can independently return None for even when
+        disabled — kept as two knobs here for the same reason)."""
+
+        def __init__(self, disabled, get_reason=None):
+            self._disabled = frozenset(disabled)
+            self._get_reason = get_reason
+
+        def is_globally_disabled(self, name, ticker=None):
+            return name in self._disabled
+
+        def disabled_reason(self, name, ticker=None):
+            if self._get_reason is None:
+                return None
+            return self._get_reason(name)
+
+    def _patch_common(self, monkeypatch, *, disabled, overrides, get_reason=None):
+        registry = self._FakeRegistry(disabled, get_reason)
+        monkeypatch.setattr(ss, "_get_registry", lambda: registry)
+        monkeypatch.setattr(ss, "_voter_overrides", lambda: frozenset(overrides))
 
     def test_disabled_signal_reports_reason(self, tmp_path: Path, monkeypatch):
         self._patch_common(
@@ -1622,6 +1647,23 @@ class TestVoters:
             overrides=set(),
             get_reason=MagicMock(side_effect=RuntimeError("boom")),
         )
+        out = ss._voters(tmp_path)
+        assert "error" in out
+
+    def test_registry_accessor_raising_does_not_blank_hero(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Phase 4.5: the registry swap adds a NEW failure mode absent from
+        the old tickers.py/signal_engine.py import path — _get_registry()
+        itself (portfolio.component_registry.get_registry()) raising, e.g.
+        a corrupt registry_overrides.json or a broken registry_defaults.py
+        regen. Must still degrade to the in-band error envelope, not a
+        blank/500 hero.
+        """
+        monkeypatch.setattr(
+            ss, "_get_registry", MagicMock(side_effect=RuntimeError("boom"))
+        )
+        monkeypatch.setattr(ss, "_voter_overrides", lambda: frozenset())
         out = ss._voters(tmp_path)
         assert "error" in out
 

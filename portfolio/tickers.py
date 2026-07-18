@@ -298,10 +298,6 @@ DISABLED_SIGNALS = {
                         # signal. Huang & Kilic (2019) JFE 132(3). 6.4% annual predictive
                         # power. Score 8.30/10. All tickers. Inverted for metals.
                         # Shadow mode — accumulate accuracy data before enabling.
-    "signal_credibility_filter",  # 2026-06-06: NEW. Persistence×(1-HHI)×follow-through meta-filter.
-                        # Source: Nechepurenko 2026, arxiv:2604.27041. Confirms credible moves,
-                        # fades manipulative/noise spikes. OHLCV-only, cross-asset. Score 7.90/10.
-                        # Shadow mode — accumulate accuracy data before enabling.
     "metals_cross_asset",  # 2026-06-06: DISABLED. Was in _TICKER_DISABLED_SIGNALS for both
                         # XAU-USD and XAG-USD (only applicable tickers), so vote was always
                         # force-HOLD. Wasting yfinance+FRED API calls every cycle for zero

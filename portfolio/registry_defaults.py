@@ -775,7 +775,7 @@ DISABLED_SIGNAL_OVERRIDES = frozenset(
 # every horizon; other keys ADD to "_default" for that horizon only.
 TICKER_DISABLED_BY_HORIZON = {
     "10d": {},
-    "12h": {"BTC-USD": frozenset({"mean_reversion", "rsi"})},
+    "12h": {"BTC-USD": frozenset({"rsi", "mean_reversion"})},
     "1d": {
         "BTC-USD": frozenset(
             {
@@ -841,16 +841,16 @@ TICKER_DISABLED_BY_HORIZON = {
         ),
     },
     "3d": {
-        "BTC-USD": frozenset({"ministral", "ema", "credit_spread_risk"}),
-        "ETH-USD": frozenset({"ministral", "ema", "credit_spread_risk"}),
-        "MSTR": frozenset({"ministral", "ema", "credit_spread_risk"}),
-        "XAG-USD": frozenset({"ministral", "ema", "credit_spread_risk"}),
-        "XAU-USD": frozenset({"ministral", "ema", "credit_spread_risk"}),
+        "BTC-USD": frozenset({"ema", "credit_spread_risk", "ministral"}),
+        "ETH-USD": frozenset({"ema", "credit_spread_risk", "ministral"}),
+        "MSTR": frozenset({"ema", "credit_spread_risk", "ministral"}),
+        "XAG-USD": frozenset({"ema", "credit_spread_risk", "ministral"}),
+        "XAU-USD": frozenset({"ema", "credit_spread_risk", "ministral"}),
     },
     "3h": {
-        "BTC-USD": frozenset({"volatility_sig", "sentiment", "bb"}),
+        "BTC-USD": frozenset({"volatility_sig", "bb", "sentiment"}),
         "ETH-USD": frozenset({"sentiment", "credit_spread_risk"}),
-        "MSTR": frozenset({"volume", "volatility_sig", "sentiment"}),
+        "MSTR": frozenset({"volatility_sig", "sentiment", "volume"}),
         "XAG-USD": frozenset({"qwen3", "forecast", "sentiment"}),
         "XAU-USD": frozenset({"sentiment"}),
     },
