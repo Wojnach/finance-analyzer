@@ -9,11 +9,12 @@
  * renders the curated `voters` payload instead: one row per signal, a
  * state pill, and the reason it's (not) voting.
  *
- * Reads `/api/system_status` payload's `voters` section, plus
- * `llm_inference` kept as a small footer for the chronos/kronos
- * forecast-model call-success counters — those don't have a voter-state
- * concept yet and dropping them entirely would lose real signal. The
- * Phase 4 component registry is expected to replace this whole card.
+ * Reads `/api/system_status` payload's `voters` section. Used to also
+ * render an `llm_inference` footer (chronos/kronos lifetime call-success
+ * counters) — removed 2026-07-18 as the same lifetime-counter-as-health
+ * trap this card exists to fix (see the docstring above and
+ * system_status.py's `_voters` docstring). The Phase 4 component
+ * registry is expected to replace this whole card.
  */
 
 import { fAgo } from "../format.js";
@@ -35,7 +36,7 @@ const STATE_ORDER = [
 ];
 
 /** @returns {HTMLElement} */
-export function votersCard(votersPayload, llmPayload) {
+export function votersCard(votersPayload) {
   const card = document.createElement("section");
   card.className = "card";
   card.style.padding = "var(--sp-3)";
@@ -67,9 +68,6 @@ export function votersCard(votersPayload, llmPayload) {
   });
 
   for (const [name, v] of entries) card.append(_voterRow(name, v));
-
-  const footer = _llmFooter(llmPayload);
-  if (footer) card.append(footer);
 
   return card;
 }
@@ -133,20 +131,4 @@ function _voterRow(name, v) {
   });
 
   return row;
-}
-
-function _llmFooter(llmPayload) {
-  const models = Array.isArray(llmPayload?.models) ? llmPayload.models : [];
-  if (!models.length) return null;
-
-  const wrap = document.createElement("div");
-  wrap.style.marginTop = "var(--sp-2)";
-  wrap.style.paddingTop = "var(--sp-2)";
-  wrap.style.borderTop = "1px solid var(--bdr)";
-  wrap.style.fontSize = "var(--ty-xs)";
-  wrap.style.color = "var(--txm)";
-
-  const parts = models.map((m) => `${m.name || m.key}: ${(m.success_pct ?? 0).toFixed(0)}%`);
-  wrap.textContent = `forecast models — ${parts.join(" · ")}`;
-  return wrap;
 }

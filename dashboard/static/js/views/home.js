@@ -97,7 +97,7 @@ function _renderAll() {
   _replaceSlot("freshness", sys ? freshnessBanner(sys) : null);
   _replaceSlot("hero",    sys ? systemStatusHero(sys)             : _placeholder("Loading system status…"));
   _replaceSlot("trading", trd ? tradingStatusCard(trd)            : _placeholder("Loading bot states…"));
-  _replaceSlot("voters",  sys ? votersCard(sys.voters, sys.llm_inference) : _placeholder("Loading voter states…"));
+  _replaceSlot("voters",  sys ? votersCard(sys.voters)             : _placeholder("Loading voter states…"));
   _replaceSlot("command", sys ? commandCentralCard(sys)           : _placeholder("Loading Command Central…"));
   _replaceSlot("signals", sys ? signalPulseCard(sys.signal_aggregate)      : _placeholder("Loading signals…"));
   _replaceSlot("errors",  sys ? errorsPanel(sys)                            : _placeholder("Loading error log…"));

@@ -1318,6 +1318,68 @@ class TestErrorsReaderDegraded:
 
 
 # ---------------------------------------------------------------------------
+# Hero errors count uses system_unresolved, Avanza noise excluded (2026-07-18)
+# ---------------------------------------------------------------------------
+
+
+class TestColorSystemUnresolved:
+    def test_avanza_noise_excluded_from_severity(self):
+        # 66 unresolved total, but only 15 are non-Avanza — the hero must
+        # bump on the 15, not the 66 (a BankID auth backlog alone used to
+        # pin this RED even though nothing else was actually broken).
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 66, "system_unresolved": 15},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+        }
+        severity, reasons = ss._color(payload)
+        assert severity == "RED"
+        assert any("15 system (66 total)" in r for r in reasons)
+
+    def test_no_avanza_noise_keeps_old_phrasing(self):
+        # system_unresolved == unresolved (no Avanza rows) — no parenthetical.
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 5, "system_unresolved": 5},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+        }
+        severity, reasons = ss._color(payload)
+        assert severity == "RED"
+        assert any(r == "5 unresolved errors" for r in reasons)
+        assert not any("total" in r for r in reasons)
+
+    def test_missing_system_unresolved_falls_back_to_total(self):
+        # Old cached payload shape (predates the Avanza split) — must not
+        # crash or silently zero out.
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 2},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+        }
+        severity, reasons = ss._color(payload)
+        assert severity == "YELLOW"
+        assert any("2 unresolved error" in r for r in reasons)
+
+    def test_avanza_only_noise_does_not_bump_severity(self):
+        # All 10 unresolved are Avanza noise, 0 system — hero stays clean.
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 10, "system_unresolved": 0},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+        }
+        severity, reasons = ss._color(payload)
+        assert severity == "GREEN"
+
+
+# ---------------------------------------------------------------------------
 # Truth & freshness layer (2026-07-18) — sources / layer1 / voters
 # ---------------------------------------------------------------------------
 

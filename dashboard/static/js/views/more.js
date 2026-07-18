@@ -12,6 +12,7 @@ const ITEMS = [
   { route: "assets",     label: "Assets",      hint: "Tradeable warrant catalog — what the loops can buy/sell" },
   { route: "portfolio",  label: "Portfolio",   hint: "Patient + Bold simulated P&L (legacy home)" },
   { route: "health",     label: "Health",      hint: "Loops, signals, errors" },
+  { route: "control",    label: "Control",     hint: "LLM pause, instrument tracking, loop start/stop" },
   { route: "loop-processes", label: "Running loops", hint: "Replaces the popup-window cue: live PID list + duplicate detection" },
   { route: "pickups",    label: "Pickups",     hint: "Scheduled verification jobs (auto-run by PF-PendingPickups 08:00 daily)" },
   { route: "llm-leaderboard", label: "LLM leaderboard", hint: "Per-LLM accuracy + Brier + shadow status" },

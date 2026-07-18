@@ -2541,6 +2541,12 @@ from dashboard.house_blueprint import bp as _house_bp  # noqa: E402
 
 app.register_blueprint(_house_bp)
 
+# Blueprint: /api/control — Command Central write API (Phase 3, 2026-07-18).
+# See dashboard/control.py for routes + hardening (allowlist, rate limit, audit).
+from dashboard.control import bp as _control_bp  # noqa: E402
+
+app.register_blueprint(_control_bp)
+
 
 # Short vanity aliases for the househunting viewer. Gated by require_auth like
 # /legacy (NOT bare like /logout): a first-visit bootstrap via /hh?token=XXX

@@ -49,6 +49,7 @@ import "./views/portfolio.js";
 import "./views/llm_leaderboard.js";
 import "./views/loop_processes.js";
 import "./views/pickups.js";
+import "./views/control.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -116,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // under "More" (health, messages, metals, golddigger, equity, settings)
   // keep the More tab highlighted.
   const MORE_SUB_ROUTES = new Set([
-    "avanza", "assets", "prices", "portfolio", "health", "messages", "metals", "golddigger", "equity", "settings",
+    "avanza", "assets", "prices", "portfolio", "health", "messages", "metals", "golddigger", "equity", "settings", "control",
   ]);
   state.subscribe(state.Slots.ROUTE, (parsed) => {
     const route = parsed?.name || "home";

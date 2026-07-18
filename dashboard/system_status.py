@@ -1094,6 +1094,19 @@ def _voters(dd: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _errors_reason(n: int, total: int) -> str:
+    """Hero reason string for the errors count.
+
+    Shows the Avanza-excluded system count (``n``), with the raw
+    (Avanza-included) ``total`` in parens when the two differ — e.g.
+    "15 system (66 total)". Falls back to the old "N unresolved error(s)"
+    phrasing when they're equal (no Avanza noise to subtract).
+    """
+    if total != n:
+        return f"{n} system ({total} total)"
+    return f"{n} unresolved error{'s' if n != 1 else ''}"
+
+
 def _color(payload: dict[str, Any]) -> tuple[str, list[str]]:
     """Compute overall GREEN/YELLOW/RED + a list of reasons.
 
@@ -1129,13 +1142,23 @@ def _color(payload: dict[str, Any]) -> tuple[str, list[str]]:
         bump("YELLOW")
         reasons.append("critical-errors check degraded")
     else:
-        n = err.get("unresolved", 0) or 0
+        # 2026-07-18: the hero used to count ALL unresolved criticals,
+        # including the Avanza auth-retry noise (see the dedicated Avanza
+        # chip) — a BankID re-auth backlog alone pinned the hero RED even
+        # when everything else was fine. Drive severity off
+        # system_unresolved (Avanza categories excluded); fall back to the
+        # raw unresolved count for older cached payloads that predate the
+        # split. _errors_reason keeps the raw total visible in parens.
+        total = err.get("unresolved", 0) or 0
+        n = err.get("system_unresolved")
+        if n is None:
+            n = total
         if n > ERRORS_YELLOW_MAX:
             bump("RED")
-            reasons.append(f"{n} unresolved errors")
+            reasons.append(_errors_reason(n, total))
         elif n > 0:
             bump("YELLOW")
-            reasons.append(f"{n} unresolved error{'s' if n != 1 else ''}")
+            reasons.append(_errors_reason(n, total))
 
     cv = payload.get("contract_violations") or {}
     vn = cv.get("unresolved", 0) or 0
