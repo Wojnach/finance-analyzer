@@ -1094,7 +1094,7 @@ def api_accuracy():
             get_or_compute_consensus_accuracy,
             get_or_compute_per_ticker_accuracy,
         )
-        from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
+        from portfolio.component_registry import get_registry
 
         def _unavailable_reason(horizon, ca):
             # 2026-07-18: horizons can have zero consensus samples for two
@@ -1121,7 +1121,8 @@ def api_accuracy():
             # rebuilds.
             #
             # Important: `enabled` and `disabled_reason` are *overwritten*
-            # from the live DISABLED_SIGNALS, not setdefault'd. A signal
+            # from the live registry (component_registry, itself generated
+            # from tickers.DISABLED_SIGNALS), not setdefault'd. A signal
             # re-enabled (e.g. statistical_jump_regime, 2026-04-29) or
             # newly disabled would otherwise keep the stale flag from the
             # cache file until the next 1h rebuild. `samples` is just an
@@ -1133,16 +1134,18 @@ def api_accuracy():
                     continue
                 if "samples" not in info and "total" in info:
                     info["samples"] = info["total"]
-                enabled = sig_name not in DISABLED_SIGNALS
-                info["enabled"] = enabled
-                if enabled:
-                    info.pop("disabled_reason", None)
+                # 2026-07-18 Phase 4.3: enabled/disabled_reason now come from
+                # component_registry (global-only check, no ticker in scope
+                # here) instead of DISABLED_SIGNALS/get_disabled_reason
+                # directly. Parity verified: registry.disabled_reason(sig)
+                # agrees with get_disabled_reason(sig) for every signal in
+                # SIGNAL_NAMES (see tests/test_dashboard.py parity canary).
+                reason = get_registry().disabled_reason(sig_name)
+                info["enabled"] = reason is None
+                if reason:
+                    info["disabled_reason"] = reason
                 else:
-                    reason = get_disabled_reason(sig_name)
-                    if reason:
-                        info["disabled_reason"] = reason
-                    else:
-                        info.pop("disabled_reason", None)
+                    info.pop("disabled_reason", None)
             return signals_dict
 
         result = {}
@@ -1259,10 +1262,11 @@ def api_signal_heatmap():
     signals_data = summary.get("signals", {})
 
     try:
-        from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS
+        from portfolio.tickers import SIGNAL_NAMES
+        from portfolio.component_registry import get_registry
     except ImportError:
         SIGNAL_NAMES = []
-        DISABLED_SIGNALS = set()
+        get_registry = None
 
     all_vote_keys = set()
     for ticker_data in signals_data.values():
@@ -1319,7 +1323,14 @@ def api_signal_heatmap():
             if row_since:
                 since[ticker] = row_since
 
-    disabled = sorted(DISABLED_SIGNALS) if DISABLED_SIGNALS else []
+    # 2026-07-18 Phase 4.3: sourced from component_registry, bounded to
+    # SIGNAL_NAMES to match the old DISABLED_SIGNALS scope exactly (parity
+    # verified in tests/test_dashboard.py).
+    disabled = (
+        sorted(s for s in SIGNAL_NAMES if get_registry().disabled_reason(s))
+        if SIGNAL_NAMES and get_registry
+        else []
+    )
     return jsonify({
         "tickers": tickers,
         "signals": all_signals,

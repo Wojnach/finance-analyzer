@@ -441,13 +441,5 @@ def _register_defaults():
                       "portfolio.signals.gold_platinum_ratio_risk",
                       "compute_gold_platinum_ratio_risk_signal",
                       requires_context=True, max_confidence=0.7)
-    # Signal Credibility Filter — meta-signal distinguishing genuine vs noise moves.
-    # 2026-06-06: Nechepurenko 2026, arxiv:2604.27041. Persistence×(1-HHI)×follow-through.
-    # Confirms credible moves, fades suspicious ones. OHLCV-only, cross-asset.
-    register_enhanced("signal_credibility_filter",
-                      "portfolio.signals.signal_credibility_filter",
-                      "compute_signal_credibility_filter_signal",
-                      requires_context=False, max_confidence=0.7)
-
 
 _register_defaults()

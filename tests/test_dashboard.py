@@ -575,6 +575,46 @@ class TestApiAccuracy:
                 "error: accuracy data unavailable for this horizon"
             )
 
+    def test_enabled_disabled_reason_matches_registry_ground_truth(
+        self, client, tmp_data
+    ):
+        """Parity canary (Phase 4.3): enabled/disabled_reason are now sourced
+        from component_registry, not DISABLED_SIGNALS/get_disabled_reason
+        directly (dashboard/app.py _enrich_signals). Locks in that the
+        generated registry_defaults.py snapshot still agrees with the live
+        tickers.py ground truth -- if this ever fails after a signal gets
+        enabled/disabled/re-reasoned, re-run scripts/gen_registry_defaults.py."""
+        self._reset_endpoint_cache()
+        from portfolio.tickers import (
+            DISABLED_SIGNALS,
+            SIGNAL_NAMES,
+            get_disabled_reason,
+        )
+
+        mock_sa = {
+            name: {"correct": 1, "total": 2, "accuracy": 0.5}
+            for name in SIGNAL_NAMES
+        }
+        mock_ca = {"correct": 5, "total": 10, "accuracy": 0.5}
+        mocked = self._mock_accuracy_stats(
+            get_or_compute_accuracy=MagicMock(return_value=mock_sa),
+            get_or_compute_consensus_accuracy=MagicMock(return_value=mock_ca),
+        )
+        with _no_auth(), patch.dict(
+            "sys.modules", {"portfolio.accuracy_stats": mocked}
+        ):
+            resp = client.get("/api/accuracy")
+        signals = resp.get_json()["1d"]["signals"]
+        for name in SIGNAL_NAMES:
+            expected_enabled = name not in DISABLED_SIGNALS
+            assert signals[name]["enabled"] == expected_enabled, name
+            if expected_enabled:
+                assert "disabled_reason" not in signals[name], name
+            else:
+                assert signals[name].get("disabled_reason") == get_disabled_reason(
+                    name
+                ), name
+
 
 class TestApiIskbets:
     def test_returns_config_and_state(self, client, tmp_data):
