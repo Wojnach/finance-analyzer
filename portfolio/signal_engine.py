@@ -4706,8 +4706,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     extra_info["_votes"] = votes
     extra_info["_raw_votes"] = raw_votes  # C10: pre-gate votes for accuracy recovery
     extra_info["_regime"] = regime
-    if horizon:
-        extra_info["_horizon"] = horizon
+    # 2026-07-18: always emit the effective vote horizon (acc_horizon
+    # falls back to "1d" when the caller passes none — see its
+    # definition above) so signal_log rows self-describe which
+    # timeframe the vote targets.
+    extra_info["_horizon"] = horizon or acc_horizon
     extra_info["_weighted_action"] = weighted_action
     extra_info["_weighted_confidence"] = weighted_conf
     extra_info["_confluence_score"] = confluence
