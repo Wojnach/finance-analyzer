@@ -82,6 +82,10 @@ export const view = {
         _renderPipeline();
         _renderVotes();
         _renderTrade();
+        // voters card inside Component health reads sys.voters — without
+        // this, a registry fetch landing first freezes "no voter data yet"
+        // until the next registry poll (race seen live 2026-07-18).
+        _renderComponents();
       }),
     );
     _unsubs.push(
