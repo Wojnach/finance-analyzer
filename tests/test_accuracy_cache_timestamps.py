@@ -209,6 +209,147 @@ class TestBlendAccuracyData:
         assert result["rsi"]["total_sell"] == 200, "max(200, 40), not sum"
 
 
+class TestAccuracyCacheMeta:
+    """get_accuracy_cache_meta() — 2026-07-18 truth-layer /api/accuracy meta."""
+
+    def test_no_cache_file_returns_null(self, cache_file):
+        from portfolio.accuracy_stats import get_accuracy_cache_meta
+
+        assert get_accuracy_cache_meta("1d") == {"updated_ts": None, "age_sec": None}
+
+    def test_reads_time_and_time_consensus_keys(self, cache_file):
+        from portfolio.accuracy_stats import get_accuracy_cache_meta
+
+        now = time.time()
+        cache_file.write_text(
+            json.dumps({"time_1d": now - 100, "time_consensus_1d": now - 50})
+        )
+        meta = get_accuracy_cache_meta("1d")
+        assert meta["updated_ts"] == now - 100
+        assert 95 <= meta["age_sec"] <= 105
+
+    def test_picks_older_of_the_two_timestamps(self, cache_file):
+        """A stale consensus write shouldn't be masked by a fresher
+        per-signal write, or vice versa — meta should reflect the older."""
+        from portfolio.accuracy_stats import get_accuracy_cache_meta
+
+        now = time.time()
+        cache_file.write_text(
+            json.dumps({"time_1d": now - 10, "time_consensus_1d": now - 9000})
+        )
+        meta = get_accuracy_cache_meta("1d")
+        assert meta["updated_ts"] == now - 9000
+
+    def test_missing_horizon_key_returns_null(self, cache_file):
+        from portfolio.accuracy_stats import get_accuracy_cache_meta
+
+        cache_file.write_text(json.dumps({"time_3d": time.time()}))
+        assert get_accuracy_cache_meta("1d") == {"updated_ts": None, "age_sec": None}
+
+
+class TestOldestSignalLogTs:
+    """get_oldest_signal_log_ts() — cheap first-line read for the
+    /api/accuracy unavailable_reason message."""
+
+    @pytest.fixture()
+    def signal_log(self, tmp_path):
+        log_path = tmp_path / "signal_log.jsonl"
+        with mock.patch("portfolio.accuracy_stats.SIGNAL_LOG", log_path):
+            yield log_path
+
+    def test_reads_first_line_ts(self, signal_log):
+        from portfolio.accuracy_stats import get_oldest_signal_log_ts
+
+        signal_log.write_text(
+            '{"ts": "2026-07-11T22:14:02.700652+00:00", "tickers": {}}\n'
+            '{"ts": "2026-07-18T00:00:00+00:00", "tickers": {}}\n'
+        )
+        ts = get_oldest_signal_log_ts()
+        assert ts is not None
+        # Should be the FIRST line's ts, not the last.
+        from datetime import datetime
+
+        assert abs(ts - datetime.fromisoformat("2026-07-11T22:14:02.700652+00:00").timestamp()) < 1
+
+    def test_missing_file_returns_none(self, signal_log):
+        from portfolio.accuracy_stats import get_oldest_signal_log_ts
+
+        assert get_oldest_signal_log_ts() is None
+
+    def test_malformed_first_line_returns_none(self, signal_log):
+        from portfolio.accuracy_stats import get_oldest_signal_log_ts
+
+        signal_log.write_text("not json\n")
+        assert get_oldest_signal_log_ts() is None
+
+    def test_missing_ts_field_returns_none(self, signal_log):
+        from portfolio.accuracy_stats import get_oldest_signal_log_ts
+
+        signal_log.write_text('{"tickers": {}}\n')
+        assert get_oldest_signal_log_ts() is None
+
+
+class TestPurgeStaleCacheKey:
+    """2026-07-18: per_ticker_consensus_{h} for a horizon whose backing
+    outcome rows dropped to zero must not linger in the cache forever."""
+
+    def test_get_or_compute_per_ticker_purges_stale_key_on_zero_result(
+        self, cache_file, monkeypatch
+    ):
+        import portfolio.accuracy_stats as acc_mod
+
+        # Seed a stale per_ticker_consensus_10d left over from when 10d had
+        # outcome rows (mirrors the real 2026-07-12 leftover in prod).
+        cache_file.write_text(
+            json.dumps(
+                {
+                    "per_ticker_consensus_10d": {"BTC-USD": {"correct": 1, "total": 2}},
+                    "time_per_ticker_consensus_10d": time.time() - 999999,
+                }
+            )
+        )
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", lambda horizon: {})
+
+        result = acc_mod.get_or_compute_per_ticker_accuracy("10d")
+
+        assert result == {}
+        raw = json.loads(cache_file.read_text())
+        assert "per_ticker_consensus_10d" not in raw
+        assert "time_per_ticker_consensus_10d" not in raw
+
+    def test_leaves_other_keys_untouched(self, cache_file, monkeypatch):
+        import portfolio.accuracy_stats as acc_mod
+
+        cache_file.write_text(
+            json.dumps(
+                {
+                    "per_ticker_consensus_10d": {"BTC-USD": {"correct": 1, "total": 2}},
+                    "time_per_ticker_consensus_10d": time.time(),
+                    "per_ticker_consensus_1d": {"BTC-USD": {"correct": 5, "total": 5}},
+                    "time_per_ticker_consensus_1d": time.time(),
+                }
+            )
+        )
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", lambda horizon: {})
+
+        acc_mod.get_or_compute_per_ticker_accuracy("10d")
+
+        raw = json.loads(cache_file.read_text())
+        assert raw["per_ticker_consensus_1d"] == {"BTC-USD": {"correct": 5, "total": 5}}
+
+    def test_nonzero_result_still_writes_normally(self, cache_file, monkeypatch):
+        import portfolio.accuracy_stats as acc_mod
+
+        result_data = {"BTC-USD": {"correct": 3, "total": 5}}
+        monkeypatch.setattr(acc_mod, "per_ticker_accuracy", lambda horizon: result_data)
+
+        result = acc_mod.get_or_compute_per_ticker_accuracy("1d")
+
+        assert result == result_data
+        raw = json.loads(cache_file.read_text())
+        assert raw["per_ticker_consensus_1d"] == result_data
+
+
 class TestLoadJsonOSError:
     """BUG-139: load_json handles OSError gracefully."""
 

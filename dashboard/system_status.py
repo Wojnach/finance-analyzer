@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 import re
+import subprocess
+import time
 
 from portfolio.file_utils import load_json, load_jsonl, load_jsonl_tail
 from portfolio.loop_contract import violation_identity_payload
@@ -78,6 +80,9 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
         "layer2": _layer2_24h(dd),
         "signal_aggregate": _signal_aggregate(dd),
         "pnl_footer": _pnl_footer(dd),
+        "sources": _sources(dd),
+        "layer1": _layer1(dd),
+        "voters": _voters(dd),
     }
     # 2026-06-06: attach Claude-gate state into the layer2 section so the home
     # page shows when Layer 2 / Claude trading is intentionally FROZEN
@@ -761,6 +766,248 @@ def _pnl_footer(dd: Path) -> dict[str, Any]:
         }
     except Exception as e:
         return {"error": f"pnl load: {type(e).__name__}: {e}"}
+
+
+# ---------------------------------------------------------------------------
+# Truth & freshness layer (2026-07-18) — sources / layer1 / voters
+# ---------------------------------------------------------------------------
+
+# Expected write cadence per backing file, in seconds. ``frozen`` in
+# _source_freshness() fires at 2x this. Loop heartbeats are 60s except
+# heartbeat.txt (pf-dataloop / Layer 1's own heartbeat, 600s main-loop
+# cycle — see portfolio/main.py). health_state.json and signal_log.jsonl
+# are written every Layer 1 cycle (600s); local_llm_report_latest.json is
+# refreshed hourly by a separate reporting job.
+_SOURCE_CADENCE_SEC: dict[str, int] = {
+    "health_state.json": 600,
+    "signal_log.jsonl": 600,
+    "local_llm_report_latest.json": 3600,
+    "crypto_loop.heartbeat": 60,
+    "metals_loop.heartbeat": 60,
+    "oil_loop.heartbeat": 60,
+    "mstr_loop.heartbeat": 60,
+    "golddigger_loop.heartbeat": 60,
+    "heartbeat.txt": 600,
+}
+
+# Error/violation logs have no steady cadence — a long gap just means
+# nothing went wrong, not that the writer died. Never mark them frozen.
+_SOURCE_NEVER_FROZEN: tuple[str, ...] = (
+    "critical_errors.jsonl",
+    "contract_violations.jsonl",
+)
+
+_SOURCE_FILES: tuple[str, ...] = tuple(_SOURCE_CADENCE_SEC) + _SOURCE_NEVER_FROZEN
+
+
+def _source_freshness(dd: Path, filename: str) -> dict[str, Any]:
+    """mtime/age/frozen for one backing file. Missing file -> all-null,
+    not frozen (nothing to compare a cadence against yet)."""
+    try:
+        mtime = (dd / filename).stat().st_mtime
+    except OSError:
+        return {"mtime": None, "age_sec": None, "frozen": False}
+    age_sec = int(time.time() - mtime)
+    if filename in _SOURCE_NEVER_FROZEN:
+        frozen = False
+    else:
+        frozen = age_sec > 2 * _SOURCE_CADENCE_SEC.get(filename, 600)
+    return {"mtime": mtime, "age_sec": age_sec, "frozen": frozen}
+
+
+def _sources(dd: Path) -> dict[str, Any]:
+    """Freshness of every file the home page's other sections read from.
+
+    Lets the dashboard say "signal data frozen since <ts>" instead of
+    quietly rendering stale numbers as if they were live (2026-07-17
+    pf-dataloop pause went unnoticed for a full day this way).
+    """
+    try:
+        return {name: _source_freshness(dd, name) for name in _SOURCE_FILES}
+    except Exception as e:
+        return {"error": f"sources: {type(e).__name__}: {e}"}
+
+
+_LAYER1_UNIT = "pf-dataloop"
+
+
+def _systemctl_user_query(unit: str, verb: str) -> str | None:
+    """Run `systemctl --user <verb> <unit>` and return stripped stdout, or
+    None on any failure (binary missing, timeout, non-systemd host). Never
+    raises — this feeds a dashboard section that must not 500."""
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", verb, unit],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return None
+
+
+def _layer1(dd: Path) -> dict[str, Any]:
+    """pf-dataloop (Layer 1 main loop) systemd state + last cycle ts.
+
+    2026-07-17: the dashboard showed "Claude Fundamental 100%" (a lifetime
+    counter) as if it were live health while pf-dataloop sat disabled for
+    a full day. This section is the fix — surface the actual unit state
+    instead of inferring it from stale signal data.
+    """
+    try:
+        active = _systemctl_user_query(_LAYER1_UNIT, "is-active") == "active"
+        enabled = _systemctl_user_query(_LAYER1_UNIT, "is-enabled") == "enabled"
+        try:
+            last_cycle_ts = (dd / "heartbeat.txt").read_text(encoding="utf-8").strip() or None
+        except OSError:
+            last_cycle_ts = None
+        return {
+            "unit": _LAYER1_UNIT,
+            "active": active,
+            "enabled": enabled,
+            "last_cycle_ts": last_cycle_ts,
+        }
+    except Exception as e:
+        return {
+            "unit": _LAYER1_UNIT,
+            "active": False,
+            "enabled": False,
+            "last_cycle_ts": None,
+            "error": f"layer1: {type(e).__name__}: {e}",
+        }
+
+
+# Curated voter watch-list — the signals whose "green" health has
+# historically meant "force-HOLD, not actually voting" (claude_fundamental,
+# forecast) or whose availability flips on a live remote-GPU gate
+# (phi4_mini). Not the full 89-signal registry — see Phase 4 plan for that.
+_VOTER_NAMES: tuple[str, ...] = (
+    "claude_fundamental",
+    "forecast",
+    "phi4_mini",
+    "ministral",
+    "qwen3",
+    "ml",
+    "sentiment",
+)
+
+# Signals whose voting (when rescued per-ticker) depends on local GPU
+# inference being unpaused. Checked against data/local_llm.disabled.
+# NOTE: "ml" is a joblib/sklearn classifier, not an LLM — it doesn't
+# actually depend on local_llm_gate today, but is included here per the
+# Phase 1 spec; flagged as a discrepancy for the Phase 4 registry cleanup.
+_LLM_FLAG_GATED_SIGNALS: frozenset[str] = frozenset({"ministral", "qwen3", "sentiment", "ml"})
+
+
+def _voter_state(
+    name: str,
+    *,
+    disabled_signals: Any,
+    get_disabled_reason: Any,
+    overrides: Any,
+    signal_health: dict[str, Any],
+    shadows: dict[str, Any],
+    llm_flag_paused: bool,
+) -> dict[str, Any]:
+    h = signal_health.get(name)
+    last_activity_ts = h.get("last_success") if isinstance(h, dict) else None
+
+    if name not in disabled_signals:
+        # None of the curated names are expected to be globally enabled
+        # today; stay truthful if that ever changes rather than mislabel.
+        return {"state": "VOTING", "reason": None, "last_activity_ts": last_activity_ts}
+
+    rescued_tickers = sorted(t for (s, t) in overrides if s == name)
+
+    if name == "phi4_mini" and rescued_tickers:
+        try:
+            from portfolio.llama_server import remote_llm_available
+
+            available = remote_llm_available()
+        except Exception:
+            available = False
+        tickers_str = ", ".join(rescued_tickers)
+        if available:
+            return {
+                "state": "VOTING",
+                "reason": f"force-HOLD globally; remote LLM reachable, voting for: {tickers_str}",
+                "last_activity_ts": last_activity_ts,
+            }
+        return {
+            "state": "GATED_REMOTE_DOWN",
+            "reason": f"force-HOLD globally; remote LLM (herc2) unreachable, would vote for: {tickers_str}",
+            "last_activity_ts": last_activity_ts,
+        }
+
+    if rescued_tickers:
+        if llm_flag_paused and name in _LLM_FLAG_GATED_SIGNALS:
+            return {
+                "state": "PAUSED_LLM_FLAG",
+                "reason": (
+                    f"rescued per-ticker for {', '.join(rescued_tickers)}, but local "
+                    "LLM inference is paused (data/local_llm.disabled)"
+                ),
+                "last_activity_ts": last_activity_ts,
+            }
+        return {
+            "state": "VOTING",
+            "reason": f"force-HOLD globally; re-enabled per-ticker for: {', '.join(rescued_tickers)}",
+            "last_activity_ts": last_activity_ts,
+        }
+
+    reason = get_disabled_reason(name)
+    shadow = shadows.get(name)
+    if isinstance(shadow, dict) and shadow.get("status"):
+        note = f"shadow_registry status={shadow['status']}"
+        reason = f"{reason}; {note}" if reason else note
+
+    return {"state": "DISABLED", "reason": reason, "last_activity_ts": last_activity_ts}
+
+
+def _voters(dd: Path) -> dict[str, Any]:
+    """Per-signal voting truth for the curated LLM/ML watch-list.
+
+    Kills the "100% green but force-HOLD" confusion: a signal's lifetime
+    call-success counter (health_state.json) says nothing about whether
+    it's actually in the consensus vote today. Wrapped whole so one bad
+    import (e.g. signal_engine's private override table moving) can't
+    blank the rest of the hero.
+    """
+    try:
+        from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
+
+        try:
+            from portfolio.signal_engine import _DISABLED_SIGNAL_OVERRIDES
+        except Exception:
+            _DISABLED_SIGNAL_OVERRIDES = frozenset()
+
+        health = load_json(dd / "health_state.json", default={}) or {}
+        signal_health = health.get("signal_health", {}) if isinstance(health, dict) else {}
+        if not isinstance(signal_health, dict):
+            signal_health = {}
+
+        registry = load_json(dd / "shadow_registry.json", default={}) or {}
+        shadows = registry.get("shadows", {}) if isinstance(registry, dict) else {}
+        if not isinstance(shadows, dict):
+            shadows = {}
+
+        llm_flag_paused = (dd / "local_llm.disabled").exists()
+
+        return {
+            name: _voter_state(
+                name,
+                disabled_signals=DISABLED_SIGNALS,
+                get_disabled_reason=get_disabled_reason,
+                overrides=_DISABLED_SIGNAL_OVERRIDES,
+                signal_health=signal_health,
+                shadows=shadows,
+                llm_flag_paused=llm_flag_paused,
+            )
+            for name in _VOTER_NAMES
+        }
+    except Exception as e:
+        return {"error": f"voters: {type(e).__name__}: {e}"}
 
 
 # ---------------------------------------------------------------------------

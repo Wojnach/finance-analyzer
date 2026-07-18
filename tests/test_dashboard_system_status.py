@@ -7,8 +7,11 @@ is called with that path so the tests never read real production files.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -1096,3 +1099,250 @@ class TestErrorsReaderDegraded:
         severity, reasons = ss._color(payload)
         assert severity == "RED"
         assert any("5 unresolved" in r for r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# Truth & freshness layer (2026-07-18) — sources / layer1 / voters
+# ---------------------------------------------------------------------------
+
+
+def _touch(path: Path, age_seconds: float = 0.0) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}", encoding="utf-8")
+    if age_seconds:
+        stamp = (_now() - timedelta(seconds=age_seconds)).timestamp()
+        os.utime(path, (stamp, stamp))
+
+
+class TestSources:
+    def test_missing_files_are_null_not_frozen(self, tmp_path: Path):
+        out = ss._sources(tmp_path)
+        assert "health_state.json" in out
+        assert "crypto_loop.heartbeat" in out
+        for entry in out.values():
+            assert entry["mtime"] is None
+            assert entry["age_sec"] is None
+            assert entry["frozen"] is False
+
+    def test_fresh_heartbeat_not_frozen(self, tmp_path: Path):
+        _touch(tmp_path / "crypto_loop.heartbeat")
+        out = ss._sources(tmp_path)
+        assert out["crypto_loop.heartbeat"]["frozen"] is False
+        assert out["crypto_loop.heartbeat"]["age_sec"] < 5
+
+    def test_stale_heartbeat_is_frozen(self, tmp_path: Path):
+        # Cadence is 60s -> frozen threshold is 120s.
+        _touch(tmp_path / "crypto_loop.heartbeat", age_seconds=200)
+        out = ss._sources(tmp_path)
+        assert out["crypto_loop.heartbeat"]["frozen"] is True
+        assert out["crypto_loop.heartbeat"]["age_sec"] >= 200
+
+    def test_heartbeat_just_under_threshold_not_frozen(self, tmp_path: Path):
+        _touch(tmp_path / "crypto_loop.heartbeat", age_seconds=100)
+        out = ss._sources(tmp_path)
+        assert out["crypto_loop.heartbeat"]["frozen"] is False
+
+    def test_layer1_heartbeat_uses_600s_cadence(self, tmp_path: Path):
+        # heartbeat.txt (layer1) cadence is 600s -> frozen at 1200s, so
+        # 200s stale (fine for a 60s-cadence loop) must NOT be frozen here.
+        _touch(tmp_path / "heartbeat.txt", age_seconds=200)
+        out = ss._sources(tmp_path)
+        assert out["heartbeat.txt"]["frozen"] is False
+
+    def test_health_state_frozen_past_1200s(self, tmp_path: Path):
+        _touch(tmp_path / "health_state.json", age_seconds=1300)
+        out = ss._sources(tmp_path)
+        assert out["health_state.json"]["frozen"] is True
+
+    def test_error_files_never_frozen_even_when_ancient(self, tmp_path: Path):
+        _touch(tmp_path / "critical_errors.jsonl", age_seconds=30 * 86400)
+        _touch(tmp_path / "contract_violations.jsonl", age_seconds=30 * 86400)
+        out = ss._sources(tmp_path)
+        assert out["critical_errors.jsonl"]["frozen"] is False
+        assert out["contract_violations.jsonl"]["frozen"] is False
+
+    def test_compute_attaches_sources(self, tmp_path: Path):
+        payload = ss.compute(tmp_path)
+        assert "sources" in payload
+        assert "health_state.json" in payload["sources"]
+
+
+class TestLayer1:
+    def _patch_systemctl(self, monkeypatch, *, active: bool, enabled: bool):
+        def fake_run(cmd, **kwargs):
+            verb = cmd[2]
+            if verb == "is-active":
+                out = "active" if active else "inactive"
+            else:
+                out = "enabled" if enabled else "disabled"
+            return subprocess.CompletedProcess(
+                cmd, 0 if (active or enabled) else 3, stdout=out + "\n", stderr=""
+            )
+
+        monkeypatch.setattr(ss.subprocess, "run", fake_run)
+
+    def test_active_and_enabled(self, tmp_path: Path, monkeypatch):
+        self._patch_systemctl(monkeypatch, active=True, enabled=True)
+        (tmp_path / "heartbeat.txt").write_text(
+            "2026-07-18T11:44:18.380860+00:00", encoding="utf-8"
+        )
+        out = ss._layer1(tmp_path)
+        assert out["unit"] == "pf-dataloop"
+        assert out["active"] is True
+        assert out["enabled"] is True
+        assert out["last_cycle_ts"] == "2026-07-18T11:44:18.380860+00:00"
+
+    def test_inactive_and_disabled(self, tmp_path: Path, monkeypatch):
+        self._patch_systemctl(monkeypatch, active=False, enabled=False)
+        out = ss._layer1(tmp_path)
+        assert out["active"] is False
+        assert out["enabled"] is False
+
+    def test_missing_heartbeat_file_gives_none(self, tmp_path: Path, monkeypatch):
+        self._patch_systemctl(monkeypatch, active=True, enabled=True)
+        out = ss._layer1(tmp_path)
+        assert out["last_cycle_ts"] is None
+
+    def test_systemctl_missing_never_raises(self, tmp_path: Path, monkeypatch):
+        def _boom(cmd, **kwargs):
+            raise FileNotFoundError("systemctl not found")
+
+        monkeypatch.setattr(ss.subprocess, "run", _boom)
+        out = ss._layer1(tmp_path)
+        assert out["active"] is False
+        assert out["enabled"] is False
+
+    def test_systemctl_timeout_never_raises(self, tmp_path: Path, monkeypatch):
+        def _timeout(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, 5)
+
+        monkeypatch.setattr(ss.subprocess, "run", _timeout)
+        out = ss._layer1(tmp_path)
+        assert out["active"] is False
+        assert out["enabled"] is False
+
+    def test_compute_attaches_layer1(self, tmp_path: Path, monkeypatch):
+        self._patch_systemctl(monkeypatch, active=True, enabled=True)
+        payload = ss.compute(tmp_path)
+        assert payload["layer1"]["unit"] == "pf-dataloop"
+
+
+class TestVoters:
+    def _patch_common(self, monkeypatch, *, disabled, overrides, get_reason=None):
+        import portfolio.signal_engine as se_mod
+        import portfolio.tickers as tickers_mod
+
+        monkeypatch.setattr(tickers_mod, "DISABLED_SIGNALS", frozenset(disabled))
+        if get_reason is not None:
+            monkeypatch.setattr(tickers_mod, "get_disabled_reason", get_reason)
+        monkeypatch.setattr(se_mod, "_DISABLED_SIGNAL_OVERRIDES", frozenset(overrides))
+
+    def test_disabled_signal_reports_reason(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"claude_fundamental"},
+            overrides=set(),
+            get_reason=lambda name: "test reason" if name == "claude_fundamental" else None,
+        )
+        out = ss._voters(tmp_path)
+        assert out["claude_fundamental"]["state"] == "DISABLED"
+        assert out["claude_fundamental"]["reason"] == "test reason"
+        assert out["claude_fundamental"]["last_activity_ts"] is None
+
+    def test_disabled_signal_mentions_shadow_registry(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"ministral"},
+            overrides=set(),
+            get_reason=lambda name: "benched",
+        )
+        _write_json(
+            tmp_path / "shadow_registry.json",
+            {"shadows": {"ministral": {"status": "retired"}}},
+        )
+        out = ss._voters(tmp_path)
+        assert out["ministral"]["state"] == "DISABLED"
+        assert "shadow_registry status=retired" in out["ministral"]["reason"]
+        assert "benched" in out["ministral"]["reason"]
+
+    def test_phi4_mini_voting_when_remote_available(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD"), ("phi4_mini", "XAU-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: True)
+        out = ss._voters(tmp_path)
+        assert out["phi4_mini"]["state"] == "VOTING"
+        assert "BTC-USD" in out["phi4_mini"]["reason"]
+
+    def test_phi4_mini_gated_when_remote_down(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: False)
+        out = ss._voters(tmp_path)
+        assert out["phi4_mini"]["state"] == "GATED_REMOTE_DOWN"
+
+    def test_rescued_signal_paused_by_llm_flag(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"ml"},
+            overrides={("ml", "ETH-USD")},
+            get_reason=lambda name: None,
+        )
+        (tmp_path / "local_llm.disabled").write_text("", encoding="utf-8")
+        out = ss._voters(tmp_path)
+        assert out["ml"]["state"] == "PAUSED_LLM_FLAG"
+        assert "ETH-USD" in out["ml"]["reason"]
+
+    def test_rescued_signal_votes_when_flag_absent(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"ml"},
+            overrides={("ml", "ETH-USD")},
+            get_reason=lambda name: None,
+        )
+        out = ss._voters(tmp_path)
+        assert out["ml"]["state"] == "VOTING"
+        assert "ETH-USD" in out["ml"]["reason"]
+
+    def test_last_activity_ts_from_signal_health(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"claude_fundamental"},
+            overrides=set(),
+            get_reason=lambda name: None,
+        )
+        _write_json(
+            tmp_path / "health_state.json",
+            {
+                "signal_health": {
+                    "claude_fundamental": {"last_success": "2026-07-18T00:00:00+00:00"}
+                }
+            },
+        )
+        out = ss._voters(tmp_path)
+        assert out["claude_fundamental"]["last_activity_ts"] == "2026-07-18T00:00:00+00:00"
+
+    def test_bad_import_does_not_blank_hero(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"claude_fundamental"},
+            overrides=set(),
+            get_reason=MagicMock(side_effect=RuntimeError("boom")),
+        )
+        out = ss._voters(tmp_path)
+        assert "error" in out
+
+    def test_compute_attaches_voters(self, tmp_path: Path, monkeypatch):
+        self._patch_common(monkeypatch, disabled=set(), overrides=set())
+        payload = ss.compute(tmp_path)
+        assert set(payload["voters"].keys()) == set(ss._VOTER_NAMES)
+

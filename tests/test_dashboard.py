@@ -428,6 +428,23 @@ class TestApiAccuracy:
         app_mod._API_ACCURACY_CACHE["data"] = None
         app_mod._API_ACCURACY_CACHE["ts"] = 0.0
 
+    def _mock_accuracy_stats(self, **overrides):
+        """Build the portfolio.accuracy_stats MagicMock the endpoint imports
+        from. 2026-07-18: get_accuracy_cache_meta/get_oldest_signal_log_ts
+        were added for the truth-layer meta/unavailable_reason work — every
+        variant must stub them, or jsonify() chokes on a bare MagicMock."""
+        defaults = dict(
+            get_or_compute_accuracy=MagicMock(return_value={}),
+            get_or_compute_consensus_accuracy=MagicMock(return_value=None),
+            get_or_compute_per_ticker_accuracy=MagicMock(return_value={}),
+            get_accuracy_cache_meta=MagicMock(
+                return_value={"updated_ts": None, "age_sec": None}
+            ),
+            get_oldest_signal_log_ts=MagicMock(return_value=None),
+        )
+        defaults.update(overrides)
+        return MagicMock(**defaults)
+
     def test_returns_accuracy_data(self, client, tmp_data):
         self._reset_endpoint_cache()
         # The endpoint now uses get_or_compute_* wrappers (2026-05-03 perf
@@ -435,13 +452,12 @@ class TestApiAccuracy:
         mock_sa = {"rsi": {"correct": 10, "total": 20, "accuracy": 0.5}}
         mock_ca = {"correct": 50, "total": 100, "accuracy": 0.5}
         mock_ta = {"BTC-USD": {"correct": 5, "total": 10}}
-        with _no_auth(), patch.dict("sys.modules", {
-            "portfolio.accuracy_stats": MagicMock(
-                get_or_compute_accuracy=MagicMock(return_value=mock_sa),
-                get_or_compute_consensus_accuracy=MagicMock(return_value=mock_ca),
-                get_or_compute_per_ticker_accuracy=MagicMock(return_value=mock_ta),
-            )
-        }):
+        mocked = self._mock_accuracy_stats(
+            get_or_compute_accuracy=MagicMock(return_value=mock_sa),
+            get_or_compute_consensus_accuracy=MagicMock(return_value=mock_ca),
+            get_or_compute_per_ticker_accuracy=MagicMock(return_value=mock_ta),
+        )
+        with _no_auth(), patch.dict("sys.modules", {"portfolio.accuracy_stats": mocked}):
             resp = client.get("/api/accuracy")
         assert resp.status_code == 200
         body = resp.get_json()
@@ -449,6 +465,8 @@ class TestApiAccuracy:
         for h in ("1d", "3d", "5d", "10d"):
             assert h in body
             assert body[h]["consensus"]["total"] == 100
+            assert "unavailable_reason" not in body[h]
+            assert body[h]["meta"] == {"updated_ts": None, "age_sec": None}
 
     def test_uses_in_process_ttl_cache(self, client, tmp_data):
         """Burst requests within TTL must hit the in-process cache, not
@@ -462,13 +480,12 @@ class TestApiAccuracy:
             compute_calls["n"] += 1
             return {"correct": 1, "total": 2, "accuracy": 0.5}
 
-        with _no_auth(), patch.dict("sys.modules", {
-            "portfolio.accuracy_stats": MagicMock(
-                get_or_compute_accuracy=MagicMock(side_effect=_track_call),
-                get_or_compute_consensus_accuracy=MagicMock(side_effect=_track_call),
-                get_or_compute_per_ticker_accuracy=MagicMock(side_effect=_track_call),
-            )
-        }):
+        mocked = self._mock_accuracy_stats(
+            get_or_compute_accuracy=MagicMock(side_effect=_track_call),
+            get_or_compute_consensus_accuracy=MagicMock(side_effect=_track_call),
+            get_or_compute_per_ticker_accuracy=MagicMock(side_effect=_track_call),
+        )
+        with _no_auth(), patch.dict("sys.modules", {"portfolio.accuracy_stats": mocked}):
             resp1 = client.get("/api/accuracy")
             resp2 = client.get("/api/accuracy")
             resp3 = client.get("/api/accuracy")
@@ -482,9 +499,12 @@ class TestApiAccuracy:
             f"Expected 12 wrapper calls (one full fanout), got {compute_calls['n']}"
         )
 
-    def test_skips_horizon_with_no_data(self, client, tmp_data):
-        """A horizon whose consensus has total=0 (cold-cache, no entries)
-        should be omitted from the response, not crash."""
+    def test_zero_sample_horizon_gets_unavailable_reason(self, client, tmp_data):
+        """A horizon whose consensus has total=0 (e.g. 10d before outcomes
+        mature) must stay in the response with an explanatory
+        unavailable_reason instead of vanishing (2026-07-18 truth-layer) —
+        the frontend needs the key present to render an explained empty
+        state rather than a silently blank tab."""
         self._reset_endpoint_cache()
 
         def _ca_for(horizon):
@@ -493,35 +513,67 @@ class TestApiAccuracy:
                 return {"correct": 5, "total": 10, "accuracy": 0.5}
             return {"correct": 0, "total": 0, "accuracy": 0.0}
 
-        with _no_auth(), patch.dict("sys.modules", {
-            "portfolio.accuracy_stats": MagicMock(
-                get_or_compute_accuracy=MagicMock(return_value={}),
-                get_or_compute_consensus_accuracy=MagicMock(side_effect=_ca_for),
-                get_or_compute_per_ticker_accuracy=MagicMock(return_value={}),
-            )
-        }):
+        mocked = self._mock_accuracy_stats(
+            get_or_compute_consensus_accuracy=MagicMock(side_effect=_ca_for),
+        )
+        with _no_auth(), patch.dict("sys.modules", {"portfolio.accuracy_stats": mocked}):
             resp = client.get("/api/accuracy")
         body = resp.get_json()
         assert "1d" in body
-        assert "3d" not in body
-        assert "5d" not in body
-        assert "10d" not in body
+        assert "unavailable_reason" not in body["1d"]
+        for h in ("3d", "5d", "10d"):
+            assert h in body, f"{h} must stay present, just marked unavailable"
+            assert body[h]["signals"] == {}
+            assert body[h]["consensus"] == {"correct": 0, "total": 0, "accuracy": 0.0}
+            assert "insufficient history" in body[h]["unavailable_reason"]
 
-    def test_handles_none_from_cache_miss(self, client, tmp_data):
-        """Cold cache returning None must not crash — responses default to
-        empty dicts for sa/ta and skip the horizon when ca is None/empty."""
+    def test_zero_sample_reason_quotes_oldest_signal_log_age(self, client, tmp_data):
+        """When the oldest signal_log entry's age is available, the
+        unavailable_reason should quote it and the horizon's day count
+        instead of the generic fallback."""
         self._reset_endpoint_cache()
-        with _no_auth(), patch.dict("sys.modules", {
-            "portfolio.accuracy_stats": MagicMock(
-                get_or_compute_accuracy=MagicMock(return_value=None),
-                get_or_compute_consensus_accuracy=MagicMock(return_value=None),
-                get_or_compute_per_ticker_accuracy=MagicMock(return_value=None),
-            )
-        }):
+        import time as _time
+
+        oldest_ts = _time.time() - 7 * 86400  # 7 days old
+
+        def _ca_for(horizon):
+            if horizon == "1d":
+                return {"correct": 5, "total": 10, "accuracy": 0.5}
+            return {"correct": 0, "total": 0, "accuracy": 0.0}
+
+        mocked = self._mock_accuracy_stats(
+            get_or_compute_consensus_accuracy=MagicMock(side_effect=_ca_for),
+            get_oldest_signal_log_ts=MagicMock(return_value=oldest_ts),
+        )
+        with _no_auth(), patch.dict("sys.modules", {"portfolio.accuracy_stats": mocked}):
+            resp = client.get("/api/accuracy")
+        body = resp.get_json()
+        for h in ("3d", "5d", "10d"):
+            reason = body[h]["unavailable_reason"]
+            assert "7 days old" in reason
+            assert f"needs {h[:-1]}+ days" in reason
+
+    def test_cache_miss_none_gets_error_reason(self, client, tmp_data):
+        """Cold cache returning None (a true compute failure, not just zero
+        samples) must be distinguished from 'no data yet' via the
+        unavailable_reason text (2026-07-18 truth-layer) — and must still
+        return 200 with every horizon present, not vanish entirely."""
+        self._reset_endpoint_cache()
+        mocked = self._mock_accuracy_stats(
+            get_or_compute_accuracy=MagicMock(return_value=None),
+            get_or_compute_consensus_accuracy=MagicMock(return_value=None),
+            get_or_compute_per_ticker_accuracy=MagicMock(return_value=None),
+        )
+        with _no_auth(), patch.dict("sys.modules", {"portfolio.accuracy_stats": mocked}):
             resp = client.get("/api/accuracy")
         assert resp.status_code == 200
-        # All horizons skipped because ca is None.
-        assert resp.get_json() == {}
+        body = resp.get_json()
+        for h in ("1d", "3d", "5d", "10d"):
+            assert h in body
+            assert body[h]["consensus"] == {"total": 0, "correct": 0}
+            assert body[h]["unavailable_reason"] == (
+                "error: accuracy data unavailable for this horizon"
+            )
 
 
 class TestApiIskbets:

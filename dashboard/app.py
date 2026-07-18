@@ -1088,11 +1088,29 @@ def api_accuracy():
 
     try:
         from portfolio.accuracy_stats import (
+            get_accuracy_cache_meta,
+            get_oldest_signal_log_ts,
             get_or_compute_accuracy,
             get_or_compute_consensus_accuracy,
             get_or_compute_per_ticker_accuracy,
         )
         from portfolio.tickers import DISABLED_SIGNALS, get_disabled_reason
+
+        def _unavailable_reason(horizon, ca):
+            # 2026-07-18: horizons can have zero consensus samples for two
+            # different reasons — distinguish them so the frontend doesn't
+            # conflate "no data yet" with "something broke".
+            if ca is None:
+                return "error: accuracy data unavailable for this horizon"
+            need_days = horizon[:-1] if horizon.endswith("d") else horizon
+            oldest_ts = get_oldest_signal_log_ts()
+            if oldest_ts is not None:
+                age_days = int((time.time() - oldest_ts) / 86400)
+                return (
+                    f"insufficient history: oldest outcome data is {age_days} "
+                    f"days old, horizon needs {need_days}+ days"
+                )
+            return "insufficient history: outcome data too young for this horizon"
 
         def _enrich_signals(signals_dict):
             # 2026-05-05: enrich at response time so older cached entries
@@ -1132,14 +1150,27 @@ def api_accuracy():
             sa = get_or_compute_accuracy(horizon)
             ca = get_or_compute_consensus_accuracy(horizon)
             ta = get_or_compute_per_ticker_accuracy(horizon)
-            # ca/sa/ta may be None when the underlying cache miss returned
-            # no data (cold cache + no signal-log entries yet); skip those
-            # horizons entirely so the response stays well-formed.
+            meta = get_accuracy_cache_meta(horizon)
+            # ca may be None (cold cache miss, no signal-log entries yet)
+            # or a dict with total==0 (horizon has zero outcome rows so
+            # far, e.g. 10d). Both cases used to drop the horizon key
+            # entirely; now we keep the key and explain why via
+            # unavailable_reason so the frontend can distinguish
+            # "no data yet" from "error" instead of rendering a blank tab.
             if ca and ca.get("total", 0) > 0:
                 result[horizon] = {
                     "signals": _enrich_signals(sa or {}),
                     "consensus": ca,
                     "per_ticker": ta or {},
+                    "meta": meta,
+                }
+            else:
+                result[horizon] = {
+                    "signals": {},
+                    "consensus": ca or {"total": 0, "correct": 0},
+                    "per_ticker": {},
+                    "meta": meta,
+                    "unavailable_reason": _unavailable_reason(horizon, ca),
                 }
         _API_ACCURACY_CACHE["data"] = result
         _API_ACCURACY_CACHE["ts"] = now

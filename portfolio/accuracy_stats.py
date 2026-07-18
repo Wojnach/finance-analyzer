@@ -1151,6 +1151,51 @@ def write_accuracy_cache(horizon, data):
         _atomic_write_json(ACCURACY_CACHE_FILE, cache)
 
 
+def get_accuracy_cache_meta(horizon: str) -> dict:
+    """Freshness metadata for a cached horizon: {updated_ts, age_sec}.
+
+    Reads time_{horizon} / time_consensus_{horizon} from ACCURACY_CACHE_FILE
+    without recomputing anything. Picks the OLDER of the two so a stale
+    consensus write doesn't get masked by a fresher per-signal write (or
+    vice versa). Returns None values when no cache entry exists yet.
+    """
+    cache = load_json(ACCURACY_CACHE_FILE)
+    if not isinstance(cache, dict):
+        return {"updated_ts": None, "age_sec": None}
+    candidates = [
+        cache.get(f"time_{horizon}"),
+        cache.get(f"time_consensus_{horizon}"),
+    ]
+    candidates = [t for t in candidates if isinstance(t, (int, float))]
+    if not candidates:
+        return {"updated_ts": None, "age_sec": None}
+    updated_ts = min(candidates)
+    return {"updated_ts": updated_ts, "age_sec": int(time.time() - updated_ts)}
+
+
+def get_oldest_signal_log_ts():
+    """Return the epoch ts of the oldest entry in signal_log.jsonl, or None.
+
+    Reads only the first line of the file — cheap regardless of file size.
+    Used to explain why a long horizon (e.g. 10d) has no outcomes yet.
+    """
+    import json
+    from datetime import datetime
+
+    try:
+        with open(SIGNAL_LOG, "r") as f:
+            line = f.readline()
+        if not line:
+            return None
+        ts_str = json.loads(line).get("ts")
+        if not ts_str:
+            return None
+        return datetime.fromisoformat(ts_str).timestamp()
+    except Exception:
+        logger.debug("Could not read oldest signal_log entry", exc_info=True)
+        return None
+
+
 # BUG-178 (2026-04-16) cache-miss wrappers. See _accuracy_compute_lock comment
 # at the top of this module for the rationale. Callers that previously did
 # `cached = load_cached_accuracy(h); if not cached: cached = signal_accuracy(h);
@@ -1192,6 +1237,28 @@ def get_or_compute_recent_accuracy(horizon: str, days: int = 7):
         return result
 
 
+def _purge_stale_cache_key(key: str) -> None:
+    """Remove a key (and its time_{key} sibling) from ACCURACY_CACHE_FILE.
+
+    2026-07-18: added because per_ticker_consensus_{h} for a horizon whose
+    backing outcome rows have since dropped to zero (e.g. log rotation
+    aged out the entries, or the tracked-ticker list shrank) would
+    otherwise linger in the cache file forever — unused by the API but
+    confusing to anyone reading it directly.
+    """
+    with _accuracy_write_lock:
+        cache = load_json(ACCURACY_CACHE_FILE, default={})
+        if not isinstance(cache, dict):
+            return
+        changed = False
+        for k in (key, f"time_{key}"):
+            if k in cache:
+                del cache[k]
+                changed = True
+        if changed:
+            _atomic_write_json(ACCURACY_CACHE_FILE, cache)
+
+
 def get_or_compute_per_ticker_accuracy(horizon: str):
     """Cached per-ticker consensus accuracy, computed at most once.
 
@@ -1209,6 +1276,10 @@ def get_or_compute_per_ticker_accuracy(horizon: str):
         result = per_ticker_accuracy(horizon)
         if result:
             write_accuracy_cache(cache_key, result)
+        else:
+            # Zero outcome rows for this horizon right now — drop any
+            # stale cache entry instead of leaving it un-refreshed.
+            _purge_stale_cache_key(cache_key)
         return result
 
 
