@@ -746,6 +746,11 @@ def _signal_aggregate(dd: Path) -> dict[str, Any]:
                     "total": total,
                     "confidence": round(confidence, 3),
                     "regime": data.get("regime"),
+                    # 2026-07-18: vote target horizon persisted by
+                    # outcome_tracker.log_signal_snapshot; None on rows
+                    # written before the field existed → UI falls back
+                    # to "1d (default)".
+                    "horizon": data.get("horizon"),
                 }
             )
         return {"ts": last.get("ts"), "tickers": tickers}

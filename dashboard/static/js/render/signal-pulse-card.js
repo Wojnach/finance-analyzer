@@ -13,7 +13,7 @@
 import * as router from "../router.js";
 
 const ACTION_COLORS = {
-  BUY:  "var(--grn)",
+  BUY: "var(--grn)",
   SELL: "var(--red)",
   HOLD: "var(--txm)",
 };
@@ -80,7 +80,9 @@ function _tickerRow(t) {
   const sell = t.sell ?? 0;
   const hold = t.hold ?? 0;
   const abstainPct = total > 0 ? Math.round((hold / total) * 100) : 0;
-  detail.textContent = `${buy}B · ${sell}S · ${hold}H — ${abstainPct}% abstaining`;
+  // horizon = vote target timeframe (2026-07-18); older snapshots lack it.
+  const horizon = t.horizon || "1d (default)";
+  detail.textContent = `${horizon} · ${buy}B · ${sell}S · ${hold}H — ${abstainPct}% abstaining`;
   left.append(detail);
   row.append(left);
 
