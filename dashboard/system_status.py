@@ -10,8 +10,12 @@ system actually working" indicators. See
 ``docs/PLAN.md`` 2026-05-04 entry and the plan file
 ``/root/.claude/plans/merry-tinkering-cake.md`` for the full design.
 
-Side-effect-free: never opens a network socket, never invokes Avanza,
-never writes a file. Safe to call from a 30s polling loop.
+Side-effects: never invokes Avanza, never writes a file. One deliberate
+exception to the old "no network socket" rule (2026-07-18): the voters
+section calls llama_server.remote_llm_available(), which health-pings the
+herc2 llama-server (3s connect timeout, 60s process-level cache) — the
+dashboard must report the LIVE remote-LLM gate state, not a stale proxy.
+Still safe to call from a 30s polling loop.
 """
 
 from __future__ import annotations
