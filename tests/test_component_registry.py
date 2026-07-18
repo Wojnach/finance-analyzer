@@ -236,10 +236,16 @@ class TestIsGloballyDisabled:
         assert not registry.is_enabled("news_event", "ETH-USD")
         assert registry.is_globally_disabled("news_event", "ETH-USD") is False
 
-    def test_unknown_signal_is_globally_disabled(self, registry):
+    def test_unknown_signal_is_NOT_globally_disabled(self, registry):
+        """Parity with the legacy dispatch gate: `sig in DISABLED_SIGNALS` is
+        False for unknown names, so the P1 axis must not disable them.
+        (is_enabled still answers False for unknowns -- different question.)
+        Regression: 2026-07-18 pre-flip gate caught a synthetic test signal
+        flipping from voting to force-HOLD under the flag."""
         assert (
-            registry.is_globally_disabled("totally_made_up_signal", "BTC-USD") is True
+            registry.is_globally_disabled("totally_made_up_signal", "BTC-USD") is False
         )
+        assert not registry.is_enabled("totally_made_up_signal", "BTC-USD")
 
     def test_overlay_enabled_override_wins(self, tmp_path):
         overlay_path = tmp_path / "registry_overrides.json"

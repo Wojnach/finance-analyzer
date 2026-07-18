@@ -176,7 +176,14 @@ class ComponentRegistry:
             return not bool(overlay["enabled"])
         meta = SIGNALS.get(signal)
         if meta is None:
-            return True
+            # Unknown-to-registry names mirror the legacy dispatch gate:
+            # `signal in DISABLED_SIGNALS` is False for names the tables
+            # have never heard of, so the P1 axis does NOT disable them.
+            # (is_enabled keeps unknown->False -- different question, that
+            # one answers "may this vote at all". Caught 2026-07-18 by the
+            # pre-flip gate: a test-injected synthetic signal flipped from
+            # voting to force-HOLD under the flag.)
+            return False
         return (
             bool(meta["disabled"]) and (signal, ticker) not in DISABLED_SIGNAL_OVERRIDES
         )
