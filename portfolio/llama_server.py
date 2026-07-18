@@ -129,6 +129,18 @@ _MODEL_CONFIGS = {
         ),
         "extra_args": [],
     },
+    # gemma3-12b: google/gemma-3-12b-it (bartowski Q4_K_M, 7.3 GB). Added
+    # 2026-07-18 for the grand LLM matrix. 12B Q4 barely fits the RTX 3080's
+    # 10 GB with 16k KV — ctx capped to 8192 (the later -c wins over the
+    # global 16384); prompts are ~500 tokens so 8k leaves ample room.
+    "gemma3-12b": {
+        "model": (
+            r"Q:\models\gemma3-12b-gguf\google_gemma-3-12b-it-Q4_K_M.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/gemma3-12b-gguf/google_gemma-3-12b-it-Q4_K_M.gguf"
+        ),
+        "extra_args": ["-c", "8192"],
+    },
 }
 
 # In-process state (each importing process tracks its own view)
@@ -837,6 +849,9 @@ def _query_remote_chat(remote, messages, max_tokens, temperature, top_p, top_k):
         "temperature": temperature,
         "top_p": top_p,
         "top_k": top_k,
+        # llama.cpp defaults min_p=0.05; no vendor config we certified
+        # (2026-07-18) recommends that — 0 matches official sampling.
+        "min_p": 0,
     }
     try:
         r = _requests.post(
@@ -864,6 +879,7 @@ def _query_http_chat(messages, max_tokens, temperature, top_p, top_k):
         "temperature": temperature,
         "top_p": top_p,
         "top_k": top_k,
+        "min_p": 0,
         "cache_prompt": True,
     }
     r = _requests.post(
