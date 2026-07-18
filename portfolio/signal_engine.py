@@ -1761,6 +1761,65 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
     return count
 
 
+# Phase 4.2 (2026-07-18): registry flag-gated wrappers. Default OFF ==
+# zero behavior change; see docs/plans/2026-07-18-dashboard-redesign-and-
+# modular-engine.md Phase 4.2. Two separate primitives, NOT one merged
+# is_enabled() call, because the legacy dispatch gate's `_promoted_override`
+# bypass applies to the global-disable axis ONLY -- a promoted signal that
+# is ALSO ticker/horizon-blacklisted must still be force-HELD by that
+# second, independent gate (verified: several shadow-tracked signals, e.g.
+# momentum_factors/MSTR, are both disabled AND ticker-blacklisted today).
+# Folding both axes into one composite check would let a promotion silently
+# bypass the ticker/horizon blacklist too -- a correctness regression this
+# split avoids.
+def _use_registry(config: dict | None) -> bool:
+    """Feature flag: config `signals.use_registry` (default False)."""
+    return bool(((config or {}).get("signals") or {}).get("use_registry", False))
+
+
+def _sig_globally_disabled(signal: str, ticker: str, config: dict | None) -> bool:
+    """Is `signal` disabled-and-not-per-ticker-overridden for `ticker`?
+
+    Deliberately narrower than ComponentRegistry.is_enabled: ignores asset-
+    class restriction and the ticker/horizon blacklist (see
+    _ticker_horizon_disabled for those). Callers combine this with
+    `_promoted_override` themselves, exactly as the legacy dispatch gate
+    always has.
+    """
+    if _use_registry(config):
+        from portfolio.component_registry import get_registry
+        return get_registry().is_globally_disabled(signal, ticker)
+    return signal in DISABLED_SIGNALS and (signal, ticker) not in _DISABLED_SIGNAL_OVERRIDES
+
+
+def _ticker_horizon_disabled(ticker: str, horizon: str | None, config: dict | None) -> frozenset:
+    """Signals force-HELD for (ticker, horizon), independent of the global
+    disable/override/promotion state -- mirrors _get_horizon_disabled_signals
+    when the flag is off (byte-identical: both are the static "_default" ∪
+    horizon-specific blacklist, ignoring asset-class restriction and global
+    disable entirely, same as legacy always has).
+    """
+    if _use_registry(config):
+        from portfolio.component_registry import get_registry
+        reg = get_registry()
+        return frozenset(
+            s for s in SIGNAL_NAMES
+            if reg.is_ticker_horizon_blacklisted(s, ticker, horizon)
+        )
+    return _get_horizon_disabled_signals(ticker, horizon)
+
+
+def _applicable_count(ticker: str, skip_gpu: bool, config: dict | None) -> int:
+    """Total applicable-signal count for `ticker` -- routes to
+    ComponentRegistry.applicable_count when the flag is on (parity-tested
+    1:1 against _compute_applicable_count in test_component_registry.py).
+    """
+    if _use_registry(config):
+        from portfolio.component_registry import get_registry
+        return get_registry().applicable_count(ticker, skip_gpu=skip_gpu)
+    return _compute_applicable_count(ticker, skip_gpu=skip_gpu)
+
+
 _VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD"})
 
 
@@ -2442,7 +2501,7 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
                         regime_gated_override=None, ticker=None,
-                        soft_confidences=None):
+                        soft_confidences=None, horizon_disabled_override=None):
     """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
@@ -2583,7 +2642,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # compute-time _default blacklist with horizon-specific entries. Compute time
     # can't see horizon (one vote reused across 3h/4h/12h/1d/3d/5d/10d consensus),
     # so per-horizon gating must happen here.
-    horizon_disabled = _get_horizon_disabled_signals(ticker, horizon)
+    horizon_disabled = (
+        horizon_disabled_override if horizon_disabled_override is not None
+        else _get_horizon_disabled_signals(ticker, horizon)
+    )
     if horizon_disabled:
         votes = {k: ("HOLD" if k in horizon_disabled else v) for k, v in votes.items()}
 
@@ -3891,6 +3953,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
         _signal_failures = []
         _dispatch_t0 = time.monotonic()
+        _default_disabled_for_ticker = _ticker_horizon_disabled(ticker, None, config)
         for sig_name, entry in _enhanced_entries.items():
             # BUG-178 fix (2026-04-10): respect DISABLED_SIGNALS in the dispatch
             # loop. Previously this loop iterated *every* registered enhanced
@@ -3918,7 +3981,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 _promoted_override = is_promoted(sig_name)
             except Exception:
                 logger.debug("shadow_registry import failed for %s", sig_name, exc_info=True)
-            if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in _DISABLED_SIGNAL_OVERRIDES and not _promoted_override:
+            if _sig_globally_disabled(sig_name, ticker, config) and not _promoted_override:
                 # Shadow-safe signals: compute but don't let them vote.
                 # Their predictions go into _shadow_votes for accuracy tracking.
                 if sig_name in _SHADOW_SAFE_SIGNALS:
@@ -4011,7 +4074,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                         extra_info[f"{sig_name}_throttled"] = True
                 votes[sig_name] = "HOLD"
                 continue
-            if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
+            if sig_name in _default_disabled_for_ticker:
                 votes[sig_name] = "HOLD"
                 continue
             # Skip GPU-intensive enhanced signals for stocks outside market hours
@@ -4127,16 +4190,16 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         # written into extra_info so `_weighted_consensus` dampens the
         # vote's weight via the existing soft_confidences path.
         if "candlestick" in votes and votes["candlestick"] == "HOLD" \
-                and "candlestick" not in DISABLED_SIGNALS \
-                and "candlestick" not in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
+                and not _sig_globally_disabled("candlestick", ticker, config) \
+                and "candlestick" not in _default_disabled_for_ticker:
             cs_vote, cs_soft_conf = _candlestick_dead_zone_vote(df)
             if cs_vote != "HOLD":
                 votes["candlestick"] = cs_vote
                 extra_info["_soft_conf_candlestick"] = cs_soft_conf
                 extra_info["candlestick_action"] = cs_vote
         if "forecast" in votes and votes["forecast"] == "HOLD" \
-                and "forecast" not in DISABLED_SIGNALS \
-                and "forecast" not in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
+                and not _sig_globally_disabled("forecast", ticker, config) \
+                and "forecast" not in _default_disabled_for_ticker:
             fc_indicators = extra_info.get("forecast_indicators") or {}
             fc_vote, fc_soft_conf = _forecast_dead_zone_vote(df, fc_indicators)
             if fc_vote != "HOLD":
@@ -4177,8 +4240,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 except Exception:
                     logger.debug("shadow_registry import failed for btc_proxy", exc_info=True)
                 _bp_disabled = (
-                    "btc_proxy" in DISABLED_SIGNALS
-                    and ("btc_proxy", ticker) not in _DISABLED_SIGNAL_OVERRIDES
+                    _sig_globally_disabled("btc_proxy", ticker, config)
                     and not _bp_promoted
                 )
                 extra_info["btc_proxy_action"] = btc_action
@@ -4375,7 +4437,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # actually drove the consensus. _weighted_consensus still applies the
     # same gating internally (idempotent: HOLD->HOLD is a no-op) as defense
     # in depth for callers that bypass generate_signal.
-    horizon_disabled_effective = _get_horizon_disabled_signals(ticker, horizon)
+    horizon_disabled_effective = _ticker_horizon_disabled(ticker, horizon, config)
     for sig_name in horizon_disabled_effective:
         if sig_name in votes and votes[sig_name] != "HOLD":
             votes[sig_name] = "HOLD"
@@ -4414,7 +4476,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
     # Total applicable signals: computed dynamically from SIGNAL_NAMES
     # minus DISABLED_SIGNALS minus per-asset-class exclusions.
-    total_applicable = _compute_applicable_count(ticker, skip_gpu=skip_gpu)
+    total_applicable = _applicable_count(ticker, skip_gpu=skip_gpu, config=config)
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:
@@ -4664,6 +4726,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         max_signals=max_signals,
         horizon=horizon,
         regime_gated_override=regime_gated_effective,
+        horizon_disabled_override=horizon_disabled_effective,
         ticker=ticker,
         # 2026-05-11 (Codex Fix B): pass extra_info so _weighted_consensus
         # can dampen ema/bb/macd soft votes by their _soft_conf_* values.

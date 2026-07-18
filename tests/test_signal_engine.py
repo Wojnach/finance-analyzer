@@ -880,16 +880,28 @@ class TestDispatchLoopRespectsDisabledSignals:
     """
 
     def test_disabled_signals_have_force_hold_in_dispatch_loop(self):
-        """The dispatch loop must short-circuit on DISABLED_SIGNALS."""
+        """The dispatch loop must short-circuit on DISABLED_SIGNALS.
+
+        Phase 4.2 (2026-07-18): the inline check was extracted into
+        _sig_globally_disabled() so it can route through the component
+        registry behind a feature flag. The dispatch loop now calls that
+        wrapper instead of testing DISABLED_SIGNALS inline; assert BOTH
+        that the loop calls the wrapper AND that the wrapper's legacy
+        (flag-off) branch still consults DISABLED_SIGNALS, so this test
+        still catches a regression that removes the skip entirely.
+        """
         import inspect
 
         from portfolio import signal_engine
         from portfolio.tickers import DISABLED_SIGNALS
 
         src = inspect.getsource(signal_engine.generate_signal)
-        # The fix: dispatch loop must check DISABLED_SIGNALS before calling compute_fn
-        assert "if sig_name in DISABLED_SIGNALS" in src, (
+        assert "_sig_globally_disabled(sig_name, ticker, config)" in src, (
             "Dispatch loop must skip disabled signals to prevent BUG-178 hangs"
+        )
+        wrapper_src = inspect.getsource(signal_engine._sig_globally_disabled)
+        assert "signal in DISABLED_SIGNALS" in wrapper_src, (
+            "_sig_globally_disabled's legacy branch must still consult DISABLED_SIGNALS"
         )
         # Defense in depth: at least one disabled signal must exist (otherwise
         # the check is dead code we should remove)

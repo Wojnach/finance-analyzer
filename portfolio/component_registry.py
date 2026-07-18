@@ -158,6 +158,63 @@ class ComponentRegistry:
                 return False
         return True
 
+    def is_globally_disabled(self, signal: str, ticker: str) -> bool:
+        """Pure global-disable check: DISABLED_SIGNALS + the static
+        per-ticker override table (and the overlay's `enabled` key, which
+        takes precedence same as is_enabled) — nothing else.
+
+        Ignores asset-class restriction and the ticker/horizon blacklist
+        (see is_enabled, which composes all three). signal_engine's
+        registry-flag wrappers need this narrower cut because those two
+        axes are orthogonal to shadow-registry promotion, while this one
+        (DISABLED_SIGNALS + _DISABLED_SIGNAL_OVERRIDES) is exactly the axis
+        a promotion bypasses — see docs/plans/2026-07-18-dashboard-redesign-
+        and-modular-engine.md Phase 4.2.
+        """
+        overlay = self._overlay_entry(signal, ticker)
+        if "enabled" in overlay:
+            return not bool(overlay["enabled"])
+        meta = SIGNALS.get(signal)
+        if meta is None:
+            return True
+        return (
+            bool(meta["disabled"]) and (signal, ticker) not in DISABLED_SIGNAL_OVERRIDES
+        )
+
+    def is_ticker_horizon_blacklisted(
+        self, signal: str, ticker: str, horizon: str | None = None
+    ) -> bool:
+        """Pure per-ticker/horizon blacklist check: is `signal` in the
+        static "_default" ∪ `horizon`-specific TICKER_DISABLED_BY_HORIZON
+        list for `ticker`, or overlaid to one via the overlay's `horizons`
+        key? Ignores global disable/override (is_globally_disabled) and
+        asset-class restriction (is_enabled composes all three).
+
+        The overlay's top-level `enabled` key is deliberately NOT consulted
+        here — that's is_globally_disabled's exclusive concern. Keeping
+        these two checks independent (rather than folding both into
+        is_enabled) is what lets signal_engine preserve the
+        shadow-registry-promotion nuance: a promotion only ever bypasses
+        the global-disable axis, never this one — see
+        docs/plans/2026-07-18-dashboard-redesign-and-modular-engine.md
+        Phase 4.2.
+        """
+        overlay = self._overlay_entry(signal, ticker)
+        if horizon and "horizons" in overlay and horizon in overlay["horizons"]:
+            return not bool(overlay["horizons"][horizon])
+        default_disabled = TICKER_DISABLED_BY_HORIZON.get("_default", {}).get(
+            ticker, frozenset()
+        )
+        if signal in default_disabled:
+            return True
+        if horizon:
+            horizon_disabled = TICKER_DISABLED_BY_HORIZON.get(horizon, {}).get(
+                ticker, frozenset()
+            )
+            if signal in horizon_disabled:
+                return True
+        return False
+
     def disabled_reason(self, signal: str, ticker: str | None = None) -> str | None:
         """Why is `signal` disabled? None means "it isn't" (for this query).
 
@@ -284,6 +341,16 @@ def get_registry() -> ComponentRegistry:
 
 def is_enabled(signal: str, ticker: str, horizon: str | None = None) -> bool:
     return get_registry().is_enabled(signal, ticker, horizon)
+
+
+def is_globally_disabled(signal: str, ticker: str) -> bool:
+    return get_registry().is_globally_disabled(signal, ticker)
+
+
+def is_ticker_horizon_blacklisted(
+    signal: str, ticker: str, horizon: str | None = None
+) -> bool:
+    return get_registry().is_ticker_horizon_blacklisted(signal, ticker, horizon)
 
 
 def disabled_reason(signal: str, ticker: str | None = None) -> str | None:

@@ -197,6 +197,114 @@ class TestUnknownSignalAndTicker:
         assert registry.is_enabled("funding", "NOPE-USD") is False
 
 
+class TestIsGloballyDisabled:
+    """Phase 4.2 prep: signal_engine needs a pure global-disable check (no
+    ticker/horizon blacklist, no asset-class restriction) to preserve the
+    shadow-registry promotion nuance at the dispatch gate — see
+    docs/plans/2026-07-18-dashboard-redesign-and-modular-engine.md Phase 4.2.
+    """
+
+    def test_matches_legacy_for_every_signal_ticker(self, registry):
+        mismatches = []
+        for signal in SIGNAL_NAMES:
+            for ticker in TICKERS:
+                expected = (
+                    signal in DISABLED_SIGNALS
+                    and (signal, ticker) not in signal_engine._DISABLED_SIGNAL_OVERRIDES
+                )
+                actual = registry.is_globally_disabled(signal, ticker)
+                if actual != expected:
+                    mismatches.append((signal, ticker, expected, actual))
+        assert not mismatches, mismatches[:20]
+
+    def test_enabled_signal_is_not_globally_disabled(self, registry):
+        assert registry.is_globally_disabled("rsi", "BTC-USD") is False
+
+    def test_disabled_signal_with_no_override_is_globally_disabled(self, registry):
+        assert registry.is_globally_disabled("macd", "BTC-USD") is True
+
+    def test_disabled_signal_with_ticker_override_is_not_globally_disabled(
+        self, registry
+    ):
+        # ml is disabled globally but rescued for ETH-USD.
+        assert registry.is_globally_disabled("ml", "ETH-USD") is False
+        assert registry.is_globally_disabled("ml", "BTC-USD") is True
+
+    def test_ignores_ticker_horizon_blacklist(self, registry):
+        # news_event is globally enabled but blacklisted for ETH-USD at every
+        # horizon — is_globally_disabled must not see that axis at all.
+        assert not registry.is_enabled("news_event", "ETH-USD")
+        assert registry.is_globally_disabled("news_event", "ETH-USD") is False
+
+    def test_unknown_signal_is_globally_disabled(self, registry):
+        assert (
+            registry.is_globally_disabled("totally_made_up_signal", "BTC-USD") is True
+        )
+
+    def test_overlay_enabled_override_wins(self, tmp_path):
+        overlay_path = tmp_path / "registry_overrides.json"
+        overlay_path.write_text(json.dumps({"BTC-USD": {"ml": {"enabled": True}}}))
+        reg = ComponentRegistry(overlay_path=overlay_path)
+        assert reg.is_globally_disabled("ml", "BTC-USD") is False
+
+
+class TestIsTickerHorizonBlacklisted:
+    """The P2 counterpart to is_globally_disabled — pure ticker/horizon
+    blacklist, ignoring global disable/override and asset-class
+    restriction. signal_engine composes the two independently so a
+    shadow-registry promotion (which only bypasses the global-disable axis)
+    can never silently bypass this one too.
+    """
+
+    def test_matches_legacy_for_every_signal_ticker_horizon(self, registry):
+        mismatches = []
+        for signal in SIGNAL_NAMES:
+            for ticker in TICKERS:
+                for horizon in HORIZONS:
+                    expected = signal in signal_engine._get_horizon_disabled_signals(
+                        ticker, horizon
+                    )
+                    actual = registry.is_ticker_horizon_blacklisted(
+                        signal, ticker, horizon
+                    )
+                    if actual != expected:
+                        mismatches.append((signal, ticker, horizon, expected, actual))
+        assert not mismatches, mismatches[:20]
+
+    def test_ignores_global_disable(self, registry):
+        # smart_money is globally disabled AND blacklisted for BTC-USD —
+        # this must report True purely from the blacklist axis, not because
+        # it's also disabled (that's is_globally_disabled's job).
+        assert registry.is_globally_disabled("smart_money", "BTC-USD") is True
+        assert registry.is_ticker_horizon_blacklisted("smart_money", "BTC-USD") is True
+        # rsi (enabled globally, not blacklisted anywhere) stays False.
+        assert registry.is_ticker_horizon_blacklisted("rsi", "BTC-USD") is False
+
+    def test_enabled_but_blacklisted_signal(self, registry):
+        # news_event is globally enabled but blacklisted for ETH-USD.
+        assert registry.is_globally_disabled("news_event", "ETH-USD") is False
+        assert registry.is_ticker_horizon_blacklisted("news_event", "ETH-USD") is True
+
+    def test_overlay_horizon_key_overrides_static_table(self, tmp_path):
+        overlay_path = tmp_path / "registry_overrides.json"
+        overlay_path.write_text(
+            json.dumps({"BTC-USD": {"rsi": {"horizons": {"1d": False}}}})
+        )
+        reg = ComponentRegistry(overlay_path=overlay_path)
+        assert reg.is_ticker_horizon_blacklisted("rsi", "BTC-USD", "1d") is True
+        assert reg.is_ticker_horizon_blacklisted("rsi", "BTC-USD", "3h") is False
+        assert reg.is_ticker_horizon_blacklisted("rsi", "BTC-USD") is False
+
+    def test_overlay_enabled_key_is_not_consulted(self, tmp_path):
+        # is_ticker_horizon_blacklisted must NOT look at the overlay's
+        # top-level `enabled` key -- that's is_globally_disabled's exclusive
+        # concern (avoids the two wrappers double-answering the same key).
+        overlay_path = tmp_path / "registry_overrides.json"
+        overlay_path.write_text(json.dumps({"BTC-USD": {"rsi": {"enabled": False}}}))
+        reg = ComponentRegistry(overlay_path=overlay_path)
+        assert reg.is_ticker_horizon_blacklisted("rsi", "BTC-USD") is False
+
+
 class TestDisabledReason:
     def test_global_disabled_reason_ignores_per_ticker_rescue(self, registry):
         # "ml" is rescued for ETH-USD but the ticker=None (global) query
