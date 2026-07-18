@@ -352,7 +352,7 @@ class TestTrailingStopReplace:
         monkeypatch.setattr(mod, "HARDWARE_TRAILING_ENABLED", True)
         monkeypatch.setattr(mod, "STOP_ORDER_ENABLED", False)
         monkeypatch.setattr(mod, "send_telegram",
-                            lambda m: calls["telegrams"].append(m))
+                            lambda m, **kw: calls["telegrams"].append(m))
         monkeypatch.setattr(mod, "_save_positions", lambda p: None)
         monkeypatch.setattr(
             cg, "record_critical_error",
@@ -467,7 +467,7 @@ class TestSpikeRollbackOpenOrdersFailure:
 
         telegrams = []
         restored = []
-        monkeypatch.setattr(mod, "send_telegram", telegrams.append)
+        monkeypatch.setattr(mod, "send_telegram", lambda m, **kw: telegrams.append(m))
         monkeypatch.setattr(
             mod, "_rearm_stops_after_failed_sell",
             lambda ob_id, snapshot: restored.append(ob_id),
@@ -493,7 +493,7 @@ class TestSpikeRollbackOpenOrdersFailure:
         import portfolio.avanza_session as avz
 
         restored = []
-        monkeypatch.setattr(mod, "send_telegram", lambda m: None)
+        monkeypatch.setattr(mod, "send_telegram", lambda m, **kw: None)
         monkeypatch.setattr(
             mod, "_rearm_stops_after_failed_sell",
             lambda ob_id, snapshot: restored.append(ob_id),

@@ -593,7 +593,7 @@ def _delete_stop_loss(page, stop_id):
 
 _tg_config = None
 
-def _send_telegram(msg):
+def _send_telegram(msg, category=None):
     global _tg_config
     if _tg_config is None:
         try:
@@ -612,10 +612,13 @@ def _send_telegram(msg):
 
     # Check mute_all from config (re-read each call to pick up runtime changes)
     try:
-        _mute = (load_json("config.json", default={}) or {}).get("telegram", {}).get("mute_all", False)
-        if _mute:
-            _log(f"[TG muted] {msg[:80]}")
-            return
+        _tg = (load_json("config.json", default={}) or {}).get("telegram", {})
+        if _tg.get("mute_all", False):
+            _raw = _tg.get("unmuted_categories", [])
+            _unmuted = set(_raw) if isinstance(_raw, list) else set()
+            if category not in _unmuted:
+                _log(f"[TG muted] {msg[:80]}")
+                return
     except Exception:
         logger.debug("_send_telegram: mute_all check failed, proceeding with send", exc_info=True)
 
@@ -783,7 +786,8 @@ class SwingTrader:
                 # Transition False → True: announce recovery (skip on first sync).
                 if self.check_count > 0:
                     _send_telegram(
-                        f"_SWING: cash sync recovered — {self.state['cash_sek']:.0f} SEK_"
+                        f"_SWING: cash sync recovered — {self.state['cash_sek']:.0f} SEK_",
+                        category="error",
                     )
                 self.cash_sync_was_ok = True
             return
@@ -799,7 +803,8 @@ class SwingTrader:
         if self.cash_sync_was_ok:
             # Transition True → False: alert once per failure streak.
             _send_telegram(
-                "⚠ _SWING: cash sync failed — entries paused until recovery_"
+                "⚠ _SWING: cash sync failed — entries paused until recovery_",
+                category="error",
             )
             self.cash_sync_was_ok = False
 
@@ -924,12 +929,13 @@ class SwingTrader:
                 _log(f"Reconciliation failed {self.recon_failure_streak} cycles in a row")
                 _send_telegram(
                     f"⚠ _SWING: position reconciliation failing for "
-                    f"{self.recon_failure_streak} cycles — session may be dead_"
+                    f"{self.recon_failure_streak} cycles — session may be dead_",
+                    category="error",
                 )
             return
         # Success — reset streak
         if self.recon_failure_streak >= RECON_FAILURE_STREAK_ALERT:
-            _send_telegram("_SWING: position reconciliation recovered_")
+            _send_telegram("_SWING: position reconciliation recovered_", category="error")
         self.recon_failure_streak = 0
 
         if not self.state.get("positions"):
@@ -948,7 +954,8 @@ class SwingTrader:
             _log(f"PHANTOM CLEARED: {name} (was {units}u @ {entry}) — not on Avanza")
             _send_telegram(
                 f"⚠ *SWING PHANTOM CLEARED* {name}\n"
-                f"`{units}u @ {entry} — not held on Avanza, removing from state`"
+                f"`{units}u @ {entry} — not held on Avanza, removing from state`",
+                category="error",
             )
             # Cancel any orphan stop-loss attached to the phantom
             stop_id = pos.get("stop_order_id")
@@ -2641,7 +2648,7 @@ class SwingTrader:
             if not success:
                 _log(f"  BUY FAILED: {result}")
                 _log_trade(trade_record)
-                _send_telegram(f"*SWING BUY FAILED* {warrant['name']}\n{result.get('parsed', {}).get('message', str(result)[:100])}")
+                _send_telegram(f"*SWING BUY FAILED* {warrant['name']}\n{result.get('parsed', {}).get('message', str(result)[:100])}", category="error")
                 return
 
         _log_trade(trade_record)
@@ -2709,7 +2716,7 @@ class SwingTrader:
                f"`Lev: {warrant['live_leverage']:.1f}x | Underlying: {underlying_price:.2f}`\n"
                f"`Signals: {sig.get('buy_count', 0)}B/{sig.get('sell_count', 0)}S | RSI {sig.get('rsi', 0):.0f}`\n"
                f"_TP: +{TAKE_PROFIT_WARRANT_PCT}% warrant | Stop: -{STOP_LOSS_WARRANT_PCT}% warrant_")
-        _send_telegram(msg)
+        _send_telegram(msg, category="trade")
 
         decision = {
             "ts": _now_utc().isoformat(),
@@ -2797,7 +2804,7 @@ class SwingTrader:
             _log(f"  Stop-loss placed: {stop_id}")
         else:
             _log("  Stop-loss FAILED")
-            _send_telegram(f"_SWING: stop-loss failed for {pos['warrant_name']}_")
+            _send_telegram(f"_SWING: stop-loss failed for {pos['warrant_name']}_", category="error")
 
     # -------------------------------------------------------------------
     # Exit logic
@@ -2841,7 +2848,8 @@ class SwingTrader:
                 _log(f"CORRUPT POS DROPPED: {pos_id} invalid entry_ts: {e}")
                 _send_telegram(
                     f"⚠ _SWING: dropped corrupt position {pos.get('warrant_name', pos_id)} "
-                    f"— invalid entry_ts ({e})_"
+                    f"— invalid entry_ts ({e})_",
+                    category="error",
                 )
                 corrupt_ids.append(pos_id)
                 continue
@@ -3226,7 +3234,7 @@ class SwingTrader:
             if not success:
                 _log(f"  SELL FAILED: {result}")
                 _log_trade(trade_record)
-                _send_telegram(f"*SWING SELL FAILED* {pos['warrant_name']}\n{result.get('parsed', {}).get('message', str(result)[:100])}")
+                _send_telegram(f"*SWING SELL FAILED* {pos['warrant_name']}\n{result.get('parsed', {}).get('message', str(result)[:100])}", category="error")
                 # Fix 3b (2026-04-09): mark the failure time so _check_exits
                 # will skip re-evaluating this position for
                 # SELL_FAILED_COOLDOWN_SECONDS. Prevents the cascade bug
@@ -3290,7 +3298,7 @@ class SwingTrader:
                f"`PnL: {pnl_emoji}{warrant_pnl_pct:.1f}% ({pnl_emoji}{pnl_sek:.0f} SEK)`\n"
                f"`Reason: {reason}`\n"
                f"_Cash: {self.state['cash_sek']:.0f} SEK | Total PnL: {self.state['total_pnl_sek']:+.0f} SEK_")
-        _send_telegram(msg)
+        _send_telegram(msg, category="trade")
 
         decision = {
             "ts": _now_utc().isoformat(),
