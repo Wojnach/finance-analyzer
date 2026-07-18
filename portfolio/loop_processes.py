@@ -51,30 +51,45 @@ logger = logging.getLogger(__name__)
 # adding a new loop is one line and an obvious change. If two loops
 # need to share words, append the distinguishing token (e.g.
 # "data/crypto_loop.py" not just "crypto_loop").
-KNOWN_LOOPS: dict[str, str] = {
-    "main":           "portfolio/main.py --loop",
-    "metals":         "data/metals_loop.py",
-    "crypto":         "data/crypto_loop.py",
-    "oil":            "data/oil_loop.py",
-    "mstr":           "portfolio.mstr_loop",
-    "golddigger":     "portfolio.golddigger",
-    "silver_monitor": "data/silver_monitor.py",
-    # dashboard launches via module form (`-m dashboard.app`), not the
-    # file path — match the module token (2026-06-06: the old
-    # "dashboard/app.py" pattern never matched, so the tile showed the
-    # live dashboard as grey/count=0 while it was serving the page).
-    "dashboard":      "dashboard.app",
+KNOWN_LOOPS: dict[str, tuple[str, ...]] = {
+    # main runs as a bare script on Windows (`portfolio\main.py --loop`)
+    # but as a module on the Deck systemd unit (`-m portfolio.main --loop`,
+    # pf-dataloop.service) — both forms need a pattern (2026-07-18: the
+    # module form never matched, so the tile showed the live Deck loop as
+    # grey/count=0 while pf-dataloop was running).
+    "main":           ("portfolio/main.py --loop", "portfolio.main --loop"),
+    "metals":         ("data/metals_loop.py",),
+    "crypto":         ("data/crypto_loop.py",),
+    "oil":            ("data/oil_loop.py",),
+    "mstr":           ("portfolio.mstr_loop",),
+    "golddigger":     ("portfolio.golddigger",),
+    "silver_monitor": ("data/silver_monitor.py",),
+    # dashboard launches via module form on Windows (`-m dashboard.app`)
+    # but as a bare script on the Deck systemd unit (`dashboard/app.py`,
+    # pf-dashboard.service) — same both-forms fix as `main` above
+    # (2026-07-18: the module-only pattern never matched the Deck process).
+    "dashboard":      ("dashboard.app", "dashboard/app.py"),
     # hw monitoring is a PowerShell script (PF-HWMonitor → read_temps.ps1),
     # not a python module — the old "hw_monitor.py" never existed as a
-    # process (2026-06-06).
-    "hw_monitor":     "data/read_temps.ps1",
-    "fix_agent":      "scripts/fix_agent_dispatcher.py",
-    "log_rotation":   "portfolio.log_rotation",
+    # process (2026-06-06). Windows-only: no equivalent unit/process
+    # exists on the Deck, so count=0 there is correct, not a bug
+    # (verified 2026-07-18 — no systemd unit, no running process).
+    "hw_monitor":     ("data/read_temps.ps1",),
+    # fix_agent dispatcher: never installed in production (see CLAUDE.md
+    # 2026-06-10 audit) and `data/fix_agent.disabled` flag is set — count=0
+    # is correct on the Deck today, not a scanner bug (verified 2026-07-18).
+    "fix_agent":      ("scripts/fix_agent_dispatcher.py",),
     # NOTE: telegram_poller is NOT process-checked — it runs as a daemon
     # thread inside the main loop (portfolio/main.py → TelegramPoller),
     # never a standalone process, so it would render a permanent false
     # grey row. Its liveness is implied by `main` being green. Removed
     # 2026-06-06.
+    #
+    # NOTE: log_rotation is NOT process-checked (removed 2026-07-18, same
+    # reasoning as telegram_poller above) — `rotate_all()` runs inline
+    # inside the main loop's cycle (portfolio/main.py ~L407), never as a
+    # standalone process on either OS, so the old entry could never show
+    # anything but a permanent false grey row.
 }
 
 
@@ -136,8 +151,8 @@ def scan(now_utc: datetime | None = None) -> dict[str, Any]:
     own_pid = os.getpid()
 
     loops: list[dict[str, Any]] = []
-    for name, pattern in KNOWN_LOOPS.items():
-        pat = pattern.replace("\\", "/").lower()
+    for name, patterns in KNOWN_LOOPS.items():
+        pats = tuple(p.replace("\\", "/").lower() for p in patterns)
         matches = []
         for proc in procs:
             if proc["pid"] == own_pid:
@@ -145,7 +160,7 @@ def scan(now_utc: datetime | None = None) -> dict[str, Any]:
             hay = _normalise_cmdline(proc["cmdline"])
             if not hay:
                 continue
-            if pat in hay:
+            if any(pat in hay for pat in pats):
                 matches.append(proc)
 
         # VENV-LAUNCHER COLLAPSE (added 2026-06-06): on Windows the
@@ -180,7 +195,7 @@ def scan(now_utc: datetime | None = None) -> dict[str, Any]:
         loops.append(
             {
                 "name": name,
-                "pattern": pattern,
+                "pattern": " | ".join(patterns),
                 "pids": pids,
                 "count": len(pids),
                 "duplicate": len(pids) > 1,

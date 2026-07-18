@@ -137,6 +137,64 @@ def test_scan_matches_module_launched_dashboard(monkeypatch):
     assert dash["count"] == 1
 
 
+def test_scan_matches_deck_module_launched_main(monkeypatch):
+    """On the Deck, pf-dataloop.service launches main via
+    `-m portfolio.main --loop` (module form), not the Windows
+    `portfolio/main.py --loop` file-path form. Both must match
+    (2026-07-18: the module form never matched, so the live Deck loop
+    showed count=0 while pf-dataloop was running)."""
+    procs = [
+        _fake_proc(
+            555,
+            [
+                "/home/deck/projects/finance-analyzer/.venv/bin/python",
+                "-u",
+                "-m",
+                "portfolio.main",
+                "--loop",
+            ],
+        ),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    main = next(L for L in payload["loops"] if L["name"] == "main")
+    assert main["count"] == 1
+    assert main["pids"] == [555]
+
+
+def test_scan_matches_deck_file_launched_dashboard(monkeypatch):
+    """On the Deck, pf-dashboard.service launches the dashboard as a
+    bare script (`dashboard/app.py`), not the Windows `-m dashboard.app`
+    module form. Both must match (2026-07-18 regression: the
+    module-only pattern never matched the live Deck process)."""
+    procs = [
+        _fake_proc(
+            556,
+            [
+                "/home/deck/projects/finance-analyzer/.venv/bin/python",
+                "dashboard/app.py",
+            ],
+        ),
+    ]
+    _patch_processes(monkeypatch, procs)
+    payload = loop_processes.scan()
+    dash = next(L for L in payload["loops"] if L["name"] == "dashboard")
+    assert dash["count"] == 1
+    assert dash["pids"] == [556]
+
+
+def test_log_rotation_not_process_checked(monkeypatch):
+    """log_rotation is NOT process-checked (removed 2026-07-18) — it
+    runs inline inside the main loop's cycle (portfolio/main.py ->
+    rotate_all()), never as a standalone process on either OS. Same
+    rationale as telegram_poller above; a permanent entry here could
+    only ever show a false grey row."""
+    _patch_processes(monkeypatch, [])
+    payload = loop_processes.scan()
+    assert "log_rotation" not in [L["name"] for L in payload["loops"]]
+    assert "log_rotation" not in loop_processes.KNOWN_LOOPS
+
+
 def test_telegram_poller_not_process_checked(monkeypatch):
     """telegram_poller is a daemon thread inside main.py, never a
     standalone process — it must not appear as a tile row."""
