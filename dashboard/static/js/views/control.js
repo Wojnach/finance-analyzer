@@ -200,7 +200,8 @@ function _renderInstruments() {
   const note = document.createElement("div");
   note.className = "card__subtitle";
   note.style.marginBottom = "var(--sp-2)";
-  note.textContent = "Not yet wired into Layer 1 — toggles are stored for the upcoming registry.";
+  note.textContent =
+    "Stored in data/control/instruments.json — the component registry (live since 2026-07-18) is the enablement authority; per-signal overrides via registry_overrides.json.";
   card.append(note);
 
   const tickers = Object.keys(_controlState.instruments || {}).sort();

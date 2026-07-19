@@ -29,13 +29,11 @@ export const view = {
     while (_root.firstChild) _root.removeChild(_root.firstChild);
     _root.append(_renderShell());
 
-    if (!state.Slots[SLOT.toUpperCase()]) {
-      // Allocate a state slot at runtime; safer than mutating state.js
-      // from a view module. state.set/get with arbitrary string keys
-      // works because the slot map is just a string lookup.
-      state.Slots[SLOT.toUpperCase()] = SLOT;
-    }
-
+    // No Slots registration needed: state.set/get/subscribe key on plain
+    // strings (see views/silver.js SLOT_* pattern). The old attempt to
+    // write into state.Slots threw "object is not extensible" in strict
+    // mode — Slots is Object.freeze'd — killing the whole view mount
+    // (2026-07-19).
     _unsubs.push(state.subscribe(SLOT, _renderBody));
 
     // 5min cadence — endpoint is 5min-cached server-side, no point
