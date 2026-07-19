@@ -266,7 +266,24 @@ function _renderDecisions(data) {
 
     const body = document.createElement("div");
     body.style.marginTop = "2px";
-    body.textContent = d.prediction || d.action || JSON.stringify(d);
+    // prediction became a dict in newer rows ({action, direction,
+    // confidence, horizon}) — rendering it raw printed "[object Object]"
+    // (2026-07-19). Compose a line from whichever shape the row has.
+    let text;
+    if (typeof d.prediction === "string" && d.prediction) {
+      text = d.prediction;
+    } else if (d.prediction && typeof d.prediction === "object") {
+      const p = d.prediction;
+      const parts = [p.action || d.action || "?"];
+      if (p.direction) parts.push(p.direction);
+      if (p.horizon) parts.push(p.horizon);
+      if (p.confidence != null) parts.push(`conf ${p.confidence}`);
+      text = parts.join(" · ");
+      if (d.trigger) text += ` — ${d.trigger}`;
+    } else {
+      text = d.action || JSON.stringify(d);
+    }
+    body.textContent = text;
 
     row.append(top, body);
     wrap.append(row);
