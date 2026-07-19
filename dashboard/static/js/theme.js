@@ -7,6 +7,7 @@
  */
 
 import * as state from "./state.js";
+import { lsGet, lsSet } from "./storage.js";
 
 const KEY = "pi-theme";
 
@@ -15,7 +16,7 @@ const KEY = "pi-theme";
  * Returns the current theme: "light" | "dark".
  */
 export function initTheme() {
-  const saved = localStorage.getItem(KEY);
+  const saved = lsGet(KEY);
   let theme;
   if (saved === "light" || saved === "dark") {
     theme = saved;
@@ -33,7 +34,7 @@ export function initTheme() {
 export function toggleTheme() {
   const next = state.get(state.Slots.THEME) === "light" ? "dark" : "light";
   _applyTheme(next);
-  localStorage.setItem(KEY, next);
+  lsSet(KEY, next);
   state.set(state.Slots.THEME, next);
   return next;
 }

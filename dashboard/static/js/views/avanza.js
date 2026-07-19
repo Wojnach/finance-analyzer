@@ -35,6 +35,7 @@ export const view = {
       const url = force ? "/api/avanza_account?force=1" : "/api/avanza_account";
       const d = await fj(url, { ttl: force ? 0 : 5_000 });
       if (d) state.set(SLOT_AVANZA, d);
+      return d != null;
     });
   },
   unmount() {

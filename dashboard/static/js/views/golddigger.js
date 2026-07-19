@@ -29,6 +29,7 @@ export const view = {
     polling.register(POLL_KEY, 60_000, async () => {
       const d = await fj("/api/golddigger", { ttl: 5_000 });
       if (d) state.set(state.Slots.GOLDDIGGER, d);
+      return d != null;
     });
   },
   unmount() {

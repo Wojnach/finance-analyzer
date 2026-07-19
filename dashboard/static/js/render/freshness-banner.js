@@ -17,6 +17,7 @@
  */
 
 import * as router from "../router.js";
+import { ssGet, ssSet } from "../storage.js";
 
 const DISMISS_KEY = "pi-freshness-banner-dismissed";
 
@@ -30,7 +31,7 @@ export function freshnessBanner(sys) {
   const signalFrozen = !!(sources["signal_log.jsonl"]?.frozen || sources["health_state.json"]?.frozen);
   if (!layer1Down && !signalFrozen) return null;
 
-  if (sessionStorage.getItem(DISMISS_KEY) === "1") return null;
+  if (ssGet(DISMISS_KEY) === "1") return null;
 
   const banner = document.createElement("div");
   banner.className = "banner banner--warn banner--sticky";
@@ -51,7 +52,7 @@ export function freshnessBanner(sys) {
   dismiss.style.minHeight = "auto";
   dismiss.addEventListener("click", (e) => {
     e.stopPropagation();
-    sessionStorage.setItem(DISMISS_KEY, "1");
+    ssSet(DISMISS_KEY, "1");
     banner.remove();
   });
   banner.append(dismiss);

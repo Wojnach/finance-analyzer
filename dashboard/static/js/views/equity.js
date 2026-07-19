@@ -30,6 +30,7 @@ export const view = {
       if (eq) state.set(state.Slots.EQUITY_CURVE, Array.isArray(eq) ? eq : (eq?.curve || eq?.data || []));
       const tr = await fj("/api/trades", { ttl: 60_000 });
       if (tr) state.set(state.Slots.TRADES, Array.isArray(tr) ? tr : (tr?.trades || []));
+      return eq != null || tr != null;
     });
   },
   unmount() {

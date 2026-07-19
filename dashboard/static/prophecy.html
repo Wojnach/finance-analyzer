@@ -80,8 +80,8 @@ function render(data){
   // meta + badges
   const cost = latest.cost_summary || {};
   document.getElementById("meta").innerHTML =
-    `Run: <b>${latest.date||"—"}</b> · model <b>${latest.model||"—"}</b>` +
-    (latest.market_outlook?` · outlook <b>${latest.market_outlook}</b>`:"") +
+    `Run: <b>${esc(latest.date)||"—"}</b> · model <b>${esc(latest.model)||"—"}</b>` +
+    (latest.market_outlook?` · outlook <b>${esc(latest.market_outlook)}</b>`:"") +
     (cost.last_run_usd!=null?` · <span class="cost">cost <b>$${(+cost.last_run_usd).toFixed(2)}</b> (30d $${(+cost.cumulative_30d_usd||0).toFixed(2)})</span>`:"");
   const badges = [];
   badges.push(data.frozen

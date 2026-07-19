@@ -6,6 +6,11 @@
  * View modules should `register()` on mount and `unregister()` on unmount
  * so closed views don't keep polling.
  *
+ * `fn()` should return a truthy value when its run produced at least one
+ * non-null fetch result — that's the signal LAST_REFRESH stamps on. A
+ * falsy/omitted return is treated as "nothing refreshed" (see each view's
+ * poll callback: `return d != null;`).
+ *
  * Track-6 spec: per-section cadences, no aggregate ticker.
  */
 
@@ -22,7 +27,7 @@ let _hidden = false;       // tab not visible
  */
 export function register(name, intervalMs, fn) {
   unregister(name);
-  const task = { intervalMs, fn, timer: null, runningP: null };
+  const task = { intervalMs, fn, timer: null, runningP: null, gen: 0 };
   _tasks.set(name, task);
   _fire(name); // initial fire
   return () => unregister(name);
@@ -87,21 +92,35 @@ function _fire(name) {
     task.timer = null;
   }
 
+  // Sequence token for this run. If a newer _fire() lands (manual refresh,
+  // visibility resume, ...) before this one resolves, its token goes stale —
+  // a stale run must not stamp LAST_REFRESH or reschedule the timer, since
+  // whichever run holds the current token already did (or will).
+  const myGen = ++task.gen;
+
   const run = async () => {
     if (_paused || _hidden) {
       // Skip while suppressed — no rescheduling here. Resume hooks will refire.
       return;
     }
+    let ok = false;
     try {
       task.runningP = Promise.resolve(task.fn());
-      await task.runningP;
-      state.set(state.Slots.LAST_REFRESH, Date.now());
+      ok = await task.runningP;
+      // "last refresh Xs ago" must reflect the last SUCCESS (task.fn()
+      // returns a falsy/null result on failure), not merely the last
+      // attempt, and only from the latest-issued run for this task.
+      if (ok && task.gen === myGen) {
+        state.set(state.Slots.LAST_REFRESH, Date.now());
+      }
     } catch (e) {
       console.warn(`polling task "${name}" threw`, e);
     } finally {
       task.runningP = null;
-      // Reschedule
-      if (_tasks.get(name) === task) {
+      // Reschedule — only the latest-issued run arms the next timer, else
+      // overlapping runs would each arm their own and the task free-runs
+      // faster than intervalMs.
+      if (_tasks.get(name) === task && task.gen === myGen) {
         task.timer = setTimeout(() => _fire(name), task.intervalMs);
       }
     }

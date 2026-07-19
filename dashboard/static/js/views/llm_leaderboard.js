@@ -41,6 +41,7 @@ export const view = {
     polling.register(POLL_KEY, 300_000, async () => {
       const data = await fj("/api/llm-leaderboard");
       if (data) state.set(SLOT, data);
+      return data != null;
     });
   },
   unmount() {

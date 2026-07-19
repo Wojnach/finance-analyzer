@@ -136,6 +136,7 @@ async function _refresh() {
   const url = _buildUrl();
   const data = await fj(url, { ttl: 5_000 });
   if (data) state.set(state.Slots.DECISIONS, data);
+  return data != null;
 }
 
 function _buildUrl() {

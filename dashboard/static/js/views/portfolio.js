@@ -66,18 +66,22 @@ export const view = {
     polling.register(POLL_KEY_SUMMARY, 60_000, async () => {
       const d = await fj("/api/summary");
       if (d) state.set(state.Slots.SUMMARY, d);
+      return d != null;
     });
     polling.register(POLL_KEY_LOOPS, 60_000, async () => {
       const d = await fj("/api/loop_health");
       if (d) state.set(state.Slots.LOOP_HEALTH, d);
+      return d != null;
     });
     polling.register(POLL_KEY_WARR, 60_000, async () => {
       const d = await fj("/api/warrants");
       if (d) state.set(state.Slots.WARRANTS, d);
+      return d != null;
     });
     polling.register(POLL_KEY_RISK, 5 * 60_000, async () => {
       const d = await fj("/api/risk");
       if (d) state.set(state.Slots.RISK, d);
+      return d != null;
     });
   },
   unmount() {

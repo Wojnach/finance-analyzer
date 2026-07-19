@@ -24,6 +24,7 @@ import {
 } from "../components/bottom-sheet.js";
 import { filterChip } from "../components/filter-chip.js";
 import { fDurationShort } from "../format.js";
+import { lsGet, lsSet } from "../storage.js";
 
 const HIDE_INACTIVE_KEY = "pi-heatmap-hide-inactive";
 
@@ -203,11 +204,11 @@ export function renderHeatmap({
 // ---------------------------------------------------------------------------
 
 function _getHideInactive() {
-  return localStorage.getItem(HIDE_INACTIVE_KEY) === "1";
+  return lsGet(HIDE_INACTIVE_KEY) === "1";
 }
 
 function _setHideInactive(v) {
-  localStorage.setItem(HIDE_INACTIVE_KEY, v ? "1" : "0");
+  lsSet(HIDE_INACTIVE_KEY, v ? "1" : "0");
 }
 
 function _isActiveRow(data, tickers, sigName) {

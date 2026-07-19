@@ -189,7 +189,10 @@ function _lane2Boxes(sys, cs, gridFisher) {
   const llmEnabled = !!cs?.llm_enabled;
 
   const credsOk = !!sys?.avanza?.creds_configured;
-  const unresolvedErrs = sys?.avanza?.unresolved_errors;
+  const unresolvedErrs = sys?.avanza?.unresolved_errors ?? 0;
+  // Green requires BOTH creds configured AND no outstanding errors — creds
+  // alone (the old check) said nothing about session/order-flow health.
+  const avanzaLevel = !credsOk ? "red" : unresolvedErrs === 0 ? "green" : "amber";
 
   return [
     {
@@ -207,10 +210,12 @@ function _lane2Boxes(sys, cs, gridFisher) {
     },
     {
       label: "Avanza warrants",
-      subtitle: credsOk
-        ? "credentials configured"
-        : `not configured — ${unresolvedErrs ?? "?"} unresolved errors`,
-      level: credsOk ? "green" : "red",
+      subtitle: !credsOk
+        ? `not configured — ${unresolvedErrs} unresolved errors`
+        : unresolvedErrs === 0
+          ? "credentials configured"
+          : `credentials configured — ${unresolvedErrs} unresolved errors`,
+      level: avanzaLevel,
     },
   ];
 }

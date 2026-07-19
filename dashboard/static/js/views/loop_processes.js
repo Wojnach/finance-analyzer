@@ -37,6 +37,7 @@ export const view = {
     polling.register(POLL_KEY, POLL_MS, async () => {
       const data = await fj("/api/loop-processes");
       if (data) state.set(SLOT, data);
+      return data != null;
     });
   },
   unmount() {

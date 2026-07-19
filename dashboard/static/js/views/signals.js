@@ -66,10 +66,12 @@ export const view = {
     polling.register(POLL_KEY_HEATMAP, 60_000, async () => {
       const d = await fj("/api/signal-heatmap");
       if (d) state.set(state.Slots.SIGNAL_HEATMAP, d);
+      return d != null;
     });
     polling.register(POLL_KEY_ACC, 5 * 60_000, async () => {
       const d = await fj("/api/accuracy");
       if (d) state.set(state.Slots.ACCURACY, d);
+      return d != null;
     });
   },
   unmount() {

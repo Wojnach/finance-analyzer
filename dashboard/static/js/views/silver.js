@@ -110,6 +110,7 @@ export const view = {
         _renderVotes();
         _renderTrade();
       }
+      return d != null;
     });
     polling.register(POLL_CONTROL, 30_000, async () => {
       const d = await fj("/api/control/state");
@@ -119,6 +120,7 @@ export const view = {
         _renderPipeline();
         _renderTrade();
       }
+      return d != null;
     });
     polling.register(POLL_REGISTRY, 60_000, async () => {
       const d = await fj(`/api/control/registry?ticker=${TICKER}`, {
@@ -127,6 +129,7 @@ export const view = {
       _fail.registry = d == null;
       if (d) state.set(SLOT_REGISTRY, d.registry);
       else _renderComponents();
+      return d != null;
     });
     polling.register(POLL_ACC, 5 * 60_000, async () => {
       const d = await fj(`/api/silver/accuracy?ticker=${TICKER}`, {
@@ -135,30 +138,35 @@ export const view = {
       _fail.accuracy = d == null;
       if (d) state.set(SLOT_ACC, d);
       else _renderAccuracy();
+      return d != null;
     });
     polling.register(POLL_ACC_GLOBAL, 5 * 60_000, async () => {
       const d = await fj("/api/accuracy");
       _fail.accGlobal = d == null;
       if (d) state.set(state.Slots.ACCURACY, d);
       else _renderAccuracy();
+      return d != null;
     });
     polling.register(POLL_METALS, 60_000, async () => {
       const d = await fj("/api/metals", { ttl: 5_000 });
       _fail.metals = d == null;
       if (d) state.set(state.Slots.METALS, d);
       else _renderTrade();
+      return d != null;
     });
     polling.register(POLL_WARRANTS, 60_000, async () => {
       const d = await fj("/api/warrants", { ttl: 5_000 });
       _fail.warrants = d == null;
       if (d) state.set(state.Slots.WARRANTS, d);
       else _renderTrade();
+      return d != null;
     });
     polling.register(POLL_GRID, 60_000, async () => {
       const d = await fj("/api/grid-fisher", { ttl: 5_000 });
       _fail.grid = d == null;
       if (d) state.set(SLOT_GRID, d);
       else _renderTrade();
+      return d != null;
     });
 
     _renderPipeline();

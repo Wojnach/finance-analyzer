@@ -30,6 +30,7 @@ export const view = {
     polling.register(POLL_KEY, 120_000, async () => {
       const c = await fj(`/api/claude_cost?days=${_days}`);
       if (c) state.set(state.Slots.CLAUDE_COST, c);
+      return c != null;
     });
   },
   unmount() {

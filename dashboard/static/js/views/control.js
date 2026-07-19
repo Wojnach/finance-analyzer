@@ -46,6 +46,7 @@ export const view = {
     polling.register(SYS_POLL_KEY, 30_000, async () => {
       const d = await fj("/api/system_status");
       if (d) state.set(state.Slots.SYSTEM_STATUS, d);
+      return d != null;
     });
 
     polling.register(POLL_KEY, 10_000, async () => {
@@ -56,6 +57,7 @@ export const view = {
         _renderInstruments();
         _renderLoops();
       }
+      return d != null;
     });
   },
   unmount() {

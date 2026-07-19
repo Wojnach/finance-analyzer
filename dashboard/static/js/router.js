@@ -148,11 +148,21 @@ function _encodeParams(p) {
 
 function _decodeParams(tail) {
   if (!tail) return null;
-  if (!tail.includes("=")) return decodeURIComponent(tail);
+  if (!tail.includes("=")) return _safeDecode(tail);
   const out = Object.create(null);
   for (const pair of tail.split("&")) {
     const [k, v = ""] = pair.split("=");
-    out[decodeURIComponent(k)] = decodeURIComponent(v);
+    out[_safeDecode(k)] = _safeDecode(v);
   }
   return out;
+}
+
+/** decodeURIComponent throws URIError on malformed %-escapes — fall back to
+ * the raw (still-encoded) segment rather than crashing the mount handler. */
+function _safeDecode(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch (e) {
+    return segment;
+  }
 }

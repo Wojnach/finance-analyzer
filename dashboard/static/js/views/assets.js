@@ -29,6 +29,7 @@ export const view = {
     polling.register(POLL_KEY, 5 * 60_000, async () => {
       const d = await fj("/api/tradeable_assets", { ttl: 60_000 });
       if (d) state.set(SLOT, d);
+      return d != null;
     });
   },
   unmount() {

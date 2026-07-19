@@ -35,6 +35,7 @@ export const view = {
       if (lh) state.set(state.Slots.LOOP_HEALTH, lh);
       const ss = await fj("/api/system_status");
       if (ss) state.set(state.Slots.SYSTEM_STATUS, ss);
+      return h != null || lh != null || ss != null;
     });
   },
   unmount() {

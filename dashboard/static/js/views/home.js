@@ -58,10 +58,12 @@ export const view = {
     polling.register(POLL_KEY_SYS, 30_000, async () => {
       const d = await fj("/api/system_status");
       if (d) state.set(state.Slots.SYSTEM_STATUS, d);
+      return d != null;
     });
     polling.register(POLL_KEY_TRD, 30_000, async () => {
       const d = await fj("/api/trading_status");
       if (d) state.set(state.Slots.TRADING_STATUS, d);
+      return d != null;
     });
   },
   unmount() {

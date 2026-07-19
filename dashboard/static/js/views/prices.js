@@ -33,6 +33,7 @@ export const view = {
       if (s) state.set(state.Slots.SUMMARY, s);
       const a = await fj("/api/avanza_account", { ttl: 5_000 });
       if (a) state.set("avanza", a);
+      return s != null || a != null;
     });
   },
   unmount() {

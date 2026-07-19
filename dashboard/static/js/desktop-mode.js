@@ -17,6 +17,8 @@
  * to "desktop"/"auto" on first read.
  */
 
+import { lsGet, lsSet } from "./storage.js";
+
 const KEY = "pi-desktop-mode";
 const MODES = ["auto", "desktop", "mobile"];
 
@@ -25,7 +27,7 @@ const _listeners = new Set();
 
 /** Init from localStorage. Idempotent. Returns "auto" | "desktop" | "mobile". */
 export function initDesktopMode() {
-  const saved = localStorage.getItem(KEY);
+  const saved = lsGet(KEY);
   if (saved === "on") _current = "desktop";
   else if (saved === "off") _current = "auto";
   else if (MODES.includes(saved)) _current = saved;
@@ -39,7 +41,7 @@ export function cycleDesktopMode() {
   const idx = MODES.indexOf(_current);
   const next = MODES[(idx + 1) % MODES.length];
   _current = next;
-  localStorage.setItem(KEY, next);
+  lsSet(KEY, next);
   _apply(next);
   _listeners.forEach((fn) => { try { fn(next); } catch (e) { console.warn(e); } });
   return next;

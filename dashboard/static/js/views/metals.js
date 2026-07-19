@@ -33,6 +33,7 @@ export const view = {
     polling.register(POLL_KEY, 60_000, async () => {
       const m = await fj("/api/metals", { ttl: 5_000 });
       if (m) state.set(state.Slots.METALS, m);
+      return m != null;
     });
   },
   unmount() {
