@@ -38,6 +38,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any
 
 from flask import Blueprint, g, jsonify, request
@@ -143,8 +144,13 @@ def _csrf_ok() -> bool:
     """
     if g.get("pf_auth_method") != "cookie":
         return True
-    origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
-    return request.host in origin
+    raw = request.headers.get("Origin") or request.headers.get("Referer") or ""
+    if not raw:
+        return False
+    # Parse the host out and compare EXACTLY — a substring test would pass
+    # "raanman.lol" against a hostile "raanman.lol.evil.com" Origin.
+    origin_host = urlsplit(raw).netloc or urlsplit("//" + raw).netloc
+    return origin_host == request.host
 
 
 def _systemctl_query(unit: str, verb: str) -> str | None:
