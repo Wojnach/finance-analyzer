@@ -385,6 +385,22 @@ def atomic_append_jsonl(path, entry):
     ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``.
     """
     path = Path(path)
+    # PYTEST GUARD (2026-07-19): a full-suite run polluted the PRODUCTION
+    # error journal — tests exercising failure paths (corrupt state files)
+    # appended phantom critical_errors rows whose context paths were
+    # /tmp/pytest-of-deck/... and the dashboard dutifully displayed them.
+    # Under pytest (PYTEST_CURRENT_TEST is set, and inherited by Popen
+    # children), appends into the repo's real data/ are dropped. Tests that
+    # verify journal writes already point their target at tmp_path, which
+    # sails through untouched.
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        try:
+            _prod_data = (Path(__file__).resolve().parent.parent / "data").resolve()
+            if path.resolve().is_relative_to(_prod_data):
+                logger.debug("pytest run — append to %s dropped", path.name)
+                return
+        except (OSError, ValueError):
+            pass
     data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
     with jsonl_sidecar_lock(path):
         # Open read+append so we can inspect the final byte. O_APPEND still
