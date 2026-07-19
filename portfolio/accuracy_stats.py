@@ -1173,6 +1173,35 @@ def get_accuracy_cache_meta(horizon: str) -> dict:
     return {"updated_ts": updated_ts, "age_sec": int(time.time() - updated_ts)}
 
 
+def get_latest_signal_log_ts():
+    """Return the epoch ts of the NEWEST entry in signal_log.jsonl, or None.
+
+    Tail-read (last 8KB) — cheap regardless of file size. The dashboard
+    shows this as the accuracy data age: the cache rebuild timestamp lies
+    when loops are stopped (a cache-miss recompute over frozen data stamps
+    "now" while the underlying signals are hours old — 2026-07-19).
+    """
+    import json
+    from datetime import datetime
+
+    try:
+        with open(SIGNAL_LOG, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 8192))
+            chunk = f.read().decode("utf-8", errors="replace")
+        lines = [l for l in chunk.strip().splitlines() if l.strip()]
+        if not lines:
+            return None
+        ts_str = json.loads(lines[-1]).get("ts")
+        if not ts_str:
+            return None
+        return datetime.fromisoformat(ts_str).timestamp()
+    except Exception:
+        logger.debug("Could not read latest signal_log entry", exc_info=True)
+        return None
+
+
 def get_oldest_signal_log_ts():
     """Return the epoch ts of the oldest entry in signal_log.jsonl, or None.
 

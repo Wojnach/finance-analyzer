@@ -466,7 +466,12 @@ class TestApiAccuracy:
             assert h in body
             assert body[h]["consensus"]["total"] == 100
             assert "unavailable_reason" not in body[h]
-            assert body[h]["meta"] == {"updated_ts": None, "age_sec": None}
+            assert body[h]["meta"] == {
+                "updated_ts": None,
+                "age_sec": None,
+                "data_ts": None,
+                "data_age_sec": None,
+            }
 
     def test_uses_in_process_ttl_cache(self, client, tmp_data):
         """Burst requests within TTL must hit the in-process cache, not

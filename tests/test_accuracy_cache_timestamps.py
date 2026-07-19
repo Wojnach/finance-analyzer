@@ -476,3 +476,25 @@ class TestEntriesParameter:
 
         assert result["rsi"]["samples"] == 1
         assert result["rsi"]["avg_return"] == 5.0
+
+
+class TestLatestSignalLogTs:
+    def test_reads_last_line_ts(self, tmp_path, monkeypatch):
+        import portfolio.accuracy_stats as astats
+
+        f = tmp_path / "signal_log.jsonl"
+        f.write_text(
+            '{"ts": "2026-07-18T10:00:00+00:00"}\n'
+            '{"ts": "2026-07-18T16:03:41+00:00"}\n'
+        )
+        monkeypatch.setattr(astats, "SIGNAL_LOG", f)
+        ts = astats.get_latest_signal_log_ts()
+        from datetime import datetime
+
+        assert ts == datetime.fromisoformat("2026-07-18T16:03:41+00:00").timestamp()
+
+    def test_missing_file_returns_none(self, tmp_path, monkeypatch):
+        import portfolio.accuracy_stats as astats
+
+        monkeypatch.setattr(astats, "SIGNAL_LOG", tmp_path / "nope.jsonl")
+        assert astats.get_latest_signal_log_ts() is None

@@ -1079,6 +1079,7 @@ def api_accuracy():
     try:
         from portfolio.accuracy_stats import (
             get_accuracy_cache_meta,
+            get_latest_signal_log_ts,
             get_oldest_signal_log_ts,
             get_or_compute_accuracy,
             get_or_compute_consensus_accuracy,
@@ -1144,6 +1145,18 @@ def api_accuracy():
             ca = get_or_compute_consensus_accuracy(horizon)
             ta = get_or_compute_per_ticker_accuracy(horizon)
             meta = get_accuracy_cache_meta(horizon)
+            # Data age != cache age: a cache-miss recompute over frozen
+            # signal data stamps "now" while the signals are hours old
+            # (loops stopped). Expose the newest underlying signal ts so
+            # the UI can show honest staleness (2026-07-19).
+            _data_ts = get_latest_signal_log_ts()
+            if not isinstance(_data_ts, (int, float)):
+                _data_ts = None  # defensive: tests mock the module
+            if isinstance(meta, dict):
+                meta["data_ts"] = _data_ts
+                meta["data_age_sec"] = (
+                    int(time.time() - _data_ts) if _data_ts else None
+                )
             # ca may be None (cold cache miss, no signal-log entries yet)
             # or a dict with total==0 (horizon has zero outcome rows so
             # far, e.g. 10d). Both cases used to drop the horizon key

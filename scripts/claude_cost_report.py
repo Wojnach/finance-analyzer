@@ -156,7 +156,10 @@ def summarise(bundle: dict) -> dict:
     )
     layer2_by_status = collections.Counter()
     for r in layer2:
-        tier = r.get("tier", "?")
+        # Stringify: tier is usually an int but "?" for unknown rows —
+        # mixed int/str keys crash Flask's sort_keys jsonify (2026-07-19,
+        # /api/claude_cost 500).
+        tier = str(r.get("tier", "?"))
         status = r.get("status", "?")
         layer2_by_status[status] += 1
         layer2_by_tier[tier]["calls"] += 1

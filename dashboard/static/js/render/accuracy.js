@@ -216,15 +216,23 @@ function _summaryBar(horizonData) {
   return bar;
 }
 
-/** Age chip: "updated 8m ago" — amber past 30m, red past 2h (stale cache). */
+/** Age chip: "data 10h ago" — amber past 30m, red past 2h.
+ * Uses data_ts (newest underlying signal) when older than the cache
+ * rebuild ts: a recompute over frozen data stamps "now" while the
+ * signals are hours old (loops stopped — 2026-07-19). */
 function _ageChip(meta) {
-  if (!meta || meta.updated_ts == null) return null;
-  const ageSec = Math.max(0, Date.now() / 1000 - Number(meta.updated_ts));
+  if (!meta || (meta.updated_ts == null && meta.data_ts == null)) return null;
+  const candidates = [meta.updated_ts, meta.data_ts]
+    .filter((t) => t != null)
+    .map(Number);
+  const effTs = Math.min(...candidates);
+  const isDataAge = meta.data_ts != null && Number(meta.data_ts) === effTs;
+  const ageSec = Math.max(0, Date.now() / 1000 - effTs);
   const color =
     ageSec > 7200 ? "var(--red)" : ageSec > 1800 ? "var(--yel)" : "var(--txm)";
 
   const chip = document.createElement("span");
-  chip.textContent = `updated ${fAgo(new Date(meta.updated_ts * 1000))}`;
+  chip.textContent = `${isDataAge ? "data" : "updated"} ${fAgo(new Date(effTs * 1000))}`;
   chip.style.padding = "1px 6px";
   chip.style.borderRadius = "999px";
   chip.style.fontWeight = "700";
