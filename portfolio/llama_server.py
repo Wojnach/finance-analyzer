@@ -133,6 +133,17 @@ _MODEL_CONFIGS = {
     # 2026-07-18 for the grand LLM matrix. 12B Q4 barely fits the RTX 3080's
     # 10 GB with 16k KV — ctx capped to 8192 (the later -c wins over the
     # global 16384); prompts are ~500 tokens so 8k leaves ample room.
+    # qwen3.5-9b: Qwen3.5-9B (Feb 2026), unsloth UD-Q4_K_XL 5.55GB. Added
+    # 2026-07-20 as the "2026-generation LLM" probe. Thinking-mode default,
+    # arch qwen35 (verified loading on llama.cpp build 8391), 248k vocab.
+    "qwen3.5-9b": {
+        "model": (
+            r"Q:\models\qwen3.5-9b-gguf\Qwen3.5-9B-UD-Q4_K_XL.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/qwen3.5-9b-gguf/Qwen3.5-9B-UD-Q4_K_XL.gguf"
+        ),
+        "extra_args": [],
+    },
     "gemma3-12b": {
         "model": (
             r"Q:\models\gemma3-12b-gguf\google_gemma-3-12b-it-Q4_K_M.gguf"

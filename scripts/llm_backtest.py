@@ -281,6 +281,8 @@ def run(args):
         "ministral8_lora": (0.15, 1.0, 40),
         # DeepSeek-R1-Distill-Llama base: generation_config 0.6/0.95, top_k off
         "finance-llama-8b": (0.6, 0.95, 0),
+        # Qwen3.5 thinking-mode (family lineage; official gen-config absent)
+        "qwen3.5-9b": (0.6, 0.95, 20),
         # google/gemma-3-12b-it official: temp 1.0, top_p 0.95, top_k 64
         "gemma3-12b": (1.0, 0.95, 64),
     }
