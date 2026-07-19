@@ -62,8 +62,10 @@ def test_skeleton_has_bottom_sheet_container():
     assert "data-bottom-sheet-close" in INDEX
 
 
-def test_skeleton_links_legacy_for_fallback():
-    assert "/legacy" in INDEX, "Skeleton must mention /legacy as a fallback"
+def test_skeleton_has_no_legacy_reference():
+    """The /legacy monolith was removed 2026-07-18 — the skeleton must not
+    resurrect a link to it."""
+    assert "/legacy" not in INDEX
 
 
 def test_skeleton_size_under_target():
