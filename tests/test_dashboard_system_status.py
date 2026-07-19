@@ -40,6 +40,42 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _default_systemctl_disabled(monkeypatch):
+    """Every systemctl --user query defaults to inactive/disabled so tests
+    are deterministic regardless of the real host's unit state (loops may
+    be enabled/disabled differently across machines/CI — 2026-07-19 loop-
+    gating fix made ``compute()`` shell out to systemctl for 6 units on
+    every call). Tests that care about a specific unit's state monkeypatch
+    ``ss.subprocess.run`` again inside the test body, which simply
+    overrides this."""
+
+    def _fake_run(cmd, **kwargs):
+        verb = cmd[2] if len(cmd) > 2 else ""
+        out = "inactive" if verb == "is-active" else "disabled"
+        return subprocess.CompletedProcess(cmd, 3, stdout=out + "\n", stderr="")
+
+    monkeypatch.setattr(ss.subprocess, "run", _fake_run)
+
+
+def _patch_dataloop_enabled(monkeypatch) -> None:
+    """Force pf-dataloop (Layer 1) to report active+enabled, while every
+    other systemd --user unit stays inactive/disabled (matches the autouse
+    default above). Used by tests pinning the pre-2026-07-19 heartbeat
+    RED/YELLOW behaviour, which is now gated on layer1.enabled."""
+
+    def _fake_run(cmd, **kwargs):
+        unit = cmd[3] if len(cmd) > 3 else ""
+        verb = cmd[2] if len(cmd) > 2 else ""
+        if unit == "pf-dataloop":
+            out = "active" if verb == "is-active" else "enabled"
+            return subprocess.CompletedProcess(cmd, 0, stdout=out + "\n", stderr="")
+        out = "inactive" if verb == "is-active" else "disabled"
+        return subprocess.CompletedProcess(cmd, 3, stdout=out + "\n", stderr="")
+
+    monkeypatch.setattr(ss.subprocess, "run", _fake_run)
+
+
 # ---------------------------------------------------------------------------
 # Heartbeat
 # ---------------------------------------------------------------------------
@@ -57,7 +93,10 @@ class TestHeartbeat:
         assert out["heartbeat"]["cycle_count"] == 5
         assert out["overall"] == "GREEN"
 
-    def test_stale_heartbeat_yellow(self, tmp_path: Path):
+    def test_stale_heartbeat_yellow(self, tmp_path: Path, monkeypatch):
+        # pf-dataloop must be ENABLED for a stale heartbeat to be a fault
+        # (2026-07-19: disabled-vs-dead gating — see TestColorLoopGating).
+        _patch_dataloop_enabled(monkeypatch)
         _write_json(
             tmp_path / "health_state.json",
             {"last_heartbeat": _ts(-300), "cycle_count": 5},
@@ -66,7 +105,8 @@ class TestHeartbeat:
         assert out["overall"] == "YELLOW"
         assert any("heartbeat" in r for r in out["reasons"])
 
-    def test_silent_loop_red(self, tmp_path: Path):
+    def test_silent_loop_red(self, tmp_path: Path, monkeypatch):
+        _patch_dataloop_enabled(monkeypatch)
         _write_json(
             tmp_path / "health_state.json",
             {"last_heartbeat": _ts(-3600), "cycle_count": 5},
@@ -75,11 +115,23 @@ class TestHeartbeat:
         assert out["overall"] == "RED"
         assert any("silent" in r for r in out["reasons"])
 
-    def test_missing_heartbeat_red(self, tmp_path: Path):
+    def test_missing_heartbeat_red(self, tmp_path: Path, monkeypatch):
+        _patch_dataloop_enabled(monkeypatch)
         # No health_state.json at all → load_json returns {}
         out = ss.compute(data_dir=tmp_path)
         assert out["heartbeat"]["age_seconds"] is None
         assert out["overall"] == "RED"
+
+    def test_stale_heartbeat_neutral_when_dataloop_disabled(self, tmp_path: Path):
+        # 2026-07-19 fix: pf-dataloop disabled (build/test mode, the
+        # autouse default) — a stale heartbeat must NOT bump the hero.
+        _write_json(
+            tmp_path / "health_state.json",
+            {"last_heartbeat": _ts(-3600), "cycle_count": 5},
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["overall"] == "GREEN"
+        assert not any("silent" in r or "heartbeat" in r for r in out["reasons"])
 
     def test_malformed_heartbeat_records_error(self, tmp_path: Path):
         _write_json(
@@ -1853,3 +1905,409 @@ class TestAvanzaStatus:
         payload = ss.compute(tmp_path)
         assert "creds_configured" in payload["avanza"]
         assert payload["avanza"]["unresolved_errors"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Item 2 (2026-07-19 triage): _source_freshness missing/enabled fields
+# ---------------------------------------------------------------------------
+
+
+class TestSourceFreshnessMissingEnabled:
+    def test_missing_file_sets_missing_true(self, tmp_path: Path):
+        out = ss._source_freshness(tmp_path, "crypto_loop.heartbeat")
+        assert out["missing"] is True
+        assert out["frozen"] is False  # unchanged: missing != frozen
+
+    def test_present_file_sets_missing_false(self, tmp_path: Path):
+        _touch(tmp_path / "crypto_loop.heartbeat")
+        out = ss._source_freshness(tmp_path, "crypto_loop.heartbeat")
+        assert out["missing"] is False
+
+    def test_non_loop_source_has_enabled_none(self, tmp_path: Path):
+        # health_state.json has no owning systemd unit in _SOURCE_LOOP_UNIT.
+        out = ss._source_freshness(tmp_path, "health_state.json")
+        assert out["enabled"] is None
+
+    def test_loop_source_enabled_reflects_systemctl(self, tmp_path: Path, monkeypatch):
+        def _fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, stdout="enabled\n", stderr="")
+
+        monkeypatch.setattr(ss.subprocess, "run", _fake_run)
+        out = ss._source_freshness(tmp_path, "metals_loop.heartbeat")
+        assert out["enabled"] is True
+
+    def test_loop_source_enabled_none_when_systemctl_unavailable(
+        self, tmp_path: Path, monkeypatch
+    ):
+        def _boom(cmd, **kwargs):
+            raise FileNotFoundError("systemctl not found")
+
+        monkeypatch.setattr(ss.subprocess, "run", _boom)
+        out = ss._source_freshness(tmp_path, "metals_loop.heartbeat")
+        assert out["enabled"] is None
+
+
+class TestUnitEnabled:
+    def test_enabled_true(self, tmp_path: Path, monkeypatch):
+        def _fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, stdout="enabled\n", stderr="")
+
+        monkeypatch.setattr(ss.subprocess, "run", _fake_run)
+        assert ss._unit_enabled("pf-cryptoloop") is True
+
+    def test_disabled_false(self, monkeypatch):
+        def _fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 3, stdout="disabled\n", stderr="")
+
+        monkeypatch.setattr(ss.subprocess, "run", _fake_run)
+        assert ss._unit_enabled("pf-cryptoloop") is False
+
+    def test_query_failure_is_none_not_false(self, monkeypatch):
+        def _boom(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, 5)
+
+        monkeypatch.setattr(ss.subprocess, "run", _boom)
+        assert ss._unit_enabled("pf-cryptoloop") is None
+
+
+# ---------------------------------------------------------------------------
+# Item 1 (2026-07-19 triage): _color composes loop-heartbeat + avanza with
+# the disabled-vs-dead distinction
+# ---------------------------------------------------------------------------
+
+
+class TestColorLoopGating:
+    def _base_payload(self, **overrides):
+        payload = {
+            "heartbeat": {"age_seconds": 10},
+            "errors": {"unresolved": 0, "system_unresolved": 0},
+            "contract_violations": {"unresolved": 0},
+            "llm_inference": {},
+            "layer2": {},
+            "layer1": {"enabled": False},
+            "sources": {},
+            "avanza": {"unresolved_errors": 0},
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_all_loops_disabled_stays_green(self):
+        payload = self._base_payload(
+            sources={
+                "crypto_loop.heartbeat": {"enabled": False, "frozen": True, "missing": False},
+                "metals_loop.heartbeat": {"enabled": False, "frozen": True, "missing": False},
+                "oil_loop.heartbeat": {"enabled": False, "missing": True, "frozen": False},
+                "mstr_loop.heartbeat": {"enabled": False, "missing": True, "frozen": False},
+                "golddigger_loop.heartbeat": {"enabled": False, "frozen": True, "missing": False},
+            }
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "GREEN"
+        assert reasons == ["all systems nominal"]
+
+    def test_enabled_loop_frozen_bumps_yellow(self):
+        payload = self._base_payload(
+            sources={
+                "crypto_loop.heartbeat": {"enabled": True, "frozen": True, "missing": False},
+            }
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "YELLOW"
+        assert any("crypto" in r and "frozen" in r for r in reasons)
+
+    def test_enabled_loop_missing_bumps_yellow(self):
+        payload = self._base_payload(
+            sources={
+                "mstr_loop.heartbeat": {"enabled": True, "frozen": False, "missing": True},
+            }
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "YELLOW"
+        assert any("mstr" in r and "missing" in r for r in reasons)
+
+    def test_unknown_enabled_state_still_bumps_on_frozen(self):
+        # systemctl degraded (enabled=None) must NOT be treated the same as
+        # a confirmed disable — never silently hide a possible fault.
+        payload = self._base_payload(
+            sources={
+                "oil_loop.heartbeat": {"enabled": None, "frozen": True, "missing": False},
+            }
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "YELLOW"
+
+    def test_main_loop_stale_heartbeat_neutral_when_dataloop_disabled(self):
+        payload = self._base_payload(
+            heartbeat={"age_seconds": 99999}, layer1={"enabled": False}
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "GREEN"
+        assert not any("silent" in r or "heartbeat" in r for r in reasons)
+
+    def test_main_loop_stale_heartbeat_faults_when_dataloop_enabled(self):
+        payload = self._base_payload(
+            heartbeat={"age_seconds": 99999}, layer1={"enabled": True}
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "RED"
+        assert any("silent" in r for r in reasons)
+
+    def test_avanza_errors_bump_when_dependent_loop_enabled(self):
+        payload = self._base_payload(
+            avanza={"unresolved_errors": 3},
+            sources={
+                "metals_loop.heartbeat": {"enabled": True, "frozen": False, "missing": False},
+            },
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "YELLOW"
+        assert any("avanza" in r.lower() for r in reasons)
+
+    def test_avanza_errors_neutral_when_dependent_loops_disabled(self):
+        payload = self._base_payload(
+            avanza={"unresolved_errors": 51},
+            sources={
+                "metals_loop.heartbeat": {"enabled": False, "frozen": False, "missing": False},
+                "golddigger_loop.heartbeat": {"enabled": False, "frozen": False, "missing": False},
+            },
+        )
+        severity, reasons = ss._color(payload)
+        assert severity == "GREEN"
+
+    def test_compute_all_disabled_live_wiring_stays_green(self, tmp_path: Path):
+        # End-to-end: nothing patched beyond the autouse all-disabled
+        # systemctl stub. Heartbeat stale + no loop files at all -> must
+        # still land GREEN (or at least not RED/YELLOW from the loop axis).
+        _write_json(
+            tmp_path / "health_state.json",
+            {"last_heartbeat": _ts(-999999), "cycle_count": 1},
+        )
+        out = ss.compute(data_dir=tmp_path)
+        assert out["overall"] == "GREEN"
+
+
+# ---------------------------------------------------------------------------
+# Item 4 (2026-07-19 triage): _claude_gate UNKNOWN on incomplete evidence
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeGateUnknown:
+    def test_unknown_when_one_of_three_unreadable(self, tmp_path: Path, monkeypatch):
+        import portfolio.claude_gate as cg
+
+        monkeypatch.setattr(cg, "CLAUDE_ENABLED", True, raising=False)
+
+        def _boom():
+            raise RuntimeError("config unreadable")
+
+        monkeypatch.setattr(cg, "_load_config_layer2_enabled", _boom, raising=False)
+        # No metals_loop.py written -> _parse_metals_claude_enabled -> None.
+        out = ss._claude_gate(tmp_path)
+        assert out["config_layer2_enabled"] is None
+        assert out["claude_gate_enabled"] is True
+        assert out["metals_claude_enabled"] is None
+        assert out["enabled"] is None
+        assert out["label"] == "UNKNOWN"
+
+    def test_frozen_still_wins_even_with_unknowns(self, tmp_path: Path, monkeypatch):
+        # One confirmed-off gate must FREEZE even though another is unknown.
+        import portfolio.claude_gate as cg
+
+        monkeypatch.setattr(cg, "CLAUDE_ENABLED", False, raising=False)
+
+        def _boom():
+            raise RuntimeError("config unreadable")
+
+        monkeypatch.setattr(cg, "_load_config_layer2_enabled", _boom, raising=False)
+        out = ss._claude_gate(tmp_path)
+        assert out["enabled"] is False
+        assert out["label"] == "FROZEN"
+
+
+# ---------------------------------------------------------------------------
+# Item 3 (2026-07-19 triage): PAUSED_LOOP_DOWN + phi4_mini shadow-throttle
+# note
+# ---------------------------------------------------------------------------
+
+
+class TestVotersLayer1Gating(TestVoters):
+    """Reuses TestVoters._FakeRegistry/_patch_common (inherits the class)."""
+
+    def test_phi4_mini_paused_when_layer1_down(self, tmp_path: Path, monkeypatch):
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: True)
+        out = ss._voters(tmp_path, layer1_active=False)
+        assert out["phi4_mini"]["state"] == "PAUSED_LOOP_DOWN"
+        assert "BTC-USD" in out["phi4_mini"]["reason"]
+        assert "not active" in out["phi4_mini"]["reason"]
+
+    def test_phi4_mini_gated_remote_down_unaffected_by_layer1_down(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # GATED_REMOTE_DOWN is reported regardless of layer1 state (kept
+        # exactly as-is per the 2026-07-19 triage).
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: False)
+        out = ss._voters(tmp_path, layer1_active=False)
+        assert out["phi4_mini"]["state"] == "GATED_REMOTE_DOWN"
+
+    def test_phi4_mini_shadow_throttle_note_included_when_voting(
+        self, tmp_path: Path, monkeypatch
+    ):
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: True)
+        _write_json(
+            tmp_path / "shadow_registry.json",
+            {"shadows": {"phi4_mini": {"status": "shadow", "cycle_modulo": 10}}},
+        )
+        out = ss._voters(tmp_path, layer1_active=True)
+        assert out["phi4_mini"]["state"] == "VOTING"
+        assert "cycle_modulo=10" in out["phi4_mini"]["reason"]
+
+    def test_phi4_mini_shadow_throttle_note_included_when_paused(
+        self, tmp_path: Path, monkeypatch
+    ):
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: True)
+        _write_json(
+            tmp_path / "shadow_registry.json",
+            {"shadows": {"phi4_mini": {"status": "shadow", "cycle_modulo": 10}}},
+        )
+        out = ss._voters(tmp_path, layer1_active=False)
+        assert out["phi4_mini"]["state"] == "PAUSED_LOOP_DOWN"
+        assert "cycle_modulo=10" in out["phi4_mini"]["reason"]
+
+    def test_rescued_non_phi4_signal_paused_when_layer1_down(
+        self, tmp_path: Path, monkeypatch
+    ):
+        self._patch_common(
+            monkeypatch,
+            disabled={"ml"},
+            overrides={("ml", "ETH-USD")},
+            get_reason=lambda name: None,
+        )
+        out = ss._voters(tmp_path, layer1_active=False)
+        assert out["ml"]["state"] == "PAUSED_LOOP_DOWN"
+        assert "ETH-USD" in out["ml"]["reason"]
+
+    def test_paused_llm_flag_unaffected_by_layer1_down(self, tmp_path: Path, monkeypatch):
+        # Kept exactly as-is per the triage: the LLM-flag pause is reported
+        # regardless of layer1 state.
+        self._patch_common(
+            monkeypatch,
+            disabled={"ml"},
+            overrides={("ml", "ETH-USD")},
+            get_reason=lambda name: None,
+        )
+        (tmp_path / "local_llm.disabled").write_text("", encoding="utf-8")
+        out = ss._voters(tmp_path, layer1_active=False)
+        assert out["ml"]["state"] == "PAUSED_LLM_FLAG"
+
+    def test_voters_default_layer1_active_true_preserves_old_behaviour(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # No layer1_active kwarg supplied -> defaults True -> old VOTING
+        # behaviour for direct callers/tests that don't care about this axis.
+        self._patch_common(
+            monkeypatch,
+            disabled={"ml"},
+            overrides={("ml", "ETH-USD")},
+            get_reason=lambda name: None,
+        )
+        out = ss._voters(tmp_path)
+        assert out["ml"]["state"] == "VOTING"
+
+    def test_compute_threads_real_layer1_state_into_voters(
+        self, tmp_path: Path, monkeypatch
+    ):
+        self._patch_common(
+            monkeypatch,
+            disabled={"phi4_mini"},
+            overrides={("phi4_mini", "BTC-USD")},
+        )
+        import portfolio.llama_server as llama_mod
+
+        monkeypatch.setattr(llama_mod, "remote_llm_available", lambda: True)
+
+        # layer1 (pf-dataloop) inactive via the autouse systemctl stub (no
+        # override here) -> compute() must thread active=False into voters.
+        payload = ss.compute(tmp_path)
+        assert payload["layer1"]["active"] is False
+        assert payload["voters"]["phi4_mini"]["state"] == "PAUSED_LOOP_DOWN"
+
+
+# ---------------------------------------------------------------------------
+# Item 5 (2026-07-19 triage): _load_last_n_hours instant compare
+# ---------------------------------------------------------------------------
+
+
+class TestLoadLastNHoursInstantCompare:
+    def test_z_suffix_boundary_uses_instant_not_lexicographic(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A row timestamped with trailing 'Z' and no microseconds, a
+        fraction of a second BEFORE the true (microsecond-precise) cutoff
+        instant, must be excluded — even though naive lexicographic string
+        compare keeps it: 'Z' (0x5A) sorts above '.' (0x2E) at the first
+        differing character, so the OLD code treated the Z-suffixed row as
+        "greater than" (i.e. newer than) the cutoff string.
+        """
+        fixed_now = datetime(2026, 7, 19, 12, 0, 0, 500000, tzinfo=UTC)
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now
+
+        monkeypatch.setattr(ss, "datetime", _Frozen)
+
+        cutoff = fixed_now - timedelta(hours=24)  # ...T12:00:00.500000+00:00
+        row_ts = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")  # ...T12:00:00Z (0 micros)
+        _write_jsonl(tmp_path / "boundary.jsonl", [{"ts": row_ts, "id": "x"}])
+        out = ss._load_last_n_hours(tmp_path / "boundary.jsonl", hours=24, ts_field="ts")
+        assert out == []
+
+    def test_z_suffix_row_within_window_is_kept(self, tmp_path: Path):
+        rows = [{"ts": _ts(-3600).replace("+00:00", "Z"), "id": "recent"}]
+        _write_jsonl(tmp_path / "recent.jsonl", rows)
+        out = ss._load_last_n_hours(tmp_path / "recent.jsonl", hours=24, ts_field="ts")
+        assert [r["id"] for r in out] == ["recent"]
+
+    def test_unparseable_ts_row_skipped_not_crashed(self, tmp_path: Path):
+        rows = [
+            {"ts": "not-a-timestamp", "id": "bad"},
+            {"ts": _ts(-100), "id": "good"},
+        ]
+        _write_jsonl(tmp_path / "mixed.jsonl", rows)
+        out = ss._load_last_n_hours(tmp_path / "mixed.jsonl", hours=24, ts_field="ts")
+        assert [r["id"] for r in out] == ["good"]
+
+    def test_missing_ts_field_skipped(self, tmp_path: Path):
+        rows = [{"id": "no-ts"}, {"ts": _ts(-100), "id": "good"}]
+        _write_jsonl(tmp_path / "missing_ts.jsonl", rows)
+        out = ss._load_last_n_hours(tmp_path / "missing_ts.jsonl", hours=24, ts_field="ts")
+        assert [r["id"] for r in out] == ["good"]

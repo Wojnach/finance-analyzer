@@ -82,6 +82,7 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
     Mirrors the per-section error envelope used by ``/api/avanza_account``.
     """
     dd = Path(data_dir) if data_dir else DATA_DIR
+    layer1 = _layer1(dd)
     out: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
         "heartbeat": _heartbeat(dd),
@@ -92,8 +93,12 @@ def compute(data_dir: Path | None = None) -> dict[str, Any]:
         "signal_aggregate": _signal_aggregate(dd),
         "pnl_footer": _pnl_footer(dd),
         "sources": _sources(dd),
-        "layer1": _layer1(dd),
-        "voters": _voters(dd),
+        "layer1": layer1,
+        # layer1_active threads Layer 1's live systemd state into the
+        # voter-state machine (2026-07-19): a rescued signal can only
+        # actually be VOTING if Layer 1's cycle is running to cast the
+        # vote at all — see _voter_state's PAUSED_LOOP_DOWN state.
+        "voters": _voters(dd, layer1_active=bool(layer1.get("active"))),
         "avanza": _avanza_status(dd),
     }
     # 2026-06-06: attach Claude-gate state into the layer2 section so the home
@@ -127,8 +132,11 @@ def _claude_gate(dd: Path) -> dict[str, Any]:
       - portfolio.claude_gate.CLAUDE_ENABLED  — master module switch
       - data/metals_loop.py CLAUDE_ENABLED    — metals loop claude_proc spawn
 
-    ``enabled`` is False if ANY switch is off (label FROZEN), True only when
-    none are off (label ACTIVE), and None/UNKNOWN if nothing could be read.
+    ``enabled`` is False if ANY switch is confirmed off (label FROZEN),
+    True only when all three are confirmed on (label ACTIVE), and
+    None/UNKNOWN if any switch couldn't be read (2026-07-19 fix: a single
+    readable True used to be enough to claim ACTIVE even with 2 of 3
+    switches unknown — incomplete evidence, not a confirmed state).
     See docs/SESSION_PROGRESS.md 2026-06-06 (token-conservation freeze).
     """
     out: dict[str, Any] = {
@@ -156,10 +164,21 @@ def _claude_gate(dd: Path) -> dict[str, Any]:
         out["claude_gate_enabled"],
         out["metals_claude_enabled"],
     )
-    if any(f is not None for f in flags):
-        any_off = any(f is False for f in flags)
-        out["enabled"] = not any_off
-        out["label"] = "ACTIVE" if out["enabled"] else "FROZEN"
+    any_off = any(f is False for f in flags)
+    any_unknown = any(f is None for f in flags)
+    if any_off:
+        # At least one gate is confirmed off - FROZEN regardless of what
+        # the other two say.
+        out["enabled"] = False
+        out["label"] = "FROZEN"
+    elif any_unknown:
+        # Incomplete evidence: at least one gate couldn't be read at all.
+        # Must NOT claim ACTIVE off the strength of the other two alone.
+        out["enabled"] = None
+        out["label"] = "UNKNOWN"
+    else:
+        out["enabled"] = True
+        out["label"] = "ACTIVE"
     return out
 
 
@@ -850,20 +869,59 @@ _SOURCE_NEVER_FROZEN: tuple[str, ...] = (
 
 _SOURCE_FILES: tuple[str, ...] = tuple(_SOURCE_CADENCE_SEC) + _SOURCE_NEVER_FROZEN
 
+# Loop-heartbeat sources that map 1:1 to a systemd --user unit, so
+# _source_freshness can tell "unit intentionally disabled" (neutral) apart
+# from "unit should be running but its file is stale/missing" (fault).
+# health_state.json/signal_log.jsonl are Layer 1's own output (gated via
+# the layer1 section instead, see _LAYER1_UNIT); local_llm_report_latest
+# and the error/violation logs have no owning loop unit at all.
+_SOURCE_LOOP_UNIT: dict[str, str] = {
+    "crypto_loop.heartbeat": "pf-cryptoloop",
+    "metals_loop.heartbeat": "pf-metalsloop",
+    "oil_loop.heartbeat": "pf-oilloop",
+    "mstr_loop.heartbeat": "pf-mstrloop",
+    "golddigger_loop.heartbeat": "pf-golddigger",
+}
+
 
 def _source_freshness(dd: Path, filename: str) -> dict[str, Any]:
-    """mtime/age/frozen for one backing file. Missing file -> all-null,
-    not frozen (nothing to compare a cadence against yet)."""
+    """mtime/age/frozen/missing/enabled for one backing file.
+
+    Missing file -> mtime/age_sec null, frozen False (nothing to compare a
+    cadence against yet) but ``missing: True`` (2026-07-19 fix: a crashed
+    loop that deleted its own heartbeat used to read back as healthy —
+    frozen was false and there was no ``missing`` flag at all). ``_color``
+    composes ``missing``/``frozen`` with ``enabled`` so a dead file only
+    faults the hero when the owning loop is supposed to be running.
+
+    ``enabled`` is the owning unit's systemd --user is-enabled state for
+    the loop-heartbeat files in ``_SOURCE_LOOP_UNIT``; None for every
+    other source (no 1:1 loop unit to check).
+    """
+    unit = _SOURCE_LOOP_UNIT.get(filename)
+    enabled = _unit_enabled(unit) if unit else None
     try:
         mtime = (dd / filename).stat().st_mtime
     except OSError:
-        return {"mtime": None, "age_sec": None, "frozen": False}
+        return {
+            "mtime": None,
+            "age_sec": None,
+            "frozen": False,
+            "missing": True,
+            "enabled": enabled,
+        }
     age_sec = int(time.time() - mtime)
     if filename in _SOURCE_NEVER_FROZEN:
         frozen = False
     else:
         frozen = age_sec > 2 * _SOURCE_CADENCE_SEC.get(filename, 600)
-    return {"mtime": mtime, "age_sec": age_sec, "frozen": frozen}
+    return {
+        "mtime": mtime,
+        "age_sec": age_sec,
+        "frozen": frozen,
+        "missing": False,
+        "enabled": enabled,
+    }
 
 
 def _sources(dd: Path) -> dict[str, Any]:
@@ -896,6 +954,17 @@ def _systemctl_user_query(unit: str, verb: str) -> str | None:
         return r.stdout.strip()
     except Exception:
         return None
+
+
+def _unit_enabled(unit: str) -> bool | None:
+    """True/False from `systemctl --user is-enabled`, or None if the query
+    itself failed (binary missing, timeout) — genuinely unknown, kept
+    distinct from a confirmed "disabled" so _color never treats a degraded
+    systemctl read as "safe to ignore" (2026-07-19 loop-gating fix)."""
+    out = _systemctl_user_query(unit, "is-enabled")
+    if out is None:
+        return None
+    return out == "enabled"
 
 
 def _layer1(dd: Path) -> dict[str, Any]:
@@ -987,14 +1056,45 @@ def _voter_state(
     signal_health: dict[str, Any],
     shadows: dict[str, Any],
     llm_flag_paused: bool,
+    layer1_active: bool,
 ) -> dict[str, Any]:
     h = signal_health.get(name)
     last_activity_ts = h.get("last_success") if isinstance(h, dict) else None
 
+    def _shadow_throttle_note(sig_name: str) -> str | None:
+        # 2026-07-19: phi4_mini is a shadow challenger dispatched at most
+        # once every ``cycle_modulo`` cycles (see shadow_registry.json) —
+        # a bare "VOTING" implies every-cycle participation, which is
+        # false for a throttled shadow signal.
+        shadow = shadows.get(sig_name)
+        if not isinstance(shadow, dict) or shadow.get("status") != "shadow":
+            return None
+        modulo = shadow.get("cycle_modulo")
+        if modulo:
+            return (
+                f"shadow_registry status=shadow, cycle_modulo={modulo} "
+                "(throttled, not every cycle)"
+            )
+        return "shadow_registry status=shadow"
+
+    def _voting(reason: str | None) -> dict[str, Any]:
+        # A signal that would actively cast a vote THIS cycle — but only
+        # if Layer 1 is actually running a cycle to vote in. 2026-07-19
+        # fix: phi4_mini showed live VOTING while layer1.active=False,
+        # since nothing here previously checked whether Layer 1 was up.
+        if not layer1_active:
+            paused = "Layer 1 loop is not active, no cycle to vote in"
+            return {
+                "state": "PAUSED_LOOP_DOWN",
+                "reason": f"{reason}; {paused}" if reason else paused,
+                "last_activity_ts": last_activity_ts,
+            }
+        return {"state": "VOTING", "reason": reason, "last_activity_ts": last_activity_ts}
+
     if not registry.is_globally_disabled(name, ticker=None):
         # None of the curated names are expected to be globally enabled
         # today; stay truthful if that ever changes rather than mislabel.
-        return {"state": "VOTING", "reason": None, "last_activity_ts": last_activity_ts}
+        return _voting(_shadow_throttle_note(name))
 
     rescued_tickers = sorted(t for (s, t) in overrides if s == name)
 
@@ -1007,11 +1107,14 @@ def _voter_state(
             available = False
         tickers_str = ", ".join(rescued_tickers)
         if available:
-            return {
-                "state": "VOTING",
-                "reason": f"force-HOLD globally; remote LLM reachable, voting for: {tickers_str}",
-                "last_activity_ts": last_activity_ts,
-            }
+            reason = f"force-HOLD globally; remote LLM reachable, voting for: {tickers_str}"
+            note = _shadow_throttle_note(name)
+            if note:
+                reason = f"{reason}; {note}"
+            return _voting(reason)
+        # Kept exactly as-is (2026-07-19 triage item 3): remote-down is
+        # reported regardless of Layer 1 state — it's the more actionable
+        # fact when it's the reason nothing would vote anyway.
         return {
             "state": "GATED_REMOTE_DOWN",
             "reason": f"force-HOLD globally; remote LLM (herc2) unreachable, would vote for: {tickers_str}",
@@ -1020,6 +1123,8 @@ def _voter_state(
 
     if rescued_tickers:
         if llm_flag_paused and name in _LLM_FLAG_GATED_SIGNALS:
+            # Kept exactly as-is: the LLM-flag pause is reported regardless
+            # of Layer 1 state, same reasoning as GATED_REMOTE_DOWN above.
             return {
                 "state": "PAUSED_LLM_FLAG",
                 "reason": (
@@ -1028,11 +1133,9 @@ def _voter_state(
                 ),
                 "last_activity_ts": last_activity_ts,
             }
-        return {
-            "state": "VOTING",
-            "reason": f"force-HOLD globally; re-enabled per-ticker for: {', '.join(rescued_tickers)}",
-            "last_activity_ts": last_activity_ts,
-        }
+        return _voting(
+            f"force-HOLD globally; re-enabled per-ticker for: {', '.join(rescued_tickers)}"
+        )
 
     reason = registry.disabled_reason(name)
     shadow = shadows.get(name)
@@ -1065,7 +1168,7 @@ def _voter_overrides() -> Any:
     return DISABLED_SIGNAL_OVERRIDES
 
 
-def _voters(dd: Path) -> dict[str, Any]:
+def _voters(dd: Path, *, layer1_active: bool = True) -> dict[str, Any]:
     """Per-signal voting truth for the curated LLM/ML watch-list.
 
     Kills the "100% green but force-HOLD" confusion: a signal's lifetime
@@ -1082,6 +1185,14 @@ def _voters(dd: Path) -> dict[str, Any]:
     live, dynamic read that the registry deliberately does not model:
     remote-LLM gate (remote_llm_available), the local_llm.disabled flag,
     shadow_registry status, and health_state.json activity timestamps.
+
+    ``layer1_active`` (2026-07-19): pf-dataloop's live systemd state.
+    ``compute()`` threads in the real value; defaults True here only so
+    direct-call sites/tests that don't care about this axis keep the
+    pre-fix VOTING behaviour. A rescued signal that would otherwise show
+    VOTING reports PAUSED_LOOP_DOWN when this is False — Layer 1 not
+    running means there's no cycle to cast a vote in (see _voter_state;
+    phi4_mini was observed live VOTING while layer1.active=False).
     """
     try:
         registry = _get_registry()
@@ -1107,6 +1218,7 @@ def _voters(dd: Path) -> dict[str, Any]:
                 signal_health=signal_health,
                 shadows=shadows,
                 llm_flag_paused=llm_flag_paused,
+                layer1_active=layer1_active,
             )
             for name in _VOTER_NAMES
         }
@@ -1149,7 +1261,15 @@ def _color(payload: dict[str, Any]) -> tuple[str, list[str]]:
 
     hb = payload.get("heartbeat") or {}
     age = hb.get("age_seconds")
-    if age is None:
+    layer1_enabled = (payload.get("layer1") or {}).get("enabled")
+    if layer1_enabled is False:
+        # 2026-07-19 fix: pf-dataloop is intentionally disabled (build/test
+        # mode) — a stale/missing heartbeat is expected, not a fault. Only
+        # a CONFIRMED disable (not an unreadable systemctl -> None) earns
+        # this pass; anything else falls through so a degraded systemctl
+        # read can't silently hide a real outage.
+        pass
+    elif age is None:
         bump("RED")
         reasons.append("loop heartbeat: unknown")
     elif age > HEARTBEAT_YELLOW_S:
@@ -1226,6 +1346,38 @@ def _color(payload: dict[str, Any]) -> tuple[str, list[str]]:
         # (layer2-activity-card.js) carries the visual icon instead.
         reasons.append("Layer 2 frozen (token-saving)")
 
+    # 2026-07-19 fix: none of the checks above looked at the per-loop
+    # heartbeat freshness in `sources`, so a frozen crypto/metals/oil/mstr/
+    # golddigger loop never moved the hero off GREEN. A unit confirmed
+    # disabled (intentional, build/test mode) contributes nothing; an
+    # enabled unit with a frozen or missing heartbeat bumps YELLOW (RED is
+    # reserved for the main/dataloop check above).
+    sources = payload.get("sources") or {}
+    for filename in _SOURCE_LOOP_UNIT:
+        label = filename.removesuffix("_loop.heartbeat")
+        src_info = sources.get(filename) or {}
+        if src_info.get("enabled") is False:
+            continue
+        if src_info.get("missing"):
+            bump("YELLOW")
+            reasons.append(f"{label} loop heartbeat missing")
+        elif src_info.get("frozen"):
+            bump("YELLOW")
+            reasons.append(f"{label} loop heartbeat frozen")
+
+    # Unresolved Avanza auth/session errors only matter if a loop that
+    # actually talks to Avanza (metals warrants, golddigger certs) is
+    # enabled — otherwise it's noise about a subsystem that isn't running.
+    avanza_errs = (payload.get("avanza") or {}).get("unresolved_errors") or 0
+    if avanza_errs and any(
+        (sources.get(f) or {}).get("enabled")
+        for f in ("metals_loop.heartbeat", "golddigger_loop.heartbeat")
+    ):
+        bump("YELLOW")
+        reasons.append(
+            f"{avanza_errs} unresolved avanza error(s), avanza-dependent loop enabled"
+        )
+
     if not reasons:
         reasons = ["all systems nominal"]
     return severity, reasons
@@ -1269,20 +1421,43 @@ def _load_last_n_hours(path: Path, *, hours: int, ts_field: str) -> list[dict]:
     back to a full ``load_jsonl`` so the count remains correct.
     """
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
-    cutoff_iso = cutoff.isoformat()
+
+    def _row_instant(r: Any) -> datetime | None:
+        # None for a non-dict row, a missing ts field, or a ts field that
+        # doesn't parse — such a row is skipped rather than crashing or
+        # (2026-07-19 fix) being kept/dropped by a lexicographic string
+        # compare that assumed every row used the same "+00:00" suffix
+        # convention as `cutoff.isoformat()`. A `Z`-suffixed or otherwise
+        # differently-formatted-but-equivalent instant now compares
+        # correctly against the cutoff.
+        if not isinstance(r, dict):
+            return None
+        raw = r.get(ts_field)
+        if not raw:
+            return None
+        try:
+            return _parse_ts(str(raw))
+        except Exception:
+            return None
+
+    def _within_window(rows: list) -> list[dict]:
+        kept = []
+        for r in rows:
+            ts = _row_instant(r)
+            if ts is not None and ts >= cutoff:
+                kept.append(r)
+        return kept
+
     for max_entries in (500, 2_000, 10_000, 50_000):
         rows = load_jsonl_tail(
             path, max_entries=max_entries, tail_bytes=max_entries * 512
         )
         if not rows:
             return []
-        oldest = next(
-            (r.get(ts_field) for r in rows if isinstance(r, dict) and r.get(ts_field)),
-            None,
+        oldest_ts = next(
+            (t for t in (_row_instant(r) for r in rows) if t is not None), None
         )
-        if not oldest or str(oldest) < cutoff_iso:
-            return [r for r in rows if isinstance(r, dict)
-                    and (r.get(ts_field) or "") >= cutoff_iso]
+        if oldest_ts is None or oldest_ts < cutoff:
+            return _within_window(rows)
     rows = load_jsonl(path)
-    return [r for r in rows if isinstance(r, dict)
-            and (r.get(ts_field) or "") >= cutoff_iso]
+    return _within_window(rows)
