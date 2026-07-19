@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 import dashboard.control as control
-from dashboard.app import app
+from dashboard.app import COOKIE_NAME, app
 
 _TOKEN = "test-token-for-control"
 _AUTH_HEADERS = {"Authorization": f"Bearer {_TOKEN}"}
@@ -275,6 +275,72 @@ class TestAuditLog:
         assert entry["endpoint"] == "instrument"
         assert "unknown ticker" in entry["result"]
 
+    def test_cf_access_path_attributes_actor_and_auth_method(self, client):
+        """Finding #12 (2026-07-19): remote_addr is always 127.0.0.1 behind
+        cloudflared — the only real identity is the CF-verified email,
+        stashed into flask.g by auth.py's require_auth and picked up here."""
+        with patch(
+            "dashboard.cf_access.verify_cf_jwt",
+            return_value={"email": "sydney@hazelight.se"},
+        ):
+            client.post(
+                "/api/control/llm",
+                json={"enabled": False},
+                headers={
+                    "Cf-Access-Authenticated-User-Email": "sydney@hazelight.se",
+                    "Cf-Access-Jwt-Assertion": "fake-jwt",
+                },
+            )
+        lines = control.AUDIT_PATH.read_text(encoding="utf-8").strip().splitlines()
+        entry = json.loads(lines[-1])
+        assert entry["actor"] == "sydney@hazelight.se"
+        assert entry["auth_method"] == "cf_access"
+
+    def test_bearer_path_has_no_actor(self, client):
+        client.post("/api/control/llm", json={"enabled": False}, headers=_AUTH_HEADERS)
+        lines = control.AUDIT_PATH.read_text(encoding="utf-8").strip().splitlines()
+        entry = json.loads(lines[-1])
+        assert entry["actor"] is None
+        assert entry["auth_method"] == "bearer"
+
+
+# ---------------------------------------------------------------------------
+# CSRF backstop (2026-07-19 NOTE) — cookie auth only; bearer/query/cf_access
+# already require possessing the secret, so a forged cross-site request
+# can't reach them without it.
+# ---------------------------------------------------------------------------
+
+
+class TestCsrfBackstop:
+    def test_cookie_auth_without_origin_or_referer_is_rejected(self, client):
+        client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+        resp = client.post("/api/control/llm", json={"enabled": False})
+        assert resp.status_code == 403
+
+    def test_cookie_auth_with_matching_origin_is_allowed(self, client):
+        client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+        resp = client.post(
+            "/api/control/llm",
+            json={"enabled": False},
+            headers={"Origin": "http://localhost"},
+        )
+        assert resp.status_code == 200
+
+    def test_cookie_auth_with_mismatched_origin_is_rejected(self, client):
+        client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+        resp = client.post(
+            "/api/control/llm",
+            json={"enabled": False},
+            headers={"Origin": "http://evil.example.com"},
+        )
+        assert resp.status_code == 403
+
+    def test_bearer_auth_is_exempt_from_the_origin_check(self, client):
+        resp = client.post(
+            "/api/control/llm", json={"enabled": False}, headers=_AUTH_HEADERS
+        )
+        assert resp.status_code == 200
+
 
 # ---------------------------------------------------------------------------
 # /state
@@ -301,7 +367,17 @@ class TestStateEndpoint:
         for row in data["instruments"].values():
             assert row == {"tracked": True}  # default when no file written yet
         for row in data["loops"].values():
-            assert row == {"active": True, "enabled": True}
+            assert row == {"active": True, "enabled": True, "state": "active"}
+
+    def test_systemctl_outage_reports_unknown_not_stopped(self, client):
+        """Finding #10 (2026-07-19): a systemctl query failure (binary
+        missing, timeout, --user session unreachable) must surface as
+        unknown, not be conflated with a confirmed-stopped unit."""
+        with patch.object(control, "_systemctl_query", return_value=None):
+            resp = client.get("/api/control/state", headers=_AUTH_HEADERS)
+        data = resp.get_json()
+        for row in data["loops"].values():
+            assert row == {"active": None, "enabled": None, "state": "unknown"}
 
     def test_reflects_written_instrument_toggle(self, client):
         client.post(

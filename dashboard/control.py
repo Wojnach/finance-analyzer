@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from dashboard.auth import require_auth
 from portfolio.component_registry import get_registry
@@ -106,6 +106,14 @@ def _audit(endpoint: str, payload: Any, result: Any) -> None:
 
     Never raises — a logging failure must not break the control action
     itself, and must not be visible to the caller as a 500.
+
+    ``remote_addr`` is near-useless for attribution here: the dashboard sits
+    behind cloudflared, so it's always 127.0.0.1. ``actor``/``auth_method``
+    come from ``flask.g``, stashed by ``dashboard.auth.require_auth`` on
+    the path that authenticated this request (cf_access carries a
+    JWT-verified email; cookie/bearer/query don't identify a person).
+    ``cf_connecting_ip`` is the CF-reported client IP — claimed, not
+    verified, but the best available hint on the CF Access path.
     """
     try:
         AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -117,10 +125,26 @@ def _audit(endpoint: str, payload: Any, result: Any) -> None:
                 "payload": payload,
                 "result": result,
                 "remote_addr": request.remote_addr,
+                "actor": g.get("pf_actor"),
+                "auth_method": g.get("pf_auth_method"),
+                "cf_connecting_ip": request.headers.get("CF-Connecting-IP"),
             },
         )
     except Exception:
         pass
+
+
+def _csrf_ok() -> bool:
+    """Backstop for cookie auth beyond SameSite=Lax (auth.py:152 NOTE).
+
+    Only cookie-authenticated requests are silently supplied by a browser
+    without the caller knowing the token — bearer/query/cf_access callers
+    already had to possess the secret, so CSRF doesn't apply to them.
+    """
+    if g.get("pf_auth_method") != "cookie":
+        return True
+    origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
+    return request.host in origin
 
 
 def _systemctl_query(unit: str, verb: str) -> str | None:
@@ -162,6 +186,8 @@ def _systemctl_action(unit: str, action: str) -> dict[str, Any]:
 @require_auth
 def api_control_llm():
     """Toggle the master local-LLM pause switch (data/local_llm.disabled)."""
+    if not _csrf_ok():
+        return jsonify({"error": "csrf_check_failed"}), 403
     if not _rate_limit_take():
         return jsonify({"error": "rate_limited"}), 429
 
@@ -186,6 +212,8 @@ def api_control_llm():
 @require_auth
 def api_control_instrument():
     """Set the `tracked` flag for one ticker in data/control/instruments.json."""
+    if not _csrf_ok():
+        return jsonify({"error": "csrf_check_failed"}), 403
     if not _rate_limit_take():
         return jsonify({"error": "rate_limited"}), 429
 
@@ -212,6 +240,8 @@ def api_control_instrument():
 @require_auth
 def api_control_loop():
     """Start/stop/restart one allowlisted pf-* systemd --user unit."""
+    if not _csrf_ok():
+        return jsonify({"error": "csrf_check_failed"}), 403
     if not _rate_limit_take():
         return jsonify({"error": "rate_limited"}), 429
 
@@ -287,9 +317,17 @@ def api_control_state():
 
     loops = {}
     for unit in sorted(LOOP_ALLOWLIST):
+        # A None query result means systemctl itself failed (binary missing,
+        # timeout, --user session not reachable) — that's an outage of our
+        # ability to ask, not a confirmed-stopped unit. Reporting it as
+        # active:false would tell the UI the loop is definitely down when
+        # we actually have no idea.
+        active_raw = _systemctl_query(unit, "is-active")
+        enabled_raw = _systemctl_query(unit, "is-enabled")
         loops[unit] = {
-            "active": _systemctl_query(unit, "is-active") == "active",
-            "enabled": _systemctl_query(unit, "is-enabled") == "enabled",
+            "active": None if active_raw is None else active_raw == "active",
+            "enabled": None if enabled_raw is None else enabled_raw == "enabled",
+            "state": "unknown" if active_raw is None else active_raw,
         }
 
     return jsonify(

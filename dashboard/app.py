@@ -151,19 +151,32 @@ from portfolio.file_utils import load_jsonl_tail as _load_jsonl_tail_impl
 
 _cache = {}
 _cache_lock = threading.Lock()
+_cache_ticket = {}
 _DEFAULT_TTL = 5  # seconds
 
 
 def _cached_read(key, ttl, read_fn):
-    """Return cached result if fresh, otherwise call read_fn and cache."""
+    """Return cached result if fresh, otherwise call read_fn and cache.
+
+    2026-07-20: the lock used to be released for the whole read_fn() call,
+    so two concurrent cache misses on the same key could store out of
+    order — a slow OLD read finishing after a fast NEW one would clobber
+    the fresher cached value. A monotonic per-key ticket is taken under
+    the lock before read_fn runs; the result is only stored afterward if
+    no newer ticket has been issued (and therefore stored) in the
+    meantime. The caller's own return value is unaffected — only the
+    shared cache write is guarded.
+    """
     now = time.monotonic()
     with _cache_lock:
         entry = _cache.get(key)
         if entry and (now - entry[1]) < ttl:
             return entry[0]
+        ticket = _cache_ticket[key] = _cache_ticket.get(key, 0) + 1
     result = read_fn()
     with _cache_lock:
-        _cache[key] = (result, now)
+        if _cache_ticket.get(key, 0) <= ticket:
+            _cache[key] = (result, now)
     return result
 
 
@@ -817,6 +830,7 @@ from dashboard.auth import (  # noqa: E402
     _get_config as _auth_get_config,  # noqa: F401 — kept for compat
     _get_dashboard_token,
     _refresh_cookie,
+    _request_is_https,
     require_auth,
 )
 
@@ -853,13 +867,16 @@ def logout():
     """
     response = redirect("/", code=302)
     # Match every flag we set on the original cookie except expiry.
+    # secure follows the request scheme (not hardcoded True) so this also
+    # clears the cookie on a plain-HTTP LAN visit — same rule as every
+    # other cookie write (see auth._refresh_cookie).
     response.set_cookie(
         "pf_dashboard_token",
         "",
         max_age=0,
         expires=0,
         httponly=True,
-        secure=True,
+        secure=_request_is_https(),
         samesite="Lax",
     )
     return response
@@ -1037,9 +1054,18 @@ def api_telegrams():
 
     results = []
     for entry in _iter_latest_dict_entries(DATA_DIR / "telegram_messages.jsonl", read_limit=5000):
-        if category_filter and (entry.get("category", "") or "").lower() != category_filter:
+        # Malformed rows (e.g. category/text written as a non-string) must
+        # not 500 the whole search — coerce to "" and let the filter treat
+        # them as non-matching instead of crashing .lower().
+        category = entry.get("category", "")
+        if not isinstance(category, str):
+            category = ""
+        text = entry.get("text", "")
+        if not isinstance(text, str):
+            text = ""
+        if category_filter and category.lower() != category_filter:
             continue
-        if search_filter and search_filter not in (entry.get("text", "") or "").lower():
+        if search_filter and search_filter not in text.lower():
             continue
         results.append(entry)
         if len(results) >= limit:
@@ -1258,11 +1284,22 @@ def api_signal_heatmap():
     Each cell is BUY/SELL/HOLD. Built from agent_summary.json _votes.
     Signal list derived dynamically from the data + canonical SIGNAL_NAMES.
     """
-    summary = _read_json(DATA_DIR / "agent_summary.json")
+    summary_path = DATA_DIR / "agent_summary.json"
+    summary = _read_json(summary_path)
     if not summary:
         return jsonify({"error": "no data"}), 404
+    if not isinstance(summary, dict):
+        # Malformed producer output (e.g. a bare list/scalar) — in-band
+        # error, not a 500. tickers/signals below all key off dict shape.
+        return jsonify({"error": "malformed agent_summary.json"}), 200
 
     signals_data = summary.get("signals", {})
+    if not isinstance(signals_data, dict):
+        signals_data = {}
+    # Drop non-dict per-ticker entries here, once, so both loops below
+    # (vote-key discovery and heatmap-row building) see only well-shaped
+    # rows — one corrupt ticker entry isolates to a missing row, not a 500.
+    signals_data = {t: v for t, v in signals_data.items() if isinstance(v, dict)}
 
     try:
         from portfolio.tickers import SIGNAL_NAMES
@@ -1334,12 +1371,25 @@ def api_signal_heatmap():
         if SIGNAL_NAMES and get_registry
         else []
     )
+    # Freshness contract (2026-07-19): the producer can die while this
+    # route keeps serving the last-written grid at 200 forever. Attach the
+    # source file's mtime so the frontend can flag a stale heatmap, same
+    # pattern as /api/accuracy's meta.data_ts.
+    try:
+        mtime = summary_path.stat().st_mtime
+    except OSError:
+        mtime = None
+    meta = {
+        "data_ts": mtime,
+        "age_sec": int(time.time() - mtime) if mtime is not None else None,
+    }
     return jsonify({
         "tickers": tickers,
         "signals": all_signals,
         "heatmap": heatmap,
         "since": since,
         "disabled_signals": disabled,
+        "meta": meta,
     })
 
 

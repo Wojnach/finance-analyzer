@@ -118,6 +118,11 @@ def _list_runs() -> list[dict]:
             slugs = json.loads(manifest.read_text())
         except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             slugs = []
+        if not isinstance(slugs, list):
+            # Corrupt/scalar manifest: isolate the damage to this one run
+            # rather than 500ing the whole /house/, /house/runs, and
+            # /house/api/runs listing over a single bad file.
+            continue
         runs.append({
             "run_id": entry.name,
             "candidate_count": len(slugs),

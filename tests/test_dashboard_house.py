@@ -457,6 +457,29 @@ def test_api_run_returns_candidate_list(client):
     assert "lagenhet-3rum-test-slug-a-123" in payload["candidates"]
 
 
+def test_scalar_manifest_isolates_bad_run_not_500(client, fake_house_root):
+    """Finding #11 (2026-07-19): a corrupt/scalar _manifest.json in one run
+    directory must not 500 the whole listing — that run is dropped, the
+    healthy run still renders on the hub, /runs, and /api/runs."""
+    bad_run = fake_house_root / "data" / "findapartments" / "2026-06-01-0000"
+    bad_run.mkdir(parents=True)
+    (bad_run / "_manifest.json").write_text("42")
+
+    client.set_cookie(COOKIE_NAME, _TOKEN, domain="localhost")
+
+    resp = client.get("/house/runs")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "2026-05-01-0032" in body
+    assert "2026-06-01-0000" not in body
+
+    resp = client.get("/house/api/runs")
+    assert resp.status_code == 200
+    run_ids = [r["run_id"] for r in resp.get_json()["runs"]]
+    assert "2026-05-01-0032" in run_ids
+    assert "2026-06-01-0000" not in run_ids
+
+
 # ---------------------------------------------------------------------------
 # Path validation
 # ---------------------------------------------------------------------------

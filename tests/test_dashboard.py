@@ -248,6 +248,33 @@ class TestIndex:
         assert b"html" in resp.data.lower()
 
 
+class TestLogout:
+    """secure flag on the /logout cookie-clear must follow the request
+    scheme, like every other cookie write (2026-07-19 finding #13)."""
+
+    def _cookie_header(self, response):
+        cookies = response.headers.getlist("Set-Cookie")
+        matches = [c for c in cookies if "pf_dashboard_token" in c]
+        return matches[0] if matches else None
+
+    def test_secure_not_set_over_plain_http(self, client):
+        resp = client.get("/logout", follow_redirects=False)
+        cookie = self._cookie_header(resp)
+        assert cookie is not None
+        assert "Secure" not in cookie
+        assert "Max-Age=0" in cookie
+
+    def test_secure_set_when_behind_https_tunnel(self, client):
+        resp = client.get(
+            "/logout",
+            follow_redirects=False,
+            headers={"X-Forwarded-Proto": "https"},
+        )
+        cookie = self._cookie_header(resp)
+        assert cookie is not None
+        assert "Secure" in cookie
+
+
 # ---------------------------------------------------------------------------
 # API routes — no auth (patched away)
 # ---------------------------------------------------------------------------
@@ -407,6 +434,33 @@ class TestApiTelegrams:
         data = resp.get_json()
         assert len(data) == 1
         assert data[0]["text"] == "buy"
+
+    def test_non_string_category_filtered_not_500(self, client, tmp_data):
+        (tmp_data / "telegram_messages.jsonl").write_text(
+            '{"ts":"t1","category":1,"text":"buy"}\n'
+            '{"ts":"t2","category":"trade","text":"sell"}\n',
+            encoding="utf-8",
+        )
+        with _no_auth():
+            resp = client.get("/api/telegrams?category=trade")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["text"] == "sell"
+
+    def test_non_string_text_search_filtered_not_500(self, client, tmp_data):
+        (tmp_data / "telegram_messages.jsonl").write_text(
+            '{"ts":"t1","text":[]}\n'
+            '{"ts":"t2","text":["not", "a", "string"]}\n'
+            '{"ts":"t3","text":"has x in it"}\n',
+            encoding="utf-8",
+        )
+        with _no_auth():
+            resp = client.get("/api/telegrams?search=x")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["ts"] == "t3"
 
 
 class TestApiSignalLog:
@@ -710,6 +764,40 @@ class TestApiSignalHeatmap:
         with _no_auth():
             resp = client.get("/api/signal-heatmap")
         assert resp.status_code == 404
+
+    def test_meta_reports_file_mtime_and_age(self, client, tmp_data):
+        summary_path = tmp_data / "agent_summary.json"
+        summary_path.write_text(
+            json.dumps({"signals": {"BTC-USD": {"extra": {"_votes": {"rsi": "BUY"}}}}}),
+            encoding="utf-8",
+        )
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        data = resp.get_json()
+        assert data["meta"]["data_ts"] == pytest.approx(summary_path.stat().st_mtime)
+        assert isinstance(data["meta"]["age_sec"], int)
+        assert data["meta"]["age_sec"] >= 0
+
+    def test_malformed_summary_not_dict_returns_in_band_error(self, client, tmp_data):
+        """A bare list (not an object) must not 500 — degrade to an in-band
+        error the frontend can render instead of crashing on `.get`."""
+        (tmp_data / "agent_summary.json").write_text("[1]", encoding="utf-8")
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        assert resp.status_code == 200
+        assert "error" in resp.get_json()
+
+    def test_malformed_ticker_value_is_skipped_not_500(self, client, tmp_data):
+        """A ticker whose value isn't a dict (e.g. a bare int) must be
+        dropped from the grid, not crash the whole endpoint."""
+        summary = {"signals": {"BTC-USD": 5, "ETH-USD": {"extra": {"_votes": {"rsi": "BUY"}}}}}
+        (tmp_data / "agent_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "BTC-USD" not in data["tickers"]
+        assert "ETH-USD" in data["tickers"]
 
     def test_includes_state_since_when_file_present(self, client, tmp_data):
         summary = {
@@ -1940,6 +2028,44 @@ class TestDashboardCache:
 
         assert len(r3) == 3
         assert len(r5) == 5
+
+    def test_out_of_order_completion_keeps_newest(self):
+        """Finding #9 (2026-07-19): the lock used to be released for the
+        whole read_fn() call, so a slow OLD cache-miss read finishing after
+        a fast NEW one would clobber the fresher value in the shared cache.
+        Force that exact ordering with two threads synchronized by events —
+        the ticket taken before read_fn runs must make the late-finishing
+        old read a no-op on write."""
+        import threading
+
+        from dashboard.app import _cache, _cache_ticket, _cached_read
+
+        key = "race-test-key"
+        _cache.clear()
+        _cache_ticket.pop(key, None)
+
+        old_started = threading.Event()
+        new_done = threading.Event()
+
+        def _old_read():
+            old_started.set()
+            new_done.wait(timeout=2)
+            return "old"
+
+        def _new_read():
+            assert old_started.wait(timeout=2)
+            new_done.set()
+            return "new"
+
+        t_old = threading.Thread(target=_cached_read, args=(key, 60, _old_read))
+        t_old.start()
+        assert old_started.wait(timeout=2)  # old's ticket is now taken
+
+        result_new = _cached_read(key, 60, _new_read)
+        t_old.join(timeout=2)
+
+        assert result_new == "new"
+        assert _cache[key][0] == "new"  # old's late finish must not win
 
 
 # ---------------------------------------------------------------------------

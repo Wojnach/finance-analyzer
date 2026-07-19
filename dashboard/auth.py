@@ -32,7 +32,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import jsonify, make_response, request
+from flask import g, jsonify, make_response, request
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +217,11 @@ def require_auth(f):
                 aud_tag=cfg.get("cf_access_aud_tag") or None,
             )
             if claims is not None:
+                # Stash the CF-verified identity so control.py's audit log
+                # can attribute the action to a real person instead of the
+                # always-127.0.0.1 remote_addr behind cloudflared.
+                g.pf_actor = cf_email
+                g.pf_auth_method = "cf_access"
                 # Suppressed false-positive: CF-Access path wraps already-rendered Flask response to refresh auth cookie; no untrusted content injected.
                 # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
                 return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
@@ -225,6 +230,7 @@ def require_auth(f):
         # 1. Cookie
         cookie_token = request.cookies.get(COOKIE_NAME)
         if cookie_token and hmac.compare_digest(cookie_token, expected):
+            g.pf_auth_method = "cookie"
             # Suppressed false-positive: Cookie auth path: same wrap-and-refresh, cookie comparison uses hmac.compare_digest.
             # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
             return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
@@ -232,6 +238,7 @@ def require_auth(f):
         # 2. Query param
         token = request.args.get("token")
         if token and hmac.compare_digest(token, expected):
+            g.pf_auth_method = "query"
             # Suppressed false-positive: Query-param auth: hmac.compare_digest gate before refresh; no user content rendered here.
             # nosemgrep: python.flask.security.audit.xss.make-response-with-unknown-content.make-response-with-unknown-content
             return _refresh_cookie(make_response(f(*args, **kwargs)), expected)
@@ -242,6 +249,7 @@ def require_auth(f):
         if auth_header.startswith("Bearer "):
             bearer_token = auth_header[7:].strip()
             if hmac.compare_digest(bearer_token, expected):
+                g.pf_auth_method = "bearer"
                 return f(*args, **kwargs)
 
         # Suppressed false-positive: bool() wraps a logical-and of two header
