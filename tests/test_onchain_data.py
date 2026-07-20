@@ -90,15 +90,29 @@ class TestFetchOnchainData:
             {"d": "2026-03-01", "netflow": -1250.5},
         ]
         from portfolio.onchain_data import _fetch_exchange_netflow
-        result = _fetch_exchange_netflow("token")
+        with patch("portfolio.onchain_data._netflow_endpoint",
+                   return_value="/v1/test-netflow"):
+            result = _fetch_exchange_netflow("token")
         assert result is not None
         assert result["netflow"] == -1250.5
+
+    @patch("portfolio.onchain_data.fetch_json")
+    def test_fetch_exchange_netflow_disabled_skips_api(self, mock_fetch):
+        """No configured endpoint (default): return None WITHOUT any API call
+        (provider removed the path 2026-07-20; don't burn the 15/day budget)."""
+        from portfolio.onchain_data import _fetch_exchange_netflow
+        with patch("portfolio.onchain_data._netflow_endpoint", return_value=None):
+            result = _fetch_exchange_netflow("token")
+        assert result is None
+        mock_fetch.assert_not_called()
 
     @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_exchange_netflow_empty_list(self, mock_fetch):
         mock_fetch.return_value = []
         from portfolio.onchain_data import _fetch_exchange_netflow
-        result = _fetch_exchange_netflow("token")
+        with patch("portfolio.onchain_data._netflow_endpoint",
+                   return_value="/v1/test-netflow"):
+            result = _fetch_exchange_netflow("token")
         assert result is None
 
     @patch("portfolio.onchain_data.fetch_json")

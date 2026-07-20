@@ -478,12 +478,16 @@ class TestNetflowStalenessAlert:
     """exchange_netflow_history.jsonl older than 7d must raise a
     critical_errors row (category data_feed_stale), once per window."""
 
-    def _run(self, history, monkeypatch, tmp_path):
+    def _run(self, history, monkeypatch, tmp_path, endpoint="/v1/test-netflow"):
         import portfolio.crypto_macro_data as cmd
 
         monkeypatch.setattr(cmd, "_NETFLOW_STALE_STATE_FILE",
                             tmp_path / "netflow_stale_state.json")
-        with patch("portfolio.onchain_data.get_onchain_data", return_value=None), \
+        # Staleness alerting is gated on a configured netflow endpoint
+        # (2026-07-20: provider removed the old path; None = intentionally
+        # disabled, no alert). Configure one so the staleness path is exercised.
+        with patch("portfolio.onchain_data._netflow_endpoint", return_value=endpoint), \
+             patch("portfolio.onchain_data.get_onchain_data", return_value=None), \
              patch("portfolio.crypto_macro_data._load_netflow_history",
                    return_value=history), \
              patch("portfolio.claude_gate.record_critical_error",
@@ -527,3 +531,12 @@ class TestNetflowStalenessAlert:
         result, mock_rce = self._run([], monkeypatch, tmp_path)
         assert result is not None
         assert mock_rce.call_count == 1
+
+    def test_disabled_endpoint_no_alert(self, monkeypatch, tmp_path):
+        """No configured netflow endpoint = a known gap (provider removed the
+        path), NOT a stale feed — must NOT fire the recurring critical row."""
+        import time as _time
+
+        history = [{"ts": _time.time() - 60 * 86400, "netflow": -100.0}]
+        _, mock_rce = self._run(history, monkeypatch, tmp_path, endpoint=None)
+        assert mock_rce.call_count == 0

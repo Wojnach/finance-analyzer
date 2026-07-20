@@ -128,6 +128,23 @@ def _load_onchain_cache(max_age_seconds=ONCHAIN_TTL):
 # Individual metric fetchers
 # ---------------------------------------------------------------------------
 
+def _netflow_endpoint():
+    """BGeometrics exchange-netflow path from config, or None when disabled.
+
+    The provider REMOVED /v1/exchange-netflow (404 on both bitcoin-data.com
+    and api.bgeometrics.com as of 2026-07-20 — migrated/renamed). Rather than
+    hammer a dead URL (wasting the 15-req/day free budget) and re-alert
+    "stale feed" forever, netflow is OFF unless config gives a live path:
+        config.json  bgeometrics.netflow_endpoint = "/v1/<slug>"
+    Set it once the correct slug is confirmed against the live API; no code
+    change needed. None/absent = intentionally disabled, no fetch, no alert.
+    """
+    try:
+        return (_load_config().get("bgeometrics") or {}).get("netflow_endpoint") or None
+    except Exception:
+        return None
+
+
 def _api_get(endpoint, token, params=None):
     """Make authenticated GET request to BGeometrics API.
 
@@ -176,8 +193,16 @@ def _fetch_realized_price(token):
 
 
 def _fetch_exchange_netflow(token):
-    """Fetch latest exchange netflow (negative = accumulation)."""
-    data = _api_get("/v1/exchange-netflow", token, params={"size": 1})
+    """Fetch latest exchange netflow (negative = accumulation).
+
+    Returns None without any API call when no netflow endpoint is
+    configured (the default — see _netflow_endpoint: the provider removed
+    the old path). Uses the API's `limit` param (not the retired `size`).
+    """
+    endpoint = _netflow_endpoint()
+    if not endpoint:
+        return None
+    data = _api_get(endpoint, token, params={"limit": 1})
     if not data or not isinstance(data, list) or len(data) == 0:
         return None
     latest = data[0] if isinstance(data[0], dict) else data[-1]

@@ -398,6 +398,13 @@ def _maybe_alert_netflow_stale(history):
     re-alerts at most once per NETFLOW_STALE_AFTER_DAYS. Never raises.
     """
     try:
+        # Netflow endpoint intentionally disabled (provider removed the old
+        # path 2026-07-20; awaiting the confirmed new slug in
+        # config.bgeometrics.netflow_endpoint). A missing endpoint is a known
+        # gap, NOT a stale feed — don't fire the recurring critical row.
+        from portfolio.onchain_data import _netflow_endpoint
+        if not _netflow_endpoint():
+            return
         now = time.time()
         latest_ts = max((e.get("ts", 0) for e in history), default=0)
         age_days = (now - latest_ts) / 86400 if latest_ts else float("inf")
