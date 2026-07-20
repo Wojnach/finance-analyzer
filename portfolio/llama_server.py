@@ -30,7 +30,10 @@ from portfolio.local_llm_gate import local_llm_enabled
 logger = logging.getLogger("portfolio.llama_server")
 
 if platform.system() == "Windows":
-    _LLAMA_SERVER = r"Q:\models\llama-cpp-bin\cuda13\llama-server.exe"
+    # 2026-07-20: b10068 (571d0d540) — needed for qwen3.6 MoE + gemma4
+    # archs; regression-loaded phi4/qwen3.5/gemma4 OK. Old cuda13 build
+    # kept on disk for rollback.
+    _LLAMA_SERVER = r"Q:\models\llama-cpp-bin\b10068\llama-server.exe"
 else:
     _LLAMA_SERVER = "/usr/local/bin/llama-server"
 
@@ -128,6 +131,17 @@ _MODEL_CONFIGS = {
             else "/home/deck/models/fin-r1-gguf/Fin-R1-q5_k_m.gguf"
         ),
         "extra_args": [],
+    },
+    # qwen3.6-35b-a3b: Qwen3.6-35B-A3B MoE (Apr 2026), 3B active/35B total,
+    # unsloth UD-Q4_K_XL 22.4GB. Runs on the 3080 via CPU-offloaded experts
+    # (--n-cpu-moe 32): ~25-40 tok/s expected. Requires llama.cpp >= b92xx.
+    "qwen3.6-35b-a3b": {
+        "model": (
+            r"Q:\models\qwen3.6-35b-a3b-gguf\Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/qwen3.6-35b-a3b-gguf/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+        ),
+        "extra_args": ["--n-cpu-moe", "32", "-fa", "on"],
     },
     # gemma3-12b: google/gemma-3-12b-it (bartowski Q4_K_M, 7.3 GB). Added
     # 2026-07-18 for the grand LLM matrix. 12B Q4 barely fits the RTX 3080's

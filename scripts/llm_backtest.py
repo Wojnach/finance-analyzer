@@ -281,6 +281,8 @@ def run(args):
         "ministral8_lora": (0.15, 1.0, 40),
         # DeepSeek-R1-Distill-Llama base: generation_config 0.6/0.95, top_k off
         "finance-llama-8b": (0.6, 0.95, 0),
+        # Qwen3.6 MoE, unsloth recommendation for instruct use
+        "qwen3.6-35b-a3b": (1.0, 0.95, 20),
         # Qwen3.5 NON-thinking (V0 raws show no <think> — unsloth template
         # renders non-thinking; family rule: 0.7/0.8/20 for that mode)
         "qwen3.5-9b": (0.7, 0.8, 20),
