@@ -436,3 +436,240 @@ both correctly block on error. Consistent with the 2026-07-19 fixes holding.
 traced `app.py` sections and the full 2026-07-19 triage doc.
 **Declared gap:** ~2300 of `app.py`'s 2689 lines outside traced sections; most of
 the 62 JS files checked selectively for XSS rather than exhaustively.
+
+---
+
+## 8. metals-core — 15 findings (P0:4 P1:9 P2:1 P3:1)
+
+*pr-review-toolkit:code-reviewer.* The real-money warrant stack is **three
+loosely-coordinated protection systems** (legacy `POSITIONS` dict, `SwingTrader`,
+`grid_fisher`) plus a fourth independent bot (`golddigger`), and every one has at
+least one reachable path to an unprotected or stuck leveraged position. Two are
+dead-code gates the developers already documented against a real 2026-04-15
+incident; two are freshly-found EOD-flat gaps that mirror each other. Important
+scoping from the reviewer: grid_fisher's 45k-entry decision log (2026-05-19→07-17)
+shows it has **never had a buy filled in production**, so its findings are
+reachable-but-unexercised paths, whereas the golddigger and legacy-POSITIONS
+findings are corroborated by real trade/incident history.
+
+- `portfolio/grid_fisher.py:2231` — **P0** — **[ACCEPTED]** — `eod_market_flat()`
+  sets `eod_sell_order_id` after the first market-sell and every later tick skips
+  that instrument while it is non-null. `reconcile_against_live` (995-1016) can
+  mark the tier CANCELLED / partially-FILLED but **never resets
+  `eod_sell_order_id` nor sets `stop_needs_rearm`**. Compounding: the stop is
+  nulled unconditionally *before* the sell is attempted (2280-2288, no check on
+  `cancel_stop_loss`'s status), so a silently-failed cancel leaves a live stop
+  resting while the market-sell bounces off `short.sell.not.allowed`. Net: any EOD
+  sell that doesn't clear in one shot leaves inventory naked — no stop, no resting
+  sell — until next day's `roll_session_if_new_day`, i.e. after a full **overnight
+  leveraged carry**. Fix: track EOD-sell resolution explicitly; re-trigger for any
+  instrument with `inventory_units > 0` and no live resting sell; verify the stop
+  cancel actually succeeded.
+
+- `data/metals_loop.py:430,436` — **P0** — **[ACCEPTED]** —
+  `STOP_ORDER_ENABLED=False` and `EMERGENCY_SELL_ENABLED=False` hardcoded with no
+  override anywhere (grep-confirmed single assignment each); `emergency_sell()` is
+  a permanent no-op. The code's own comment (1950-1954) states any position
+  landing in the legacy `POSITIONS` dict without explicit `SwingTrader` migration
+  gets **zero exit protection**, citing the incident it caused
+  (`docs/PLAN-orphan-positions.md`: +5.78% → −1.27%, no exit). Any warrant ob_id
+  outside the 3-entry `KNOWN_WARRANT_OB_IDS` allowlist — e.g. after Avanza
+  reissues a series — still lands there. Fix: wire the flag or extend migration so
+  nothing lands unmanaged; add a startup assertion that fails loudly.
+
+- `portfolio/golddigger/runner.py:192-212` + `state.py:12-22` — **P0** —
+  **[ACCEPTED]** — the hardware stop `sl_id` returned by `place_stop_loss` is
+  logged but **never persisted** (no such field on `Position`) and **never
+  cancelled** by any exit path — TAKE_PROFIT / SIGNAL_EXIT / SESSION_FLATTEN all
+  sell via a plain order with zero cancel calls anywhere under
+  `portfolio/golddigger/` (grep-confirmed). Failure: position A closes on
+  take-profit, its stop keeps resting at trigger T1; position B opens later at a
+  different price; price revisits T1 and the stale order fires against B's size at
+  a price disconnected from B's risk parameters. Fix: persist the id; cancel it as
+  the first step of every non-stop exit.
+
+- `portfolio/golddigger/bot.py:88-135,187` — **P0** — **[ACCEPTED]** — `step()`
+  returns early outside session hours, and the EOD flatten check is only reachable
+  *inside* `step()` — so flattening a 20×-leveraged position gets one ~60s window
+  (~12 tries at poll_seconds=5). If all fail (dead session, CSRF error, `bid<=0`
+  early-return at 354-356, `_execute_order` exception) the position is never
+  revisited that day and `_should_flatten` is False the next morning: **no forced
+  retry, no overnight-carry check independent of the session gate**. Tests cover
+  only the happy path. Fix: persist a flatten-pending/failed flag that keeps
+  retrying regardless of the session window.
+
+- `portfolio/grid_fisher.py:1682-1839,2199` — **P1** — **[ACCEPTED]** — ladder/stop
+  state is mutated in memory right after a successful broker call but
+  `self._persist()` only runs at end-of-tick. A crash in between orphans the
+  broker order from on-disk state: the tier isn't in `existing_tiers` on restart
+  so the same index can be re-placed (doubling notional invisibly, since the
+  orphan never enters `planned_notional_sek()`), and a just-placed `stop_loss_id`
+  is lost so the next rotation's cancel won't fire → two live stops on one
+  position. Fix: persist immediately after each successful broker mutation.
+
+- `portfolio/grid_fisher.py:916-1048` — **P1** — **[ACCEPTED]** —
+  `reconcile_against_live` never calls `get_stop_losses()`/`get_stop_losses_strict()`
+  (both exist and are used elsewhere in the same loop) to verify `stop_loss_id`
+  matches a real resting stop. Combined with the above, a stale id is
+  undetectable; the only re-arm trigger is the narrow `stop_needs_rearm` flag, not
+  "our belief about the stop may be wrong."
+
+- `data/metals_swing_trader.py:2797` (config `metals_swing_config.py:236-268`) —
+  **P1** — **[ACCEPTED]** — the only *broker-resting* stop for a SwingTrader
+  position is static and entry-anchored (~−30% warrant move on a 5× cert); the
+  1.0-1.5% trailing stop and the momentum/reversal/time exits are in-memory only
+  and never re-arm the broker order as they tighten. **If the loop dies, real
+  protection reverts from ~1-1.5% to ~30%.** The only external detector
+  (`scripts/loop_health_watchdog.py`) is Telegram-alert-only, throttled to 1/4h,
+  and never inspects position state — and Telegram is currently muted.
+
+- `data/metals_loop.py:590` — **P1** — **[ACCEPTED]** — `_load_positions` restores
+  only the 3 hardcoded `POSITIONS_DEFAULTS` keys; dynamic keys written by
+  `_handle_buy_fill` (`silver_queue`/`gold_queue`/`silver_q{N}`) are silently
+  dropped on restart even though `_save_positions` wrote them. On rediscovery
+  `detect_holdings` treats the position as new and recomputes
+  `stop_price = entry*0.95`, **discarding any tighter trailing stop achieved
+  pre-crash**.
+
+- `data/metals_loop.py:1686` (writer `portfolio/reporting.py:957,1315`) — **P1** —
+  **[ACCEPTED]** — `_vote_detail` is only ever written by the compact/tier2
+  summary writers, never by the full-summary writer that `read_signal_data`
+  prefers when present (confirmed live: `agent_summary.json`'s `extra` has
+  `_votes`, no `_vote_detail`). So `metals_signal_tracker`'s per-signal accuracy
+  has been a **permanent silent no-op in production** — `per_signal` always empty.
+
+- `portfolio/golddigger/risk.py:87-139` — **P1** — **[VERIFIED, de-escalated to
+  dry-run]** — `size_position()` rejects only `entry_ask <= 0`, with no floor on
+  implausibly-small positive prices. Live: `data/golddigger_trades.jsonl` has
+  **98 of 126 trades at `price_sek: 0.001`** (2026-03-23 → 2026-05-16), quantities
+  up to **9,950,248 units** (~9,950 SEK notional). Orchestrator resolved the
+  reviewer's stated condition: the systemd unit runs `--dry-run`, config has
+  `trade_enabled: false`, and `--live` is opt-in — so **no real money was at
+  risk**. The defect stands: the same bug under `--live` is a multi-million-unit
+  order, and ~2 months of dry-run results are garbage. Fix: reject prices below a
+  plausibility floor.
+
+- `portfolio/golddigger/runner.py:193-201` — **P1** — **[ACCEPTED]** — when the
+  stop trigger is within 3% of bid, hardware-stop placement is silently skipped
+  (`logger.warning` only, **no Telegram alert**) unlike the `sl_ok is False`
+  branch two lines below which does alert. The operator cannot distinguish "stop
+  placed" from "stop skipped, position unprotected."
+
+- `portfolio/instrument_profile.py:117` via `component_registry.py:257-270` —
+  **P1** — **[ACCEPTED]** — `_derive_signal_lists`' "trusted" list comes from
+  `applicable_signals()`, which checks `is_enabled()` only, **not** `shadow_llm`.
+  phi4_mini is globally disabled but per-ticker rescued, so it reads as trusted
+  even though `voter_state()` correctly classifies it SHADOW. Confirmed live:
+  `format_profile_briefing("XAG-USD")` lists phi4_mini as trusted and
+  `fin_fish.py:1207` **stars it in the human-read briefing before a manual
+  trade** — a shadow signal presented as trusted. (Same root as web-control's
+  finding #1: two methods answering the same question differently.)
+
+- `portfolio/fin_fish.py:307-314` — **P1** — **[ACCEPTED]** — `fetch_fx_rate()`'s
+  bare `except: return 10.0` is indistinguishable from a live rate downstream and
+  feeds `warrant_price_at_fish`'s real order-price computation plus the printed
+  "FX rate" a trader reads before placing a live order.
+
+- `data/metals_loop.py:1035-1091` — **P2** — **[ACCEPTED, corrects the brief]** —
+  the 10s fast-tick is single-threaded/serialised with the 60s loop, so **no
+  race/re-entrancy** (the brief's hypothesis was wrong). But it has no aggregate
+  per-iteration deadline — only per-call HTTP timeouts — so degraded network calls
+  stretch the primary stop-check cadence via head-of-line blocking.
+
+- `portfolio/golddigger/bot.py:100,189` — **P3** — **[ACCEPTED]** — logged
+  `SESSION_FLATTEN` reason hardcodes "17:20 Stockholm" while the configured
+  flatten time is 21:55 — misleads anyone reading the journal after the fact.
+
+**Coverage:** full read of `grid_fisher.py`, `grid_fisher_config.py`, and all five
+live state files (all confirm flat/empty). `metals_loop.py`,
+`metals_swing_trader.py`, `golddigger/*`, `fin_fish.py`, `instrument_profile.py`
+covered via two focused sub-reviews whose top claims the reviewer independently
+spot-verified against source.
+
+---
+
+## 7. infrastructure — 8 findings (P0:1 P1:2 P2:4 P3:1)
+
+*pr-review-toolkit:code-reviewer.* The load-bearing primitives are
+**structurally sound** — same-lock discipline between `atomic_append_jsonl` and
+`rotate_jsonl` genuinely closed the 2026-05-11 lost-append class. Residual risk
+is not in the I/O mechanics but in two places code trusts a *process-level*
+invariant it doesn't enforce.
+
+**Answer to orchestrator Q1 — confirms the pytest-guard finding, escalates to P0,
+and corrects the orchestrator's mechanism:**
+
+- `portfolio/file_utils.py:396` — **P0** (escalated from the orchestrator's P1) —
+  **[VERIFIED, mechanism corrected]** — confirmed: env-var check only, no
+  `sys.modules` check, and **the guard's own comment already admits the
+  inheritance** ("and inherited by Popen children"). Confirmed the naked-position
+  alarm path and that the lock-key derivation matches (no mismatch there — that
+  part is fine). **Correction to the orchestrator's framing:** "a shell where the
+  variable leaked" is wrong — `os.environ` mutation inside pytest does not
+  propagate upward to a parent shell. The real mechanism is **fork-time env
+  copying**: any child spawned *while a test has the var set* keeps its own copy
+  for life, so a detached/unjoined child doing later production work stays blind
+  permanently. Reviewer audited every unmocked `Popen`/`run` in `tests/` — all are
+  tiny inert `-c` scripts on `tmp_path`, all `.wait()`-joined — **but found a
+  concrete proof-of-mechanism**: `tests/test_portfolio.py:993-999` spawns the
+  **real** `portfolio/main.py --report` with `env={**os.environ, ...}`, i.e. a
+  genuine production entrypoint inheriting the var. Bounded and disabled by
+  default (`HERC2_SUBPROCESS_TESTS=1`), so not currently armed — but it proves the
+  pattern exists in-repo, one missing `.wait()` from a permanent silent drop.
+  Graded P0 on blast-radius/reversibility, the same standard the original P0-3
+  this alarm exists to serve was graded on. Fix: require both conditions; log the
+  drop at **WARNING**, not debug; add a conftest check failing any test that
+  leaves an unjoined Popen past teardown.
+
+**Answer to orchestrator Q2 — no, rotation cannot lose an append:**
+traced `rotate_jsonl` (`log_rotation.py:349-507`): the entire
+read→classify→archive→write-tmp→`os.replace` runs inside
+`with jsonl_sidecar_lock(filepath):`, the same primitive and same lock-path
+derivation `atomic_append_jsonl` takes. An append is **excluded by the same
+mutex**, not coincidentally non-overlapping. The 2026-05-11 fix holds.
+
+- `~/.config/systemd/user/pf-metalsloop.service` + `data/metals_loop.py:7968-8003`
+  — **P1** — **[ACCEPTED]** — zero `signal.signal` calls in the file; cleanup
+  (`_kill_claude()`, `stop_llm_thread()`, orchestrator stop, Playwright
+  `page.close()`, `release_singleton_lock()`) lives in a `finally:` reachable only
+  via `KeyboardInterrupt`. systemd's default `KillSignal=SIGTERM` **skips it** —
+  orphaning Chromium and a Claude CLI child on every stop, worse under
+  `Restart=always`. In-repo precedent exists: `pf-golddigger.service:11` already
+  sets `KillSignal=SIGINT`. Fix: same, or port `crypto_loop.py:299-316`'s
+  SIGTERM-handler pattern.
+- `pf-dataloop.service` / `pf-mstrloop.service` — **P1** — **[ACCEPTED]** — same
+  root cause, lower blast radius, same fix missing.
+- `log_rotation.py:473-484` — **P2** — gz-archive merge truncates in place
+  (`"wt"`), unlike the atomic tempfile+replace three lines below; a crash there
+  loses archived history (not live appends). All 13 archives pass `gzip -t` today.
+- `log_rotation.py` `ROTATION_POLICIES` + `main.py:408-409` — **P2** —
+  **`critical_errors.jsonl` has no rotation policy** (confirmed unmanaged, 1505
+  lines) and `rotate_all()`'s `"unmanaged"` warning key is discarded by `main.py`,
+  so it never reaches any journal/dashboard. That file grows forever.
+- `scripts/deck/with-herc.sh:51` — **P2** — **[VERIFIED — orchestrator's own
+  script, written today]** — the busy-guard **fails open**: a failed or timed-out
+  SSH query for `PF-LLMBacktest` is indistinguishable from "not running", so a
+  post-WOL connectivity blip (repeatedly observed today) falls through to an
+  unconditional `shutdown /s /f /t 0` on line 55 — the exact harm the guard
+  exists to prevent, potentially killing another session's GPU campaign. Reviewer
+  notes the orchestrator's *other* same-day script,
+  `~/herc-idle-shutdown.sh`, gets this right ("GPU unreadable → treat as busy —
+  fail safe, never shut down on missing evidence"). Two scripts written hours
+  apart, opposite failure postures. Fix: copy the fail-safe pattern.
+- `api_utils.py:21-36` — **P3** — mtime-cached config dict returned **by
+  reference** to 10+ modules including an 8-worker pool; no current mutator, but
+  in-place config mutation is already an idiom elsewhere (`iskbets.py:52,846`,
+  `telegram_poller.py:467-468`) — one copy-paste from corruption.
+
+**Dropped after investigation (recorded):** 33+21 identical-timestamp rows in
+`critical_errors.jsonl` looked like a torn/duplicate-append bug; all 33
+`resolves_ts` values proved distinct — a legitimate batch-resolution pass (the
+orchestrator's own), not a defect.
+
+**Coverage:** `file_utils.py`, `log_rotation.py`, `shared_state.py`,
+`http_retry.py`, `api_utils.py`, `gpu_gate.py`, `local_llm_gate.py`,
+`telegram_notifications.py`, `message_store.py`, `main.py`,
+`mstr_loop/__main__.py`, `metals_loop.py`, `crypto_loop.py`, `oil_loop.py`,
+`grid_fisher.py`, `claude_gate.py`, all `scripts/deck/*.sh` + `scripts/win/*.ps1`,
+all 21 `pf-*` units, 3 test files. **Skipped:** `dashboard/app.py` (other
+subsystem), signal-quality modules.

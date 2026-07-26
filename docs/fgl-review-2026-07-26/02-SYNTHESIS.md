@@ -30,7 +30,11 @@ the correct implementation exists and production never reaches it.
 | P0-5    | **Broker retry without idempotency key** — browser death after Avanza accepts an order resubmits it; the sibling timeout path explicitly refuses to, for this exact reason                                                                                           | `avanza_session.py:514-546`                                | **ACCEPTED** (static-traced; Avanza intentionally down)                                                                                                              |
 | P0-6    | **`get_open_orders` returns `[]` on shape drift** instead of raising, feeding the metals spike-rollback safety decision → restores a full-volume stop over a possibly-live sell. Shape has already drifted twice in 2026                                             | `avanza_session.py:1047-1092` → `metals_loop.py:5578-5601` | **ACCEPTED**                                                                                                                                                         |
 | P0-7    | **Real-money oil leg has no freshness gate** — `bar_ts` is computed and forwarded _specifically_ for staleness judgment; grid_fisher never reads it (`grep bar_ts grid_fisher.py` → 0). BZ=F is always yfinance (10-15 min lag)                                      | `grid_fisher.py:2083-2086` vs `oil_grid_signal.py:170-177` | **VERIFIED**                                                                                                                                                         |
-| P1→P0\* | **Pytest write-guard can drop production journal appends** — keys on `PYTEST_CURRENT_TEST`, which children inherit. Blast radius includes `grid_fisher`'s **naked-leveraged-position** alarm                                                                         | `file_utils.py:396` + `grid_fisher.py:1813-1830`           | **VERIFIED.** \*P0 if any production path can inherit the var                                                                                                        |
+| P0-8 | **grid_fisher EOD-flat has no retry** — once `eod_sell_order_id` is set every later tick skips the instrument; a cancelled/partial sell never resets it and the stop was already nulled unconditionally → naked leveraged inventory carried **overnight** | `grid_fisher.py:2231,2280-2288` | **ACCEPTED.** Reachable-but-unexercised (grid_fisher has never had a production fill) |
+| P0-9 | **golddigger never persists or cancels its hardware stop id** — a stop from a closed position keeps resting and can fire against a later unrelated position | `golddigger/runner.py:192-212`, `state.py:12-22` | **ACCEPTED** |
+| P0-10 | **golddigger EOD flatten gets one ~60s window** — unreachable outside session hours, no retry next day; a failed flatten carries a 20x-leveraged position overnight | `golddigger/bot.py:88-135,187` | **ACCEPTED** |
+| P0-11 | **Legacy metals exit protection permanently disabled** — `STOP_ORDER_ENABLED`/`EMERGENCY_SELL_ENABLED` hardcoded False, `emergency_sell()` a no-op; any ob_id outside a 3-entry allowlist lands there with zero exit protection (cited against a real incident: +5.78% -> -1.27%, no exit) | `metals_loop.py:430,436` | **ACCEPTED** |
+| P0-12 | **Pytest write-guard can drop production journal appends** — keys on `PYTEST_CURRENT_TEST`, which children inherit. Blast radius includes `grid_fisher`'s **naked-leveraged-position** alarm                                                                         | `file_utils.py:396` + `grid_fisher.py:1813-1830`           | **VERIFIED. Escalated to P0 by the infrastructure reviewer** on blast-radius grounds; proof-of-mechanism at `tests/test_portfolio.py:993-999`                                                                                                        |
 
 ## 3. Meta-themes (each = one structural fix closing a class of bugs)
 
@@ -79,6 +83,16 @@ time-since-_Layer-2-ran_ (192/217 rows were autonomous), and
 Layer-2 silence check _structurally cannot fail_. _Structural fix: audit/alarm on
 every path via try/finally; never derive a liveness signal from a proxy event._
 
+**M6 — Fail-open where fail-safe was intended.** `with-herc.sh:51`'s busy-guard
+treats a failed SSH query as "not busy" and shuts the machine down, while the
+orchestrator's *other* same-day script explicitly treats missing evidence as busy.
+`claude_gate._load_config_layer2_enabled()` fails OPEN on a kill switch while the
+equivalent in `agent_invocation.py` was hardened to fail CLOSED. `tune_instrument`'s
+overlap gate no-ops when span data is missing. `fin_fish.fetch_fx_rate()` returns a
+hardcoded 10.0 indistinguishable from a live rate, feeding a real order price.
+*Structural fix: for every guard, write down what it does on missing evidence — and
+make "unknown" mean "refuse", never "proceed".*
+
 ## 4. Notable non-findings (recorded so they aren't re-litigated)
 
 - Warrant knockout floor: **correctly implemented** in two places — prior P0 stale.
@@ -110,7 +124,13 @@ or `systemctl --user start pf-*`):**
 3. Pytest-guard discriminator (`+ "pytest" in sys.modules`, log at WARNING).
 4. P0-6 `get_open_orders` raise-on-shape-drift.
 
-**Tier 2 — before any real-money trading resumes:** 5. P0-5 idempotency: re-query instead of resubmitting a mutation. 6. P0-3 route `pf.py` through `update_state`. 7. P0-4 wire `record_warrant_transaction`, or make VaR read the real source. 8. Avanza CONFIRM path → BankID functions (currently cannot place a trade at all).
+**Tier 2 — before any real-money trading resumes:**
+4b. P0-8/9/10 EOD-flat + stop-id lifecycle (grid_fisher **and** golddigger — both
+    carry leveraged inventory overnight on a failed flatten).
+4c. P0-11 legacy `POSITIONS` unmanaged-position path (startup assertion at minimum).
+4d. `KillSignal=SIGINT` on pf-metalsloop/dataloop/mstrloop so cleanup actually runs
+    (precedent already in pf-golddigger.service).
+4e. golddigger price-plausibility floor (98/126 dry-run trades at 0.001 SEK). 5. P0-5 idempotency: re-query instead of resubmitting a mutation. 6. P0-3 route `pf.py` through `update_state`. 7. P0-4 wire `record_warrant_transaction`, or make VaR read the real source. 8. Avanza CONFIRM path → BankID functions (currently cannot place a trade at all).
 
 **Tier 3 — data honesty, fix now (affects what you're looking at today):** 9. P0-2 Bold −100% (one-line loader swap). 10. M3 voter-state contradiction on #silver. 11. M5 audit-on-every-path + honest `last_invocation_ts`.
 
@@ -120,10 +140,10 @@ legacy readers report. 14. `tune_instrument` span-None → hard SKIP; overlay pr
 
 ## 6. Coverage and honesty notes
 
-- **Outstanding:** metals-core and infrastructure had not reported at time of
-  writing. `data/metals_loop.py` (8011 lines) and `portfolio/grid_fisher.py` are
-  therefore only partially covered — via the avanza-api and data-external
-  reviewers' cross-subsystem tracing, not a dedicated pass.
+- **All 9 subsystems reported.** metals-core and infrastructure arrived after the
+  first synthesis draft and are incorporated above; `grid_fisher.py` got a full
+  read, while `metals_loop.py` (8011 lines) was covered via two focused
+  sub-reviews with spot-verification rather than a single linear read.
 - **Declared gaps:** ~2300 lines of `dashboard/app.py`; most of 62 JS files
   (selective XSS check only); `price_targets.py`; `kelly_sizing.py` /
   `kelly_metals.py` (unassigned — partition gap to fix next FGL);

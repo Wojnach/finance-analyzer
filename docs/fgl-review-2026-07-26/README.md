@@ -19,7 +19,7 @@ against source and live runtime artefacts.
 
 ## Headline results
 
-- **8 P0s.** Five are _wiring_ defects — correct code that production never
+- **12 P0s.** Five are _wiring_ defects — correct code that production never
   reaches: `bar_ts` forwarded for staleness and never read; `update_state` and
   `record_warrant_transaction` with zero callers; the knockout floor implemented
   twice and never invoked; `_build_llm_context` skipped on the promoted path.
@@ -31,7 +31,12 @@ against source and live runtime artefacts.
 - **Live data-honesty defects, visible right now:** Bold equity reports a −100%
   wipeout across 343/343 rows for a strategy whose state file doesn't exist; the
   #silver page renders `SHADOW` and `GATED_REMOTE_DOWN` for the same component in
-  one card, from two disagreeing endpoints.
+  one card, from two disagreeing endpoints; a shadow-only signal is starred as
+  "trusted" in the briefing a human reads before a manual trade.
+- **Four independent overnight-carry paths** for leveraged inventory (grid_fisher
+  EOD-flat, golddigger EOD-flat, golddigger stop-id lifecycle, legacy
+  `POSITIONS`) — the metals stack is three loosely-coordinated protection systems
+  plus a fourth bot, and each has at least one reachable unprotected path.
 - **Dominant meta-theme:** _every_ safety mechanism added in the preceding 8 days
   has a hole on the one path that couldn't be executed when it was written. The
   fixes were verified on runnable paths; the defects live in the unrunnable ones.
@@ -53,10 +58,10 @@ against source and live runtime artefacts.
 
 ## Honesty notes
 
-- **metals-core and infrastructure did not report**, so `data/metals_loop.py`
-  (8011 lines) and `grid_fisher.py` are covered only indirectly. All other
-  declared coverage gaps are listed in §6 of the synthesis. Absence of findings in
-  an unreviewed file is _not_ evidence of cleanliness.
+- All 9 subsystems reported. Declared coverage gaps are listed in §6 of the
+  synthesis — absence of findings in an unreviewed file is _not_ evidence of
+  cleanliness. `metals_loop.py` (8011 lines) was covered by focused sub-reviews
+  with spot-verification, not a single linear read.
 - Loops are intentionally stopped and Avanza intentionally down, so avanza-api and
   metals findings are static-traced rather than runtime-observed; reviewers stated
   this limitation themselves.
