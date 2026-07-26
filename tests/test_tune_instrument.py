@@ -280,3 +280,48 @@ class TestAnalyseEndToEnd:
         )
         assert proposal["thresholds"]["min_samples"] == 25
         assert proposal["data_span_days"] == 6.7
+
+
+class TestAssetTypeLabelling:
+    """Regression: metals must never be described to an LLM as crypto.
+
+    Found 2026-07-26 — the backtest never set `asset_type` and every prompt
+    builder defaults it to "cryptocurrency", so XAG-USD rows literally read
+    "the price of XAG-USD (Bitcoin...". The live shared context had the same
+    gap for phi4_mini, which votes on XAU/XAG as a promoted override.
+    """
+
+    def test_backtest_maps_instrument_classes(self):
+        from scripts.llm_backtest import _asset_type_for
+
+        assert _asset_type_for("XAG-USD") == "precious metal"
+        assert _asset_type_for("XAU-USD") == "precious metal"
+        assert _asset_type_for("BTC-USD") == "cryptocurrency"
+        assert _asset_type_for("MSTR") == "stock"
+
+    def test_live_shared_context_sets_asset_type(self):
+        from portfolio.signal_engine import _build_llm_context
+
+        ind = {
+            "close": 56.08,
+            "rsi": 50,
+            "macd_hist": 0.1,
+            "ema9": 56.0,
+            "ema21": 55.0,
+            "price_vs_bb": "middle",
+            "volume_ratio": 1.0,
+            "change_24h": 0.5,
+        }
+        assert _build_llm_context("XAG-USD", ind, {}, {})["asset_type"] == (
+            "precious metal"
+        )
+        assert _build_llm_context("BTC-USD", ind, {}, {})["asset_type"] == (
+            "cryptocurrency"
+        )
+
+    def test_no_silent_crypto_default_on_failure(self):
+        """A lookup failure must not fall back to 'cryptocurrency' — that
+        default is precisely what hid the bug."""
+        import scripts.llm_backtest as lb
+
+        assert lb._asset_type_for("TOTALLY-UNKNOWN") != "cryptocurrency"

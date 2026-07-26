@@ -3130,6 +3130,19 @@ def _build_llm_context(ticker, ind, timeframes, extra_info):
 
     return {
         "ticker": ticker.replace("-USD", ""),
+        # asset_type belongs HERE, not at individual call sites. Every LLM
+        # prompt builder (_build_phi4_messages, qwen3_trader, finance_llama)
+        # defaults it to "cryptocurrency" when absent, and until 2026-07-26
+        # only the qwen3 call site set it — so live phi4_mini was told
+        # XAU-USD / XAG-USD are cryptocurrencies while voting on them as a
+        # promoted per-ticker override. Setting it on the shared context
+        # fixes every consumer at once and stops the next signal from
+        # inheriting the same trap.
+        "asset_type": (
+            "cryptocurrency"
+            if ticker in CRYPTO_SYMBOLS
+            else "precious metal" if ticker in METALS_SYMBOLS else "stock"
+        ),
         "price_usd": ind["close"],
         "rsi": round(ind["rsi"], 1),
         # 2026-04-10: bumped to 5 decimals — see portfolio/reporting.py:114

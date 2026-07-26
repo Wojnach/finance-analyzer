@@ -203,6 +203,23 @@ def fetch_fng() -> dict:
     }
 
 
+def _asset_type_for(ticker: str) -> str:
+    """Prompt label for the instrument class — mirrors signal_engine's live
+    mapping (CRYPTO_SYMBOLS / METALS_SYMBOLS / else stock) so backtest and
+    production describe the same asset the same way."""
+    try:
+        from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
+
+        if ticker in CRYPTO_SYMBOLS:
+            return "cryptocurrency"
+        if ticker in METALS_SYMBOLS:
+            return "precious metal"
+        return "stock"
+    except Exception:
+        # Never guess "cryptocurrency" on failure — that is the bug.
+        return "financial instrument"
+
+
 def build_context(
     df: pd.DataFrame,
     at: pd.Timestamp,
@@ -236,6 +253,16 @@ def build_context(
     chg24 = (price / float(day_ago.iloc[-1]) - 1) * 100 if len(day_ago) else 0.0
     return {
         "ticker": ticker,
+        # asset_type MUST be set: _build_phi4_messages (and qwen3_trader)
+        # default it to "cryptocurrency", so every metals row this harness
+        # ever produced told the model that XAU/XAG is a crypto — the raw
+        # text literally read "the price of XAG-USD (Bitcoin...".
+        # Found 2026-07-26 via the V0 gate; it invalidates earlier metals
+        # LLM numbers (e.g. the "phi4 62.4% on metals 3h" claim). The live
+        # engine sets this correctly (signal_engine.py, qwen3 block) — the
+        # backtest simply never did. Same class as the 2026-07-17 phi4
+        # input bug: wrong input, confident output.
+        "asset_type": _asset_type_for(ticker),
         "timeframe": f"{interval} candles",
         "price_usd": price,
         "change_24h": f"{chg24:+.2f}%",
