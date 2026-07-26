@@ -39,9 +39,19 @@ $log = Join-Path $repo "data\llm_backtest_run.log"
 
 Start-Transcript -Path $log -Append
 try {
+    # Idempotent lift. Rename-Item throws "Cannot create a file when that
+    # file already exists" if a previous run crashed and left $gateLifted
+    # behind — which happened on 2026-07-02 and went unnoticed until
+    # 2026-07-26 because the Write-Host below ran regardless, so the log
+    # claimed "gate lifted" on every run while both files sat there. Use
+    # -Force and report what actually happened.
     if (Test-Path $gate) {
-        Rename-Item $gate $gateLifted
-        Write-Host "gate lifted"
+        Move-Item -LiteralPath $gate -Destination $gateLifted -Force
+        Write-Host "gate lifted -> $gateLifted"
+    } elseif (Test-Path $gateLifted) {
+        Write-Host "WARN: gate already lifted by an earlier run (stale marker) — leaving as-is"
+    } else {
+        Write-Host "no gate flag present — nothing to lift"
     }
     Set-Location $repo
     $extra = @()
@@ -53,8 +63,12 @@ try {
     Write-Host "exit code: $LASTEXITCODE"
 } finally {
     if (Test-Path $gateLifted) {
-        Rename-Item $gateLifted $gate
-        Write-Host "gate restored"
+        Move-Item -LiteralPath $gateLifted -Destination $gate -Force
+        if (Test-Path $gate) {
+            Write-Host "gate restored"
+        } else {
+            Write-Host "ERROR: gate restore FAILED — local inference left UNGATED"
+        }
     }
     Stop-Transcript
 }
