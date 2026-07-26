@@ -53,8 +53,21 @@ BR=$(hssh "cd /d $RREPO && git branch --show-current" | tr -d '\r')
 [ "$BR" = "main" ] || { echo "herc2 repo on '$BR' (another agent?) — abort"; exit 1; }
 timeout 90 ssh -o BatchMode=yes "$HOST" "cd /d $RREPO && git -c core.sshCommand=\"ssh -o BatchMode=yes -o ConnectTimeout=15\" pull --ff-only" || { echo "pull failed/timed out"; exit 1; }
 
-echo "== disabling sleep"
+echo "== disabling sleep (incl. UNATTENDSLEEP — see below)"
+# UNATTENDSLEEP is the one that actually matters for a WOL-launched run.
+# Windows keeps a SEPARATE, hidden "unattended sleep timeout" that applies
+# when the machine was woken programmatically (WOL / scheduled task) rather
+# than by a human at the keyboard. standby-timeout-ac does NOT cover it, so
+# with only the two /change lines below the box slept ~10 min after every
+# wake — which is what silently killed the LLM matrix campaign on
+# 2026-07-19 (stalled at ~11%, all output files frozen 05:17-07:36) and any
+# run launched since. Diagnosed 2026-07-26 after herc2 went down three times
+# within minutes of waking. A manual powercfg fix was applied 2026-07-17 but
+# did not persist, so set it here on every launch.
 hssh "powercfg /change standby-timeout-ac 0 & powercfg /change hibernate-timeout-ac 0" >/dev/null
+hssh "powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP UNATTENDSLEEP 0 & powercfg /setactive SCHEME_CURRENT" >/dev/null
+_unattend=$(hssh "powercfg /query SCHEME_CURRENT SUB_SLEEP UNATTENDSLEEP" 2>/dev/null | tr -d '\r' | grep -i "Current AC Power Setting" | head -1)
+echo "   UNATTENDSLEEP now: ${_unattend:-<unreadable>}  (0x00000000 = never)"
 
 echo "== launching PF-LLMBacktest (models=$MODELS $START..$END interval=$INTERVAL step=${STEP_HOURS}h)"
 KR=false; [ -n "$KEEP_RAW" ] && KR=true
