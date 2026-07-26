@@ -3110,6 +3110,18 @@ def _load_local_model_accuracy(signal_name, horizon="1d", days=None, cache_ttl=N
     return _cached(cache_key, ttl, _fetch)
 
 
+# Explicit instrument names for LLM prompts. The class alone is ambiguous:
+# told "XAG-USD (precious metal)", phi4_instruct reasoned about it as GOLD
+# (2026-07-26). Name the metal/coin so the model never has to guess.
+_LLM_ASSET_LABELS = {
+    "XAG-USD": "silver, a precious metal",
+    "XAU-USD": "gold, a precious metal",
+    "BTC-USD": "Bitcoin, a cryptocurrency",
+    "ETH-USD": "Ethereum, a cryptocurrency",
+    "MSTR": "MicroStrategy stock (MSTR)",
+}
+
+
 def _build_llm_context(ticker, ind, timeframes, extra_info):
     """Build shared context dict for local LLM signals (Ministral, Qwen3)."""
     tf_summary = ""
@@ -3138,10 +3150,13 @@ def _build_llm_context(ticker, ind, timeframes, extra_info):
         # promoted per-ticker override. Setting it on the shared context
         # fixes every consumer at once and stops the next signal from
         # inheriting the same trap.
-        "asset_type": (
-            "cryptocurrency"
-            if ticker in CRYPTO_SYMBOLS
-            else "precious metal" if ticker in METALS_SYMBOLS else "stock"
+        "asset_type": _LLM_ASSET_LABELS.get(
+            ticker,
+            (
+                "cryptocurrency"
+                if ticker in CRYPTO_SYMBOLS
+                else "precious metal" if ticker in METALS_SYMBOLS else "stock"
+            ),
         ),
         "price_usd": ind["close"],
         "rsi": round(ind["rsi"], 1),

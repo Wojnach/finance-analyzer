@@ -291,12 +291,16 @@ class TestAssetTypeLabelling:
     gap for phi4_mini, which votes on XAU/XAG as a promoted override.
     """
 
-    def test_backtest_maps_instrument_classes(self):
+    def test_backtest_names_the_instrument(self):
+        """Class alone is ambiguous: given 'XAG-USD (precious metal)',
+        phi4_instruct reasoned about GOLD. Name the metal explicitly."""
         from scripts.llm_backtest import _asset_type_for
 
-        assert _asset_type_for("XAG-USD") == "precious metal"
-        assert _asset_type_for("XAU-USD") == "precious metal"
-        assert _asset_type_for("BTC-USD") == "cryptocurrency"
+        assert "silver" in _asset_type_for("XAG-USD")
+        assert "gold" in _asset_type_for("XAU-USD")
+        assert "gold" not in _asset_type_for("XAG-USD")
+        assert "silver" not in _asset_type_for("XAU-USD")
+        assert "Bitcoin" in _asset_type_for("BTC-USD")
         assert _asset_type_for("MSTR") == "stock"
 
     def test_live_shared_context_sets_asset_type(self):
@@ -312,12 +316,11 @@ class TestAssetTypeLabelling:
             "volume_ratio": 1.0,
             "change_24h": 0.5,
         }
-        assert _build_llm_context("XAG-USD", ind, {}, {})["asset_type"] == (
-            "precious metal"
-        )
-        assert _build_llm_context("BTC-USD", ind, {}, {})["asset_type"] == (
-            "cryptocurrency"
-        )
+        xag = _build_llm_context("XAG-USD", ind, {}, {})["asset_type"]
+        xau = _build_llm_context("XAU-USD", ind, {}, {})["asset_type"]
+        assert "silver" in xag and "gold" not in xag
+        assert "gold" in xau and "silver" not in xau
+        assert "crypto" in _build_llm_context("BTC-USD", ind, {}, {})["asset_type"]
 
     def test_no_silent_crypto_default_on_failure(self):
         """A lookup failure must not fall back to 'cryptocurrency' — that

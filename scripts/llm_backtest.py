@@ -203,6 +203,16 @@ def fetch_fng() -> dict:
     }
 
 
+_METAL_NAMES = {
+    "XAG-USD": "silver, a precious metal",
+    "XAU-USD": "gold, a precious metal",
+}
+_CRYPTO_NAMES = {
+    "BTC-USD": "Bitcoin, a cryptocurrency",
+    "ETH-USD": "Ethereum, a cryptocurrency",
+}
+
+
 def _asset_type_for(ticker: str) -> str:
     """Prompt label for the instrument class — mirrors signal_engine's live
     mapping (CRYPTO_SYMBOLS / METALS_SYMBOLS / else stock) so backtest and
@@ -210,10 +220,16 @@ def _asset_type_for(ticker: str) -> str:
     try:
         from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
 
-        if ticker in CRYPTO_SYMBOLS:
-            return "cryptocurrency"
+        # Name the INSTRUMENT, not just its class. "XAG-USD (precious
+        # metal)" was not enough: phi4_instruct read that and reasoned about
+        # "XAG-USD (the precious metal, which refers to Gold)" -- XAG is
+        # silver. Gold and silver trade on different drivers (safe-haven vs
+        # industrial demand), so a mislabelled metal corrupts the reasoning
+        # just as badly as calling it a cryptocurrency did.
         if ticker in METALS_SYMBOLS:
-            return "precious metal"
+            return _METAL_NAMES.get(ticker, "precious metal")
+        if ticker in CRYPTO_SYMBOLS:
+            return _CRYPTO_NAMES.get(ticker, "cryptocurrency")
         return "stock"
     except Exception:
         # Never guess "cryptocurrency" on failure — that is the bug.
