@@ -15,7 +15,7 @@ param(
     [switch]$FromArgsFile
 )
 
-# schtasks /tr silently truncates ~261 chars — long invocations must go
+# schtasks /tr silently truncates ~261 chars -- long invocations must go
 # through the args file (written by the Deck orchestrator) and a short
 # fixed task command with just -FromArgsFile.
 if ($FromArgsFile) {
@@ -41,7 +41,7 @@ Start-Transcript -Path $log -Append
 try {
     # Idempotent lift. Rename-Item throws "Cannot create a file when that
     # file already exists" if a previous run crashed and left $gateLifted
-    # behind — which happened on 2026-07-02 and went unnoticed until
+    # behind -- which happened on 2026-07-02 and went unnoticed until
     # 2026-07-26 because the Write-Host below ran regardless, so the log
     # claimed "gate lifted" on every run while both files sat there. Use
     # -Force and report what actually happened.
@@ -49,9 +49,9 @@ try {
         Move-Item -LiteralPath $gate -Destination $gateLifted -Force
         Write-Host "gate lifted -> $gateLifted"
     } elseif (Test-Path $gateLifted) {
-        Write-Host "WARN: gate already lifted by an earlier run (stale marker) — leaving as-is"
+        Write-Host "WARN: gate already lifted by an earlier run (stale marker) -- leaving as-is"
     } else {
-        Write-Host "no gate flag present — nothing to lift"
+        Write-Host "no gate flag present -- nothing to lift"
     }
     Set-Location $repo
     $extra = @()
@@ -67,7 +67,7 @@ try {
         if (Test-Path $gate) {
             Write-Host "gate restored"
         } else {
-            Write-Host "ERROR: gate restore FAILED — local inference left UNGATED"
+            Write-Host "ERROR: gate restore FAILED -- local inference left UNGATED"
         }
     }
     Stop-Transcript
