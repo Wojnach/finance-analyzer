@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import sys
 import tempfile
 import time
 from collections import deque
@@ -393,11 +394,25 @@ def atomic_append_jsonl(path, entry):
     # children), appends into the repo's real data/ are dropped. Tests that
     # verify journal writes already point their target at tmp_path, which
     # sails through untouched.
-    if "PYTEST_CURRENT_TEST" in os.environ:
+    # FGL 2026-07-26 (P0-12): the env-var check ALONE was unsafe. pytest sets
+    # PYTEST_CURRENT_TEST in its own process, and any child spawned while a test
+    # holds it keeps an independent copy for life (fork-time env copy) — so a
+    # detached child doing real production work would silently drop every append,
+    # including grid_fisher's `grid_fisher_naked_position` alarm, the one signal
+    # that says leveraged inventory has no broker-side stop. Proof the pattern
+    # exists in-repo: tests/test_portfolio.py spawns the real
+    # `portfolio/main.py --report` with env={**os.environ, ...}.
+    # `pytest` in sys.modules is the discriminator: true only IN the test
+    # runner's own process, false in a spawned child that merely inherited the
+    # variable. Both conditions must hold, and a drop now logs at WARNING so a
+    # mistake is visible instead of debug-buried.
+    if "PYTEST_CURRENT_TEST" in os.environ and "pytest" in sys.modules:
         try:
             _prod_data = (Path(__file__).resolve().parent.parent / "data").resolve()
             if path.resolve().is_relative_to(_prod_data):
-                logger.debug("pytest run — append to %s dropped", path.name)
+                logger.warning(
+                    "pytest run — append to production data/%s DROPPED", path.name
+                )
                 return
         except (OSError, ValueError):
             pass

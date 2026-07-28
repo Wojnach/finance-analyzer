@@ -1100,6 +1100,41 @@ class TestGetOpenOrdersFailure:
             get_open_orders()
 
     @patch("portfolio.avanza_session.api_get")
+    def test_shape_drift_on_both_routes_raises_not_empty(self, mock_api_get):
+        """FGL 2026-07-26 P0-6: a 200 body without an 'orders' key must never
+        read as an empty order book. The metals spike-rollback path uses this
+        list to decide a spike sell is terminal, then restores a full-volume
+        stop-loss on top of what may still be a live sell."""
+        from portfolio.avanza_session import get_open_orders
+
+        # Both routes return a valid-JSON dict of an unexpected shape.
+        mock_api_get.return_value = {"unexpectedKey": [], "meta": {}}
+        with pytest.raises(AvanzaSessionError, match="Could not fetch open orders"):
+            get_open_orders()
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_primary_drift_falls_back_to_working_route(self, mock_api_get):
+        """Primary drifting must try the fallback, not give up or return []."""
+        from portfolio.avanza_session import get_open_orders
+
+        mock_api_get.side_effect = [
+            {"nope": 1},                                  # primary: drifted
+            [{"orderId": "X1", "accountId": "1625505"}],  # fallback: healthy
+        ]
+        assert get_open_orders(account_id="1625505") == [
+            {"orderId": "X1", "accountId": "1625505"}
+        ]
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_non_list_orders_value_raises(self, mock_api_get):
+        """'orders' present but not a list is drift too."""
+        from portfolio.avanza_session import get_open_orders
+
+        mock_api_get.return_value = {"orders": {"oops": "dict"}}
+        with pytest.raises(AvanzaSessionError):
+            get_open_orders()
+
+    @patch("portfolio.avanza_session.api_get")
     def test_primary_filters_other_accounts(self, mock_api_get):
         # 2026-07-13 endpoint change: primary /_api/trading/rest/orders is
         # account-global — result must be filtered to the requested account.

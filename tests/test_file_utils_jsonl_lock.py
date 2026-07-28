@@ -417,3 +417,53 @@ class TestMsvcrtBoundedRetry:
                     pass
         finally:
             proc.wait(timeout=10)
+
+
+class TestPytestProdGuardDiscriminator:
+    """FGL 2026-07-26 P0-12: the guard that stops tests polluting the production
+    journal must not silently swallow PRODUCTION writes.
+
+    pytest's PYTEST_CURRENT_TEST is copied into any child spawned while a test
+    holds it, and that copy outlives the test. Keying only on the env var meant a
+    detached child doing real work dropped every append -- including
+    grid_fisher's naked-leveraged-position alarm. `pytest in sys.modules` is
+    true only inside the runner's own process, so both conditions are required.
+    """
+
+    def test_drops_prod_append_inside_the_test_runner(self, monkeypatch):
+        """We ARE pytest, so a write into the real data/ dir must be dropped."""
+        import portfolio.file_utils as fu
+
+        prod = Path(fu.__file__).resolve().parent.parent / "data"
+        target = prod / "_guard_probe_should_never_exist.jsonl"
+        assert not target.exists()
+        fu.atomic_append_jsonl(str(target), {"must": "not land"})
+        assert not target.exists(), "guard failed: test wrote into production data/"
+
+    def test_allows_tmp_path_append_inside_the_test_runner(self, tmp_path):
+        """tmp_path targets must sail through untouched -- tests that verify
+        journal writes depend on this."""
+        import portfolio.file_utils as fu
+
+        target = tmp_path / "journal.jsonl"
+        fu.atomic_append_jsonl(str(target), {"ok": 1})
+        assert target.exists() and target.read_text().strip()
+
+    def test_env_var_without_pytest_imported_still_writes(self, monkeypatch, tmp_path):
+        """Simulate a spawned child: env var present, pytest NOT in sys.modules.
+        This is the production-writer case the old guard silently dropped."""
+        import portfolio.file_utils as fu
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "fake::test (call)")
+        monkeypatch.delitem(sys.modules, "pytest", raising=False)
+        prod = Path(fu.__file__).resolve().parent.parent / "data"
+        target = prod / "_guard_probe_child_write.jsonl"
+        target.unlink(missing_ok=True)
+        try:
+            fu.atomic_append_jsonl(str(target), {"child": "write"})
+            assert target.exists(), (
+                "regression: a production child inheriting PYTEST_CURRENT_TEST "
+                "had its append silently dropped"
+            )
+        finally:
+            target.unlink(missing_ok=True)

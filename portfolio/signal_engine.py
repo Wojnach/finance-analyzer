@@ -4175,7 +4175,29 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 if ticker:
                     _set_last_signal(ticker, sig_name)
                 if entry.get("requires_context"):
-                    result = compute_fn(df, context=context_data)
+                    # FGL 2026-07-26 (P0-1): enrich by SIGNAL IDENTITY, not by
+                    # which branch we happened to enter. The rich LLM context
+                    # (_build_llm_context: price_usd, rsi, macd_hist, bb, volume,
+                    # fear_greed, sentiment, timeframe_summary, change_24h and —
+                    # critically — asset_type) was previously built ONLY inside
+                    # the shadow branch above. A signal promoted per-ticker via
+                    # _DISABLED_SIGNAL_OVERRIDES (phi4_mini on BTC/ETH/XAU/XAG
+                    # since 2026-07-13) skips that branch and landed here with
+                    # the bare context_data, producing a prompt reading
+                    # "Asset: XAG-USD (cryptocurrency) / Price: $0.00" with
+                    # every indicator "N/A" — i.e. the promoted path, the only
+                    # path on which these signals actually VOTE, was still
+                    # affected by the asset-mislabelling bug that commits
+                    # b5d2026b/597176b2 fixed for the shadow and backtest paths.
+                    if sig_name in _SHADOW_LLM_SIGNALS:
+                        _ctx = dict(context_data)
+                        _ctx.update(
+                            _build_llm_context(ticker, ind, timeframes, extra_info)
+                        )
+                        _ctx["ticker"] = ticker
+                        result = compute_fn(df, context=_ctx)
+                    else:
+                        result = compute_fn(df, context=context_data)
                 elif entry.get("requires_macro"):
                     result = compute_fn(df, macro=macro_data or None)
                 else:

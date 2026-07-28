@@ -262,3 +262,74 @@ class TestGenerateSignalEndToEndFlagParity:
 
         assert action_off == action_on
         assert conf_off == pytest.approx(conf_on)
+
+
+class TestPromotedLLMContextEnrichment:
+    """FGL 2026-07-26 P0-1.
+
+    The rich LLM context was built only inside the shadow branch. A signal
+    promoted per-ticker via _DISABLED_SIGNAL_OVERRIDES (phi4_mini on
+    BTC/ETH/XAU/XAG) skips that branch, so the ONLY path on which it actually
+    votes received the bare context_data -- yielding
+    "Asset: XAG-USD (cryptocurrency) / Price: $0.00" with every indicator N/A.
+    Enrichment is now keyed on signal identity, not on the branch taken.
+    """
+
+    def test_phi4_is_a_promoted_voter_on_metals(self):
+        """Guard the premise: if this stops being true the bug class changes."""
+        from portfolio.signal_engine import _sig_globally_disabled
+
+        assert _sig_globally_disabled("phi4_mini", "XAG-USD", None) is False
+        assert _sig_globally_disabled("phi4_mini", "XAU-USD", None) is False
+
+    def test_enriched_context_names_the_metal_and_carries_price(self):
+        from portfolio.signal_engine import _build_llm_context
+        from portfolio.signals.phi4_mini_reasoning import _build_phi4_messages
+
+        ind = {
+            "close": 56.08,
+            "rsi": 61.2,
+            "macd_hist": 0.14,
+            "ema9": 56.4,
+            "ema21": 55.1,
+            "price_vs_bb": "upper half",
+            "volume_ratio": 1.3,
+            "change_24h": 0.8,
+        }
+        ctx = {
+            "ticker": "XAG-USD",
+            "config": {},
+            "macro": None,
+            "regime": "ranging",
+            "seasonality_profile": None,
+        }
+        ctx.update(_build_llm_context("XAG-USD", ind, {}, {}))
+        ctx["ticker"] = "XAG-USD"
+        prompt = _build_phi4_messages(ctx)[-1]["content"]
+
+        assert "cryptocurrency" not in prompt
+        assert "silver" in prompt
+        assert "$0.00" not in prompt
+        assert "56.08" in prompt
+
+    def test_bare_context_would_have_been_wrong(self):
+        """Pins the defect itself: the bare dispatch context yields a crypto
+        label and a zero price, which is why enrichment must not be branch-keyed."""
+        from portfolio.signals.phi4_mini_reasoning import _build_phi4_messages
+
+        bare = {
+            "ticker": "XAG-USD",
+            "config": {},
+            "macro": None,
+            "regime": "ranging",
+            "seasonality_profile": None,
+        }
+        prompt = _build_phi4_messages(bare)[-1]["content"]
+        assert "cryptocurrency" in prompt and "$0.00" in prompt
+
+    def test_all_llm_signals_are_covered_by_the_enrichment_set(self):
+        """Any signal using an LLM prompt builder must be in the set the
+        dispatch enriches, or it silently inherits the bare-context bug."""
+        from portfolio.signal_engine import _SHADOW_LLM_SIGNALS
+
+        assert {"phi4_mini", "finance_llama", "cryptotrader_lm"} <= _SHADOW_LLM_SIGNALS

@@ -1065,7 +1065,29 @@ def get_open_orders(account_id: str | None = None) -> list[dict]:
         # deals-and-orders route ("No static resource" 404 on both). The
         # surviving endpoint returns all accounts' orders — filter locally.
         data = api_get("/_api/trading/rest/orders")
-        orders = data.get("orders", []) if isinstance(data, dict) else data
+        # FGL 2026-07-26 (P0-6): do NOT default a dict without "orders" to [].
+        # This endpoint's shape has already drifted twice in 2026 (the
+        # 2026-03-24 cancel-verb change and the 2026-07-13 route change above),
+        # and a third drift returning HTTP 200 with an unexpected body would
+        # silently read as "no open orders". That value is not cosmetic: the
+        # metals spike-rollback path uses it to decide a spike sell reached a
+        # terminal state, then restores the original full-volume stop-loss on
+        # top of what may still be a live sell. Same reasoning as
+        # get_stop_losses_strict below — "could not read" must never be
+        # indistinguishable from "nothing there".
+        if isinstance(data, dict):
+            if "orders" not in data:
+                raise RuntimeError(
+                    "orders endpoint returned a dict without an 'orders' key "
+                    f"(shape drift?) — keys: {sorted(data)[:8]}"
+                )
+            orders = data["orders"]
+        else:
+            orders = data
+        if not isinstance(orders, list):
+            raise RuntimeError(
+                f"orders endpoint returned {type(orders).__name__}, expected list"
+            )
         return [
             o
             for o in orders
@@ -1078,7 +1100,27 @@ def get_open_orders(account_id: str | None = None) -> list[dict]:
             data = api_get(f"/_api/trading/rest/order/account/{aid}")
             if isinstance(data, list):
                 return data
-            return data.get("orders", data.get("openOrders", []))
+            # Same shape-drift rule as the primary route above: an unexpected
+            # 200 body must raise, not read as an empty order book. Hardened
+            # together so the fallback cannot silently reintroduce the
+            # very failure mode the primary now rejects (FGL 2026-07-26 P0-6).
+            if isinstance(data, dict):
+                for key in ("orders", "openOrders"):
+                    if key in data:
+                        found = data[key]
+                        if not isinstance(found, list):
+                            raise RuntimeError(
+                                f"fallback orders '{key}' is "
+                                f"{type(found).__name__}, expected list"
+                            )
+                        return found
+                raise RuntimeError(
+                    "fallback orders endpoint returned a dict with neither "
+                    f"'orders' nor 'openOrders' — keys: {sorted(data)[:8]}"
+                )
+            raise RuntimeError(
+                f"fallback orders endpoint returned {type(data).__name__}"
+            )
         except RuntimeError as fallback_exc:
             logger.warning(
                 "Could not fetch open orders (primary=%s fallback=%s)",

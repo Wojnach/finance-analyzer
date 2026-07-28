@@ -304,3 +304,87 @@ class TestTickHonoursLiveCap:
         )
         assert report.get("placements", 0) == 0
         assert sess.place_buy_calls == []
+
+
+class TestStaleSignalBarGate:
+    """FGL 2026-07-26 P0-7: oil_grid_signal publishes `bar_ts` (the underlying
+    kline's own timestamp) so this loop can refuse stale data on the real-money
+    oil leg; nothing read it. BZ=F is always yfinance-routed (10-15 min lag), so
+    a successful fetch says nothing about whether the price is current.
+
+    Scope matters: only producers that PUBLISH bar_ts are held to it. XAG/XAU
+    rows carry no bar_ts, and requiring one would silently stop the whole metals
+    grid.
+    """
+
+    def _fresh(self):
+        import datetime as dt
+
+        return dt.datetime.now(dt.timezone.utc).isoformat()
+
+    def _old(self, minutes):
+        import datetime as dt
+
+        return (
+            dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes)
+        ).isoformat()
+
+    def test_stale_bar_ts_blocks_placement(self, tmp_path, single_instrument_active):
+        sess = _StubSession(buying_power_return={"buying_power": 50_000.0})
+        f = _make_fisher(sess, tmp_path)
+        report = f.tick(
+            signal_data={
+                "XAG-USD": {
+                    "direction": "LONG",
+                    "confidence": 0.9,
+                    "bar_ts": self._old(45),
+                }
+            },
+            prices={"1650161": {"bid": 100.0, "ask": 100.5}},
+        )
+        assert report.get("placements", 0) == 0
+        assert sess.place_buy_calls == []
+        skip = report["instruments"]["1650161"]["skip"]
+        assert "stale_signal_bar" in skip
+
+    def test_bar_ts_none_is_treated_as_stale(self, tmp_path, single_instrument_active):
+        """oil_grid_signal emits bar_ts=None when the kline fetch fails — an
+        unknown age must never read as fresh on a money path."""
+        sess = _StubSession(buying_power_return={"buying_power": 50_000.0})
+        f = _make_fisher(sess, tmp_path)
+        report = f.tick(
+            signal_data={
+                "XAG-USD": {"direction": "LONG", "confidence": 0.9, "bar_ts": None}
+            },
+            prices={"1650161": {"bid": 100.0, "ask": 100.5}},
+        )
+        assert report.get("placements", 0) == 0
+        assert sess.place_buy_calls == []
+        assert "stale_signal_bar" in report["instruments"]["1650161"]["skip"]
+
+    def test_fresh_bar_ts_allows_placement(self, tmp_path, single_instrument_active):
+        sess = _StubSession(buying_power_return={"buying_power": 50_000.0})
+        f = _make_fisher(sess, tmp_path)
+        report = f.tick(
+            signal_data={
+                "XAG-USD": {
+                    "direction": "LONG",
+                    "confidence": 0.9,
+                    "bar_ts": self._fresh(),
+                }
+            },
+            prices={"1650161": {"bid": 100.0, "ask": 100.5}},
+        )
+        assert report.get("placements", 0) >= 1
+
+    def test_absent_bar_ts_preserves_legacy_behaviour(
+        self, tmp_path, single_instrument_active
+    ):
+        """XAG/XAU publish no bar_ts; requiring one would stop the metals grid."""
+        sess = _StubSession(buying_power_return={"buying_power": 50_000.0})
+        f = _make_fisher(sess, tmp_path)
+        report = f.tick(
+            signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.9}},
+            prices={"1650161": {"bid": 100.0, "ask": 100.5}},
+        )
+        assert report.get("placements", 0) >= 1

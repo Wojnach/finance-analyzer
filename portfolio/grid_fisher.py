@@ -869,6 +869,33 @@ def should_halt_global(state: GridFisherState) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+# FGL 2026-07-26 (P0-7): ceiling on how old a signal's underlying bar may be
+# before we refuse to arm new inventory. oil_grid_signal refreshes its kline
+# every REFRESH_INTERVAL_SEC=300s, so 2x that tolerates one missed refresh while
+# still rejecting a genuinely frozen feed.
+_MAX_SIGNAL_BAR_AGE_SEC = 600
+
+
+def _bar_age_seconds(bar_ts: Any) -> Optional[float]:
+    """Age in seconds of a signal's underlying bar, or None if unknowable.
+
+    Returns None for a missing/unparseable timestamp so callers can treat
+    "unknown age" as stale — never as fresh.
+    """
+    if not bar_ts:
+        return None
+    try:
+        if isinstance(bar_ts, (int, float)):
+            return max(0.0, time.time() - float(bar_ts))
+        txt = str(bar_ts).strip().replace("Z", "+00:00")
+        parsed = _dt.datetime.fromisoformat(txt)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+        return max(0.0, (_dt.datetime.now(_dt.timezone.utc) - parsed).total_seconds())
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 @dataclass
 class ReconcileResult:
     """Diff summary returned by reconcile_against_live."""
@@ -2101,6 +2128,47 @@ class GridFisher:
                 continue
             if confidence < self._min_conf:
                 instr_report["skip"] = f"low_conf<{self._min_conf}"
+                report["instruments"][ob_id] = instr_report
+                continue
+
+            # FGL 2026-07-26 (P0-7): STALENESS GATE. oil_grid_signal computes
+            # `bar_ts` — the underlying kline's OWN timestamp, not fetch time —
+            # specifically so this loop can judge data age, and metals_loop
+            # forwards it for that purpose. Until now nothing here read it, so a
+            # stale-but-HTTP-200 bar could arm a real BUY ladder on a leveraged
+            # warrant. BZ=F/CL=F are always yfinance-routed (10-15 min lag), so
+            # "the fetch succeeded" says nothing about whether the price is
+            # current. A missing/unparseable bar_ts is treated as STALE: an
+            # unknown age must never read as fresh on a money path.
+            # Scope: only producers that PUBLISH a freshness contract are held
+            # to it. metals_loop supplies `bar_ts` for OIL-USD only (always
+            # present — and explicitly None when the kline fetch failed);
+            # XAG/XAU rows come from agent_summary.json carrying just
+            # direction/confidence/atr_pct, so a blanket requirement would
+            # silently stop the entire metals grid — a worse outcome than the
+            # bug. Key PRESENT => enforce (None counts as stale, which is the
+            # oil-fetch-failed case). Key ABSENT => no contract, unchanged
+            # behaviour. Follow-up recorded in the FGL doc: XAG/XAU have no
+            # freshness contract at all and should grow one.
+            bar_age = None
+            if "bar_ts" in sig:
+                bar_age = _bar_age_seconds(sig.get("bar_ts"))
+                _stale = bar_age is None or bar_age > _MAX_SIGNAL_BAR_AGE_SEC
+            else:
+                _stale = False
+            if _stale:
+                shown = "unknown" if bar_age is None else f"{bar_age:.0f}s"
+                instr_report["skip"] = (
+                    f"stale_signal_bar(age={shown}>{_MAX_SIGNAL_BAR_AGE_SEC}s)"
+                )
+                self._log(
+                    "skip_stale_signal_bar",
+                    ob_id=ob_id,
+                    ticker=ticker,
+                    bar_ts=sig.get("bar_ts"),
+                    bar_age_s=bar_age,
+                    max_age_s=_MAX_SIGNAL_BAR_AGE_SEC,
+                )
                 report["instruments"][ob_id] = instr_report
                 continue
 
