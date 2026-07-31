@@ -1997,6 +1997,22 @@ def api_swedbank():
 
     data["available"] = True
     data["snapshot_age_s"] = age
+    # Signals run on a much slower clock than prices (a full pass is ~40s, so it
+    # recomputes every ~15 cycles). Reporting the snapshot's age for them would
+    # imply a freshness they do not have — they get their OWN age, derived from
+    # the payload's own timestamp rather than a stat().
+    data["signals_age_s"] = None
+    sig_ts = data.get("signals_computed_at")
+    if sig_ts:
+        try:
+            _t = _dt.datetime.fromisoformat(sig_ts)
+            if _t.tzinfo is None:
+                _t = _t.replace(tzinfo=_dt.timezone.utc)
+            data["signals_age_s"] = max(
+                0.0, (_dt.datetime.now(_dt.timezone.utc) - _t).total_seconds()
+            )
+        except (ValueError, TypeError):
+            data["signals_age_s"] = None
     # Signals run on a slower clock than prices (every Nth loop cycle), so they
     # have their own age and it is NOT snapshot_age_s. Derived from the payload
     # for the same reason as above — a stat() would call a carried-forward
