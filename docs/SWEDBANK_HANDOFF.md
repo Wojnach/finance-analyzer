@@ -1,0 +1,143 @@
+# Swedbank book — handoff / resume point
+
+**Written 2026-07-31 so a future session can pick this up cold.** Read this
+first, then `docs/PLAN.md` (design + premortem) and `docs/SESSION_PROGRESS.md`.
+
+## Where things are
+
+Worktree `.worktrees/swedbank-book`, branch `feature/swedbank-book`, merged
+fast-forward into local `main`. **Nothing is pushed to GitHub and nothing should
+be** — see Privacy below. herc2 was synced to `0663f5d7` via
+`scripts/deck/sync-repo-to-herc.sh`.
+
+## Privacy — read before committing anything
+
+`github.com/Wojnach/finance-analyzer` is **PUBLIC** (verified: anonymous API
+returns `"private": false`). The operator decided 2026-07-31 to make it private
+and to stop pushing entirely; only the Deck and herc2 need the code.
+
+- `data/swedbank_*` is gitignored **and** in `.git/info/exclude` (the latter
+  covers every worktree regardless of which branch is checked out — a
+  branch-only rule left the real book exposed as `??` in the main checkout).
+- No real quantities, cost basis, account totals, P&L or account labels in git.
+  Tests are synthetic. Docs use A/B/C.
+- Never route this data through `dashboard/export_static.py` or
+  `dashboard/static/api-data/` — served with **no auth**.
+- **OPEN: 11 credentials sit in public git history at commit `338b6000`**
+  (added 2026-03-15 15:27, untracked 83 min later in `d9dbe707`; untracking does
+  not remove history). Verified publicly fetchable. Tracked as pending-pickup
+  `ROTATE-LEAKED-CREDS`, which prints at every session start. Binance/Alpaca are
+  read-only in this codebase (verified: zero order/withdraw calls), but the
+  Telegram token and api_server jwt/password are not.
+
+## What is DONE and verified live
+
+| Piece                              | File                                                    | Status                                        |
+| ---------------------------------- | ------------------------------------------------------- | --------------------------------------------- |
+| Pinned instrument table (26)       | `portfolio/swedbank/instruments.py`                     | 26/26 verified against upstream names         |
+| Derivation (FX solve, qty, cost)   | `portfolio/swedbank/snapshot.py`                        | reconciles to <2 SEK on the real book         |
+| Pricing (Avanza + Alpaca fallback) | `portfolio/swedbank/pricing.py`                         | 26/26 live in ~1.5s                           |
+| Book model + valuation             | `portfolio/swedbank/book.py`                            | live against the real book                    |
+| CLI `show` / `quotes`              | `portfolio/swedbank/cli.py`                             | working                                       |
+| Monitoring loop                    | `data/swedbank_loop.py`                                 | 2 cycles verified, lock + heartbeat + SIGTERM |
+| systemd unit                       | `scripts/deck/install-swedbank-loop.sh`                 | installed, **not enabled**                    |
+| Dashboard route + tab              | `dashboard/app.py` `/api/swedbank`, `views/swedbank.js` | 200 with auth, 401 without                    |
+| Deck→herc sync                     | `scripts/deck/sync-repo-to-herc.sh`                     | synced successfully                           |
+
+**137 offline tests pass.** Pre-change baseline was 38 failures; the suite is
+flaky (37–54 across runs) so ALWAYS capture a baseline before judging. Every
+apparent new failure was confirmed pre-existing on `main`.
+
+## IN FLIGHT at handoff (2026-07-31, signals work)
+
+New, **untested and uncommitted at time of writing**:
+
+- `portfolio/swedbank/ohlcv.py` — Avanza price-chart → DataFrame, Alpaca
+  fallback for US names only. Stockholm has no fallback and RAISES.
+- `portfolio/swedbank/signals.py` — `evaluate()` / `evaluate_universe()` /
+  `applicable_for()` / `log_snapshot()`, plus `_trajectory()` via
+  `price_targets.compute_targets`.
+
+Subagents were dispatched for: `tests/test_swedbank_signals.py` (agent
+`sig-tests`), and loop+route+view wiring (agent `wire-ui`). If those did not
+finish, their briefs are reproducible from the sections below.
+
+### Remaining work, in priority order
+
+1. Verify `signals.evaluate()` end-to-end against live Avanza data.
+2. Wire signals into `data/swedbank_loop.py::cycle()` — every
+   `SIGNAL_EVERY_N_CYCLES=15` cycles, NOT every cycle (each signal is an OHLCV
+   fetch + indicator computation). Must never break pricing: try/except, store
+   `{"error": ...}`, keep the valuation.
+3. Expose `signals` + `signals_age_s` in `/api/swedbank` (heredoc edits only).
+4. Render in `views/swedbank.js`; an errored signal must NOT render as HOLD.
+5. Re-run the full suite against the 38-failure baseline; adversarial review.
+
+## Hard-won constraints (do not relearn these)
+
+- **`dashboard/app.py`, `portfolio/signal_engine.py`, `dashboard/system_status.py`,
+  `portfolio/accuracy_stats.py`, `dashboard/trading_status.py`,
+  `portfolio/loop_processes.py` are NOT black-clean.** Editing them with
+  Edit/Write triggers a format-on-save hook that rewrites the whole file. Use
+  `python3 - <<'PYEOF'` heredoc patches with `assert src.count(old)==1`.
+- **A fresh git worktree has no gitignored runtime files.** `config.json`,
+  `data/avanza_session.json`, `data/avanza_storage_state.json` must be
+  symlinked in or every live-data call fails while unit tests pass.
+- **`.gitignore`'s `_*.py` scratch rule also matches `__init__.py`**, silently
+  dropping new packages' init files. Fixed with `!**/__init__.py`.
+- **Never add these tickers to `tickers.STOCK_SYMBOLS`.** `alpha_vantage.py:238`
+  iterates it against a 25/day budget; 19 extra names starve Tier-1's
+  fundamentals. Also drags in `earnings_calendar.py` and NYSE-hours GPU gating
+  (wrong session for the Stockholm half). Carry `asset_class` on the instrument
+  instead.
+- **Never call the sentiment vote path.** `signal_engine.flush_sentiment_state()`
+  is a whole-dict overwrite from a per-process copy — a second process clobbers
+  Layer 1's tickers.
+- **Never write to `data/signal_log.jsonl`.** `accuracy_stats.signal_accuracy()`
+  blends all tickers into one global per-signal figure Tier-1 falls back on, and
+  our rows would evict real history from its 50k-row tail. Use
+  `data/swedbank_signal_log.jsonl`.
+- **Avanza calls must stay sequential.** The real-money metals loop shares the
+  session. A full 26-instrument sweep is 1.5s — 2.5% duty cycle at 60s — so
+  concurrency buys nothing and risks the Playwright context.
+- **`ssh herc2 true` always fails** — herc2 is Windows, there is no `true`.
+- **Windows OpenSSH scp rejects `/c/Users/...`** — use home-relative paths.
+
+## Known-open findings (from Codex + Claude adversarial reviews)
+
+Fixed: FX hard-coded 10.50 placeholder, partial-cost-basis P&L inflation, FX
+ambiguity, stale-quote validity, non-positive marks, heartbeat leaking the book
+total, prefix-match wrong-instrument, the pinned-ID test that verified nothing,
+`--once` lock bypass, `sync` exit code, `keys=[]` sweeping everything,
+integration tests running live by default, snapshot age from a cached read.
+
+**Still open:**
+
+- **P0-1** `api_get` internally performs browser recovery, so this loop can
+  disturb the metals session. Bounded to 3 consecutive failures instead of 26;
+  the real fix is a read-only Avanza client sharing no browser context.
+  `TODO: MANUAL REVIEW` in `pricing.py`.
+- **P1** `reconcile()` is written and tested but not wired into `cmd_sync`.
+- **P1** `parse_markdown_table` silently skips unparseable rows.
+- **P2** `require_auth` fails OPEN when `dashboard_token` is absent from config.
+- **P2** cached quotes have no maximum age — a 3-week-old mark stays in totals.
+- **P2** `/api/swedbank` `loop.running` never checks heartbeat freshness.
+- **P2** `acquire_singleton_lock` TOCTOU (inherited from `oil_loop.py`), plus a
+  local bug: `except (OSError, ProcessLookupError)` precedes
+  `except PermissionError`, and PermissionError subclasses OSError, so the
+  assume-alive branch is unreachable.
+
+## Commands
+
+```bash
+cd /home/deck/projects/finance-analyzer
+.venv/bin/python -m portfolio.swedbank show      # live valuation
+.venv/bin/python -m portfolio.swedbank quotes    # raw sweep
+.venv/bin/python -u data/swedbank_loop.py --once
+.venv/bin/python -m pytest tests/test_swedbank_*.py -q
+scripts/deck/with-herc.sh scripts/deck/sync-repo-to-herc.sh   # sync to herc2
+systemctl --user enable --now pf-swedbank        # NOT enabled by default
+```
+
+The loop is deliberately not enabled: every other `pf-*` unit is disabled and
+auto-starting one would override a pause the operator chose.
