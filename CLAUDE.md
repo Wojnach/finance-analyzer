@@ -204,6 +204,41 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
   (CL=F/BZ=F → yfinance; oil has no Binance FAPI perp in the symbol map,
   so it falls through to the yfinance last-resort path — reconciled 2026-06-11).
 
+### Swedbank book (`portfolio/swedbank/`, monitoring only)
+Tracks three externally-custodied share accounts (26 instruments) that are NOT
+held at Avanza. **Monitoring and valuation only — it can never place an order.**
+The operator executes every trade by hand; `tests/test_swedbank_no_trading.py`
+enforces this by AST-inspecting the package for order imports, order-function
+references and any `api_post`/`api_delete`.
+
+- Prices: Avanza is primary for all 26 (`get_quote` is real-time for equities,
+  certificates and warrants alike via the `/stock/` path; `/_api/price-chart/
+  stock/<ob>` serves OHLCV from 1-minute to monthly). Alpaca is the automatic
+  fallback for the 19 US names, flagged degraded since it carries no bid/ask.
+  The 7 Stockholm instruments have no fallback and degrade to last-good price
+  with a visible age stamp.
+- Sweeps are **sequential, never concurrent** — the real-money metals loop
+  shares this Avanza session. A full 26-instrument sweep is ~1.5s (2.5% duty
+  cycle at 60s). This loop never invokes browser recovery.
+- Marking: `last` when inside the bid/ask, otherwise bid/ask **mid** with a
+  `stale_last` flag. Thin instruments carry hours-stale prints.
+- Orderbook IDs are **pinned** in `instruments.py`, never resolved by runtime
+  search — search returned the wrong share class for 2 of 19 US names, and the
+  ID is both the pricing key and the manual-order deep link.
+- Asset class is carried on the instrument, NOT via `tickers.py` sets. Adding
+  these names to `STOCK_SYMBOLS` would exhaust the 25/day Alpha Vantage quota
+  (`alpha_vantage.py:238`) and stale Tier-1 fundamentals; omitting them makes
+  `_compute_applicable_count` read equities as non-stocks. Zero Tier-1 coupling.
+- **`data/swedbank_*.json` holds REAL positions and is gitignored — this repo is
+  public.** Guarded in `.gitignore` and `.git/info/exclude`. Tests use synthetic
+  books only.
+- Entry: `.venv/bin/python -m portfolio.swedbank {show,quotes}` ·
+  loop `data/swedbank_loop.py --loop` · install
+  `scripts/deck/install-swedbank-loop.sh` (unit `pf-swedbank`, not auto-enabled)
+- Endpoint: `/api/swedbank` (serves the loop's snapshot; never prices on demand,
+  so a page refresh cannot contend for the Avanza session). Tab: More → Swedbank.
+- NOT yet wired: signals/trajectories over this universe. Data layer is ready.
+
 ### Trading Bots
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
