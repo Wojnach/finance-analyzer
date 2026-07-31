@@ -133,21 +133,28 @@ def evaluate(inst, horizon="1d", chart_fn=None, config=None):
     try:
         from portfolio.signal_engine import generate_signal
 
-        verdict = generate_signal(ind, ticker=signal_ticker, config=config, df=df)
+        # generate_signal returns a 3-TUPLE (action, confidence, extra), not a
+        # dict — see the canonical caller at portfolio/main.py:512.
+        action, confidence, extra = generate_signal(
+            ind, ticker=signal_ticker, config=config, df=df
+        )
     except Exception as exc:
         logger.warning("swedbank signals: generate_signal failed for %s: %s", key, exc)
         return {**base, "error": f"signal engine failed: {exc}"}
 
-    action = (verdict or {}).get("action") or "HOLD"
-    confidence = float((verdict or {}).get("confidence") or 0.0)
-    votes = (verdict or {}).get("votes") or {}
-    extra = (verdict or {}).get("extra_info") or {}
+    extra = extra or {}
+    action = action or "HOLD"
+    confidence = float(confidence or 0.0)
+    # Votes are only exposed under the private `_raw_votes` key (pre-gate,
+    # shadow votes merged in) — there is no public "votes"/"signals" entry, and
+    # reading one that does not exist renders an empty vote panel forever.
+    votes = extra.get("_raw_votes") or {}
 
     out = {
         **base,
         "action": action,
         "confidence": confidence,
-        "regime": extra.get("regime") or (verdict or {}).get("regime") or "",
+        "regime": extra.get("_regime") or "",
         "votes": {k: v for k, v in votes.items() if v and v != "HOLD"},
         "vote_counts": {
             "buy": sum(1 for v in votes.values() if v == "BUY"),
@@ -217,12 +224,24 @@ def _trajectory(inst, sig, ind, extra):
         logger.warning("swedbank trajectory failed for %s: %s", inst.key, exc)
         return {"error": f"trajectory failed: {exc}"}
 
+    # compute_targets returns ticker/side/price_usd/hours_remaining/extremes/
+    # targets/recommended — there is no expected_move_pct key. Derive the
+    # projected move from `extremes` rather than inventing a field.
+    t = t or {}
+    extremes = t.get("extremes") or {}
+    price = float(sig["price"]) or 0.0
+    move_pct = None
+    hi, lo = extremes.get("high"), extremes.get("low")
+    if price and hi is not None and lo is not None:
+        move_pct = round((float(hi) - float(lo)) / price * 100.0, 2)
     return {
         "side": side,
         "p_up": round(p_up, 4),
         "hours_remaining": round(_hours_remaining(inst), 2),
-        "targets": (t or {}).get("targets") or [],
-        "expected_move_pct": (t or {}).get("expected_move_pct"),
+        "targets": t.get("targets") or [],
+        "recommended": t.get("recommended"),
+        "extremes": extremes,
+        "projected_range_pct": move_pct,
         "atr_pct": atr_pct,
     }
 

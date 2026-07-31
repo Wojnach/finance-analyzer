@@ -1976,19 +1976,18 @@ def api_swedbank():
     # positions as seconds-fresh — defeating the whole freshness guarantee.
     import datetime as _dt
 
-    age = None
-    as_of = data.get("as_of")
-    if as_of:
+    def _age_of(iso):
+        if not iso:
+            return None
         try:
-            ts = _dt.datetime.fromisoformat(as_of)
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=_dt.timezone.utc)
-            age = max(
-                0.0,
-                (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds(),
-            )
+            ts = _dt.datetime.fromisoformat(iso)
         except (ValueError, TypeError):
-            age = None
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_dt.timezone.utc)
+        return max(0.0, (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds())
+
+    age = _age_of(data.get("as_of"))
 
     hb = {}
     try:
@@ -1998,6 +1997,11 @@ def api_swedbank():
 
     data["available"] = True
     data["snapshot_age_s"] = age
+    # Signals run on a slower clock than prices (every Nth loop cycle), so they
+    # have their own age and it is NOT snapshot_age_s. Derived from the payload
+    # for the same reason as above — a stat() would call a carried-forward
+    # signal set fresh every single cycle.
+    data["signals_age_s"] = _age_of(data.get("signals_computed_at"))
     data["loop"] = {
         "status": hb.get("status"),
         "ts": hb.get("ts"),
