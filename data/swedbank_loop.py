@@ -129,14 +129,14 @@ def cycle():
     atomic_write_json(SNAPSHOT_FILE, val)
 
     live = sum(1 for q in s.quotes.values() if not q.degraded)
+    # No monetary values in logs — journald is not private and this repo is
+    # public. Counts and timings only.
     logger.info(
-        "cycle ok: %d/%d priced (%d live), %.2fs, value=%.2f %s%s",
+        "cycle ok: %d/%d priced (%d live), %.2fs%s",
         len(s.quotes),
         len(b.keys_held),
         live,
         s.duration_s,
-        val["total"]["total_value"],
-        val["base_currency"],
         f", {len(val['unpriced'])} unpriced" if val["unpriced"] else "",
     )
     if s.errors:
@@ -157,10 +157,15 @@ def run_loop():
         try:
             val = cycle()
             backoff = BACKOFF_MIN
+            # Never put monetary values or account labels in the heartbeat:
+            # data/*.heartbeat is not covered by the data/swedbank_*.json
+            # ignore rule, and this repo is public. Counts only.
             _heartbeat(
                 "ok",
                 {
-                    "total_value": val["total"]["total_value"],
+                    "priced": len(val["accounts"]) and sum(
+                        len(a["holdings"]) for a in val["accounts"].values()
+                    ),
                     "unpriced": len(val["unpriced"]),
                     "degraded": len(val["degraded"]),
                 },
@@ -193,7 +198,17 @@ def main(argv=None):
         p.error("specify --loop or --once")
 
     if args.once:
-        cycle()
+        # --once previously bypassed the lock, so running it while the service
+        # was mid-cycle let the older cycle finish last and overwrite the newer
+        # snapshot. Every writer takes the same lock.
+        lock = acquire_singleton_lock()
+        if not lock:
+            logger.error("another swedbank loop holds the lock; exiting")
+            return EXIT_LOCK_CONFLICT
+        try:
+            cycle()
+        finally:
+            release_singleton_lock(lock)
         return 0
 
     lock = acquire_singleton_lock()

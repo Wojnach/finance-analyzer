@@ -31,7 +31,7 @@ pythonpath = [".", "tests"]
 # only the slow tests, or ``-m ''`` to run everything. Slow tests today:
 # tests/test_kronos_backtest_feb27.py (real Kronos GPU inference + Binance
 # klines, 4+ min). Documented in docs/TESTING.md.
-addopts = "-m 'not slow'"
+addopts = " -m 'not slow and not integration'"
 markers = [
     "integration: marks tests that require live GPU / network (deselect with '-k not integration')",
     "slow: marks tests that take a long time to run (default: skipped — run explicitly with '-m slow')",

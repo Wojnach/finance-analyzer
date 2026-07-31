@@ -6,8 +6,16 @@ Design constraints, each from a premortem finding:
   1.5s sequential, a 2.5% duty cycle at 60s. The real-money metals loop shares this
   Avanza session, so there is no performance justification for concurrency and every
   reason to avoid contending for the Playwright context.
-* **Never invoke browser recovery.** On session error this module degrades and backs
-  off, leaving recovery to the loops that actually trade.
+* **Session-error handling.** CAVEAT, corrected 2026-07-31 after review: this module
+  calls `avanza_session.api_get`, which internally performs browser teardown/relaunch
+  recovery and consecutive-failure escalation. An earlier version of this docstring
+  claimed we "never invoke browser recovery" — that was false. What we actually do is
+  bound the damage: `SESSION_FAILURE_ABORT` consecutive failures abort the remaining
+  sweep instead of hammering all 26 instruments through a dead session, which is what
+  would otherwise trigger repeated context relaunches and critical/Telegram escalation
+  while the metals loop is managing real orders.
+  TODO: MANUAL REVIEW — the real fix is a read-only market-data client that shares no
+  browser context with the trading path.
 * **Read-only.** `api_get` only — enforced by tests/test_swedbank_no_trading.py.
 * **Mark at mid when `last` falls outside bid/ask** (P1-3). Thin instruments carry
   hours-stale prints; one warrant measured +4.04% above mid on 15 units traded.
@@ -18,6 +26,7 @@ Design constraints, each from a premortem finding:
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import asdict, dataclass, field
 
@@ -26,6 +35,8 @@ from portfolio.swedbank.instruments import INSTRUMENTS
 logger = logging.getLogger("portfolio.swedbank.pricing")
 
 STALE_LAST_TOL = 0.005
+STALE_QUOTE_S = 1800
+SESSION_FAILURE_ABORT = 3
 CACHE_PATH = "data/swedbank_prices.json"
 
 
@@ -111,12 +122,28 @@ def build_quote(inst, raw, now_ms=None):
         elif not (min(bid, ask) <= last <= max(bid, ask)):
             if abs(last - mid) / mid > STALE_LAST_TOL:
                 mark, basis, stale = mid, "mid", True
-    if mark is None:
-        raise ValueError(f"{inst.key}: quote carries neither usable last nor bid/ask")
+    # Reject non-positive and non-finite marks. Only `None` was rejected before,
+    # so a suspended instrument quoting last=0 with no bid/ask produced a value of
+    # 0 — which the dashboard renders as a clean -100% loss rather than "unpriced".
+    if mark is None or not math.isfinite(mark) or mark <= 0:
+        raise ValueError(
+            f"{inst.key}: no usable price (last={last!r} bid={bid!r} ask={ask!r})"
+        )
 
     age = None
     if updated:
         age = max(0.0, (now_ms - float(updated)) / 1000.0)
+
+    # A quote whose print is hours old, or which the venue itself does not call
+    # real-time, is not live data no matter how well-formed it looks.
+    quote_degraded = False
+    quote_note = "marked at mid: last outside bid/ask" if stale else None
+    if raw.get("isRealTime") is False:
+        quote_degraded = True
+        quote_note = "venue reports quote is not real-time"
+    elif age is not None and age > STALE_QUOTE_S:
+        quote_degraded = True
+        quote_note = f"quote is {age:.0f}s old"
 
     return Quote(
         key=inst.key,
@@ -134,7 +161,8 @@ def build_quote(inst, raw, now_ms=None):
         volume=raw.get("totalVolumeTraded"),
         is_real_time=raw.get("isRealTime"),
         stale_last=stale,
-        note="marked at mid: last outside bid/ask" if stale else None,
+        degraded=quote_degraded,
+        note=quote_note,
     )
 
 
@@ -173,23 +201,49 @@ def sweep(
     Degradation order per instrument: Avanza -> Alpaca (US only) -> cached
     last-good -> recorded error.
     """
-    keys = list(keys or INSTRUMENTS)
+    # Distinguish None ("all") from an explicitly empty list ("nothing"). An
+    # empty book previously swept all 26 instruments every cycle for no reason.
+    keys = list(INSTRUMENTS if keys is None else keys)
     cache = cache or {}
     started = time.time()
     fetch = quote_fn or _avanza_quote_fn()
     sweep_result = PriceSweep(swept_at=started)
 
+    consecutive_failures = 0
+    session_dead = False
+
     for key in keys:
         inst = INSTRUMENTS[key]
+        if session_dead:
+            # Stop hitting a dead session. Continuing through all 26 instruments
+            # is what drives repeated browser relaunches inside api_get and the
+            # consecutive-failure escalation, precisely while the metals loop may
+            # be managing real orders.
+            sweep_result.errors[key] = "skipped: avanza session unavailable"
+            _serve_from_cache_or_error(sweep_result, key, cache, now_ms, fallback_fn, inst)
+            continue
         try:
             raw = fetch(inst.avanza_ob)
             if not raw:
                 raise ValueError("empty quote payload")
             sweep_result.quotes[key] = build_quote(inst, raw, now_ms=now_ms)
+            consecutive_failures = 0
             continue
         except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}"
-            logger.warning("swedbank: avanza quote failed for %s (%s)", key, reason)
+            consecutive_failures += 1
+            if consecutive_failures >= SESSION_FAILURE_ABORT:
+                session_dead = True
+                logger.warning(
+                    "swedbank: %d consecutive avanza failures — treating session as "
+                    "down and aborting the remaining sweep (%s)",
+                    consecutive_failures,
+                    reason,
+                )
+            else:
+                logger.warning(
+                    "swedbank: avanza quote failed for %s (%s)", key, reason
+                )
 
         try:
             fb = (fallback_fn or _alpaca_fallback)(inst)
@@ -229,15 +283,78 @@ def sweep(
         sweep_result.errors[key] = "no price available from any source"
 
     if fx_fn is not None:
-        try:
-            sweep_result.fx["USDSEK"] = float(fx_fn())
-        except Exception as exc:
-            # A silently-stale FX rate mis-values ~70% of the book by whatever
-            # the drift is, with no other symptom. Record it as an error.
-            sweep_result.errors["__fx__"] = f"USD/SEK unavailable: {exc}"
+        rate, err = resolve_fx(fx_fn)
+        if rate is not None:
+            sweep_result.fx["USDSEK"] = rate
+        if err:
+            sweep_result.errors["__fx__"] = err
 
     sweep_result.duration_s = time.time() - started
     return sweep_result
+
+
+def _serve_from_cache_or_error(sweep_result, key, cache, now_ms, fallback_fn, inst):
+    """Fallback chain used when the live Avanza path is skipped or failed."""
+    try:
+        fb = (fallback_fn or _alpaca_fallback)(inst)
+    except Exception as exc:
+        fb = None
+        logger.warning("swedbank: alpaca fallback failed for %s: %s", key, exc)
+    if fb is not None:
+        sweep_result.quotes[key] = fb
+        return
+    cached = cache.get(key)
+    if not cached:
+        return
+    try:
+        q = Quote(**{k: v for k, v in cached.items() if k in Quote.__annotations__})
+        q.degraded = True
+        q.source = f"{q.source}:cached"
+        q.note = "no live source; last-good price"
+        if q.as_of_ms:
+            now = now_ms if now_ms is not None else int(time.time() * 1000)
+            q.age_s = max(0.0, (now - q.as_of_ms) / 1000.0)
+    except Exception as exc:
+        logger.warning("swedbank: unusable cache entry for %s: %s", key, exc)
+        return
+    sweep_result.quotes[key] = q
+
+
+def resolve_fx(fx_fn):
+    """Resolve USD/SEK, refusing the silent hard-coded fallback.
+
+    `portfolio.fx_rates.fetch_usd_sek()` does NOT raise when the upstream API
+    fails: if its sanity check fails and no cached rate exists it returns
+    `FX_RATE_FALLBACK` (10.50). That is ~9.5% above a realistic rate and would
+    overstate every USD position — roughly 70% of this book — with no error, no
+    exception and a green freshness banner.
+
+    Valuation must never silently use a placeholder. Returns (rate, error): a
+    rate of None means USD positions become `unpriced` rather than mis-valued.
+    """
+    try:
+        raw = fx_fn()
+    except Exception as exc:
+        return None, f"USD/SEK unavailable: {exc}"
+    if raw is None:
+        return None, "USD/SEK unavailable: source returned None"
+    try:
+        rate = float(raw)
+    except (TypeError, ValueError):
+        return None, f"USD/SEK unusable: {raw!r}"
+    if not math.isfinite(rate) or rate <= 0:
+        return None, f"USD/SEK not a usable rate: {rate!r}"
+    try:
+        from portfolio.fx_rates import FX_RATE_FALLBACK
+    except Exception:
+        FX_RATE_FALLBACK = None
+    if FX_RATE_FALLBACK is not None and rate == float(FX_RATE_FALLBACK):
+        return None, (
+            f"USD/SEK returned the hard-coded fallback ({rate}) — the live "
+            f"source is down and no cached rate exists. Refusing to value USD "
+            f"positions at a placeholder."
+        )
+    return rate, None
 
 
 def value_holding(qty, quote, fx, base="SEK"):

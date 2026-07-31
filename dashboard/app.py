@@ -1971,11 +1971,24 @@ def api_swedbank():
             }
         )
 
-    snap = DATA_DIR / "swedbank_snapshot.json"
-    try:
-        age = max(0.0, time.time() - snap.stat().st_mtime)
-    except OSError:
-        age = None
+    # Age MUST come from the payload we are actually returning. _read_json is
+    # TTL-cached, so pairing cached content with a fresh stat() reported old
+    # positions as seconds-fresh — defeating the whole freshness guarantee.
+    import datetime as _dt
+
+    age = None
+    as_of = data.get("as_of")
+    if as_of:
+        try:
+            ts = _dt.datetime.fromisoformat(as_of)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=_dt.timezone.utc)
+            age = max(
+                0.0,
+                (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds(),
+            )
+        except (ValueError, TypeError):
+            age = None
 
     hb = {}
     try:

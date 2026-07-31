@@ -125,9 +125,21 @@ def cmd_sync(args):
         n = name.strip().lower()
         if n in name_to_key:
             return name_to_key[n]
-        for full, k in name_to_key.items():
-            if full.startswith(n) or n.startswith(full):
-                return k
+        # Collect ALL prefix candidates and refuse unless exactly one matches.
+        # Returning the first silently mapped a broker-truncated name to the
+        # wrong instrument — the Bitcoin and Ether tracker names share a long
+        # prefix, so the holding would then be priced off the wrong orderbook.
+        cands = sorted(
+            {k for full, k in name_to_key.items()
+             if full.startswith(n) or n.startswith(full)}
+        )
+        if len(cands) == 1:
+            return cands[0]
+        if len(cands) > 1:
+            raise KeyError(
+                f"export row {name!r} is ambiguous — matches {cands}. Refusing to "
+                f"guess; add an exact alias in portfolio/swedbank/instruments.py"
+            )
         raise KeyError(
             f"cannot map export row {name!r} to a pinned instrument; "
             f"add it to portfolio/swedbank/instruments.py"
@@ -180,7 +192,9 @@ def cmd_sync(args):
         "write would have to\n  guess which account each position belongs to. "
         "Seed the book per-account instead."
     )
-    return 0
+    # Exit non-zero: nothing was written, so reporting success would let a
+    # caller believe a ledger now exists when the loop will still fail to load.
+    return 3
 
 
 def main(argv=None):

@@ -56,7 +56,7 @@ class TestMarkingRule:
         assert q.mark == pytest.approx(100.1)
 
     def test_no_usable_price_raises(self):
-        with pytest.raises(ValueError, match="neither usable last nor bid/ask"):
+        with pytest.raises(ValueError, match="no usable price"):
             build_quote(by_key("NVDA"), {"buy": None, "sell": None, "last": None})
 
     def test_spread_percent_computed(self):
@@ -236,3 +236,77 @@ class TestCorruptCacheDoesNotCrashSweep:
         )
         assert "MU" not in s.quotes
         assert "no price available" in s.errors["MU"]
+
+
+class TestStrictFx:
+    """fetch_usd_sek() does NOT raise on failure — it returns a hard-coded
+    FX_RATE_FALLBACK (10.50). Valuing ~70% of the book at a placeholder, with no
+    error and a green banner, is the worst silent failure available here."""
+
+    def test_hardcoded_fallback_is_refused(self):
+        from portfolio.fx_rates import FX_RATE_FALLBACK
+        from portfolio.swedbank.pricing import resolve_fx
+
+        rate, err = resolve_fx(lambda: FX_RATE_FALLBACK)
+        assert rate is None
+        assert "hard-coded fallback" in err
+
+    def test_sweep_records_fx_error_and_omits_rate(self):
+        from portfolio.fx_rates import FX_RATE_FALLBACK
+
+        s = sweep(keys=["NVDA"], quote_fn=lambda ob: raw(), now_ms=NOW_MS,
+                  fx_fn=lambda: FX_RATE_FALLBACK)
+        assert "USDSEK" not in s.fx
+        assert "__fx__" in s.errors
+
+    @pytest.mark.parametrize("bad", [None, 0, -1, float("nan"), float("inf"), "abc"])
+    def test_unusable_rates_rejected(self, bad):
+        from portfolio.swedbank.pricing import resolve_fx
+
+        rate, err = resolve_fx(lambda: bad)
+        assert rate is None and err
+
+    def test_good_rate_passes(self):
+        from portfolio.swedbank.pricing import resolve_fx
+
+        rate, err = resolve_fx(lambda: 9.6)
+        assert rate == pytest.approx(9.6) and err is None
+
+
+class TestQuoteValidity:
+    def test_zero_last_without_bidask_is_rejected(self):
+        # A suspended instrument quoting 0 would otherwise value at 0 and render
+        # as a clean -100% loss instead of "unpriced".
+        with pytest.raises(ValueError, match="no usable price"):
+            build_quote(by_key("NVDA"), {"buy": None, "sell": None, "last": 0})
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -5.0])
+    def test_non_finite_or_negative_mark_rejected(self, bad):
+        with pytest.raises(ValueError, match="no usable price"):
+            build_quote(by_key("NVDA"), {"buy": None, "sell": None, "last": bad})
+
+    def test_not_real_time_is_degraded(self):
+        q = build_quote(by_key("NVDA"), raw(rt=False), now_ms=NOW_MS)
+        assert q.degraded
+        assert "not real-time" in q.note
+
+    def test_very_old_quote_is_degraded(self):
+        q = build_quote(by_key("NVDA"), raw(updated=NOW_MS - 7200_000), now_ms=NOW_MS)
+        assert q.degraded
+        assert "old" in q.note
+
+    def test_fresh_realtime_quote_is_not_degraded(self):
+        q = build_quote(by_key("NVDA"), raw(), now_ms=NOW_MS)
+        assert not q.degraded
+
+
+class TestEmptyKeys:
+    def test_empty_key_list_touches_nothing(self):
+        calls = []
+        s = sweep(keys=[], quote_fn=lambda ob: calls.append(ob) or raw(), now_ms=NOW_MS)
+        assert calls == []
+        assert s.quotes == {}
+
+    def test_none_still_means_all(self):
+        s = sweep(keys=None, quote_fn=lambda ob: raw(), now_ms=NOW_MS)
+        assert len(s.quotes) == len(INSTRUMENTS)

@@ -526,3 +526,6 @@ data/*.corrupt
 # constraint". Same rationale as data/portfolio_state*.json above.
 data/swedbank_book.json
 data/swedbank_*.json
+# ...and every other swedbank runtime artifact. The heartbeat and lock
+# are not .json, and a heartbeat previously carried a real portfolio total.
+data/swedbank_*

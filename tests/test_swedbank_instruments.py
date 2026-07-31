@@ -108,14 +108,41 @@ class TestPinnedIdsStillResolve:
     manual order. Verify upstream has not moved any of them."""
 
     def test_each_pinned_id_resolves_to_expected_instrument(self):
+        """Compare the NAME upstream reports against the name we pinned.
+
+        The previous version of this test only asserted the quote endpoint
+        returned something non-empty — so swapping NVDA's orderbook ID for any
+        other valid security would have passed while silently valuing NVDA at
+        the wrong price. Checking identity is the entire point.
+        """
+        import os
+
+        if os.environ.get("PF_LIVE_AVANZA_TESTS") != "1":
+            pytest.skip("set PF_LIVE_AVANZA_TESTS=1 to hit the live Avanza session")
+
         from portfolio.avanza_session import api_get, verify_session
 
         if not verify_session():
             pytest.skip("no live Avanza session")
 
+        def _norm(x):
+            return "".join(ch for ch in (x or "").lower() if ch.isalnum())
+
         mismatches = []
         for inst in INSTRUMENTS.values():
-            data = api_get(f"/_api/market-guide/stock/{inst.avanza_ob}/quote")
-            if not data:
-                mismatches.append((inst.key, inst.avanza_ob, "no quote"))
-        assert not mismatches, f"pinned ids failed to resolve: {mismatches}"
+            detail = None
+            for typ in ("stock", "certificate", "warrant", "exchange_traded_fund"):
+                try:
+                    detail = api_get(f"/_api/market-guide/{typ}/{inst.avanza_ob}")
+                except Exception:
+                    detail = None
+                if detail:
+                    break
+            if not detail:
+                mismatches.append((inst.key, inst.avanza_ob, "no instrument detail"))
+                continue
+            upstream = detail.get("name") or detail.get("orderbook", {}).get("name")
+            a, b = _norm(upstream), _norm(inst.name)
+            if not (a and b and (a.startswith(b) or b.startswith(a) or a == b)):
+                mismatches.append((inst.key, inst.avanza_ob, f"{upstream!r} != {inst.name!r}"))
+        assert not mismatches, f"pinned orderbook ids no longer match: {mismatches}"

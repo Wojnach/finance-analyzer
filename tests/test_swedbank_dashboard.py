@@ -1,5 +1,6 @@
 """/api/swedbank route tests. Synthetic snapshot only — this repo is public."""
 
+import datetime
 import json
 
 import pytest
@@ -24,7 +25,7 @@ def _auth():
 
 SNAP = {
     "base_currency": "SEK",
-    "as_of": "2026-01-01T00:00:00+00:00",
+    "as_of": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "fx": {"USDSEK": 9.5},
     "accounts": {
         "A": {
