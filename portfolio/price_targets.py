@@ -331,10 +331,20 @@ def compute_targets(ticker: str, side: str, price_usd: float,
     from portfolio.monte_carlo import trading_days_for_ticker
     td = trading_days_for_ticker(ticker)
     vol = volatility_from_atr(atr_pct, trading_days=td)
-    if side == "buy":
-        drift = drift_from_probability(1.0 - p_up, vol, trading_days=td)
-    else:
-        drift = drift_from_probability(p_up, vol, trading_days=td)
+    # BUG (fixed 2026-08-01): the buy branch used `1.0 - p_up`, double-negating
+    # the direction. `fill_probability_buy` already negates drift internally, but
+    # that negation is the REFLECTION transform for P(min <= target) — paired
+    # with the price**2/target reflection — not a directional flip. Inverting the
+    # belief here on top of it made a MORE bullish view produce DEEPER dips.
+    #
+    # Measured before the fix (100 spot, buy limit 99, 2% ATR, 6.5h):
+    #   p_up=0.1 (bearish) -> fill_prob 0.003
+    #   p_up=0.9 (bullish) -> fill_prob 0.370
+    # i.e. exactly backwards. After: 0.370 and 0.003 respectively.
+    #
+    # p_up is the probability the price rises, so both sides derive drift from
+    # it directly; the side-specific maths lives in fill_probability_*.
+    drift = drift_from_probability(p_up, vol, trading_days=td)
 
     # Blend Chronos drift when available
     if chronos_drift is not None:
