@@ -326,3 +326,41 @@ class TestUnderlyingIsNeverSelfReferencing:
         )
         assert r.get("error")
         assert r.get("action") is None
+
+
+class TestUniverseInjectionAndStoHours:
+    def test_evaluate_universe_forwards_ticker_fn(self):
+        """evaluate_universe is the LOOP's entry point. Without ticker_fn
+        passthrough, a fully-faked loop test still hit live Binance for the XBT
+        rows — reintroducing, one level up, the exact isolation hole that adding
+        alpaca_fn was meant to close."""
+        used = []
+        signals.evaluate_universe(
+            keys=["XBT-BTC"],
+            chart_fn=lambda *a: _bars(),
+            alpaca_fn=lambda *a: None,
+            ticker_fn=lambda t, horizon="1d": used.append(t)
+            or (ohlcv.to_frame(_bars()), "price_source"),
+        )
+        assert used == ["BTC-USD"], "real fetch_by_ticker was used instead of the fake"
+
+    def test_sto_hours_normalised_to_us_equivalent(self):
+        """price_targets._year_fraction hardcodes 6.5h as one trading day, but a
+        Stockholm session is 8.5h and one daily bar spans it — so a full session
+        must equal ONE trading day of variance. Uncorrected this inflated every
+        STO band by sqrt(8.5/6.5) = 1.143, permanently."""
+        r = signals.evaluate(
+            by_key("INVE-B"), chart_fn=lambda *a: _bars(), alpaca_fn=lambda *a: None
+        )
+        t = r.get("trajectory") or {}
+        raw, _ = signals._hours_remaining(by_key("INVE-B"))
+        assert t.get("hours_remaining") == pytest.approx(raw * (6.5 / 8.5), rel=1e-6)
+
+    def test_us_hours_not_rescaled(self):
+        r = signals.evaluate(
+            by_key("NVDA"), chart_fn=lambda *a: _bars(), alpaca_fn=lambda *a: None
+        )
+        raw, _ = signals._hours_remaining(by_key("NVDA"))
+        assert (r.get("trajectory") or {}).get("hours_remaining") == pytest.approx(
+            raw, rel=1e-6
+        )

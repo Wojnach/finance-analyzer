@@ -251,6 +251,15 @@ def _trajectory(inst, sig, ind, extra):
         return {"error": "no ATR — cannot project a range"}
 
     hours_left, market_open = _hours_remaining(inst)
+    is_24h = sig["signal_ticker"].endswith("-USD")
+    if not is_24h and inst.venue == "STO":
+        # price_targets._year_fraction hardcodes 6.5h as one trading day, but a
+        # Stockholm session is 8.5h and one daily Avanza bar spans that whole
+        # session — so one full session must equal exactly ONE trading day of
+        # variance, not 8.5/6.5 = 1.308. Left uncorrected this inflated every
+        # STO band by sqrt(1.308) = 1.143, permanently. Convert to
+        # US-equivalent trading hours.
+        hours_left = hours_left * (6.5 / 8.5)
     conf = max(0.0, min(1.0, float(sig.get("confidence") or 0.0)))
     # Map consensus to a directional probability, centred on 0.5 for HOLD so a
     # no-opinion verdict produces a symmetric range rather than a fake edge.
@@ -269,7 +278,7 @@ def _trajectory(inst, sig, ind, extra):
             hours_remaining=hours_left,
             indicators=ind,
             extra=extra,
-            is_24h=sig["signal_ticker"].endswith("-USD"),
+            is_24h=is_24h,
             regime=sig.get("regime") or "",
             n_paths=4000,
         )
@@ -304,25 +313,24 @@ def _trajectory(inst, sig, ind, extra):
 
 
 def evaluate_universe(keys=None, horizon="1d", chart_fn=None, config=None,
-                      alpaca_fn=None):
+                      alpaca_fn=None, ticker_fn=None):
     """Sequentially evaluate the universe. Sequential for the same reason
     pricing.sweep is: the real-money metals loop shares this Avanza session."""
     keys = list(INSTRUMENTS if keys is None else keys)
-    # Certificates share an underlying with each other; evaluating the same
-    # underlying repeatedly would triple the Avanza chart calls for no gain.
-    cache, out = {}, {}
+    # No result cache. A previous version memoised whole result rows per
+    # underlying, which could never hit in production (underlyings cannot be
+    # book keys — book.py validates against INSTRUMENTS — and no two keys share
+    # one) while silently leaking asset_class, the underlying note and the other
+    # instrument's venue-specific hours between rows the moment a caller passed
+    # unsorted keys. Dead code whose only reachable behaviour is confident-wrong
+    # output is exactly this subsystem's enemy. If dedup is ever needed, memoise
+    # (df, source) per signal_ticker — cache the DATA, never the row.
+    out = {}
     for key in keys:
-        inst = INSTRUMENTS[key]
-        under = UNDERLYING.get(key, key)
-        if under in cache and under != key:
-            out[key] = {**cache[under], "key": key, "name": inst.name}
-            continue
-        res = evaluate(
-            inst, horizon=horizon, chart_fn=chart_fn, config=config,
-            alpaca_fn=alpaca_fn,
+        out[key] = evaluate(
+            INSTRUMENTS[key], horizon=horizon, chart_fn=chart_fn, config=config,
+            alpaca_fn=alpaca_fn, ticker_fn=ticker_fn,
         )
-        out[key] = res
-        cache[under] = res
     return out
 
 
