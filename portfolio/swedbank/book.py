@@ -150,11 +150,18 @@ def revalue(book, sweep_result):
     fx = (sweep_result.fx or {}).get("USDSEK")
     out_accounts = {}
     unpriced, degraded, stale = [], [], []
-    g_value = g_cost = g_cash = 0.0
+    g_value = g_cost = g_cash = g_value_costed = 0.0
+    g_costless = 0
 
     for label, acc in book.accounts.items():
         rows = []
-        a_value = a_cost = 0.0
+        # a_value is every priced position. a_value_costed counts ONLY positions
+        # that carry a cost basis, and is what P&L is computed against. Summing
+        # all value against a partial cost would inflate P&L by the entire market
+        # value of every cost-less position — e.g. two positions worth 100 each,
+        # one with cost 80 and one with no cost, would report +120 instead of +20.
+        a_value = a_cost = a_value_costed = 0.0
+        n_costless = 0
         for pos in acc.positions:
             q = sweep_result.quotes.get(pos.key)
             if q is None:
@@ -195,7 +202,11 @@ def revalue(book, sweep_result):
                 }
             )
             a_value += value
-            a_cost += pos.cost_basis or 0.0
+            if pos.cost_basis:
+                a_cost += pos.cost_basis
+                a_value_costed += value
+            else:
+                n_costless += 1
         rows.sort(key=lambda r: -r["value"])
         out_accounts[label] = {
             "cash": acc.cash,
@@ -203,12 +214,18 @@ def revalue(book, sweep_result):
             "holdings_value": a_value,
             "total_value": a_value + acc.cash,
             "cost_basis": a_cost,
-            "pnl": a_value - a_cost if a_cost else None,
-            "pnl_pct": ((a_value / a_cost - 1) * 100.0) if a_cost else None,
+            "pnl": a_value_costed - a_cost if a_cost else None,
+            "pnl_pct": ((a_value_costed / a_cost - 1) * 100.0) if a_cost else None,
+            # P&L covers only the costed subset. Surfaced so the UI can say so
+            # rather than implying it covers the whole account.
+            "pnl_covers_value": a_value_costed,
+            "positions_without_cost_basis": n_costless,
         }
         g_value += a_value
+        g_value_costed += a_value_costed
         g_cost += a_cost
         g_cash += acc.cash
+        g_costless += n_costless
 
     return {
         "as_of": _now_iso(),
@@ -220,8 +237,10 @@ def revalue(book, sweep_result):
             "cash": g_cash,
             "total_value": g_value + g_cash,
             "cost_basis": g_cost,
-            "pnl": g_value - g_cost if g_cost else None,
-            "pnl_pct": ((g_value / g_cost - 1) * 100.0) if g_cost else None,
+            "pnl": g_value_costed - g_cost if g_cost else None,
+            "pnl_pct": ((g_value_costed / g_cost - 1) * 100.0) if g_cost else None,
+            "pnl_covers_value": g_value_costed,
+            "positions_without_cost_basis": g_costless,
         },
         "consolidated": _consolidate(out_accounts),
         "unpriced": unpriced,
@@ -245,6 +264,7 @@ def _consolidate(out_accounts):
                     "qty": 0,
                     "value": 0.0,
                     "cost_basis": 0.0,
+                    "_value_costed": 0.0,
                     "mark": r["mark"],
                     "currency": r["currency"],
                     "avanza_ob": r["avanza_ob"],
@@ -252,10 +272,11 @@ def _consolidate(out_accounts):
             )
             e["qty"] += r["qty"]
             e["value"] += r["value"]
-            e["cost_basis"] += r["cost_basis"] or 0.0
+            if r["cost_basis"]:
+                e["cost_basis"] += r["cost_basis"]
+                e["_value_costed"] += r["value"]
     for e in agg.values():
-        e["pnl"] = e["value"] - e["cost_basis"] if e["cost_basis"] else None
-        e["pnl_pct"] = (
-            (e["value"] / e["cost_basis"] - 1) * 100.0 if e["cost_basis"] else None
-        )
+        vc = e.pop("_value_costed")
+        e["pnl"] = vc - e["cost_basis"] if e["cost_basis"] else None
+        e["pnl_pct"] = (vc / e["cost_basis"] - 1) * 100.0 if e["cost_basis"] else None
     return sorted(agg.values(), key=lambda e: -e["value"])
