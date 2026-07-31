@@ -93,7 +93,7 @@ def applicable_for(inst):
     return out
 
 
-def evaluate(inst, horizon="1d", chart_fn=None, config=None):
+def evaluate(inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None):
     """Signals + trajectory for one instrument.
 
     Returns a dict, or one carrying `error` — never a neutral/HOLD verdict
@@ -120,7 +120,9 @@ def evaluate(inst, horizon="1d", chart_fn=None, config=None):
 
     src_inst = INSTRUMENTS.get(signal_ticker, inst)
     try:
-        df, source = ohlcv.fetch(src_inst, horizon=horizon, chart_fn=chart_fn)
+        df, source = ohlcv.fetch(
+            src_inst, horizon=horizon, chart_fn=chart_fn, alpaca_fn=alpaca_fn
+        )
     except Exception as exc:
         return {**base, "error": f"no OHLCV: {exc}"}
     base["ohlcv_source"] = source
@@ -266,8 +268,11 @@ def _trajectory(inst, sig, ind, extra):
     t = t or {}
     extremes = t.get("extremes") or {}
     price = float(sig["price"]) or 0.0
+    # `extremes` is a PERCENTILE dict (p10/p25/p50/p75/p90), not high/low — so
+    # the earlier high/low lookup always yielded None. p10..p90 is the honest
+    # 80% projection band.
     move_pct = None
-    hi, lo = extremes.get("high"), extremes.get("low")
+    lo, hi = extremes.get("p10"), extremes.get("p90")
     if price and hi is not None and lo is not None:
         move_pct = round((float(hi) - float(lo)) / price * 100.0, 2)
     return {
@@ -278,12 +283,13 @@ def _trajectory(inst, sig, ind, extra):
         "targets": t.get("targets") or [],
         "recommended": t.get("recommended"),
         "extremes": extremes,
-        "projected_range_pct": move_pct,
+        "projected_range_pct": move_pct,   # p10..p90 band, % of spot
         "atr_pct": atr_pct,
     }
 
 
-def evaluate_universe(keys=None, horizon="1d", chart_fn=None, config=None):
+def evaluate_universe(keys=None, horizon="1d", chart_fn=None, config=None,
+                      alpaca_fn=None):
     """Sequentially evaluate the universe. Sequential for the same reason
     pricing.sweep is: the real-money metals loop shares this Avanza session."""
     keys = list(INSTRUMENTS if keys is None else keys)
@@ -296,7 +302,10 @@ def evaluate_universe(keys=None, horizon="1d", chart_fn=None, config=None):
         if under in cache and under != key:
             out[key] = {**cache[under], "key": key, "name": inst.name}
             continue
-        res = evaluate(inst, horizon=horizon, chart_fn=chart_fn, config=config)
+        res = evaluate(
+            inst, horizon=horizon, chart_fn=chart_fn, config=config,
+            alpaca_fn=alpaca_fn,
+        )
         out[key] = res
         cache[under] = res
     return out
