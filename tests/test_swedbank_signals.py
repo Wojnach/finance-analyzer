@@ -282,3 +282,47 @@ class TestAssetClasses:
     def test_certificates_and_warrant_are_not_equity(self):
         for key in ("XBT-BTC", "XBT-ETH", "MINI-TSMC"):
             assert by_key(key).asset_class is not AssetClass.EQUITY
+
+
+class TestUnderlyingIsNeverSelfReferencing:
+    """The seventh contract bug: BTC-USD and ETH-USD are NOT pinned in
+    INSTRUMENTS, so `INSTRUMENTS.get(signal_ticker, inst)` silently fell back to
+    the CERTIFICATE — computing indicators on exactly the thin decaying SEK
+    series the underlying mapping exists to avoid, while the payload still
+    claimed the underlying was used. Only MINI-TSMC worked, because TSM happens
+    to be pinned, and that was the one verified live."""
+
+    def test_crypto_underlyings_are_not_pinned(self):
+        from portfolio.swedbank.instruments import INSTRUMENTS
+
+        assert "BTC-USD" not in INSTRUMENTS
+        assert "ETH-USD" not in INSTRUMENTS
+        assert "TSM" in INSTRUMENTS
+
+    @pytest.mark.parametrize("key", ["XBT-BTC", "XBT-ETH"])
+    def test_never_fetches_the_certificates_own_orderbook(self, key):
+        seen = []
+
+        def chart(ob, *a, **k):
+            seen.append(ob)
+            return _bars()
+
+        signals.evaluate(
+            by_key(key),
+            chart_fn=chart,
+            alpaca_fn=lambda *a: None,
+            ticker_fn=lambda t, horizon="1d": (ohlcv.to_frame(_bars()), "price_source"),
+        )
+        assert by_key(key).avanza_ob not in seen, (
+            "fetched the certificate's own orderbook while claiming the underlying"
+        )
+
+    @pytest.mark.parametrize("key", ["XBT-BTC", "XBT-ETH"])
+    def test_unfetchable_underlying_errors_rather_than_self_referencing(self, key):
+        r = signals.evaluate(
+            by_key(key),
+            chart_fn=lambda *a: _bars(),
+            ticker_fn=lambda t, horizon="1d": (_ for _ in ()).throw(RuntimeError("down")),
+        )
+        assert r.get("error")
+        assert r.get("action") is None

@@ -73,6 +73,32 @@ def to_frame(payload):
     return df[["timestamp", "open", "high", "low", "close", "volume"]]
 
 
+def fetch_by_ticker(ticker, horizon=DEFAULT_HORIZON):
+    """OHLCV for a ticker that is NOT a pinned Swedbank instrument.
+
+    The crypto underlyings (BTC-USD, ETH-USD) have no orderbook ID in our table,
+    so they cannot go through the Avanza chart path. Route them to the canonical
+    price_source router instead of silently falling back to the certificate,
+    which would compute indicators on exactly the thin, decaying, SEK-denominated
+    series the underlying mapping exists to avoid.
+    """
+    from portfolio.price_source import fetch_klines
+
+    interval = {"1h": "1h", "1d": "1d", "1w": "1d"}.get(horizon, "1d")
+    df = fetch_klines(ticker, interval=interval, limit=400)
+    if df is None or len(df) < MIN_BARS:
+        raise OhlcvError(
+            f"{ticker}: price_source returned "
+            f"{0 if df is None else len(df)} bars, need {MIN_BARS}"
+        )
+    out = df.copy()
+    if "volume" not in out.columns:
+        out["volume"] = 0
+    if "timestamp" not in out.columns:
+        out = out.reset_index().rename(columns={out.index.name or "index": "timestamp"})
+    return out, "price_source"
+
+
 def fetch(inst, horizon=DEFAULT_HORIZON, chart_fn=None, alpaca_fn=None):
     """OHLCV for one instrument. Avanza first, Alpaca only for US names.
 

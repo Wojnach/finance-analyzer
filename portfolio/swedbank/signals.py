@@ -93,7 +93,8 @@ def applicable_for(inst):
     return out
 
 
-def evaluate(inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None):
+def evaluate(inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None,
+             ticker_fn=None):
     """Signals + trajectory for one instrument.
 
     Returns a dict, or one carrying `error` — never a neutral/HOLD verdict
@@ -118,11 +119,25 @@ def evaluate(inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None):
             f"the certificate's own series unreliable for indicators"
         )
 
-    src_inst = INSTRUMENTS.get(signal_ticker, inst)
+    # An UNDERLYING that is not itself a pinned instrument (BTC-USD, ETH-USD)
+    # has no orderbook ID, so it cannot use the Avanza chart path. Previously
+    # `INSTRUMENTS.get(signal_ticker, inst)` silently fell back to the
+    # CERTIFICATE — computing indicators on exactly the thin, decaying SEK series
+    # the underlying mapping exists to avoid, while the payload still claimed the
+    # underlying was used. Route those through price_source instead, and never
+    # self-reference.
+    src_inst = INSTRUMENTS.get(signal_ticker)
     try:
-        df, source = ohlcv.fetch(
-            src_inst, horizon=horizon, chart_fn=chart_fn, alpaca_fn=alpaca_fn
-        )
+        if src_inst is not None:
+            df, source = ohlcv.fetch(
+                src_inst, horizon=horizon, chart_fn=chart_fn, alpaca_fn=alpaca_fn
+            )
+        elif signal_ticker != key:
+            df, source = (ticker_fn or ohlcv.fetch_by_ticker)(
+                signal_ticker, horizon=horizon
+            )
+        else:
+            return {**base, "error": f"{key}: no pinned instrument and no source"}
     except Exception as exc:
         return {**base, "error": f"no OHLCV: {exc}"}
     base["ohlcv_source"] = source
@@ -254,7 +269,7 @@ def _trajectory(inst, sig, ind, extra):
             hours_remaining=hours_left,
             indicators=ind,
             extra=extra,
-            is_24h=False,
+            is_24h=sig["signal_ticker"].endswith("-USD"),
             regime=sig.get("regime") or "",
             n_paths=4000,
         )
