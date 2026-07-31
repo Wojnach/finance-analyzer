@@ -206,6 +206,43 @@ spread is a real personal cost, not a footnote.
 
 6. Static asset changes require bumping the `sw.js` CACHE version.
 
+## Asset-class registration — why we touch neither `tickers.py` nor `signal_engine.py`
+
+`_compute_applicable_count` (signal_engine.py:1727) classifies purely by global set
+membership:
+
+```python
+is_crypto = ticker in CRYPTO_SYMBOLS
+is_metal  = ticker in METALS_SYMBOLS
+is_stock  = ticker in STOCK_SYMBOLS      # == {"MSTR"}
+...
+if sig in _NON_STOCK_SIGNALS and is_stock: continue   # orderbook_flow
+```
+
+This creates a trap with no good option among the obvious two:
+
+- **Leave the new tickers unregistered** → all three flags are `False`, so an equity
+  reads as "not a stock" and `orderbook_flow` (declared metals+crypto only) is applied
+  to it. Same class of defect as the asset-class mislabeling fixed in b5d2026b /
+  597176b2.
+- **Add them to `STOCK_SYMBOLS`** → the main loop is unaffected (it iterates `SYMBOLS`,
+  main.py:455/477), but `STOCK_SYMBOLS` is _not_ inert. `alpha_vantage.py:238,314`
+  iterates it for the fundamentals refresh against a hard **25 calls/day** quota;
+  19 extra tickers exhausts it and starves Tier-1. It also pulls in
+  `earnings_calendar.py:158,164,189`, `market_timing.py:312` and `reporting.py:202`.
+
+**Decision: use neither.** `portfolio/swedbank/instruments.py` carries an explicit
+`asset_class` field per instrument, and the swedbank signal runner computes applicability
+from that field — the same rules, parameterised instead of global.
+
+Consequences, all desirable:
+
+- Zero lines changed in `tickers.py` and `signal_engine.py` → zero Tier-1 blast radius.
+- Neither of the two heredoc-only files is touched for the signal work.
+- The already-failing `test_signal_pipeline.py::TestVoteCountIntegrity` assertions about
+  stock applicable-counts are unaffected.
+- Alpha Vantage quota untouched.
+
 ## Architecture
 
 ### 1. Ledger — `portfolio/swedbank/`
@@ -246,8 +283,12 @@ stale number as live.
 - [x] **ANSWERED.** Avanza exposes full OHLCV per orderbook ID — the Stockholm
       instruments can carry technical signals.
 - [ ] Avanza session contention with the real-money metals loop (highest priority).
-- [ ] Exact `signal_engine` entry point; can it run for a ticker absent from
-      `tickers.py SYMBOLS`?
+- [x] **ANSWERED.** Entry point is
+      `signal_engine.generate_signal(ind, ticker, config, timeframes, df, horizon)`
+      (signal*engine.py:3490). Indicators come from
+      `portfolio/indicators.py::compute_indicators(df, horizon)`. It only \_warns* on a
+      missing ticker — registry membership is not required to call it. See
+      "Asset-class registration" below for why we still must not rely on that.
 - [ ] Which of the 15 active signals genuinely apply to a plain equity.
 - [ ] Whether logging 26 new instruments pollutes Tier-1 accuracy stats.
 - [ ] Exact dashboard tab registration checklist.
@@ -276,5 +317,123 @@ Any failure beyond this set is attributable to this campaign.
 
 ## Premortem
 
-_(Pending — fresh general-purpose agent in flight. Non-skippable per `/fgl` step 3;
-no implementation begins until its findings are folded in.)_
+Written from failure modes actually encountered or demonstrated during exploration, not
+speculated. A dispatched premortem agent is still in flight; its findings get appended.
+
+### P0-1 — Real positions leak into a public repo, permanently
+
+**Chain:** The subsystem's natural artifacts (`data/swedbank_book.json`, a seeded test
+fixture, an exported JSON, a worked example in a commit message) contain real quantities
+and cost basis. `docs/GUIDELINES.md:21` makes push _mandatory_
+("work that isn't merged and pushed didn't happen"). `github.com/Wojnach/finance-analyzer`
+answers anonymous GET with 200 — it is public. Push publishes the operator's positions
+irreversibly; git history survives later deletion, and public repos are mirrored within
+minutes.
+
+**Already happened in this session.** The first two plan commits contained real account
+totals, cost basis and account labels. Caught before push and rewritten via
+`git reset --soft`.
+
+**Severity: P0.** **Hook:** `.gitignore` entries added (verified with `git check-ignore`);
+privacy constraint section at the top of this plan; a pre-merge grep for the operator's
+figures across the diff. Tests must construct synthetic books, never load the live file.
+
+### P0-2 — Wrong orderbook ID sends a real manual order to the wrong security
+
+**Chain:** Resolving instruments by Avanza search at runtime returned the wrong
+instrument for 2 of 19 US names during exploration — one zero-hit (legal name vs ticker),
+one **wrong share class** (Class C returned for a Class A holding; near-identical names,
+near-identical prices, so the error is invisible on inspection). A third name has a decoy
+second listing. Because the orderbook ID is both the pricing key and the deep-link the
+operator clicks to trade, a wrong ID mis-values the position _and_ routes a real order to
+the wrong security.
+
+**Severity: P0.** **Hook:** IDs pinned in `instruments.py`; a test asserts every pinned ID
+still resolves to its expected instrument name, so an upstream change fails loudly rather
+than silently repricing. No runtime search resolution anywhere in the code path.
+
+### P1-3 — Stale `last` on thin instruments silently overstates the book
+
+**Chain:** Avanza returns `last` even when the instrument has barely traded. Measured:
+one warrant had traded 15 units on the day with `last` **+4.04% above live mid** (it grew
+from +3.2% within an hour as the market moved and the warrant did not). A second
+instrument sat +1.05% off mid. Marking at `last` inflates those positions with no error,
+no exception, exit code 0.
+
+**Severity: P1 (silent wrong output).** **Hook:** mark at mid when `last` falls outside
+bid/ask; set a `stale_last` flag on the row; surface `spread` in the UI. Unit test with a
+synthetic quote whose `last` sits outside the spread, asserting mid is chosen and the flag
+is set.
+
+### P1-4 — Registering asset class exhausts the Alpha Vantage quota and starves Tier-1
+
+**Chain:** The intuitive fix for asset-class gating is adding the new equities to
+`STOCK_SYMBOLS`. The main loop is unaffected (it iterates `SYMBOLS`), so this looks free
+and tests would pass. But `alpha_vantage.py:238,314` iterates `STOCK_SYMBOLS` for the
+daily fundamentals refresh against a hard **25 requests/day** limit. Nineteen extra
+tickers exhausts the quota, and Tier-1's fundamentals silently go stale — a Tier-1
+degradation caused entirely by a monitoring-only subsystem, surfacing days later as
+`fundamentals_cache.json` staleness rather than as an error.
+
+**Severity: P1.** **Hook:** decided against touching the global sets at all (see
+"Asset-class registration"). Test asserts `portfolio.swedbank` imports do not mutate
+`tickers.STOCK_SYMBOLS`/`CRYPTO_SYMBOLS`/`METALS_SYMBOLS`.
+
+### P1-5 — Unregistered ticker mislabeled as non-stock, wrong signals applied
+
+**Chain:** The mirror of P1-4. Leave tickers out of the global sets and
+`_compute_applicable_count` (signal_engine.py:1727) evaluates `is_crypto/is_metal/is_stock`
+all `False`, so the `_NON_STOCK_SIGNALS` guard (`orderbook_flow`) never fires and an
+order-book microstructure signal designed for metals/crypto votes on an equity. Produces
+plausible-looking output that is quietly wrong.
+
+**Severity: P1.** **Hook:** explicit `asset_class` per instrument; applicability computed
+from that field; test asserting `orderbook_flow` is excluded for `asset_class="equity"`.
+
+### P2-6 — Avanza session contention with the real-money metals loop
+
+**Chain:** `metals_loop` places and cancels real stop-losses through the same
+authenticated session. A monitoring loop polling 26 instruments could contend for the
+Playwright browser context, trip rate limiting, or trigger a browser-recovery path while
+metals is mid-order — turning a monitoring feature into a failed stop-loss.
+
+**Measured:** a full 26-instrument sweep is 1.5 s sequential (median 20 ms/call), i.e. a
+2.5% duty cycle at 60 s. **Severity reduced from P0 to P2 by measurement** — there is no
+performance reason to use concurrency, so the contention mechanism is removed rather than
+managed.
+
+**Hook:** sequential-only, asserted by test; this loop never invokes browser recovery —
+on any session error it degrades to last-good-price and backs off, leaving recovery to
+the trading loops. Log a structured `swedbank_session_degraded` line rather than writing
+to `critical_errors.jsonl`, so it cannot burn the fix-agent backoff budget.
+
+### P2-7 — Layer 1 assumed alive when it is not
+
+**Chain:** `pf-dataloop` is currently `inactive` and _disabled_, alongside every other
+loop; only `pf-dashboard` runs. Code that reads `health_state.json`, `signal_log.jsonl`
+or `agent_summary*.json` would consume month-old frozen data as if current. The
+2026-07-18 redesign doc records this exact confusion already biting the dashboard
+("Claude Fundamental 100%" was a frozen lifetime counter read as live health).
+
+**Severity: P2.** **Hook:** the swedbank subsystem reads none of those files. Anything it
+does surface carries `as_of`/`age_sec`.
+
+### P2-8 — Parallel Claude sessions corrupt the book
+
+**Chain:** The operator routinely runs 3+ sessions against this repo. Two concurrent
+`swedbank sync` runs, or a sync racing the loop's price-cache write, could interleave
+writes to `data/swedbank_book.json`.
+
+**Severity: P2.** **Hook:** all writes through `file_utils.atomic_write_json`; the loop
+writes prices to a _separate_ cache file and never to the book; `sync` takes the same
+O_CREAT|O_EXCL singleton lock the oil loop uses (`data/oil_loop.py:98`).
+
+### Plan changes required
+
+1. `.gitignore` + privacy section — **done** before any code (P0-1).
+2. Pinned instrument table with a resolve-verification test (P0-2).
+3. Mark-at-mid rule with `stale_last` flag (P1-3).
+4. Explicit `asset_class`; do not touch the global ticker sets (P1-4, P1-5).
+5. Sequential-only pricing, no browser recovery, structured degradation log (P2-6).
+6. No reads of Layer-1 state files (P2-7).
+7. Atomic writes + singleton lock on sync; loop never writes the book (P2-8).
