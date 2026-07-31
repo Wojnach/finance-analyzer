@@ -144,6 +144,39 @@ finish, their briefs are reproducible from the sections below.
 4. Render in `views/swedbank.js`; an errored signal must NOT render as HOLD.
 5. Re-run the full suite against the 38-failure baseline; adversarial review.
 
+## SEVENTH bug (fixed) + one decision the OPERATOR must make
+
+**Seventh contract bug, same class as the other six.** `BTC-USD`/`ETH-USD` are
+not pinned in `INSTRUMENTS` (it holds only the 26 book names), so
+`INSTRUMENTS.get(signal_ticker, inst)` silently fell back to the CERTIFICATE.
+XBT-BTC/XBT-ETH computed indicators on the thin decaying SEK series the
+underlying mapping exists to avoid, while the payload still reported
+`signal_ticker: "BTC-USD"`. Only MINI-TSMC worked, because TSM happens to be
+pinned — and that was the one case verified live. **Verifying the case that
+passes is how this survived.** Fixed: unpinned underlyings route through
+`price_source`; an unfetchable underlying errors rather than self-referencing;
+`is_24h` derived from the signal ticker (hardcoding False inflated the crypto
+projection band ~2.3x). Three regression tests pin it.
+
+### OPEN — needs the operator's decision, do NOT change unilaterally
+
+`price_targets.py:334-337` computes buy-side drift as
+`drift_from_probability(1.0 - p_up)`, and `fill_probability_buy` negates again
+(`price_targets.py:106-107`). Double negation: a MORE bullish `p_up` yields
+DEEPER dip targets. Measured — side="buy", p_up=0.9 gives running-min p50 99.19
+vs 99.91 at p_up=0.1; a buy limit 1% below spot moves fill_prob 0.06 -> 0.37 as
+belief turns more bullish. Backwards.
+
+This is **shared Layer 1 code**, also reached by Tier-1's `compute_all_targets`
+buy path, so it is pre-existing there too. Tier-1's accuracy history may have
+adapted to the current behaviour, which is why it has been left alone. Fixing it
+is a Layer-1 decision with a blast radius beyond this subsystem.
+
+Related and also open: swedbank's `p_up = 0.5 +/- conf/2` manufactures edge —
+consensus confidence is not a calibrated probability, and at conf=0.8 it implies
+~173%/yr drift. The canonical caller uses calibrated focus probabilities.
+Suggested damping: `0.5 + conf*0.15`.
+
 ## Hard-won constraints (do not relearn these)
 
 - **`dashboard/app.py`, `portfolio/signal_engine.py`, `dashboard/system_status.py`,
