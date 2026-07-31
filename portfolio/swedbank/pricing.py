@@ -163,7 +163,9 @@ def _alpaca_fallback(inst):
     )
 
 
-def sweep(keys=None, quote_fn=None, now_ms=None, cache=None, fx_fn=None):
+def sweep(
+    keys=None, quote_fn=None, now_ms=None, cache=None, fx_fn=None, fallback_fn=None
+):
     """Fetch quotes for the given instruments, sequentially.
 
     Returns a PriceSweep. Individual failures are collected rather than raised —
@@ -190,7 +192,7 @@ def sweep(keys=None, quote_fn=None, now_ms=None, cache=None, fx_fn=None):
             logger.warning("swedbank: avanza quote failed for %s (%s)", key, reason)
 
         try:
-            fb = _alpaca_fallback(inst)
+            fb = (fallback_fn or _alpaca_fallback)(inst)
         except Exception as exc:
             fb = None
             logger.warning("swedbank: alpaca fallback failed for %s: %s", key, exc)

@@ -89,6 +89,10 @@ class TestSweep:
             keys=["NVDA", "MU"],
             quote_fn=fn,
             now_ms=NOW_MS,
+            # Inject the fallback too. Without this the test passes or fails
+            # depending on whether Alpaca credentials happen to be reachable,
+            # which silently changes WHICH code path is under test.
+            fallback_fn=lambda inst: None,
             cache={
                 "MU": {
                     "key": "MU",
@@ -108,6 +112,7 @@ class TestSweep:
     def test_cached_fallback_recomputes_age(self):
         s = sweep(
             keys=["MINI-TSMC"],
+            fallback_fn=lambda inst: None,
             quote_fn=lambda ob: (_ for _ in ()).throw(RuntimeError()),
             now_ms=NOW_MS,
             cache={
