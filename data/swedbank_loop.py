@@ -39,6 +39,14 @@ from portfolio.swedbank import book as bookmod  # noqa: E402
 from portfolio.swedbank.pricing import CACHE_PATH, sweep  # noqa: E402
 
 CYCLE_SECONDS = 60
+# A signal pass is an OHLCV fetch plus indicator computation per instrument —
+# orders of magnitude dearer than a quote sweep, and against the same shared
+# Avanza session. Signals also move on a far slower clock than price, so
+# recomputing every 60s would spend the session budget for no new information.
+# Every 15th cycle (~15 min); in between the previous result is carried forward
+# with its original signals_computed_at, so the UI shows real age instead of
+# implying every value in the snapshot was computed at as_of.
+SIGNAL_EVERY_N_CYCLES = 15
 SINGLETON_LOCK_FILE = "data/swedbank_loop.lock"
 HEARTBEAT_FILE = "data/swedbank_loop.heartbeat"
 SNAPSHOT_FILE = "data/swedbank_snapshot.json"
@@ -54,6 +62,7 @@ logging.basicConfig(
 logger = logging.getLogger("swedbank_loop")
 
 _stop = False
+_cycle_n = 0
 
 
 def _now_iso():
@@ -112,8 +121,27 @@ def _heartbeat(status, extra=None):
         atomic_write_json(HEARTBEAT_FILE, payload)
 
 
-def cycle():
+def _carried_signals():
+    """Previous signal pass, read from the snapshot we are about to replace.
+
+    Read from the file rather than kept in memory so a loop restart mid-interval
+    keeps showing the last real evaluation (with its true age) instead of a gap.
+    """
+    prev = load_json(SNAPSHOT_FILE, default=None) or {}
+    return prev.get("signals"), prev.get("signals_computed_at")
+
+
+def _evaluate_signals(keys):
+    from portfolio.swedbank import signals as sigmod
+
+    results = sigmod.evaluate_universe(keys=keys)
+    sigmod.log_snapshot(results)
+    return results
+
+
+def cycle(with_signals=None):
     """One pass: load book, sweep prices, revalue, persist snapshot + cache."""
+    global _cycle_n
     b = bookmod.load()
     cache = (load_json(CACHE_PATH, default=None) or {}).get("quotes") or {}
 
@@ -121,6 +149,36 @@ def cycle():
 
     s = sweep(keys=b.keys_held, cache=cache, fx_fn=fetch_usd_sek)
     val = bookmod.revalue(b, s)
+
+    if with_signals is None:
+        with_signals = _cycle_n % SIGNAL_EVERY_N_CYCLES == 0
+    _cycle_n += 1
+
+    if with_signals:
+        t0 = time.time()
+        try:
+            val["signals"] = _evaluate_signals(b.keys_held)
+            val["signals_computed_at"] = _now_iso()
+            n_err = sum(1 for v in val["signals"].values() if v.get("error"))
+            logger.info(
+                "signals: %d evaluated (%d error), %.1fs",
+                len(val["signals"]),
+                n_err,
+                time.time() - t0,
+            )
+        except Exception as exc:
+            # Pricing is the primary job. A broken signal pass must cost the
+            # operator its own row and nothing else — never the valuation. The
+            # error is stored rather than swallowed so the UI shows "no signal",
+            # which is not the same thing as HOLD.
+            logger.warning("signal evaluation failed: %s: %s", type(exc).__name__, exc)
+            val["signals"] = {"error": f"{type(exc).__name__}: {exc}"}
+            val["signals_computed_at"] = _now_iso()
+    else:
+        carried, carried_at = _carried_signals()
+        if carried is not None:
+            val["signals"] = carried
+            val["signals_computed_at"] = carried_at
 
     # The loop writes the price cache and the snapshot. It NEVER writes the book
     # itself — that belongs to the operator's sync path, and two writers on a

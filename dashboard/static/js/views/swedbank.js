@@ -16,6 +16,12 @@
  *     spread is a real personal cost, not a footnote.
  *   - Positions with no price are listed separately and excluded from totals,
  *     because a total that quietly omits a holding is worse than a visible gap.
+ *   - Signals run on a slower clock than prices, so they carry their OWN age
+ *     (signals_age_s), never the snapshot's.
+ *   - An instrument whose signal failed renders the failure. It is never drawn
+ *     as HOLD: "we could not evaluate this" and "the evaluation says do
+ *     nothing" are different statements, and conflating them turns a broken
+ *     fetch into a recommendation.
  *
  * Orderbook IDs are shown as plain text, NOT as links. Certificates, warrants
  * and equities live under different Avanza URL paths, and a deep link that
@@ -37,6 +43,10 @@ const POLL_MS = 30_000;
 const STALE_WARN_S = 180;
 const STALE_BAD_S = 900;
 const WIDE_SPREAD_PCT = 0.5;
+// The loop recomputes signals every 15th cycle (~15 min). Anything past 20 min
+// means a pass was missed or is failing, so say stale rather than let a
+// yesterday-shaped verdict sit on the page looking current.
+const SIGNALS_STALE_S = 1200;
 
 let _root = null;
 let _unsubs = [];
@@ -238,6 +248,209 @@ function _totalsBlock(t, currency) {
   return dl;
 }
 
+function _pct(x, dp = 0) {
+  if (x == null || Number.isNaN(x)) return "—";
+  return `${(x * 100).toFixed(dp)}%`;
+}
+
+function _signalsAgeLine(age) {
+  if (age == null) {
+    return _el("p", {
+      className: "banner warn",
+      text:
+        "Signal age unknown — the snapshot carries no signals_computed_at. " +
+        "Treat the verdicts below as stale.",
+    });
+  }
+  if (age > SIGNALS_STALE_S) {
+    return _el("p", {
+      className: "banner warn",
+      text:
+        `Signals are ${_age(age)} old — STALE. A pass is expected every ` +
+        "~15 min; prices above are unaffected.",
+    });
+  }
+  return _el("p", {
+    className: "sub",
+    text: `Signals computed ${_age(age)} ago · recomputed every ~15 min.`,
+  });
+}
+
+function _votesTitle(sg) {
+  const named = Object.entries(sg.votes || {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ");
+  const applicable =
+    sg.applicable == null ? "" : `${sg.applicable} signals applicable`;
+  return [named, applicable].filter(Boolean).join(" — ") || "no votes";
+}
+
+function _expectedMove(traj) {
+  if (!traj) return "—";
+  if (traj.error) return traj.error;
+  if (traj.expected_move_pct == null) return "—";
+  return `${_signed(traj.expected_move_pct, 2)}%`;
+}
+
+function _targetsText(traj) {
+  if (!traj || traj.error) return "—";
+  const targets = traj.targets || [];
+  if (!targets.length) return "no target cleared min fill";
+  return targets
+    .slice(0, 3)
+    .map((t) => `${_num(t.price)} (${_pct(t.fill_prob)})`)
+    .join(" · ");
+}
+
+function _trajTitle(traj) {
+  if (!traj) return "no trajectory";
+  if (traj.error) return traj.error;
+  const bits = [`${traj.side || "?"} path`];
+  if (traj.p_up != null) bits.push(`p(up) ${_pct(traj.p_up, 1)}`);
+  if (traj.hours_remaining != null) {
+    bits.push(`${traj.hours_remaining}h to close`);
+  }
+  if (traj.atr_pct != null) bits.push(`ATR ${_num(traj.atr_pct, 2)}%`);
+  return bits.join(" · ");
+}
+
+function _signalFromCell(sg) {
+  // Certificates and warrants are evaluated on their underlying: the product's
+  // own series is levered and decaying, so indicators on it are misleading.
+  // The operator must be able to see that the verdict is not about the thing
+  // they hold, hence a visible marker rather than a silent substitution.
+  if (sg.signal_ticker && sg.signal_ticker !== sg.key) {
+    return _el("td", {
+      className: "warn",
+      text: `via ${sg.signal_ticker}`,
+      title:
+        sg.note ||
+        "signals computed on the underlying, not on this leveraged product",
+    });
+  }
+  const src = sg.ohlcv_source || "—";
+  const bars = sg.bars ? `${sg.bars} bars` : "";
+  return _el("td", {
+    className: "sub",
+    text: src,
+    title: [bars, sg.horizon].filter(Boolean).join(" · "),
+  });
+}
+
+const SIGNAL_COLS = [
+  "Instrument",
+  "Action",
+  "Conf",
+  "Regime",
+  "Votes B/S/H",
+  "Exp. move",
+  "Top targets",
+  "Signal from",
+];
+
+function _signalsTable(sigs) {
+  const table = _el("table", { className: "data-table" });
+  const thead = _el("thead");
+  const hr = _el("tr");
+  for (const h of SIGNAL_COLS) hr.appendChild(_el("th", { text: h }));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = _el("tbody");
+  for (const key of Object.keys(sigs).sort()) {
+    const sg = sigs[key];
+    if (!sg || typeof sg !== "object") continue;
+    const tr = _el("tr");
+    tr.appendChild(_el("td", { text: sg.name || key, title: key }));
+
+    if (sg.error) {
+      // Never fall through to a neutral verdict here. See the header comment.
+      const td = _el("td", {
+        className: "neg",
+        text: `no signal — ${sg.error}`,
+      });
+      td.colSpan = SIGNAL_COLS.length - 1;
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      continue;
+    }
+
+    const action = _el("td", { text: sg.action || "—" });
+    if (sg.action === "BUY") action.className = "pos";
+    else if (sg.action === "SELL") action.className = "neg";
+    tr.appendChild(action);
+
+    tr.appendChild(_el("td", { text: _pct(sg.confidence) }));
+    tr.appendChild(_el("td", { className: "sub", text: sg.regime || "—" }));
+
+    const vc = sg.vote_counts || {};
+    tr.appendChild(
+      _el("td", {
+        text: `${vc.buy ?? 0}/${vc.sell ?? 0}/${vc.hold ?? 0}`,
+        title: _votesTitle(sg),
+      }),
+    );
+
+    const traj = sg.trajectory || null;
+    const move = _el("td", {
+      text: _expectedMove(traj),
+      title: _trajTitle(traj),
+    });
+    if (traj && traj.error) move.className = "sub";
+    tr.appendChild(move);
+    tr.appendChild(
+      _el("td", { text: _targetsText(traj), title: _trajTitle(traj) }),
+    );
+    tr.appendChild(_signalFromCell(sg));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function _signalsSection(data) {
+  const frag = document.createDocumentFragment();
+  frag.appendChild(_el("h2", { text: "Signals & trajectory" }));
+
+  const sigs = data.signals;
+  if (!sigs || typeof sigs !== "object") {
+    frag.appendChild(
+      _el("p", {
+        className: "sub",
+        text:
+          "No signals in this snapshot yet — the loop evaluates them every " +
+          "15th cycle (~15 min). Nothing here is a HOLD; there is simply no " +
+          "evaluation to show.",
+      }),
+    );
+    return frag;
+  }
+  if (typeof sigs.error === "string") {
+    frag.appendChild(
+      _el("p", {
+        className: "banner bad",
+        text:
+          `Signal evaluation failed: ${sigs.error}. No verdicts are ` +
+          "available — the prices and totals above are unaffected.",
+      }),
+    );
+    return frag;
+  }
+
+  frag.appendChild(_signalsAgeLine(data.signals_age_s));
+  frag.appendChild(_signalsTable(sigs));
+  frag.appendChild(
+    _el("p", {
+      className: "sub",
+      text:
+        "Verdicts are informational. This system places no orders — you " +
+        "execute manually on Avanza. Targets show price and fill probability " +
+        "over the remaining session; hover a row for the vote breakdown.",
+    }),
+  );
+  return frag;
+}
+
 function _renderBody(data) {
   const body = _root?.querySelector("#swedbank-body");
   if (!body) return;
@@ -300,6 +513,8 @@ function _renderBody(data) {
     );
   }
   body.appendChild(_holdingsTable(data.consolidated || [], currency));
+
+  body.appendChild(_signalsSection(data));
 
   for (const [label, acc] of Object.entries(data.accounts || {})) {
     body.appendChild(_el("h2", { text: label }));
