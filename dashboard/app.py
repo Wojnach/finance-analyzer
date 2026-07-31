@@ -1937,8 +1937,36 @@ def api_loop_processes():
         }), 500
 
 
+def _require_token_strict(fn):
+    """Fail CLOSED when no dashboard_token is configured.
+
+    `require_auth` deliberately allows every request when `dashboard_token` is
+    absent, for backwards compatibility (dashboard/auth.py). That is an
+    acceptable default for most routes, but this one serves REAL brokerage
+    positions — quantities, cost basis, account labels and P&L — on an
+    internet-facing dashboard. A config that loses its token must lock this
+    endpoint, not open it.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        from dashboard.auth import _get_dashboard_token
+
+        if not _get_dashboard_token():
+            logger.error(
+                "swedbank: refusing to serve real positions with no "
+                "dashboard_token configured"
+            )
+            return jsonify({"error": "auth_not_configured"}), 503
+        return fn(*args, **kwargs)
+
+    return _wrapped
+
+
 @app.route("/api/swedbank")
 @require_auth
+@_require_token_strict
 def api_swedbank():
     """Swedbank book — externally-custodied share accounts, monitoring only.
 

@@ -125,3 +125,18 @@ def test_corrupt_snapshot_degrades(client):
     assert r.status_code in (200, 500)
     if r.status_code == 200:
         assert r.get_json()["available"] is False
+
+
+def test_fails_closed_when_no_token_configured(client, monkeypatch):
+    """require_auth allows everything when dashboard_token is absent, for
+    backwards compatibility. This route serves REAL positions on an
+    internet-facing dashboard, so a token-less config must LOCK it, not open
+    it."""
+    import dashboard.auth as auth_mod
+
+    c, tmp = client
+    (tmp / "swedbank_snapshot.json").write_text(json.dumps(SNAP))
+    monkeypatch.setattr(auth_mod, "_get_dashboard_token", lambda: None)
+    resp = c.get("/api/swedbank")
+    assert resp.status_code != 200, "token-less config must not expose positions"
+    assert resp.status_code in (401, 403, 503)
