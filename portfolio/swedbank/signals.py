@@ -193,7 +193,11 @@ def _trajectory(inst, sig, ind, extra):
         return {"error": f"price_targets unavailable: {exc}"}
 
     action = sig.get("action") or "HOLD"
-    side = "LONG" if action == "BUY" else "SHORT" if action == "SELL" else "LONG"
+    # price_targets branches on lowercase "buy"/"sell" (price_targets.py:93,137,
+    # 281-287) — "LONG"/"SHORT" matched NEITHER, so every comparison fell to the
+    # else branch and the whole projection ran with inverted directional logic
+    # while still returning plausible targets. Verified against the callee.
+    side = "sell" if action == "SELL" else "buy"
     atr_pct = sig.get("atr_pct")
     if not atr_pct or atr_pct <= 0:
         return {"error": "no ATR — cannot project a range"}
