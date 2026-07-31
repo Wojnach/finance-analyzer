@@ -170,19 +170,50 @@ def evaluate(inst, horizon="1d", chart_fn=None, config=None):
 
 
 def _hours_remaining(inst):
-    """Hours until this instrument's session closes.
+    """Hours until this instrument's session closes, DST-correct.
 
-    Stockholm closes 17:30 CET, US 16:00 ET. `price_targets.compute_all_targets`
-    hardcodes the US close for every non-24h ticker, which is why we compute this
-    ourselves rather than using that wrapper.
+    Two bugs this replaces, both silent:
+
+    * Hardcoded UTC constants (15.5 STO / 20.0 US) are only right during summer
+      time. Stockholm closes 17:30 local = 15:30 UTC in CEST but 16:30 UTC in
+      CET; New York 16:00 local = 20:00 UTC in EDT but 21:00 in EST. So every
+      projection was mis-scaled by an hour for roughly five months a year.
+    * Wrapping past midnight returned up to 24h, so with the market shut the
+      trajectory projected a full day of volatility as though it were an
+      intraday move.
+
+    Returns (hours, market_open). When the market is closed we report the hours
+    to the NEXT close but flag it, so a caller can say so rather than presenting
+    an overnight projection as an intraday one.
     """
-    now = datetime.datetime.now(datetime.timezone.utc)
-    close_utc_hour = 15.5 if inst.venue == "STO" else 20.0
-    now_h = now.hour + now.minute / 60.0
-    remaining = close_utc_hour - now_h
-    if remaining <= 0:
-        remaining += 24.0
-    return max(0.5, remaining)
+    from zoneinfo import ZoneInfo
+
+    tz, close_h, close_m, open_h, open_m = (
+        (ZoneInfo("Europe/Stockholm"), 17, 30, 9, 0)
+        if inst.venue == "STO"
+        else (ZoneInfo("America/New_York"), 16, 0, 9, 30)
+    )
+    now = datetime.datetime.now(tz)
+    close = now.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
+    open_t = now.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
+
+    market_open = open_t <= now < close and now.weekday() < 5
+    if now >= close or now.weekday() >= 5:
+        # Roll to the next weekday's close.
+        close += datetime.timedelta(days=1)
+        while close.weekday() >= 5:
+            close += datetime.timedelta(days=1)
+
+    hours = (close - now).total_seconds() / 3600.0
+    if not market_open:
+        # With the market shut, wall-clock to the next close can be 60h+ over a
+        # weekend. Feeding that to the projection scales it by sqrt(60) and
+        # yields a ladder so wide it means nothing. Cap at one session so the
+        # numbers describe the NEXT session, which is what a closed-market
+        # projection can honestly claim.
+        session_len = 8.5 if inst.venue == "STO" else 6.5
+        hours = min(hours, session_len)
+    return max(0.25, hours), market_open
 
 
 def _trajectory(inst, sig, ind, extra):
@@ -202,6 +233,7 @@ def _trajectory(inst, sig, ind, extra):
     if not atr_pct or atr_pct <= 0:
         return {"error": "no ATR — cannot project a range"}
 
+    hours_left, market_open = _hours_remaining(inst)
     conf = max(0.0, min(1.0, float(sig.get("confidence") or 0.0)))
     # Map consensus to a directional probability, centred on 0.5 for HOLD so a
     # no-opinion verdict produces a symmetric range rather than a fake edge.
@@ -217,7 +249,7 @@ def _trajectory(inst, sig, ind, extra):
             price_usd=float(sig["price"]),
             atr_pct=float(atr_pct),
             p_up=p_up,
-            hours_remaining=_hours_remaining(inst),
+            hours_remaining=hours_left,
             indicators=ind,
             extra=extra,
             is_24h=False,
@@ -241,7 +273,8 @@ def _trajectory(inst, sig, ind, extra):
     return {
         "side": side,
         "p_up": round(p_up, 4),
-        "hours_remaining": round(_hours_remaining(inst), 2),
+        "hours_remaining": round(hours_left, 2),
+        "market_open": market_open,
         "targets": t.get("targets") or [],
         "recommended": t.get("recommended"),
         "extremes": extremes,

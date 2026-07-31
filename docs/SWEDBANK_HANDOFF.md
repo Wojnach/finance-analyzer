@@ -73,8 +73,30 @@ clobber risk does not apply. The sentiment signal does still *compute*
 (read-only, in-memory), which costs latency and hits Reddit — Reddit currently
 403s, harmlessly.
 
-Still to verify at handoff: `projected_range_pct` reads None because `extremes`
-does not expose `high`/`low` under those names — inspect the real shape.
+### Bugs found and fixed in the signals layer (all silent, none raised)
+
+Four string/enum contracts were assumed from the caller's vocabulary instead of
+read from the callee. Every one produced confident, well-formed, WRONG output:
+
+1. `generate_signal` returns a 3-tuple, not a dict — crashed every call.
+2. `extra["regime"]` does not exist; it is `extra["_regime"]`. Regime was always
+   empty, so `compute_targets(regime=...)` ran as regime-unknown everywhere.
+3. `side` was `"LONG"`/`"SHORT"`; `price_targets` branches on lowercase
+   `"buy"`/`"sell"` (price_targets.py:93,137,281-287). Every comparison fell to
+   the else branch — trajectories ran with inverted directional logic while
+   still returning plausible targets.
+4. `_hours_remaining` hardcoded UTC constants (15.5 STO / 20.0 US) that are only
+   correct during summer time — off by an hour for ~5 months a year — and could
+   return 70h+ over a weekend, scaling the projection by sqrt(70). Rewritten
+   with `zoneinfo`, returns `(hours, market_open)`, and caps to one session
+   (6.5h US / 8.5h STO) when the market is shut.
+
+**Lesson worth keeping: verify every cross-module string against its consumer.**
+Reading this module's own code would not have caught any of the four.
+
+Still open: `projected_range_pct` reads None because `extremes` does not expose
+`high`/`low` under those names — inspect the real shape and fix or drop the
+field.
 
 ## PREVIOUSLY IN FLIGHT (superseded)
 
