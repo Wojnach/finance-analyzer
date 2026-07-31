@@ -19,6 +19,17 @@
       "created_ts": "2026-05-19T00:00:00+02:00",
       "created_by": "session-2026-05-19",
       "history": []
+    },
+    {
+      "id": "ROTATE-LEAKED-CREDS",
+      "title": "Rotate credentials exposed in early git history (see local memory for detail)",
+      "due_ts": "2026-07-31T00:00:00+02:00",
+      "handler": "manual_reminder",
+      "context": {
+        "note": "Deliberately vague here \u2014 this file is git-tracked. Full detail in the operator's local memory dir, not in the repo.",
+        "requires_human": true,
+        "priority": "high"
+      }
     }
   ]
 }
