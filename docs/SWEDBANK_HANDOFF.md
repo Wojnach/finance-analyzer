@@ -48,7 +48,35 @@ and to stop pushing entirely; only the Deck and herc2 need the code.
 flaky (37–54 across runs) so ALWAYS capture a baseline before judging. Every
 apparent new failure was confirmed pre-existing on `main`.
 
-## IN FLIGHT at handoff (2026-07-31, signals work)
+## SIGNALS LAYER — now WORKING (updated 2026-07-31)
+
+`portfolio/swedbank/ohlcv.py` + `portfolio/swedbank/signals.py` are built and
+verified against live Avanza data. 143 offline tests pass.
+
+Live proof: NVDA -> SELL conf 0.41 off 252 Avanza bars, 8 buy / 7 sell / 74 hold
+across 9 applicable signals, 4 price targets with fill probabilities.
+MINI-TSMC -> SELL conf 0.48 computed on its **TSM underlying**, confirming the
+leveraged-product mapping.
+
+Three shape bugs were found only by running it, never by reading:
+- `generate_signal` returns a **3-tuple** `(action, confidence, extra)`, not a
+  dict (canonical caller: `portfolio/main.py:512`).
+- Votes live at `extra["_votes"]` / `extra["_raw_votes"]`. Guessing
+  `"votes"`/`"signals"` yielded all-zero counts — a plausible but empty
+  consensus, the exact silent-wrongness class this subsystem exists to avoid.
+- `compute_targets` returns `extremes`/`targets`/`recommended`. There is no
+  `expected_move_pct`.
+
+Confirmed safe: `flush_sentiment_state()` is called from exactly one place,
+`main.py:757` (Layer 1 only). This module never calls it, so the cross-process
+clobber risk does not apply. The sentiment signal does still *compute*
+(read-only, in-memory), which costs latency and hits Reddit — Reddit currently
+403s, harmlessly.
+
+Still to verify at handoff: `projected_range_pct` reads None because `extremes`
+does not expose `high`/`low` under those names — inspect the real shape.
+
+## PREVIOUSLY IN FLIGHT (superseded)
 
 New, **untested and uncommitted at time of writing**:
 
