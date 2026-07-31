@@ -193,3 +193,46 @@ class TestValueHolding:
         )
         with pytest.raises(ValueError, match="no FX rate"):
             value_holding(3, q, fx=None)
+
+
+class TestCorruptCacheDoesNotCrashSweep:
+    """The cache branch only runs after live sources failed. An exception there
+    would turn a degraded-but-working sweep into a crash, and the bad cache
+    persists on disk so the loop would crashloop every cycle."""
+
+    def _dead(self, ob):
+        raise RuntimeError("session dead")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {},                                   # empty
+            {"key": "MU"},                        # missing mark/currency/source
+            {"mark": 5.0},                        # missing key
+            {"key": "MU", "mark": None, "currency": "USD",
+             "source": "avanza", "mark_basis": "last"},
+            {"key": "MU", "mark": 5.0, "currency": "USD", "source": "avanza",
+             "mark_basis": "last", "bogus_field": 1},   # unknown key is dropped
+        ],
+    )
+    def test_malformed_entry_is_skipped_not_raised(self, bad):
+        s = sweep(
+            keys=["MU"],
+            quote_fn=self._dead,
+            fallback_fn=lambda inst: None,
+            now_ms=NOW_MS,
+            cache={"MU": bad},
+        )
+        # Must not raise. Either it produced a usable quote or recorded an error.
+        assert "MU" in s.quotes or "MU" in s.errors
+
+    def test_wholly_unusable_cache_records_error(self):
+        s = sweep(
+            keys=["MU"],
+            quote_fn=self._dead,
+            fallback_fn=lambda inst: None,
+            now_ms=NOW_MS,
+            cache={"MU": {"nonsense": True}},
+        )
+        assert "MU" not in s.quotes
+        assert "no price available" in s.errors["MU"]

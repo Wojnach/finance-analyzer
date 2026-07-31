@@ -203,16 +203,28 @@ def sweep(
 
         cached = cache.get(key)
         if cached:
-            q = Quote(**{k: v for k, v in cached.items() if k in Quote.__annotations__})
-            q.degraded = True
-            q.source = f"{q.source}:cached"
-            q.note = "no live source; last-good price"
-            if q.as_of_ms:
-                now = now_ms if now_ms is not None else int(time.time() * 1000)
-                q.age_s = max(0.0, (now - q.as_of_ms) / 1000.0)
-            sweep_result.quotes[key] = q
-            sweep_result.errors[key] = "no live source; served last-good"
-            continue
+            # A malformed cache entry must not crash the sweep. This branch only
+            # runs when the live sources have ALREADY failed, so an unguarded
+            # TypeError here would turn "degraded but still serving last-good
+            # prices" into a hard crash at exactly the moment the fallback
+            # exists to help — and the bad cache persists on disk, so the loop
+            # would crashloop every cycle.
+            try:
+                q = Quote(
+                    **{k: v for k, v in cached.items() if k in Quote.__annotations__}
+                )
+                q.degraded = True
+                q.source = f"{q.source}:cached"
+                q.note = "no live source; last-good price"
+                if q.as_of_ms:
+                    now = now_ms if now_ms is not None else int(time.time() * 1000)
+                    q.age_s = max(0.0, (now - q.as_of_ms) / 1000.0)
+            except Exception as exc:
+                logger.warning("swedbank: unusable cache entry for %s: %s", key, exc)
+            else:
+                sweep_result.quotes[key] = q
+                sweep_result.errors[key] = "no live source; served last-good"
+                continue
 
         sweep_result.errors[key] = "no price available from any source"
 
