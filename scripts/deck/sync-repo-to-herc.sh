@@ -54,7 +54,15 @@ LOCAL_SHA=$(git rev-parse "$BRANCH")
 echo "sync: Deck $BRANCH @ ${LOCAL_SHA:0:8}"
 
 # 2. Reachability.
-$SSH true 2>/dev/null || die "herc2 unreachable over SSH. Wake it first:
+# NOT `ssh herc2 true` — herc2 is Windows and has no `true` command, so that
+# probe exits non-zero on a perfectly healthy connection. Also retry: with-herc
+# declares herc2 awake off an RDP probe, which answers before sshd does.
+SSH_UP=""
+for _try in 1 2 3 4 5 6; do
+    if [ "$($SSH 'echo ok' 2>/dev/null | tr -d '\r')" = "ok" ]; then SSH_UP=1; break; fi
+    sleep 5
+done
+[ -n "$SSH_UP" ] || die "herc2 unreachable over SSH after 30s. Wake it first:
     scripts/deck/with-herc.sh scripts/deck/sync-repo-to-herc.sh $BRANCH"
 
 # 3. What does herc2 already have? Compare before sending anything.
