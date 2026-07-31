@@ -1,3 +1,63 @@
+## 2026-07-31 — Swedbank book: monitoring ledger + dashboard tab (feature/swedbank-book)
+
+Tracks three externally-custodied share accounts (26 instruments) inside
+finance-analyzer. Monitoring and trajectory groundwork only — the operator
+executes every order by hand, and `tests/test_swedbank_no_trading.py` enforces
+that mechanically by AST-inspecting the package for order imports, order
+function references and any api_post/api_delete.
+
+**Shipped:** `portfolio/swedbank/` (instruments, snapshot, pricing, book, cli),
+`data/swedbank_loop.py`, `/api/swedbank`, `dashboard/static/js/views/swedbank.js`,
+`scripts/deck/install-swedbank-loop.sh`. 95 offline tests.
+
+**Data source.** Avanza serves everything: `get_quote()` returns isRealTime with
+bid/ask/spread/VWAP for equities, certificates and warrants alike via the
+`/stock/` path, and `/_api/price-chart/stock/<ob>?timePeriod&resolution` serves
+OHLCV from 1-minute to monthly (753 daily bars over 3y, 1257 over 5y). Alpaca is
+the automatic fallback for US names, flagged degraded since it carries no
+bid/ask. Stockholm instruments have no fallback and degrade to last-good with a
+visible age. A full 26-instrument sweep is 1.5s sequential.
+
+**Things that would have shipped silently, caught here:**
+
+- `solve_fx` was underdetermined — a single foreign row admits every rate. It
+  produced the right answer on the real book only because 19 varied rows
+  over-constrain it. Now takes the live rate as a prior and searches a band.
+- `_eq()` conflated an explicit `alpaca=None` with a missing argument, so
+  Stockholm equities advertised a fallback that cannot exist — that would have
+  masked an Avanza outage instead of degrading honestly.
+- `.gitignore`'s scratch rule `_*.py` also matches `__init__.py`, silently
+  dropping the init file of every NEW package. Namespace packages hide it
+  locally; it only fails on a fresh clone. Fixed with `!**/__init__.py`.
+- A pricing test passed only because Alpaca happened to be unreachable, so it
+  was exercising a different branch than it claimed. `sweep()` now takes
+  `fallback_fn` for injection.
+- Real positions were briefly committed to a plan doc on a PUBLIC repo. Caught
+  before push and history rewritten. `data/swedbank_*.json` is now gitignored on
+  the branch AND in `.git/info/exclude` so every worktree is covered regardless
+  of which branch is checked out.
+
+**Deliberately not done:**
+
+- `sync` is REPORT-ONLY, gated with `TODO: MANUAL REVIEW`. A multi-account
+  export has no per-row account attribution and writing would guess.
+- Signals/trajectories over the universe are NOT wired yet. The data layer
+  supports it (Avanza OHLCV, explicit `asset_class` per instrument) but the
+  signal runner is unwritten.
+- The systemd unit is installed but NOT enabled — every other pf-* loop is
+  currently disabled and auto-starting one would override a deliberate pause.
+
+**Trap for future work:** a git worktree has no gitignored runtime files, so
+`config.json` and `data/avanza_session.json` are absent and all live-data code
+fails there while unit tests pass. Symlink them in.
+
+**Note on the ticker registries:** adding these equities to `STOCK_SYMBOLS`
+would exhaust the 25/day Alpha Vantage quota via `alpha_vantage.py:238` and
+stale Tier-1 fundamentals; leaving them out makes
+`signal_engine._compute_applicable_count` read them as non-stocks and apply
+`orderbook_flow` to equities. Resolved by carrying `asset_class` on the
+instrument and touching neither `tickers.py` nor `signal_engine.py`.
+
 ## 2026-07-02 — master local-LLM pause switch (ACTIVE)
 
 User requested all local LLMs paused going forward. Built portfolio/local_llm_gate.py:
