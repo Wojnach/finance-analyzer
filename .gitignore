@@ -515,3 +515,9 @@ _livecheck/
 data/*_task.log
 data/*.corrupt
 *.pre_b6.json
+
+# Swedbank book — REAL brokerage positions (quantities, cost basis, account labels).
+# This repo is PUBLIC; these must never be committed. See docs/PLAN.md "Privacy
+# constraint". Same rationale as data/portfolio_state*.json above.
+data/swedbank_book.json
+data/swedbank_*.json

@@ -1,261 +1,259 @@
-# PLAN — Audit-fix campaign 2026-06-10/11
+# PLAN — Swedbank book: monitoring ledger + trajectories + dashboard tab
 
-> Supersedes the 2026-06-01 adversarial-review plan (completed — findings merged into
-> `docs/IMPROVEMENT_AUDIT_2026-06-10.md` workflow).
+> Supersedes the 2026-06-10/11 audit-fix campaign (completed; archived to
+> `docs/plans/2026-06-10-audit-fix-campaign.md`).
 
-Source: `docs/IMPROVEMENT_AUDIT_2026-06-10.md` — 138 findings across 13 sections, every
-P0/P1 batch adversarially skeptic-verified (33 confirmed, 3 refuted). This plan executes
-the fixes batch by batch under the /fgl protocol.
+Campaign date: 2026-07-31. Worktree `.worktrees/swedbank-book`, branch
+`feature/swedbank-book`. Protocol: `/fgl` → `docs/GUIDELINES.md`.
 
-Process: worktree `.worktrees/audit-fixes`, branch `fix/audit-batches-20260610`.
-Merge to main after EACH batch (session-loss safety — user constraint 2026-06-10).
-Push periodically. Per batch: implement → targeted tests → `caveman:cavecrew-reviewer`
-on the batch diff → fix P1/P2 findings → commit → merge.
+## Privacy constraint — read before adding anything to this doc
 
-## Status
+**`github.com/Wojnach/finance-analyzer` is a PUBLIC repository** (verified 2026-07-31:
+anonymous HTTPS GET returns 200). This subsystem handles the operator's _real_ brokerage
+positions, unlike the simulated Patient/Bold portfolios.
 
-- **B1 ops-automation — DONE**, merged `31df4c77` (pre-fgl; retro adversarial review scheduled).
-  Pickups task action bat-wrapped (argv redirection bug killed every scheduled run),
-  run-hidden.vbs optional wait mode, pickup retry semantics, check_critical_errors
-  auto-resolve fix, fix_agent per-category state persist, accuracy_degradation 24h dedup.
-- **B2 live-incident signals — DONE**, merged `0d0d2e94` (pre-fgl; retro review scheduled).
-  crypto_macro expiry-proximity quarterly-only BUY (was permanent BUY on daily Deribit
-  expiries — primary June accuracy-collapse driver), options metrics on monthly/quarterly
-  chain, consecutive_negative day units, netflow 7d staleness alert (BGeometrics endpoint
-  confirmed 404 — feed dead), fallback weight neutralization, econ_calendar event_free
-  regime gate, accuracy consensus/shadow separation, SE gate n_eff autocorrelation correction.
+Rules, decided by the operator 2026-07-31:
 
-## Remaining batches
+1. **No real position data in git — ever.** No quantities, no cost basis, no account
+   totals, no P&L, no account labels. Not in code, not in docs, not in commit messages,
+   not in test fixtures.
+2. `data/swedbank_book.json` and `data/swedbank_*.json` are **gitignored**. The book is
+   generated locally from the operator's own snapshot and never committed.
+3. Tests use **synthetic** holdings. Never seed a fixture from the live book.
+4. Accounts are referred to in code and docs by index (`account_0/1/2`) or by whatever
+   label sits in the local, untracked book file. This document uses A/B/C.
+5. Never route this data through `dashboard/export_static.py` or
+   `dashboard/static/api-data/` — `.gitignore:32-35` records that path is served with
+   **no auth**.
 
-### B3 prophecy
-- alerts.log_critical level "error" → "critical" so startup check sees prophecy alerts (P1).
-- outcomes: validate Claude-supplied spot_at_prediction (sanity band vs live/recent price;
-  reject + alert on breach) — prevents permanent scoring crash/poison.
-- outcomes: 8 of 13 enabled instruments structurally unscoreable — reconcile scoring
-  coverage with enabled set; alert on unscoreable instruments instead of silence.
-- publish: reconcile against enabled instruments (hallucinated accepted / missing unflagged).
-- cost: cumulative_30d_usd = real 30-day window, same-day re-run dedupe.
-- prophecy-daily.bat: check prep exit code before invoking claude; kill switch fail-closed
-  (missing sentinel dir = treat as disabled + alert); model read from prophecy_config.json
-  instead of hardcode.
-- SECURITY: pass --allowedTools restricting the headless agent (Read, WebSearch, WebFetch,
-  Write scoped to data/prophecy_runs/) — prompt-injection from fetched web content currently
-  inherits repo-wide Bash(*)/Write(*).
-- Weekend/holiday horizon scoring window fix (4h window scored as 1-2d move).
+This mirrors existing practice: `data/portfolio_state.json`, `portfolio_state_bold.json`
+and the Avanza session files are all already excluded for the same reason.
 
-### B4 metals real-money
-- avanza_session: pin ALL Playwright traffic to one dedicated long-lived worker thread
-  (module-level single-thread executor wrapping api_get/api_post/api_delete) — kills the
-  greenlet thread-affinity class that silently disabled grid fisher + stop management
-  (confirmed P1). Alternative considered and rejected: adding greenlet error to
-  is_browser_dead_error only heals after breakage.
-- get_open_orders: propagate errors (raise or sentinel) — silent [] made reconcile
-  misclassify live orders as filled/cancelled.
-- grid_fisher: global halt runs EOD sweep + cancels armed buys before returning; halted
-  flag clears next session day. EOD cancel verification before marking CANCELLED.
-  Hardcoded 21:55 → todayClosingTime from API (memory rule). Reconcile buy+sell same-tick
-  ambiguity: detect, log, take conservative path. Session-loss halt threshold: fixed
-  global value, not scaled by instrument count.
-- avanza_session min-order guard: exempt position-closing SELLs (sub-1000 SEK inventory
-  must be exitable; EOD flat retried forever).
-- metals_loop trailing stops: cancel previous stop before placing replacement on
-  add-to-position.
-- avanza_orders CONFIRM flow: single getUpdates consumer (route confirmations through
-  telegram_poller offsets or disable the second consumer) — currently poller eats CONFIRM
-  replies and confirmed orders silently expire.
+## Goal
 
-### B5 orchestration
-- autonomous._detect_regime: read extra['_regime'] (currently always falls back to
-  'range-bound' — and autonomous IS the production path during freeze).
-- invoke_agent: handle exited-but-unobserved prior agent (run completion accounting before
-  spawn); fail-CLOSED on config read error for layer2.enabled; call
-  claude_gate.check_claude_gates('layer2') at top so one master switch governs;
-  persist {pid, start_ts, tier} at spawn + startup reap of stale agent processes.
-- trigger: arm flip cooldown only after budget-floor gate passes; persist wall-clock not
-  monotonic in _update_sustained.
-- main: stop double-logging every False invoke_agent return as 'skipped_busy'.
-- Comment sweep: 60s → 600s cadence where stale (market_timing.py; CLAUDE.md text in B11).
+Track three real share accounts (A, B, C — 26 distinct instruments) inside
+finance-analyzer. **Monitoring and trajectory calculation only.** The operator executes
+every order by hand on Avanza. Nothing in this subsystem may place, modify or cancel an
+order.
 
-### B6 signal-core
-- btc_proxy: disabled signal still votes live on MSTR — route through DISABLED_SIGNALS
-  force-HOLD properly.
-- MIN_VOTERS_METALS=2 vs Stage-4 dynamic floor 3 — honor the metals floor.
-- Metals seasonal BUY multiplier applied after global 0.80 cap — apply before cap (cap is
-  the documented invariant).
-- _compute_applicable_count: ministral counts for non-crypto tickers too.
-- outcome_tracker.backfill_outcomes: hold jsonl sidecar lock across read-process-rewrite
-  (rotation race).
-- blend_accuracy_data: recent window double-count in directional totals.
-- Circuit-breaker comments + .claude/rules vs constants (2pp/45%/7000) — sync docs to code.
-- Soft-vote dampening scale-invariance: document current behavior; add scale factor only
-  if cheap and test-covered (judgment call at implement time).
+Deliverables:
 
-### B7 portfolio-risk
-- _DEFAULT_STATE: deep-copy per load (shared mutable holdings/transactions refs).
-- compute_probabilistic_stops: metals branch annualization; MSTR gets stock session key.
-- Drawdown peak: sanity bound vs current equity (glitched row must not permanently
-  inflate peak); _streaming_max: skip non-numeric rows with warning instead of TypeError
-  fail-open.
-- monte_carlo_risk: fx_rate sanity band (mirror P1-15 fix).
-- trade_guards: corrupt state file → warning + critical entry (not silent reset);
-  check_overtrading_guards uses its portfolio arg / correct new-position counting;
-  cooldown + loss-escalation apply to ENTRIES only — exits (SELL of existing position)
-  pass through. Rationale: blocking exits hardest after losses inverts risk management.
+1. A durable ledger (`data/swedbank_book.json`, untracked) storing qty + cost basis.
+2. A standalone monitoring loop that re-prices it and computes signals/trajectories.
+3. A dashboard tab, behind `@require_auth`.
 
-### B8 swing-loops
-- mstr_loop execution: SHORT entries priced/sized off the BEAR cert quote (currently BULL).
-- mstr_loop state: live cash sync — implement real sync from Avanza buying power at phase
-  start, or refuse to enter live phase with a loud error (no silent cash-starved start).
-- mstr_loop loop.py: EOD-flatten backstop independent of bundle.is_usable().
-- mstr_loop config: validate PHASE env (unknown → hard error at startup).
-- crypto_loop: reject 0.0 prices like oil_loop does.
-- oil_grid_signal: stamp bar timestamp, not now() — grid must see data age; oil fast-tick
-  cadence 10s → 60s (feed lags 10-15 min; 10s is pure waste).
-- oil_loop header: document real route (yfinance-only) — CLAUDE.md text in B11.
+## Environment corrections (Deck migration)
 
-### B9 infra
-- file_utils: msvcrt lock acquisition — bounded blocking retry with backoff + clear error
-  naming the holder file; atomic_write_jsonl takes jsonl sidecar lock; prune_jsonl uses the
-  same recovery decoder as last_jsonl_entry (don't drop concatenated-object lines);
-  last_jsonl_entry: type-check decoded value is dict before returning.
-- http_retry: cap retry_after sleep (90s) + total-deadline option; fetch_json: reject
-  unknown kwargs with TypeError (silent **kwargs swallow).
-- telegram_poller: ack offset only after successful command handling (current design
-  permanently acks failed commands server-side) — bounded: skip-after-3-attempts to avoid
-  poison-message loops.
-- message_store: sync docstring routing table with SEND_CATEGORIES.
+`docs/GUIDELINES.md` still documents the herc2/Windows environment. On this machine:
 
-### B10 dashboard
-- house_blueprint: sanitize rendered markdown HTML (bleach if importable, else
-  markupsafe.escape fallback) — stored XSS from scraped content.
-- Redact ?token= and /go/<slug> from access logs (custom log filter) or document residual
-  risk; auth cookie: set secure flag only on https requests so LAN http sessions work
-  (currently cookie dropped, forcing ?token= on every request — worse for log hygiene).
-- App-wide MAX_CONTENT_LENGTH (e.g. 1 MB).
-- cf_access: JWKS negative cache 60s.
-- /api/avanza_account worker queue: bound + in-flight dedup.
+| GUIDELINES says                                      | Actual                                 |
+| ---------------------------------------------------- | -------------------------------------- |
+| `.venv/Scripts/python.exe`                           | `.venv/bin/python`                     |
+| `cmd.exe /c "cd /d Q:\finance-analyzer && git push"` | plain `git push`                       |
+| `schtasks /run /tn PF-DataLoop`                      | `systemctl --user restart pf-dataloop` |
+| `scripts/win/install-*-task.ps1`                     | `~/.config/systemd/user/pf-*.service`  |
 
-### B11 docs
-- CLAUDE.md fact sweep: active signals (rebuild list from signal_registry +
-  DISABLED_SIGNALS at implement time — audit says 15 not 21), MIN_VOTERS metals=2, signal
-  module counts, removed per-ticker overrides, applicable-signal counts, dashboard route
-  counts (re-grep), test surface (~440 files / ~10.4K tests), loop cadence 600s, oil price
-  route. Keep structure, fix facts.
-- README: refresh from March state (instruments, signal count, test count).
-- TRADING_PLAYBOOK: telegram sender claim, '30 signals', retired Forecast/Kronos refs,
-  config.json raw-open sample → safe pattern.
-- SYSTEM_OVERVIEW: header vs body counts.
-- trading_status._in_session docstring (08:30-21:30).
+`pytest-timeout` is not installed — `--timeout=N` is rejected by pytest.
 
-### B12 hygiene
-- .gitignore: zz*.txt, data/arxiv_*.xml, _livecheck/, phone-*.png, '0', 'nul',
-  data/*_task.log; delete the untracked debris from disk.
-- Prune orphaned .worktrees/* (git worktree prune + delete dirs not in `git worktree list`,
-  EXCEPT audit-fixes while campaign live) — ~326 MB.
-- `git add scripts/win/RC_DISABLED_DO_NOT_REENABLE.md` (kill-switch doc must be tracked).
-- Move data/test_metals_swing_trader.py → tests/ (currently never runs in the suite);
-  fix imports/paths as needed.
-- Move one-off live-trading debug scripts in data/ (gold_sell_debug.py etc.) →
-  scripts/archive/ with a README warning about hardcoded account/orderbook IDs.
-- Optional if cheap: docs/SCHEDULED_TASKS.md inventory generated from
-  scripts/win/install-*.ps1.
+## Method — quantities and cost basis are derived, not entered
 
-## End-of-campaign ops (main checkout, after final merge)
+The operator's broker export gives price, percent-since-purchase and market value per
+line, but **no quantity column**. Both missing fields are recoverable:
 
-1. Full suite: `.venv/Scripts/python.exe -m pytest tests/ -n auto` — compare against the
-   42 known pre-existing failures recorded in B2.
-2. Append resolution entries for the 16 accuracy_degradation criticals (verdict: genuine
-   regime shift; crypto_macro structural bias fixed in B2; cite commit).
-3. Inspect scripts/pickups handler for LLM-CRYPTOTRADER-72H re: token freeze, then
-   force-run: `.venv/Scripts/python.exe scripts/process_pending_pickups.py --force LLM-CRYPTOTRADER-72H`.
-4. User admin actions: re-run install-pending-pickups-task.ps1 (action line changed);
-   decide PF-FixAgentDispatcher (flag data/fix_agent.disabled now in place).
-5. Restart loops: PF-DataLoop + PF-MetalsLoop (schtasks via cmd.exe; fallback taskkill
-   PID + Start-Process per memory 2026-06-03).
-6. Push via `cmd.exe /c "cd /d Q:\finance-analyzer && git push"` (if classifier blocks,
-   ask user to run `! git push`).
-7. Update docs/SESSION_PROGRESS.md + .remember handoff.
+```
+qty        = value_local / (price * fx)          # fx = 1 for SEK-quoted lines
+cost_basis = value_local / (1 + since_purch_pct/100)
+```
 
-## Deferred (explicitly out of campaign scope — flagged for future sessions)
+The FX rate is not assumed — it is **solved**. Sweep candidate rates and choose the one
+that drives every USD-quoted line to an integer share count simultaneously. On the
+2026-07-31 snapshot a single rate satisfied all of them at once, and the reconstructed
+cost basis then reconciled against the broker's stated total to under 2 SEK on a
+six-figure book — i.e. rounding. That dual agreement (integer quantities _and_
+independent total reconciliation) is what makes the derivation trustworthy rather than
+a guess.
 
-- signal_engine.py split (4,698 lines: policy constants / regime overlays / consensus /
-  dispatch).
-- Swing-loop scaffolding dedup (crypto/oil/metals ~90% copy-paste).
-- Relocating executable loops out of data/ (metals_loop.py 7,904 lines).
-- Dashboard app.py monolith split.
-- run-hidden.vbs default-wait migration for all PF-* tasks (only pickups uses wait now).
-- Replacement source for exchange-netflow (BGeometrics endpoint 404).
+Cross-check: the broker's quoted closes for that session matched Alpaca's daily bars for
+the same date to within rounding across the sampled US names, confirming the snapshot is
+genuine and correctly dated.
+
+**Caveat to carry forward:** the percent-since-purchase is denominated in SEK, so it
+embeds FX drift. A USD-true cost basis would need the FX rate at each purchase date,
+which the export does not carry. `portfolio/fx_rates.py` could backfill it if trade dates
+are ever supplied. Until then, cost basis is SEK-true and USD-approximate — the ledger
+must label it as such rather than implying otherwise.
+
+## Data sources
+
+### Primary — Avanza, all 26 instruments
+
+Verified 26/26 on 2026-07-31. One code path, keyed on orderbook ID, covering US
+equities, Swedish equities, certificates and warrants identically.
+
+**Quotes** — `GET /_api/market-guide/stock/<ob>/quote` (the `/stock/` path works for
+every instrument type). Returns `isRealTime: true` with a current `timeOfLast`, plus
+`buy, sell, last, spread, highest, lowest, change, changePercent, totalVolumeTraded,
+volumeWeightedAveragePrice, updated`.
+
+**History** — `GET /_api/price-chart/stock/<ob>?timePeriod=<p>&resolution=<r>`
+
+| timePeriod                       | default resolution | bars           |
+| -------------------------------- | ------------------ | -------------- |
+| `today`                          | minute             | ~420           |
+| `one_week`                       | ten_minutes        | ~297           |
+| `one_month`                      | hour               | ~214           |
+| `one_year`                       | day                | ~251           |
+| `three_years` + `resolution=day` | day                | ~753           |
+| `five_years` + `resolution=day`  | day                | ~1257          |
+| `infinity`                       | month              | ~502 (to 1984) |
+
+`resolution` is lowercase and must appear in that period's `availableResolutions`
+(echoed in `metadata.resolution`), else a clean HTTP 400. Response:
+`{ohlc: [{timestamp, open, high, low, close, totalVolumeTraded}], metadata, from, to,
+previousClosingPrice}`.
+
+This is enough history and enough timeframes for the existing signal engine, and it
+covers the Stockholm instruments — including a thin warrant — which no other configured
+source can see.
+
+> An earlier draft claimed Avanza quotes were delayed. That was wrong: it read the
+> _search-index_ price rather than the quote endpoint, and compared against an Alpaca
+> sample taken 20 minutes earlier during a session where one holding ranged ~8% intraday.
+
+### Fallback — Alpaca, US names only
+
+When the Avanza session is unavailable, the 19 US instruments fail over to Alpaca via
+`price_source.fetch_klines` (verified 19/19). Alpaca is IEX-only and carries no bid/ask,
+so a fallback quote is marked `source: "alpaca:fallback"` and the UI must show that the
+bid/ask/spread columns are unavailable rather than blanking them silently.
+
+The 7 Stockholm instruments have **no fallback**. On session loss they degrade to
+last-good-price with an explicit age stamp. The book still totals; it never claims
+freshness it does not have.
+
+FX: `portfolio.fx_rates.fetch_usd_sek()` — note the name is `fetch_`, not `get_`.
+
+## Instrument identity is a correctness hazard
+
+Resolving instruments by search at runtime returned the **wrong instrument for 2 of 19**
+US names during exploration:
+
+- One query returned zero hits because the search string used the legal name rather than
+  the ticker.
+- One matched the wrong **share class** — Class C instead of Class A, two different
+  securities with near-identical names and nearly identical prices.
+
+A third name has a decoy second listing at a different orderbook ID.
+
+Since the operator places orders by hand from this UI, and the orderbook ID is now both
+the pricing key _and_ the deep-link target, a wrong ID would mis-price a position **and**
+misdirect a real order.
+
+**Decision: orderbook IDs are pinned in a static, human-reviewed table
+(`portfolio/swedbank/instruments.py`). No runtime search resolution, ever.** A test
+asserts each pinned ID still resolves to the expected instrument name, so an upstream
+change fails loudly instead of silently repricing.
+
+## Marking rule — last vs mid
+
+`last` is unreliable on thin instruments. During exploration one warrant had traded 15
+units on the day, with `last` sitting ~3% above the live bid/ask mid — stale by hours.
+Marking at `last` would have overstated that position by roughly that margin. Another
+holding showed a spread near 1,7%.
+
+Rule: mark at `last` when it falls inside the bid/ask; otherwise mark at **mid** and flag
+the row `stale_last`. Always surface `spread` — the operator executes manually, so the
+spread is a real personal cost, not a footnote.
+
+## Constraints discovered
+
+1. **`pf-dataloop` is `inactive`.** Layer 1 is down; `health_state.json`,
+   `signal_log.jsonl`, `agent_summary*.json` may be frozen. The new loop must be
+   standalone and must not read Layer 1 outputs as if live.
+2. **Formatter trap.** These files are not black-clean; the PostToolUse hook rewrites the
+   whole file if touched with Edit/Write. Patch them with `python3 - <<'EOF'` heredoc
+   scripts only: `dashboard/app.py`, `portfolio/signal_engine.py`,
+   `dashboard/system_status.py`, `portfolio/accuracy_stats.py`,
+   `dashboard/trading_status.py`, `portfolio/loop_processes.py`.
+3. **The dashboard is internet-facing** (Cloudflare tunnel + CF Access JWT + token).
+   The new route uses `@require_auth`, matching `/api/avanza_account` precedent.
+   Approved by the operator 2026-07-31.
+4. **Main-loop cycle cost.** Seven tickers were removed on 2026-04-09 purely to hold
+   cycle p50 down. Adding 26 instruments to Tier 1 would repeat that mistake — hence a
+   separate loop.
+5. **Shared Avanza session with the real-money metals loop.** See Premortem — this is
+   the highest-risk coupling in the design.
+6. Static asset changes require bumping the `sw.js` CACHE version.
+
+## Architecture
+
+### 1. Ledger — `portfolio/swedbank/`
+
+Stores `qty` + `cost_basis` + pinned routing. **Never stores value** — value is always
+derived, so the file cannot go stale.
+
+```
+portfolio/swedbank/
+  __init__.py
+  instruments.py   pinned instrument table (26 entries), single source of truth
+  book.py          schema, load/save via file_utils atomic helpers, revalue()
+  snapshot.py      PURE: parse export -> solve FX -> derive qty/cost -> diff vs stored
+  pricing.py       Avanza quotes + history, Alpaca fallback, FX, mark/mid rule,
+                   staleness stamps, graceful degradation on session expiry
+  cli.py           python -m portfolio.swedbank {sync,show}
+```
+
+`snapshot.py` is pure (no I/O) so it can be exhaustively unit-tested on synthetic books.
+
+### 2. Monitoring loop — `data/swedbank_loop.py` + `pf-swedbank.service`
+
+Clones the `data/oil_loop.py` satellite pattern. Structurally incapable of trading: the
+package imports no order module, and a test asserts that no symbol from
+`avanza_orders` is reachable from `portfolio.swedbank`.
+
+systemd unit mirrors `pf-oilloop.service` (WorkingDirectory, PYTHONPATH,
+`Restart=always`, `RestartSec=30`).
+
+### 3. Dashboard tab — `/api/swedbank` + `dashboard/static/js/views/swedbank.js`
+
+New SPA view alongside the existing 21, registered in the hash router and the More menu.
+Every price carries `as_of` / `stale_s` / `source`; the UI renders age and never shows a
+stale number as live.
+
+## Open questions (explorer agents in flight)
+
+- [x] **ANSWERED.** Avanza exposes full OHLCV per orderbook ID — the Stockholm
+      instruments can carry technical signals.
+- [ ] Avanza session contention with the real-money metals loop (highest priority).
+- [ ] Exact `signal_engine` entry point; can it run for a ticker absent from
+      `tickers.py SYMBOLS`?
+- [ ] Which of the 15 active signals genuinely apply to a plain equity.
+- [ ] Whether logging 26 new instruments pollutes Tier-1 accuracy stats.
+- [ ] Exact dashboard tab registration checklist.
+
+## Test baseline (captured before any change, 2026-07-31)
+
+`pytest tests/ -n auto` → **38 failed, 11 270 passed, 32 skipped** in 211s.
+Pre-existing failures span 18 files; heaviest are `test_portfolio.py` (5),
+`test_metals_loop_pre_sell_cancel.py` (4), `test_metals_loop_autonomous.py` (3),
+`test_loop_contract.py` (3), `test_forecast_timeout.py` (3),
+`test_forecast_circuit_breaker.py` (3). Full list kept locally outside the repo.
+Any failure beyond this set is attributable to this campaign.
+
+## Execution order
+
+| Batch | Contents                                                              |
+| ----- | --------------------------------------------------------------------- |
+| 1     | `portfolio/swedbank/` ledger core + pinned instruments table + tests  |
+| 2     | Pricing layer (Avanza primary, Alpaca fallback, FX, mark/mid) + tests |
+| 3     | Local seed of `data/swedbank_book.json`; CLI sync/show                |
+| 4     | Signals + trajectories for the universe                               |
+| 5     | Monitoring loop + systemd unit                                        |
+| 6     | `/api/swedbank` route (heredoc patch) + tests                         |
+| 7     | SPA view + router + More menu + sw.js bump                            |
+| 8     | Adversarial review, full pytest, merge, push                          |
 
 ## Premortem
 
-Fresh-context agent, 2026-06-11. 14 narratives; all accepted with hooks except where
-noted. Each hook is BINDING on the owning batch.
-
-1. **Naked-stop window (B4).** Cancel-old-stop succeeds, place-new fails (session death
-   mid-replace) → 5x position unprotected through a wick. HOOK (B4): place-failure after
-   successful cancel → `stop_replace_naked` critical entry + Telegram + immediate
-   re-place-or-exit path.
-2. **Single-thread executor serializes every Avanza consumer (B4).** One hung Playwright
-   call (BankID wait) blocks the only worker; EOD sweep queues behind it. Re-entrant
-   `submit()` from the executor thread = deadlock. HOOK (B4): log queue-wait + per-call
-   duration; critical at wait >30s; hard error if submitted from executor thread; per-call
-   timeout.
-3. **get_open_orders contract change breaks unswept callers (B4).** metals_loop:5497,
-   dashboard app.py:2142 iterate the result; grid_fisher `_safe(default=None)` may
-   convert a sentinel back to "no orders". HOOK (B4): grep-enumerate ALL call sites,
-   handle each; test asserting every call site handles the failure value.
-4. **Oil bar-ts restamp kills cache (B8).** `get_cached_or_refresh` computes freshness
-   from the same `ts` field; bar lag 10-15 min > 5-min TTL → permanent cache miss →
-   yfinance hammering → neutral fallback, oil leg silently dead. PLAN CHANGED: split into
-   `bar_ts` (data age) + `fetched_ts` (cache freshness); test cache-hit with lagged bar.
-5. **Sidecar lock held across backfill rewrite stalls loop (B6×B9).** B6 holds the lock
-   across read-process-rewrite while B9 makes atomic_write_jsonl take the same lock →
-   appends block → heartbeat stale → watchdog restart mid-rewrite. HOOK (B6/B9): chunked
-   bounded rewrite; file_utils logs lock-hold >5s; verify no lock-order inversion with
-   the msvcrt file lock.
-6. **Unfreeze latency bomb (B3/B5).** Fail-closed flips ship while Claude paths are
-   frozen — zero production validation; at unfreeze a missing sentinel dir or transient
-   config read error keeps everything dead while autonomous fallback looks green.
-   HOOK: end-of-campaign ops adds post-unfreeze smoke (one `claude -p` per path) +
-   digest line "layer2 invocations last 24h: N", alert at 0.
-7. **Startup reap kills wrong PID (B5).** Windows PID reuse after reboot → persisted pid
-   now belongs to metals_loop/dashboard; reap terminates production process. HOOK (B5):
-   verify process cmdline contains `claude` (psutil) before terminate; else only mark
-   completion-unobserved.
-8. **msvcrt retry untested on POSIX dev (B9).** Note: tests run via Windows venv
-   (.venv/Scripts/python.exe) so os.name=='nt' — partially mitigated. HOOK (B9): add an
-   explicit Windows contention test (two processes, one holding the lock) in
-   tests/test_file_utils*.
-9. **B12 test relocation runs live-path test in suite.** data/test_metals_swing_trader.py
-   may write live data/ files (metals_swing_state.json already dirty). HOOK (B12): audit
-   for data/ writes + network before move; patch to tmp_path; do NOT move as-is.
-10. **Double measurement change masks real regression (B2+B6).** blend_accuracy fix +
-    consensus/shadow split shift all accuracy numbers in one campaign; gate flips look
-    like "expected metric steps". HOOK (B6): snapshot accuracy_cache.json pre/post merge;
-    diff script listing 47%/50% gate-status flips; alert if >3 flip or any metals signal
-    flips.
-11. **Metals MIN_VOTERS 3→2 churns real-money ladders (B6).** Weaker consensus passes;
-    grid re-ladders on flips; cost invisible during #10's metric churn. HOOK (B6): log
-    voter_count on metals consensus rows; documented revert trigger: 2-voter hit-rate
-    <50% over 100 samples.
-12. **Poller skip-after-3 drops a halt command silently (B9).** Previously failed /mode
-    commands re-delivered forever; new design acks+drops after 3. HOOK (B9): on drop,
-    send explicit Telegram reply "command dropped after 3 failed attempts: <cmd>".
-13. **Prophecy level flip floods criticals (B3).** 8/13 unscoreable instruments + level
-    "critical" = daily spam; burns fix-agent backoff to disabled-on-noise. HOOK (B3):
-    internal ordering — coverage reconcile lands BEFORE level flip; rate-limit prophecy
-    criticals 1/day/category in prophecy/alerts.py.
-14. **todayClosingTime fetch fails on the worst day (B4).** Auth-degraded day = fetch
-    fails = EOD time undefined = missed flat. HOOK (B4): fallback to hardcoded 21:55
-    minus margin + `eod_close_time_fallback` structured log.
-
-### Retro adversarial review of B1+B2 (cavecrew-reviewer, 2026-06-11)
-
-- loop_contract.py ts-"" comparison: FALSE POSITIVE — candidates list pre-filters
-  `not ts` at the lookback gate, "" unreachable at line 1586. No change.
-- check_critical_errors fix_cat fallback mis-credits 'resolution' bucket when
-  resolves_ts unresolvable: FIXED (skip instead of mis-credit).
-- crypto_macro_data metrics_date None on all-expired fallback: INTENTIONAL — comment
-  added (None = honest unknown; negative DTE would trip gravity gate).
-- pickups attempts coercion + outcome_tracker `v is True` strictness: P3, equivalent
-  semantics / intentional strictness — documented here, no change.
+_(Pending — fresh general-purpose agent in flight. Non-skippable per `/fgl` step 3;
+no implementation begins until its findings are folded in.)_
