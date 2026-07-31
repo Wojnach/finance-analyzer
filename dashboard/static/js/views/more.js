@@ -15,6 +15,7 @@ const ITEMS = [
   { route: "health",     label: "Health",      hint: "Loops, signals, errors" },
   { route: "control",    label: "Control",     hint: "LLM pause, instrument tracking, loop start/stop" },
   { route: "loop-processes", label: "Running loops", hint: "Replaces the popup-window cue: live PID list + duplicate detection" },
+  { route: "swedbank",   label: "Swedbank",    hint: "Externally-custodied share accounts — monitoring only, you trade manually" },
   { route: "pickups",    label: "Pickups",     hint: "Scheduled verification jobs (auto-run by PF-PendingPickups 08:00 daily)" },
   { route: "llm-leaderboard", label: "LLM leaderboard", hint: "Per-LLM accuracy + Brier + shadow status" },
   { route: "cost",       label: "Claude cost", hint: "CLI tokens + $ rollup (7d default)" },

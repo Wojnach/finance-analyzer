@@ -1937,6 +1937,62 @@ def api_loop_processes():
         }), 500
 
 
+@app.route("/api/swedbank")
+@require_auth
+def api_swedbank():
+    """Swedbank book — externally-custodied share accounts, monitoring only.
+
+    Serves the snapshot written by data/swedbank_loop.py. Deliberately does NOT
+    price on demand: the Avanza session is shared with the real-money metals
+    loop, so a page refresh must never be able to contend for it. The trade-off
+    is that this endpoint can serve a stale snapshot, which is why the payload
+    always carries snapshot_age_s and the loop heartbeat — the UI shows age
+    rather than implying freshness.
+
+    The operator executes every order manually; nothing here can trade.
+
+    Read-only endpoint.
+    """
+    try:
+        data = _read_json(DATA_DIR / "swedbank_snapshot.json")
+    except Exception as exc:  # noqa: BLE001 — dashboard must degrade
+        logger.exception("swedbank snapshot read failed: %s", exc)
+        return jsonify({"error": "swedbank snapshot read failed"}), 500
+
+    if not isinstance(data, dict) or not data.get("accounts"):
+        return jsonify(
+            {
+                "available": False,
+                "reason": (
+                    "no snapshot yet — run `python -m portfolio.swedbank show` or "
+                    "start the loop: systemctl --user enable --now pf-swedbank"
+                ),
+                "accounts": {},
+            }
+        )
+
+    snap = DATA_DIR / "swedbank_snapshot.json"
+    try:
+        age = max(0.0, time.time() - snap.stat().st_mtime)
+    except OSError:
+        age = None
+
+    hb = {}
+    try:
+        hb = _read_json(DATA_DIR / "swedbank_loop.heartbeat") or {}
+    except Exception:  # noqa: BLE001
+        hb = {}
+
+    data["available"] = True
+    data["snapshot_age_s"] = age
+    data["loop"] = {
+        "status": hb.get("status"),
+        "ts": hb.get("ts"),
+        "running": bool(hb.get("status") == "ok"),
+    }
+    return jsonify(data)
+
+
 @app.route("/api/pickups")
 @require_auth
 def api_pickups():
