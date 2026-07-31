@@ -32,7 +32,7 @@ HERC_REPO_SH='/q/finance-analyzer'
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=8 herc2"
 BUNDLE_LOCAL="/tmp/fa-sync-${BRANCH}.bundle"
 BUNDLE_REMOTE='C:\Users\herc2\fa-sync.bundle'
-BUNDLE_REMOTE_SH='/c/Users/herc2/fa-sync.bundle'
+BUNDLE_REMOTE_SH='fa-sync.bundle'   # home-relative: Windows scp rejects /c/Users/...
 
 die() { echo "sync: $*" >&2; exit 1; }
 
