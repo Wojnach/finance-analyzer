@@ -94,9 +94,30 @@ read from the callee. Every one produced confident, well-formed, WRONG output:
 **Lesson worth keeping: verify every cross-module string against its consumer.**
 Reading this module's own code would not have caught any of the four.
 
-Still open: `projected_range_pct` reads None because `extremes` does not expose
-`high`/`low` under those names — inspect the real shape and fix or drop the
-field.
+FIXED: `projected_range_pct` was always None because `extremes` is a PERCENTILE
+dict (`p10/p25/p50/p75/p90`), not high/low. Now reports the p10-p90 band.
+
+### Signals are wired END-TO-END (2026-07-31, final state)
+
+Loop computes signals every `SIGNAL_EVERY_N_CYCLES = 15` — a full pass is ~42s
+vs ~1.5s for prices, so per-cycle would be wasteful and would hammer the shared
+Avanza session. Between passes the prior result carries forward with its
+ORIGINAL `signals_computed_at`. Signal failure cannot break pricing.
+
+Route exposes `signals_age_s` separately from `snapshot_age_s` (different
+clocks). Both derive from the payload's own timestamps, never a `stat()` —
+`_read_json` is TTL-cached and pairing cached content with a fresh stat reports
+stale data as fresh.
+
+**Verified live: 26/26 signals, 0 errors, 41.8s; prices 26/26 in 1.47s;
+endpoint returns snapshot_age_s 56.9 alongside signals_age_s 15.0.**
+
+**172 offline tests pass** (32 of them covering ohlcv + signals specifically).
+
+Remaining known gaps: the Fable 5 review never delivered (agents hit their
+session limit at 16:34); P0-1 (api_get performs browser recovery internally) is
+bounded to 3 failures but not properly fixed; `reconcile()` still not wired into
+`cmd_sync`; `require_auth` fails OPEN if `dashboard_token` is ever absent.
 
 ## PREVIOUSLY IN FLIGHT (superseded)
 
