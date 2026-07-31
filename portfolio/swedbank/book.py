@@ -37,7 +37,7 @@ class Position:
         return {
             "key": self.key,
             "qty": self.qty,
-            "cost_basis": self.cost_basis,
+            "cost_basis_sek": self.cost_basis,
             "currency": self.currency,
         }
 
@@ -103,11 +103,32 @@ def from_dict(raw):
                 raise BookError(
                     f"{label}/{key}: qty must be a positive int, got {qty!r}"
                 )
+            # cost_basis is ALWAYS in the book's base currency (SEK), never in
+            # the instrument's quote currency. `currency` describes how the
+            # instrument is QUOTED and is deliberately not applied to cost.
+            # The book is hand-authored, so writing a USD cost basis for a USD
+            # instrument is the natural mistake and would understate cost by the
+            # FX rate — reporting roughly +900% P&L. Accept the explicit
+            # cost_basis_sek spelling and sanity-check the ambiguous one.
+            cost = p.get("cost_basis_sek")
+            if cost is None:
+                cost = p.get("cost_basis")
+            if cost is not None:
+                try:
+                    cost = float(cost)
+                except (TypeError, ValueError):
+                    raise BookError(
+                        f"{label}/{key}: cost_basis must be a number, got {cost!r}"
+                    ) from None
+                if cost <= 0:
+                    raise BookError(
+                        f"{label}/{key}: cost_basis must be positive, got {cost!r}"
+                    )
             positions.append(
                 Position(
                     key=key,
                     qty=qty,
-                    cost_basis=p.get("cost_basis"),
+                    cost_basis=cost,
                     currency=p.get("currency") or INSTRUMENTS[key].currency,
                 )
             )

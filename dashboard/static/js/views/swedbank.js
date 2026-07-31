@@ -127,6 +127,21 @@ function _freshnessBanner(data) {
     msg +=
       " Monitoring loop is not running (systemctl --user start pf-swedbank).";
   }
+  // The loop rewrites the snapshot every cycle whether or not any quote was
+  // live, so snapshot age alone can read seconds-fresh while every price in it
+  // is cached. Degraded rows must escalate the banner or the page lies.
+  const nDeg = (data.degraded || []).length;
+  const nUnpriced = (data.unpriced || []).length;
+  if (nDeg) {
+    cls = "bad";
+    msg +=
+      ` ${nDeg} position(s) priced from a DEGRADED source — totals include` +
+      " marks that are not live.";
+  }
+  if (nUnpriced) {
+    cls = "bad";
+    msg += ` ${nUnpriced} position(s) have no price and are excluded from totals.`;
+  }
   return _el("p", { className: `banner ${cls}`, text: msg });
 }
 
@@ -271,6 +286,19 @@ function _renderBody(data) {
   }
 
   body.appendChild(_el("h2", { text: "Consolidated" }));
+  // Consolidated rows aggregate across accounts and carry no per-row age or
+  // source, so this table cannot show staleness the way the account tables do.
+  // Say so rather than leaving blank Age/Flags cells that read as "fine".
+  if ((data.degraded || []).length || (data.unpriced || []).length) {
+    body.appendChild(
+      _el("p", {
+        className: "sub",
+        text:
+          "Consolidated rows carry no per-row age or source — see the " +
+          "per-account tables below for which marks are degraded.",
+      }),
+    );
+  }
   body.appendChild(_holdingsTable(data.consolidated || [], currency));
 
   for (const [label, acc] of Object.entries(data.accounts || {})) {
