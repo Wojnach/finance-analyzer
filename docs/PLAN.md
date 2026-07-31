@@ -181,8 +181,29 @@ spread is a real personal cost, not a footnote.
 4. **Main-loop cycle cost.** Seven tickers were removed on 2026-04-09 purely to hold
    cycle p50 down. Adding 26 instruments to Tier 1 would repeat that mistake — hence a
    separate loop.
-5. **Shared Avanza session with the real-money metals loop.** See Premortem — this is
-   the highest-risk coupling in the design.
+5. **Shared Avanza session with the real-money metals loop.** The metals loop places and
+   cancels real stop-losses through the same authenticated session this loop polls.
+
+   **Measured 2026-07-31:** a full 26-instrument quote refresh takes **1.5 s sequential**
+   (median 20 ms/call, 26/26 success, first call ~950 ms as browser-context warmup).
+   At a 60 s cycle that is a **2.5% duty cycle** on the shared session.
+
+   **Decision: sequential only, never concurrent.** Concurrency was the mechanism by
+   which this loop could have contended for the Playwright context or tripped rate
+   limiting while metals was mid-order. At 1.5 s/cycle there is no performance reason to
+   parallelise, so the risk is designed out rather than mitigated. A test asserts the
+   pricing layer issues no concurrent Avanza calls.
+
+   Remaining coupling to address in the Premortem: session _expiry_ mid-cycle, and
+   whether this loop's failures could trigger a browser-recovery path that disturbs
+   metals. Mitigation direction: this loop never calls recovery — on any session error it
+   degrades to last-good-price and backs off, leaving recovery to the trading loops.
+
+   Current state: all loops (`pf-dataloop`, `pf-metalsloop`, `pf-cryptoloop`,
+   `pf-oilloop`, `pf-mstrloop`, `pf-golddigger`) are **inactive and disabled**; only
+   `pf-dashboard` runs. The system is dormant, so nothing contends today — but the design
+   must hold when metals is re-enabled.
+
 6. Static asset changes require bumping the `sw.js` CACHE version.
 
 ## Architecture
