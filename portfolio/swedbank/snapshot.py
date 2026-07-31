@@ -133,6 +133,7 @@ def solve_fx(rows, reference_fx, base_currency="SEK", band=0.10, tol=_QTY_TOL):
         )
 
     best = None
+    full_hit = []
     for fx in candidates:
         hits, err = 0, 0.0
         for r in foreign:
@@ -141,9 +142,30 @@ def solve_fx(rows, reference_fx, base_currency="SEK", band=0.10, tol=_QTY_TOL):
             if d <= tol:
                 hits += 1
             err += d
+        if hits == len(foreign):
+            qty_vec = tuple(
+                int(round(r.value_local / (r.price * fx))) for r in foreign
+            )
+            full_hit.append((fx, qty_vec))
         score = (hits, -err, -abs(fx - reference_fx))
         if best is None or score > best[0]:
             best = (score, fx, hits, err)
+
+    # Several rates can explain every row while implying DIFFERENT share counts —
+    # e.g. rows (100, 9000) and (50, 9000) are satisfied by both 9.0 (10 and 20
+    # shares) and 10.0 (9 and 18). Picking the one nearest the reference would
+    # silently produce wrong quantities, and reconciliation cannot catch it
+    # because value and cost are both derived from value_local independently of
+    # the chosen quantity. Refuse instead of guessing.
+    distinct = {qv for _, qv in full_hit}
+    if len(distinct) > 1:
+        rates = sorted(fx for fx, _ in full_hit)
+        raise SnapshotError(
+            f"FX solve is ambiguous: {len(distinct)} different share-count "
+            f"solutions all explain every row (candidate rates {rates[:5]}). "
+            f"Reconciliation cannot distinguish them. Supply the broker's own FX "
+            f"rate or explicit quantities rather than letting this guess."
+        )
 
     _, fx, hits, err = best
     if hits != len(foreign):

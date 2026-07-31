@@ -226,3 +226,29 @@ class TestParseMarkdownTable:
     def test_header_and_separator_ignored(self):
         rows = parse_markdown_table(self.TABLE)
         assert all(r.name.lower() != "holding" for r in rows)
+
+
+class TestAmbiguousFxIsRefused:
+    """Several rates can satisfy every row while implying different share
+    counts. Reconciliation cannot tell them apart, because value and cost are
+    both derived from value_local independently of the chosen quantity."""
+
+    def test_two_valid_solutions_raise(self):
+        # 9.0 -> (10, 20 shares); 10.0 -> (9, 18 shares). Both fully consistent.
+        rows = [
+            RawRow("A", 100.0, "USD", 9000.0, None),
+            RawRow("B", 50.0, "USD", 9000.0, None),
+        ]
+        with pytest.raises(SnapshotError, match="ambiguous"):
+            solve_fx(rows, reference_fx=9.5, band=0.15)
+
+    def test_unambiguous_book_still_solves(self):
+        rows = [
+            _row("Alpha", 338.19, 1),
+            _row("Beta", 190.01, 32),
+            _row("Gamma", 739.00, 2),
+            _row("Delta", 1015.89, 1),
+            _row("Epsilon", 23.22, 4),
+        ]
+        fx, diag = solve_fx(rows, reference_fx=SYNTH_FX)
+        assert fx == pytest.approx(SYNTH_FX, rel=1e-6)
