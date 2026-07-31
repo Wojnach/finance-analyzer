@@ -178,6 +178,11 @@ data/models/meta_learner_*_metrics.json
 # Scratch/debug scripts
 _*.py
 !tests/_state_reset.py
+# ...but _*.py also matches __init__.py, which silently drops the init file
+# of every NEW package (already-tracked ones are unaffected, so this only
+# bites new code and only on a fresh clone — namespace packages hide it
+# locally). Keep package inits.
+!**/__init__.py
 _*.ps1
 send_telegram.py
 /test_digest.py
