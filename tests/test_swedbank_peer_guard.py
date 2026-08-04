@@ -86,13 +86,25 @@ class TestPeerGuardBlocks:
     def _no_env_override(self, monkeypatch):
         monkeypatch.delenv("PF_SWEDBANK_IGNORE_PEER", raising=False)
 
-    def test_primary_never_defers(self, monkeypatch):
+    def test_primary_proceeds_when_peer_idle(self, monkeypatch):
         monkeypatch.setattr(sl, "_peer_config", lambda: ("steamdeck", "x", True))
         monkeypatch.setattr(sl, "is_primary_host", lambda primary=None: True)
-        monkeypatch.setattr(
-            sl, "peer_loop_alive", lambda *a, **k: pytest.fail("must not be consulted")
-        )
+        monkeypatch.setattr(sl, "peer_loop_alive", lambda *a, **k: False)
         assert not sl.peer_guard_blocks()
+
+    def test_two_self_declared_primaries_both_refuse(self, monkeypatch):
+        # config.json is per-machine, so promoting herc without demoting the Deck
+        # leaves two primaries. "Both are primary" must not mean two writers.
+        monkeypatch.setattr(sl, "_peer_config", lambda: ("steamdeck", "x", True))
+        monkeypatch.setattr(sl, "is_primary_host", lambda primary=None: True)
+        monkeypatch.setattr(sl, "peer_loop_alive", lambda *a, **k: True)
+        assert sl.peer_guard_blocks()
+
+    def test_primary_collision_is_still_overridable(self, monkeypatch):
+        monkeypatch.setattr(sl, "_peer_config", lambda: ("steamdeck", "x", True))
+        monkeypatch.setattr(sl, "is_primary_host", lambda primary=None: True)
+        monkeypatch.setattr(sl, "peer_loop_alive", lambda *a, **k: True)
+        assert not sl.peer_guard_blocks(ignore_peer=True)
 
     def test_secondary_defers_to_live_primary(self, monkeypatch):
         monkeypatch.setattr(sl, "_peer_config", lambda: ("steamdeck", "x", True))

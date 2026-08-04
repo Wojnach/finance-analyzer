@@ -206,6 +206,18 @@ def peer_guard_blocks(ignore_peer=False):
     if not guard_enabled:
         return False
     if is_primary_host(primary=primary):
+        # Primary wins by design, but config.json is per-machine: promoting herc
+        # without demoting the Deck would leave two self-declared primaries and
+        # two writers. A peer that also claims primary is a misconfiguration, and
+        # the safe reading of "both are primary" is that neither should assume it.
+        if peer_loop_alive():
+            logger.error(
+                "peer loop is alive while this host also claims primary "
+                "(swedbank.loop_primary_host=%r) — refusing rather than running "
+                "two writers. Fix the config so exactly one host is primary.",
+                primary,
+            )
+            return True
         return False
     return peer_loop_alive()
 

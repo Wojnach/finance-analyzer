@@ -85,7 +85,15 @@ def _aggregate(articles, ticker):
         )
 
     if not scored:
-        return {"available": True, "n": 0, "headlines": [], "max_score": 0.0}
+        # available:true with max_score 0.0 would be indistinguishable from
+        # "checked, genuinely quiet news day" — a fabricated neutral reading. An
+        # empty response means we learned nothing, so say so.
+        return {
+            "available": False,
+            "n": 0,
+            "headlines": [],
+            "reason": "no headlines returned",
+        }
 
     relevant = [s for s in scored if s["relevant"]]
     # Rank on relevant headlines when any matched the ticker, else fall back to
@@ -147,8 +155,11 @@ def fetch_for(key, limit=10, fetch_fn=None, use_cache=True):
         return {**base, "available": False, "reason": f"{type(exc).__name__}: {exc}"}
 
     payload = _aggregate(articles, ticker)
-    with _lock:
-        _cache[ticker] = (_now().timestamp(), payload)
+    # Only cache a real observation. Caching an empty response would pin a
+    # 30-minute window during which a genuine breaking story is invisible.
+    if payload.get("available"):
+        with _lock:
+            _cache[ticker] = (_now().timestamp(), payload)
     return {**base, **payload, "cached": False}
 
 
