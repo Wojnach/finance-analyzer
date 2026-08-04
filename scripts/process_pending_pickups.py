@@ -273,7 +273,17 @@ def main(argv: list[str] | None = None) -> int:
                 "details": result.get("details", {}),
             }
         )
-        if verdict != "error":
+        if verdict == "defer":
+            # 2026-08-04: verdict=defer used to mark the pickup COMPLETED, which
+            # closed it forever. "defer" means the handler could not judge yet
+            # (data not accumulated, horizon not elapsed) and explicitly asks to
+            # be re-checked — LLM-CRYPTOTRADER-72H said "extend window 7d and
+            # re-check" and was closed anyway, and CALLS-VERIFY-1D was closed
+            # before the calls it exists to score were even due. A deferral is
+            # the one verdict that must stay pending.
+            pickup["status"] = "pending"
+            print("  verdict=defer -- left pending for a later run")
+        elif verdict != "error":
             pickup["status"] = "completed"
         else:
             # 2026-06-10: bounded retry. status="error" used to be terminal
