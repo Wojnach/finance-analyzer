@@ -536,3 +536,8 @@ data/swedbank_*.json
 # ...and every other swedbank runtime artifact. The heartbeat and lock
 # are not .json, and a heartbeat previously carried a real portfolio total.
 data/swedbank_*
+
+# Analytical call journal — carries stakes_sek (real position sizes) alongside
+# each call, so it is private for the same reason data/swedbank_*.json is.
+# The MODULE and its tests are tracked; the operator's actual calls are not.
+data/call_journal.jsonl*

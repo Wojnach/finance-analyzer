@@ -50,10 +50,12 @@ from portfolio.file_utils import atomic_write_json, load_json  # noqa: E402
 # dict so that a malicious or corrupted `data/pending_pickups.json` cannot
 # import arbitrary modules via a `handler` field. (Semgrep WARNING
 # CWE-706 -- dynamic importlib.import_module with untrusted input.)
+from scripts.pickups import call_journal_resolve as _call_journal_resolve  # noqa: E402
 from scripts.pickups import llm_cryptotrader_72h as _llm_cryptotrader_72h  # noqa: E402
 
 _HANDLERS = {
     "llm_cryptotrader_72h": _llm_cryptotrader_72h,
+    "call_journal_resolve": _call_journal_resolve,
 }
 
 _PICKUPS_PATH = _REPO_ROOT / "data" / "pending_pickups.json"
@@ -219,11 +221,13 @@ def _record_pickup_failure(pickup: dict, result: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="List what would run; mutate nothing.",
     )
     parser.add_argument(
-        "--force", default=None,
+        "--force",
+        default=None,
         help="Force-run a specific pickup id regardless of due_ts.",
     )
     args = parser.parse_args(argv)
@@ -261,12 +265,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  verdict={verdict} summary={result.get('summary', '')[:200]}")
 
         history = pickup.setdefault("history", [])
-        history.append({
-            "ran_at": now.isoformat(),
-            "verdict": verdict,
-            "summary": result.get("summary", ""),
-            "details": result.get("details", {}),
-        })
+        history.append(
+            {
+                "ran_at": now.isoformat(),
+                "verdict": verdict,
+                "summary": result.get("summary", ""),
+                "details": result.get("details", {}),
+            }
+        )
         if verdict != "error":
             pickup["status"] = "completed"
         else:
