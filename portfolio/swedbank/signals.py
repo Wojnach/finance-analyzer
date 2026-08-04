@@ -127,7 +127,13 @@ def evaluate(
     # the underlying mapping exists to avoid, while the payload still claimed the
     # underlying was used. Route those through price_source instead, and never
     # self-reference.
+    # A watchlist instrument is not pinned in INSTRUMENTS but carries its own
+    # orderbook ID, so it can use the Avanza chart path directly. Only when the
+    # signal ticker is a DIFFERENT unpinned symbol (an underlying like BTC-USD)
+    # must it route through price_source instead.
     src_inst = INSTRUMENTS.get(signal_ticker)
+    if src_inst is None and signal_ticker == key:
+        src_inst = inst
     try:
         if src_inst is not None:
             df, source = ohlcv.fetch(
@@ -184,11 +190,11 @@ def evaluate(
         "atr_pct": extra.get("atr_pct") or ind.get("atr_pct"),
     }
     out["trajectory"] = _trajectory(inst, out, ind, extra)
-    out["news"] = _news_block(key)
+    out["news"] = _news_block(key, signal_ticker)
     return out
 
 
-def _news_block(key):
+def _news_block(key, signal_ticker=None):
     """Display-only headline scores. Imported here, not at module scope, because
     news.py reads UNDERLYING from this module — a top-level import would cycle.
 
@@ -199,7 +205,7 @@ def _news_block(key):
     try:
         from portfolio.swedbank import news as newsmod
 
-        return newsmod.fetch_for(key)
+        return newsmod.fetch_for(key, ticker=signal_ticker)
     except Exception as exc:
         logger.warning("swedbank news block failed for %s: %s", key, exc)
         return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}

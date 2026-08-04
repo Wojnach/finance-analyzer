@@ -115,15 +115,18 @@ def _aggregate(articles, ticker):
     }
 
 
-def fetch_for(key, limit=10, fetch_fn=None, use_cache=True):
+def fetch_for(key, limit=10, fetch_fn=None, use_cache=True, ticker=None):
     """Headlines + keyword scores for one instrument key.
+
+    `ticker` lets an unpinned instrument (watchlist name) supply its own query
+    symbol; pinned instruments resolve through the UNDERLYING map as before.
 
     Never raises — a news outage must degrade this block, not the whole
     signal snapshot the caller is building.
     """
     inst = INSTRUMENTS.get(key)
     base = {"key": key, "checked_at": _now().isoformat()}
-    if inst is None:
+    if inst is None and not ticker:
         return {**base, "available": False, "reason": "unknown instrument"}
     if key in NO_COVERAGE:
         return {
@@ -132,7 +135,7 @@ def fetch_for(key, limit=10, fetch_fn=None, use_cache=True):
             "reason": "no Yahoo coverage for this Stockholm listing",
         }
 
-    ticker = news_ticker_for(key)
+    ticker = news_ticker_for(key) if inst is not None else ticker
     base["news_ticker"] = ticker
     if ticker != key:
         base["note"] = f"headlines for underlying {ticker}"

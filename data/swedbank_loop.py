@@ -313,6 +313,9 @@ def cycle(with_signals=None):
     atomic_write_json(CACHE_PATH, s.to_dict())
     atomic_write_json(SNAPSHOT_FILE, val)
 
+    if with_signals:
+        _watchlist_pass()
+
     live = sum(1 for q in s.quotes.values() if not q.degraded)
     # No monetary values in logs — journald is not private and this repo is
     # public. Counts and timings only.
@@ -332,6 +335,37 @@ def cycle(with_signals=None):
             "swedbank_session_degraded: %s", dict(list(s.errors.items())[:5])
         )
     return val
+
+
+def _watchlist_pass():
+    """Signals + news for the user's Avanza watchlist ("Mina bevakningar").
+
+    Runs on the same 15-cycle cadence as the book's signal pass, AFTER the
+    snapshot write: watch-only names must never delay or break the valuation of
+    real positions. The list itself is re-fetched daily inside ensure_fresh()
+    because the user curates it in the app and expects additions to be picked
+    up without a restart.
+    """
+    try:
+        from portfolio.swedbank import watchlist as wlmod
+
+        cache = wlmod.ensure_fresh()
+        if not cache:
+            logger.warning("watchlist: no cache and refresh failed — skipping pass")
+            return
+        t0 = time.time()
+        results, pointers = wlmod.evaluate_watchlist(cache=cache)
+        wlmod.write_snapshot(results, pointers, cache)
+        n_err = sum(1 for v in results.values() if v.get("error"))
+        logger.info(
+            "watchlist: %d evaluated (%d error), %d in book, %.1fs",
+            len(results),
+            n_err,
+            len(pointers),
+            time.time() - t0,
+        )
+    except Exception as exc:
+        logger.warning("watchlist pass failed: %s: %s", type(exc).__name__, exc)
 
 
 def run_loop():

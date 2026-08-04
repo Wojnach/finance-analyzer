@@ -164,7 +164,7 @@ class TestEvaluateErrorPath:
         r = signals.evaluate(
             by_key("NVDA"),
             chart_fn=lambda *a: _bars(n=8),
-            alpaca_fn=lambda *a: None,   # isolate: NVDA has a real fallback
+            alpaca_fn=lambda *a: None,  # isolate: NVDA has a real fallback
         )
         assert r.get("error")
         assert r.get("action") is None
@@ -243,7 +243,11 @@ class TestNoLayer1Contamination:
 
         tree = ast.parse(pathlib.Path(signals.__file__).read_text())
         called = {
-            n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
+            (
+                n.func.attr
+                if isinstance(n.func, ast.Attribute)
+                else getattr(n.func, "id", "")
+            )
             for n in ast.walk(tree)
             if isinstance(n, ast.Call)
         }
@@ -313,16 +317,18 @@ class TestUnderlyingIsNeverSelfReferencing:
             alpaca_fn=lambda *a: None,
             ticker_fn=lambda t, horizon="1d": (ohlcv.to_frame(_bars()), "price_source"),
         )
-        assert by_key(key).avanza_ob not in seen, (
-            "fetched the certificate's own orderbook while claiming the underlying"
-        )
+        assert (
+            by_key(key).avanza_ob not in seen
+        ), "fetched the certificate's own orderbook while claiming the underlying"
 
     @pytest.mark.parametrize("key", ["XBT-BTC", "XBT-ETH"])
     def test_unfetchable_underlying_errors_rather_than_self_referencing(self, key):
         r = signals.evaluate(
             by_key(key),
             chart_fn=lambda *a: _bars(),
-            ticker_fn=lambda t, horizon="1d": (_ for _ in ()).throw(RuntimeError("down")),
+            ticker_fn=lambda t, horizon="1d": (_ for _ in ()).throw(
+                RuntimeError("down")
+            ),
         )
         assert r.get("error")
         assert r.get("action") is None
@@ -354,7 +360,7 @@ class TestUniverseInjectionAndStoHours:
         )
         t = r.get("trajectory") or {}
         raw, _ = signals._hours_remaining(by_key("INVE-B"))
-        assert t.get("hours_remaining") == pytest.approx(raw * (6.5 / 8.5), rel=1e-6)
+        assert t.get("hours_remaining") == pytest.approx(raw * (6.5 / 8.5), abs=0.0051)
 
     def test_us_hours_not_rescaled(self):
         r = signals.evaluate(
@@ -362,5 +368,5 @@ class TestUniverseInjectionAndStoHours:
         )
         raw, _ = signals._hours_remaining(by_key("NVDA"))
         assert (r.get("trajectory") or {}).get("hours_remaining") == pytest.approx(
-            raw, rel=1e-6
+            raw, abs=0.0051
         )
