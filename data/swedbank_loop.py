@@ -51,6 +51,21 @@ SINGLETON_LOCK_FILE = "data/swedbank_loop.lock"
 HEARTBEAT_FILE = "data/swedbank_loop.heartbeat"
 SNAPSHOT_FILE = "data/swedbank_snapshot.json"
 EXIT_LOCK_CONFLICT = 11
+EXIT_PEER_ACTIVE = 12
+
+# The singleton lock is a PID in a local file, so it cannot see a loop on the
+# other machine: herc's data/ is a different filesystem and a Deck PID means
+# nothing on Windows. Both boxes now hold valid Avanza sessions for the SAME
+# account, which the real-money metals loop also uses, so two concurrent loops
+# would interleave requests on it.
+#
+# Only a persistent --loop is guarded. One-shot calls (--once, CLI, probes) stay
+# free: herc is the testing bench, and one-shots against a live Deck loop were
+# exercised repeatedly with no contention.
+PEER_PRIMARY_HOST = "steamdeck"
+PEER_URL_DEFAULT = "http://100.75.67.98:5055/api/swedbank"
+PEER_HEARTBEAT_MAX_AGE_S = 180.0
+PEER_TIMEOUT_S = 5.0
 
 BACKOFF_MIN = 10
 BACKOFF_MAX = 300
@@ -106,6 +121,93 @@ def release_singleton_lock(lock_path):
     if lock_path:
         with contextlib.suppress(OSError):
             os.remove(lock_path)
+
+
+def _peer_config():
+    cfg = (load_json("config.json", default=None) or {}).get("swedbank") or {}
+    return (
+        str(cfg.get("loop_primary_host") or PEER_PRIMARY_HOST),
+        str(cfg.get("loop_peer_url") or PEER_URL_DEFAULT),
+        cfg.get("loop_peer_guard", True),
+    )
+
+
+def is_primary_host(hostname=None, primary=None):
+    """Primary never defers — it is the designated Avanza writer.
+
+    Override by setting swedbank.loop_primary_host in config.json to the other
+    machine, which inverts who yields without touching this file.
+    """
+    import socket
+
+    name = (hostname or socket.gethostname() or "").strip().lower()
+    want = (primary or _peer_config()[0]).strip().lower()
+    return bool(want) and (name == want or name.startswith(want))
+
+
+def peer_loop_alive(url=None, fetch_fn=None):
+    """Whether the other machine's swedbank loop is running.
+
+    Unreachable peer returns False on purpose: the Deck being off is exactly the
+    case herc must still cover, so an unknown peer must not block us. That means
+    a network partition can allow two writers — accepted, because the failure it
+    prevents (silently no monitoring while the Deck is down) is the likelier one.
+    """
+    import json as _json
+    import urllib.request
+
+    target = url or _peer_config()[1]
+    try:
+        if fetch_fn is not None:
+            payload = fetch_fn(target)
+        else:
+            token = (load_json("config.json", default=None) or {}).get(
+                "dashboard_token"
+            )
+            req = urllib.request.Request(target)
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=PEER_TIMEOUT_S) as resp:
+                payload = _json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        logger.info("peer check: %s unreachable (%s) — proceeding", target, exc)
+        return False
+
+    # /api/swedbank nests the heartbeat under "loop" and reports status "ok";
+    # "heartbeat" is the shape of the raw data/swedbank_loop.heartbeat file, kept
+    # so a direct file read works too.
+    src = payload or {}
+    hb = src.get("loop") or src.get("heartbeat") or {}
+    status = str(hb.get("status") or "")
+    if status not in ("starting", "running", "ok"):
+        return False
+    ts = hb.get("ts")
+    if not ts:
+        return False
+    try:
+        age = (
+            datetime.datetime.now(datetime.timezone.utc)
+            - datetime.datetime.fromisoformat(ts)
+        ).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    if age > PEER_HEARTBEAT_MAX_AGE_S:
+        logger.info("peer check: heartbeat %.0fs stale — proceeding", age)
+        return False
+    logger.warning("peer check: peer loop alive (status=%s, %.0fs old)", status, age)
+    return True
+
+
+def peer_guard_blocks(ignore_peer=False):
+    primary, _url, guard_enabled = _peer_config()
+    if ignore_peer or os.environ.get("PF_SWEDBANK_IGNORE_PEER") == "1":
+        logger.warning("peer guard overridden — starting anyway")
+        return False
+    if not guard_enabled:
+        return False
+    if is_primary_host(primary=primary):
+        return False
+    return peer_loop_alive()
 
 
 def _heartbeat(status, extra=None):
@@ -221,9 +323,8 @@ def run_loop():
             _heartbeat(
                 "ok",
                 {
-                    "priced": len(val["accounts"]) and sum(
-                        len(a["holdings"]) for a in val["accounts"].values()
-                    ),
+                    "priced": len(val["accounts"])
+                    and sum(len(a["holdings"]) for a in val["accounts"].values()),
                     "unpriced": len(val["unpriced"]),
                     "degraded": len(val["degraded"]),
                 },
@@ -251,6 +352,12 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Swedbank monitoring loop (never trades)")
     p.add_argument("--loop", action="store_true")
     p.add_argument("--once", action="store_true")
+    p.add_argument(
+        "--ignore-peer",
+        action="store_true",
+        help="start --loop even if the primary machine's loop is running "
+        "(also: PF_SWEDBANK_IGNORE_PEER=1, or swedbank.loop_peer_guard=false)",
+    )
     args = p.parse_args(argv)
     if not (args.loop or args.once):
         p.error("specify --loop or --once")
@@ -268,6 +375,14 @@ def main(argv=None):
         finally:
             release_singleton_lock(lock)
         return 0
+
+    if peer_guard_blocks(ignore_peer=args.ignore_peer):
+        logger.error(
+            "the primary machine's swedbank loop is running — refusing to start a "
+            "second writer against the shared Avanza session. Override with "
+            "--ignore-peer if you really want both."
+        )
+        return EXIT_PEER_ACTIVE
 
     lock = acquire_singleton_lock()
     if not lock:
