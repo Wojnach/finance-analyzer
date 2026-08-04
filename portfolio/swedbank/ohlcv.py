@@ -38,6 +38,42 @@ class OhlcvError(RuntimeError):
     pass
 
 
+_AVAILABILITY_TTL = 60.0
+_availability = {"checked_at": 0.0, "ok": None}
+
+
+def avanza_available(now_fn=None):
+    """Whether an Avanza session exists and has not expired.
+
+    Cheap file check, cached for a minute. Without it every US instrument on a
+    machine with no session pays a doomed HTTP round-trip before falling back to
+    Alpaca — 81s vs 36s for the same 26 instruments, measured on herc.
+
+    Cached rather than per-call because a sweep asks 26 times in a row, and TTL'd
+    rather than once-per-process because a login can land mid-run.
+    """
+    import time
+
+    from portfolio.avanza_session import SESSION_FILE, session_remaining_minutes
+
+    clock = now_fn or time.monotonic
+    now = clock()
+    if (
+        _availability["ok"] is not None
+        and (now - _availability["checked_at"]) < _AVAILABILITY_TTL
+    ):
+        return _availability["ok"]
+
+    ok = SESSION_FILE.exists()
+    if ok:
+        remaining = session_remaining_minutes()
+        # None means the file carries no expiry — usable, let the call decide.
+        if remaining is not None and remaining <= 0:
+            ok = False
+    _availability.update({"checked_at": now, "ok": ok})
+    return ok
+
+
 def _avanza_chart(ob, period, resolution):
     from portfolio.avanza_session import api_get
 
@@ -107,10 +143,20 @@ def fetch(inst, horizon=DEFAULT_HORIZON, chart_fn=None, alpaca_fn=None):
     """
     period, resolution = HORIZON_SPEC.get(horizon, HORIZON_SPEC[DEFAULT_HORIZON])
     fetch_chart = chart_fn or _avanza_chart
-    try:
-        return to_frame(fetch_chart(inst.avanza_ob, period, resolution)), "avanza"
-    except Exception as exc:
-        logger.warning("swedbank ohlcv: avanza chart failed for %s: %s", inst.key, exc)
+    # An explicit chart_fn is a caller override (tests, probes) and must still be
+    # honoured even with no session on disk.
+    skip_avanza = chart_fn is None and not avanza_available()
+    if skip_avanza and not inst.has_fallback:
+        raise OhlcvError(
+            f"{inst.key}: no Avanza session and no fallback exists (Stockholm listing)"
+        )
+    if not skip_avanza:
+        try:
+            return to_frame(fetch_chart(inst.avanza_ob, period, resolution)), "avanza"
+        except Exception as exc:
+            logger.warning(
+                "swedbank ohlcv: avanza chart failed for %s: %s", inst.key, exc
+            )
 
     if not inst.has_fallback:
         raise OhlcvError(
