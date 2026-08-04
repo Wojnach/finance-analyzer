@@ -36,8 +36,15 @@ api_keys.py
 dashboard/static/api-data/
 
 # Avanza session data (auth tokens, cookies, credentials)
-data/avanza_session.json
-data/avanza_storage_state.json
+# Globbed, not exact: a bare filename rule misses every copy the tooling and we
+# ourselves make. data/avanza_session.json.migrated-to-deck was sitting
+# untracked-and-NOT-ignored on herc, one `git add -A` away from a public repo.
+# The same applies to .bak, .old, .corrupt-<hash> written by the atomic writers.
+data/avanza_session.json*
+data/avanza_storage_state.json*
+data/*avanza_session*
+data/*avanza_storage_state*
+*.migrated-to-deck
 .mcp.json
 
 # Claude Code
