@@ -41,6 +41,12 @@ class OhlcvError(RuntimeError):
 _AVAILABILITY_TTL = 60.0
 _availability = {"checked_at": 0.0, "ok": None}
 
+# A session file can exist and be unexpired while the session is actually dead
+# (revoked server-side, or displaced by a login on the other machine). Without
+# this, a sweep that already burned through failures still pays one doomed
+# request per instrument before each falls back.
+_DEAD_SESSION_FAILURES = 5
+
 
 def avanza_available(now_fn=None):
     """Whether an Avanza session exists and has not expired.
@@ -58,6 +64,20 @@ def avanza_available(now_fn=None):
 
     clock = now_fn or time.monotonic
     now = clock()
+
+    # Checked BEFORE the cache, and deliberately not cached itself. A 26-instrument
+    # sweep finishes inside the 60s TTL, so a cached positive taken at sweep start
+    # would otherwise let every remaining instrument keep calling a session that
+    # has already died mid-sweep — the exact waste this breaker exists to stop.
+    # Reading it live also means recovery is immediate once the count resets.
+    if _consecutive_failures() >= _DEAD_SESSION_FAILURES:
+        logger.warning(
+            "swedbank ohlcv: last %d+ Avanza calls failed — treating the session as "
+            "dead and using fallbacks",
+            _DEAD_SESSION_FAILURES,
+        )
+        return False
+
     if (
         _availability["ok"] is not None
         and (now - _availability["checked_at"]) < _AVAILABILITY_TTL
@@ -72,6 +92,20 @@ def avanza_available(now_fn=None):
             ok = False
     _availability.update({"checked_at": now, "ok": ok})
     return ok
+
+
+def _consecutive_failures():
+    """Live failure count from the shared session, or 0 if unavailable.
+
+    Never raises: an unreadable stat must not stop us attempting Avanza, since
+    that is the normal path.
+    """
+    try:
+        from portfolio.avanza_session import session_call_stats
+
+        return int((session_call_stats() or {}).get("consecutive_failures") or 0)
+    except Exception:
+        return 0
 
 
 def _avanza_chart(ob, period, resolution):

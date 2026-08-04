@@ -95,32 +95,45 @@ def _pid_alive(pid):
 
 
 def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
+    """Take the local single-writer lock, or return None if another holds it.
+
+    Uses an OS lock held by an open descriptor rather than a PID file. The PID
+    approach had a TOCTOU: O_CREAT|O_EXCL and the write of the PID are two steps,
+    so a second process reading in the gap saw an empty file, read no PID, judged
+    the lock stale, deleted it, and both ended up holding it. It also could not
+    survive a PID being reused. The kernel releases this on process death, so a
+    crash cannot leave a lock nobody can clear.
+
+    Same primitive as portfolio/avanza_order_lock.py, which guards real orders.
+    """
+    import filelock
+
     Path(os.path.dirname(lock_path) or ".").mkdir(parents=True, exist_ok=True)
-    for _ in range(2):
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            return lock_path
-        except FileExistsError:
-            old_pid = None
-            with contextlib.suppress(ValueError, OSError), open(lock_path) as f:
-                old_pid = int(f.read().strip() or 0)
-            if old_pid and _pid_alive(old_pid):
-                logger.warning("singleton lock held by pid %d", old_pid)
-                return None
-            with contextlib.suppress(OSError):
-                os.remove(lock_path)
-        except OSError as exc:
-            logger.warning("acquire_singleton_lock: %s", exc)
-            return None
-    return None
+    # filelock appends nothing to the path, so the lock and its sidecar are the
+    # same file the old implementation used.
+    lock = filelock.FileLock(str(lock_path), timeout=0)
+    try:
+        lock.acquire()
+    except filelock.Timeout:
+        logger.warning("singleton lock held by another process (%s)", lock_path)
+        return None
+    except OSError as exc:
+        logger.warning("acquire_singleton_lock: %s", exc)
+        return None
+    return lock
 
 
-def release_singleton_lock(lock_path):
-    if lock_path:
+def release_singleton_lock(lock):
+    if not lock:
+        return
+    # Older callers passed the path string back. Tolerate it so a stale caller
+    # cannot wedge the loop, but only a real lock object can be released.
+    if isinstance(lock, (str, os.PathLike)):
         with contextlib.suppress(OSError):
-            os.remove(lock_path)
+            os.remove(lock)
+        return
+    with contextlib.suppress(Exception):
+        lock.release()
 
 
 def _peer_config():
