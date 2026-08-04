@@ -93,8 +93,9 @@ def applicable_for(inst):
     return out
 
 
-def evaluate(inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None,
-             ticker_fn=None):
+def evaluate(
+    inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None, ticker_fn=None
+):
     """Signals + trajectory for one instrument.
 
     Returns a dict, or one carrying `error` — never a neutral/HOLD verdict
@@ -183,7 +184,25 @@ def evaluate(inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None,
         "atr_pct": extra.get("atr_pct") or ind.get("atr_pct"),
     }
     out["trajectory"] = _trajectory(inst, out, ind, extra)
+    out["news"] = _news_block(key)
     return out
+
+
+def _news_block(key):
+    """Display-only headline scores. Imported here, not at module scope, because
+    news.py reads UNDERLYING from this module — a top-level import would cycle.
+
+    News never votes: `out["action"]` above is already final. Attaching an
+    uncalibrated keyword score to consensus would move decisions on nothing but
+    word counts, and calibration needs realized outcomes we do not have yet.
+    """
+    try:
+        from portfolio.swedbank import news as newsmod
+
+        return newsmod.fetch_for(key)
+    except Exception as exc:
+        logger.warning("swedbank news block failed for %s: %s", key, exc)
+        return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
 def _hours_remaining(inst):
@@ -307,13 +326,14 @@ def _trajectory(inst, sig, ind, extra):
         "targets": t.get("targets") or [],
         "recommended": t.get("recommended"),
         "extremes": extremes,
-        "projected_range_pct": move_pct,   # p10..p90 band, % of spot
+        "projected_range_pct": move_pct,  # p10..p90 band, % of spot
         "atr_pct": atr_pct,
     }
 
 
-def evaluate_universe(keys=None, horizon="1d", chart_fn=None, config=None,
-                      alpaca_fn=None, ticker_fn=None):
+def evaluate_universe(
+    keys=None, horizon="1d", chart_fn=None, config=None, alpaca_fn=None, ticker_fn=None
+):
     """Sequentially evaluate the universe. Sequential for the same reason
     pricing.sweep is: the real-money metals loop shares this Avanza session."""
     keys = list(INSTRUMENTS if keys is None else keys)
@@ -328,8 +348,12 @@ def evaluate_universe(keys=None, horizon="1d", chart_fn=None, config=None,
     out = {}
     for key in keys:
         out[key] = evaluate(
-            INSTRUMENTS[key], horizon=horizon, chart_fn=chart_fn, config=config,
-            alpaca_fn=alpaca_fn, ticker_fn=ticker_fn,
+            INSTRUMENTS[key],
+            horizon=horizon,
+            chart_fn=chart_fn,
+            config=config,
+            alpaca_fn=alpaca_fn,
+            ticker_fn=ticker_fn,
         )
     return out
 
