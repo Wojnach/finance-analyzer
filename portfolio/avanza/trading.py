@@ -62,6 +62,9 @@ def place_order(
     Raises:
         ValueError: If volume < 1, price <= 0, or order total < 1000 SEK.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_order")
     if volume < 1:
         raise ValueError(f"volume must be >= 1, got {volume}")
     if price <= 0:
@@ -156,6 +159,9 @@ def cancel_order(
     Returns:
         ``True`` if the cancellation was accepted.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("cancel_order")
     client = AvanzaClient.get_instance()
     acct = account_id or client.account_id
     raw: dict[str, Any] = client.avanza.delete_order(acct, order_id)
@@ -236,6 +242,9 @@ def place_stop_loss(
     Returns:
         :class:`~portfolio.avanza.types.StopLossResult`.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_stop_loss")
     client = AvanzaClient.get_instance()
     acct = account_id or client.account_id
     valid_until = date.today() + timedelta(days=valid_days)

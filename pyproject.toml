@@ -35,6 +35,7 @@ addopts = " -m 'not slow and not integration'"
 markers = [
     "integration: marks tests that require live GPU / network (deselect with '-k not integration')",
     "slow: marks tests that take a long time to run (default: skipped — run explicitly with '-m slow')",
+    "real_trading_gate: opt out of the conftest bypass and exercise the live-trading kill switch for real",
 ]
 
 [tool.ruff]

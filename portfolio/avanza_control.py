@@ -129,6 +129,9 @@ def fetch_page_positions(page, account_id: str | None = None):
 
 def place_order(page, account_id: str | None, ob_id: str, side: str, price: float, volume: int):
     """Place a BUY/SELL order via the authenticated browser session."""
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_order")
     resolved_account_id = str(account_id or get_account_id())
     normalized_side = (side or "").strip().upper()
     return _place_page_order(page, resolved_account_id, ob_id, normalized_side, price, volume)
@@ -144,6 +147,9 @@ def place_stop_loss(
     valid_days: int = 8,
 ):
     """Place a hardware stop-loss order via the authenticated browser session."""
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_stop_loss")
     resolved_account_id = str(account_id or get_account_id())
     return _place_page_stop_loss(
         page,
@@ -340,6 +346,9 @@ def place_order_no_page(account_id, ob_id, side, price, volume):
     Raises:
         ValueError: If *side* is not "BUY" or "SELL" (C2 fail-safe).
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_order_no_page")
     normalized_side = (side or "").strip().upper()
     if normalized_side not in ("BUY", "SELL"):
         raise ValueError(
@@ -359,6 +368,9 @@ def place_stop_loss_no_page(account_id, ob_id, trigger_price, sell_price, volume
     Returns:
         Tuple (ok: bool, result: dict) matching the page-based interface.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_stop_loss_no_page")
     result = _place_stop_loss_session(ob_id, trigger_price, sell_price, volume, account_id, valid_days)
     ok = result.get("status") == "SUCCESS"
     return ok, result

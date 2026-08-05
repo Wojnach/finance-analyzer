@@ -299,6 +299,9 @@ def place_buy_order(
     Returns:
         Dict with orderId, orderRequestStatus, message
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_buy_order")
     from avanza.constants import OrderType
     return _place_order(orderbook_id, OrderType.BUY, price, volume, valid_until)
 
@@ -320,6 +323,9 @@ def place_sell_order(
     Returns:
         Dict with orderId, orderRequestStatus, message
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_sell_order")
     from avanza.constants import OrderType
     return _place_order(orderbook_id, OrderType.SELL, price, volume, valid_until)
 

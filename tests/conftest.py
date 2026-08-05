@@ -9,7 +9,8 @@ import pytest
 
 def pytest_configure(config):
     config.addinivalue_line(
-        "markers", "integration: marks tests that require live GPU / network (deselect with '-k not integration')"
+        "markers",
+        "integration: marks tests that require live GPU / network (deselect with '-k not integration')",
     )
 
 
@@ -25,6 +26,7 @@ def _reset_module_state():
     See: docs/IMPROVEMENT_BACKLOG.md TEST-HYGIENE-1
     """
     from _state_reset import reset_all_high_risk
+
     reset_all_high_risk()
     yield
     reset_all_high_risk()
@@ -96,6 +98,7 @@ def _isolate_accuracy_caches():
 # Indicator dictionary helpers
 # ---------------------------------------------------------------------------
 
+
 def make_indicators(**overrides):
     """Return a baseline indicator dict suitable for most signal tests.
 
@@ -127,17 +130,20 @@ def make_indicators(**overrides):
 # OHLCV DataFrame builders
 # ---------------------------------------------------------------------------
 
+
 def make_candles(prices, volume=100.0):
     """Build a minimal OHLCV DataFrame from a list of close prices."""
     n = len(prices)
-    return pd.DataFrame({
-        "open": prices,
-        "high": [p * 1.01 for p in prices],
-        "low": [p * 0.99 for p in prices],
-        "close": prices,
-        "volume": [volume] * n,
-        "time": pd.date_range("2026-01-01", periods=n, freq="15min"),
-    })
+    return pd.DataFrame(
+        {
+            "open": prices,
+            "high": [p * 1.01 for p in prices],
+            "low": [p * 0.99 for p in prices],
+            "close": prices,
+            "volume": [volume] * n,
+            "time": pd.date_range("2026-01-01", periods=n, freq="15min"),
+        }
+    )
 
 
 def make_ohlcv_df(n=250, close_base=100.0, trend=0.0, volatility=1.0, seed=42):
@@ -155,15 +161,22 @@ def make_ohlcv_df(n=250, close_base=100.0, trend=0.0, volatility=1.0, seed=42):
     opn = close + rng.standard_normal(n) * 0.3
     volume = rng.integers(100, 10_000, n).astype(float)
     dates = pd.date_range("2024-01-01", periods=n, freq="1h")
-    return pd.DataFrame({
-        "open": opn, "high": high, "low": low,
-        "close": close, "volume": volume, "time": dates,
-    })
+    return pd.DataFrame(
+        {
+            "open": opn,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+            "time": dates,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Config fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_config():
@@ -185,7 +198,46 @@ def config_file(tmp_path, sample_config):
 # Temporary data directory
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_data_dir(tmp_path):
     """Provide a temporary data directory (use with monkeypatch to override DATA_DIR)."""
     return tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Live-trading kill switch (portfolio/trading_gate.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _bypass_trading_gate(request):
+    """Let order-VALIDATION logic be tested while the kill switch is armed.
+
+    The gate guards every order function, so with it armed (its normal state)
+    the guard fires before any of the minimum-size, position-lookup or
+    fail-closed logic those tests actually exercise. This patches only
+    ``require_trading_enabled`` — never ``trading_enabled`` — so a test that
+    asks whether trading is really on still gets the truthful answer.
+
+    Tests of the gate itself opt out with ``@pytest.mark.real_trading_gate``.
+
+    Deliberately does NOT depend on the ``monkeypatch`` fixture: as an autouse
+    fixture it would then join every test's teardown chain, and that reordering
+    broke suites that set an env var and re-import a module under it
+    (test_mstr_loop_config_phase). Manual save/restore keeps it inert.
+    """
+    if request.node.get_closest_marker("real_trading_gate"):
+        yield
+        return
+    try:
+        import portfolio.trading_gate as tg
+    except ImportError:
+        yield
+        return
+    original = tg.require_trading_enabled
+    tg.require_trading_enabled = lambda op="order": True
+    try:
+        yield
+    finally:
+        tg.require_trading_enabled = original

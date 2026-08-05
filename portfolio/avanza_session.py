@@ -906,6 +906,9 @@ def place_buy_order(
     Returns:
         Dict with orderRequestStatus, orderId, message.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_buy_order")
     return _place_order("BUY", orderbook_id, price, volume, account_id, valid_until)
 
 
@@ -917,6 +920,9 @@ def place_sell_order(
     valid_until: str | None = None,
 ) -> dict:
     """Place a limit SELL order on Avanza."""
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_sell_order")
     return _place_order("SELL", orderbook_id, price, volume, account_id, valid_until)
 
 
@@ -1034,6 +1040,9 @@ def cancel_order(order_id: str, account_id: str | None = None) -> dict:
 
     IMPORTANT: Uses POST (not DELETE verb) — Avanza API change 2026-03-24.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("cancel_order")
     payload = {
         "accountId": str(account_id or DEFAULT_ACCOUNT_ID),
         "orderId": str(order_id),
@@ -1225,6 +1234,9 @@ def place_stop_loss(
     Returns:
         Dict with status, stoplossOrderId.
     """
+    from portfolio.trading_gate import require_trading_enabled
+
+    require_trading_enabled("place_stop_loss")
     acct = str(account_id or DEFAULT_ACCOUNT_ID)
     if acct not in ALLOWED_ACCOUNT_IDS:
         raise ValueError(
