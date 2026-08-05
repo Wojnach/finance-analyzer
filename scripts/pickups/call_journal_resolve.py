@@ -91,17 +91,37 @@ def run(pickup: dict, repo_root: Path) -> dict:
             f"{r['instrument']} {r['call']} -> {r['verdict']} ({r['realised_move_pct']:+.1f}%)"
             for r in resolved
         )
+
+        # Lifetime breakdown, not just the running total — a single hit rate is
+        # the one number that cannot tell you where the judgment is unreliable.
+        analytics, report_text = None, ""
+        try:
+            from portfolio import call_analytics as ca
+
+            analytics = ca.build(path=path)
+            report_text = ca.report(path=path)
+        except Exception as exc:  # noqa: BLE001
+            report_text = f"(analytics unavailable: {type(exc).__name__}: {exc})"
+
+        cal = (analytics or {}).get("calibration") or {}
+        cal_note = (
+            f" Brier {cal['brier']} vs 0.25 coin-flip on n={cal['n']}."
+            if cal.get("brier") is not None
+            else ""
+        )
         return {
             "verdict": "reviewed",
             "summary": (
                 f"Resolved {len(resolved)}/{len(due)} due calls ({wins} correct). "
                 f"{lines}. Running scorecard: n={sc['n']}, "
-                f"direction hit rate={sc.get('direction_hit_rate')}%."
+                f"direction hit rate={sc.get('direction_hit_rate')}%.{cal_note}"
                 + (f" Unpriced, left open: {skipped}." if skipped else "")
             ),
             "resolved": len(resolved),
             "skipped": skipped,
             "scorecard": sc,
+            "analytics": analytics,
+            "details": {"lifetime_report": report_text},
         }
     except Exception as exc:  # noqa: BLE001
         import traceback

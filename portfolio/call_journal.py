@@ -36,7 +36,11 @@ def _now():
 
 def make_id(instrument, ts=None):
     ts = ts or _now()
-    return f"{instrument}-{ts.strftime('%Y%m%dT%H%M%S')}"
+    # Microseconds matter: a second-resolution id collides when two calls on the
+    # same instrument are logged in the same second, and a duplicate id makes
+    # resolutions attach to the wrong call — silently overwriting its basis and
+    # corrupting every per-evidence and per-confidence breakdown built from it.
+    return f"{instrument}-{ts.strftime('%Y%m%dT%H%M%S')}-{ts.microsecond:06d}"
 
 
 def log_call(
@@ -54,8 +58,14 @@ def log_call(
     source=None,
     path=JOURNAL_PATH,
     ts=None,
+    retroactive=False,
 ):
-    """Record one call. Returns the entry (including its generated id)."""
+    """Record one call. Returns the entry (including its generated id).
+
+    `retroactive=True` logs a call that was made verbally but never journalled at
+    the time. It must be flagged, because a record containing only the calls its
+    author felt good about will report a hit rate that means nothing.
+    """
     from portfolio.file_utils import atomic_append_jsonl
 
     call = (call or "").upper()
@@ -81,6 +91,7 @@ def log_call(
         "confidence": confidence,
         "source": source,
         "status": "open",
+        "retroactive": bool(retroactive),
     }
     atomic_append_jsonl(path, entry)
     logger.info("call logged: %s %s @ %s", call, instrument, price_at_call)
