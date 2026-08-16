@@ -46,7 +46,8 @@ _MAX_CONFIDENCE = 0.7
 # Persisted headlines path (fish monitor reads this)
 _HEADLINES_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "data", "headlines_latest.json",
+    "data",
+    "headlines_latest.json",
 )
 
 _headlines_lock = threading.Lock()
@@ -73,22 +74,34 @@ def _persist_headlines(ticker: str, headlines: list[dict]) -> None:
             if sev in ("critical", "high"):
                 sentiment = "negative"
             elif sev == "moderate":
-                if any(kw in lower for kw in (
-                    "beat", "upgrade", "approval", "approved",
-                    "raise", "buyback", "split", "rally", "surge",
-                )):
+                if any(
+                    kw in lower
+                    for kw in (
+                        "beat",
+                        "upgrade",
+                        "approval",
+                        "approved",
+                        "raise",
+                        "buyback",
+                        "split",
+                        "rally",
+                        "surge",
+                    )
+                ):
                     sentiment = "positive"
                 else:
                     sentiment = "negative"
             else:
                 sentiment = "neutral"
-            scored.append({
-                "title": title,
-                "source": h.get("source", "unknown"),
-                "severity": sev,
-                "sentiment": sentiment,
-                "_weight": weight,
-            })
+            scored.append(
+                {
+                    "title": title,
+                    "source": h.get("source", "unknown"),
+                    "severity": sev,
+                    "sentiment": sentiment,
+                    "_weight": weight,
+                }
+            )
         # Sort by weight descending, take top 10
         scored.sort(key=lambda x: x["_weight"], reverse=True)
         top = scored[:10]
@@ -116,26 +129,47 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
     if not ticker:
         return []
     short = ticker.upper().replace("-USD", "")
-    from portfolio.sentiment import _fetch_crypto_headlines, _fetch_stock_headlines, _is_crypto
+    from portfolio.sentiment import (
+        _fetch_crypto_headlines,
+        _fetch_stock_headlines,
+        _is_crypto,
+    )
 
     articles = []
+    newsapi_key = config.get("newsapi_key", "")
     try:
         if _is_crypto(short):
-            articles = _cached(
-                f"news_headlines_crypto_{short}",
-                _HEADLINE_TTL,
+            # Both keys, or this branch issues unauthenticated requests and the
+            # crypto news feed 401s — the stock branch below always forwarded
+            # newsapi_key, this one did not (fixed 2026-08-16). _cached takes
+            # positional args only, hence the partial.
+            from functools import partial
+
+            fetch_crypto = partial(
                 _fetch_crypto_headlines,
-                short,
-            ) or []
+                cryptocompare_api_key=config.get("cryptocompare_api_key") or None,
+                newsapi_key=newsapi_key or None,
+            )
+            articles = (
+                _cached(
+                    f"news_headlines_crypto_{short}",
+                    _HEADLINE_TTL,
+                    fetch_crypto,
+                    short,
+                )
+                or []
+            )
         else:
-            newsapi_key = config.get("newsapi_key", "")
-            articles = _cached(
-                f"news_headlines_stock_{short}",
-                _HEADLINE_TTL,
-                _fetch_stock_headlines,
-                short,
-                newsapi_key or None,
-            ) or []
+            articles = (
+                _cached(
+                    f"news_headlines_stock_{short}",
+                    _HEADLINE_TTL,
+                    _fetch_stock_headlines,
+                    short,
+                    newsapi_key or None,
+                )
+                or []
+            )
     except Exception:
         logger.debug("Failed to fetch headlines for %s", ticker, exc_info=True)
 
@@ -150,11 +184,12 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
         "software": "PLTR",
         "gaming": "TTWO",
         "infrastructure": "VRT",
-        "metals": None,   # metals use Binance FAPI, not Yahoo
-        "crypto": None,   # crypto uses CryptoCompare categories (already shared)
+        "metals": None,  # metals use Binance FAPI, not Yahoo
+        "crypto": None,  # crypto uses CryptoCompare categories (already shared)
     }
     try:
         from portfolio.news_keywords import TICKER_SECTORS
+
         seen_titles = {a.get("title", "").lower() for a in articles}
         ticker_secs = TICKER_SECTORS.get(ticker, set())
         for sec in ticker_secs:
@@ -162,13 +197,16 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
             if not rep or rep == short:
                 continue  # skip if no rep, or if this IS the rep
             newsapi_key = config.get("newsapi_key", "")
-            peer_articles = _cached(
-                f"news_headlines_stock_{rep}",
-                _HEADLINE_TTL,
-                _fetch_stock_headlines,
-                rep,
-                newsapi_key or None,
-            ) or []
+            peer_articles = (
+                _cached(
+                    f"news_headlines_stock_{rep}",
+                    _HEADLINE_TTL,
+                    _fetch_stock_headlines,
+                    rep,
+                    newsapi_key or None,
+                )
+                or []
+            )
             for a in peer_articles:
                 title_lower = a.get("title", "").lower()
                 if title_lower and title_lower not in seen_titles:
@@ -204,7 +242,18 @@ def _headline_velocity(headlines: list[dict]) -> tuple[str, dict]:
         elif sev == "moderate":
             # moderate keywords can be positive (earnings beat, upgrade)
             lower = title.lower()
-            if any(kw in lower for kw in ("beat", "upgrade", "approval", "approved", "raise", "buyback", "split")):
+            if any(
+                kw in lower
+                for kw in (
+                    "beat",
+                    "upgrade",
+                    "approval",
+                    "approved",
+                    "raise",
+                    "buyback",
+                    "split",
+                )
+            ):
                 pos_count += 1
             else:
                 neg_count += 1
@@ -237,8 +286,11 @@ def _keyword_severity_vote(headlines: list[dict]) -> tuple[str, dict]:
             max_weight = weight
             max_sev = keyword_severity(title)
 
-    indicators = {"max_severity": max_sev, "max_weight": max_weight,
-                  "keywords_found": list(set(all_keywords))[:10]}
+    indicators = {
+        "max_severity": max_sev,
+        "max_weight": max_weight,
+        "keywords_found": list(set(all_keywords))[:10],
+    }
 
     if max_sev == "critical":
         return "SELL", indicators
@@ -267,15 +319,38 @@ def _sentiment_shift(headlines: list[dict]) -> tuple[str, dict]:
     #     earnings/forecast cuts which are bearish.
     _BULLISH_CUT_PHRASES = ("rate cut", "tax cut")
     _BEARISH_CUT_PHRASES = (
-        "guidance cut", "dividend cut", "earnings cut", "forecast cut",
-        "outlook cut", "production cut", "salary cut", "wage cut",
-        "job cut", "jobs cut", "workforce cut", "budget cut", "spending cut",
-        "cuts earnings", "cuts dividend", "cuts guidance", "cuts forecast",
-        "cuts outlook", "cuts production", "slashes earnings",
-        "slashes dividend", "slashes guidance", "slashes forecast",
+        "guidance cut",
+        "dividend cut",
+        "earnings cut",
+        "forecast cut",
+        "outlook cut",
+        "production cut",
+        "salary cut",
+        "wage cut",
+        "job cut",
+        "jobs cut",
+        "workforce cut",
+        "budget cut",
+        "spending cut",
+        "cuts earnings",
+        "cuts dividend",
+        "cuts guidance",
+        "cuts forecast",
+        "cuts outlook",
+        "cuts production",
+        "slashes earnings",
+        "slashes dividend",
+        "slashes guidance",
+        "slashes forecast",
     )
     _POSITIVE_KEYWORDS = (
-        "beat", "upgrade", "approval", "approved", "raise", "buyback", "split",
+        "beat",
+        "upgrade",
+        "approval",
+        "approved",
+        "raise",
+        "buyback",
+        "split",
     )
     for h in headlines:
         title = h.get("title", "").lower()
@@ -335,15 +410,30 @@ def _source_weight_vote(headlines: list[dict]) -> tuple[str, dict]:
         title = h.get("title", "").lower()
         sev = keyword_severity(h.get("title", ""))
         if sev != "normal":
-            if any(kw in title for kw in ("beat", "upgrade", "approval", "approved",
-                                           "raise", "buyback", "split")) or "rate cut" in title:
+            if (
+                any(
+                    kw in title
+                    for kw in (
+                        "beat",
+                        "upgrade",
+                        "approval",
+                        "approved",
+                        "raise",
+                        "buyback",
+                        "split",
+                    )
+                )
+                or "rate cut" in title
+            ):
                 credible_pos += 1
             else:
                 credible_neg += 1
 
-    indicators = {"credible_sources": credible_count,
-                  "credible_negative": credible_neg,
-                  "credible_positive": credible_pos}
+    indicators = {
+        "credible_sources": credible_count,
+        "credible_negative": credible_neg,
+        "credible_positive": credible_pos,
+    }
 
     if credible_neg >= 2:
         return "SELL", indicators
@@ -374,8 +464,11 @@ def _sector_impact_vote(headlines: list[dict], ticker: str) -> tuple[str, dict]:
                 sell_impacts += 1
                 matched_impacts.append(f"{kw}:SELL")
 
-    indicators = {"buy_impacts": buy_impacts, "sell_impacts": sell_impacts,
-                  "matched_impacts": matched_impacts[:10]}
+    indicators = {
+        "buy_impacts": buy_impacts,
+        "sell_impacts": sell_impacts,
+        "matched_impacts": matched_impacts[:10],
+    }
 
     if sell_impacts > buy_impacts and sell_impacts >= 1:
         return "SELL", indicators
@@ -405,8 +498,18 @@ def _dissemination_vote(headlines: list[dict]) -> tuple[str, dict]:
             neg += 1
         elif sev == "moderate":
             title_lower = h.get("title", "").lower()
-            if any(kw in title_lower for kw in ("beat", "upgrade", "approval", "approved",
-                                                  "raise", "buyback", "split")):
+            if any(
+                kw in title_lower
+                for kw in (
+                    "beat",
+                    "upgrade",
+                    "approval",
+                    "approved",
+                    "raise",
+                    "buyback",
+                    "split",
+                )
+            ):
                 pos += 1
             else:
                 neg += 1
@@ -421,7 +524,9 @@ def _dissemination_vote(headlines: list[dict]) -> tuple[str, dict]:
     return "HOLD", indicators
 
 
-def _thesis_alignment_vote(headlines: list[dict], ticker: str, config: dict) -> tuple[str, dict]:
+def _thesis_alignment_vote(
+    headlines: list[dict], ticker: str, config: dict
+) -> tuple[str, dict]:
     """Thesis alignment with prophecy beliefs (config-gated).
 
     If news headlines align with an active prophecy belief's direction,
@@ -453,6 +558,7 @@ def _thesis_alignment_vote(headlines: list[dict], ticker: str, config: dict) -> 
     # Get active beliefs for this ticker
     try:
         from portfolio.prophecy import get_active_beliefs
+
         beliefs = get_active_beliefs(ticker=ticker)
     except Exception:
         return "HOLD", indicators
@@ -477,8 +583,19 @@ def _thesis_alignment_vote(headlines: list[dict], ticker: str, config: dict) -> 
         title = h.get("title", "").lower()
         sev = keyword_severity(h.get("title", ""))
         if sev != "normal":
-            if any(kw in title for kw in ("beat", "upgrade", "approval", "bullish",
-                                           "raise", "buyback", "rally", "surge")):
+            if any(
+                kw in title
+                for kw in (
+                    "beat",
+                    "upgrade",
+                    "approval",
+                    "bullish",
+                    "raise",
+                    "buyback",
+                    "rally",
+                    "surge",
+                )
+            ):
                 pos_count += 1
             else:
                 neg_count += 1

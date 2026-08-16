@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from functools import partial
 import re
 
 from portfolio.swedbank.instruments import INSTRUMENTS, AssetClass, Instrument
@@ -188,7 +189,13 @@ def evaluate_watchlist(cache=None, horizon="1d", evaluate_fn=None):
 
     cache = cache or load_cache()
     overlap, fresh, quote_only = split_entries(cache)
-    evaluate = evaluate_fn or sigmod.evaluate
+    if evaluate_fn is not None:
+        evaluate = evaluate_fn
+    else:
+        # Bind the config once. Without it signal_engine has no API keys and
+        # every crypto-news fetch in the pass 401s (see signals._default_config).
+        cfg = sigmod._default_config()
+        evaluate = partial(sigmod.evaluate, config=cfg)
 
     results = {}
     for e in fresh:

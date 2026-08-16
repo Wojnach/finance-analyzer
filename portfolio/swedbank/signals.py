@@ -93,6 +93,20 @@ def applicable_for(inst):
     return out
 
 
+def _default_config():
+    """Load config.json for the signal engine's API-key lookups.
+
+    Every caller in this package used to leave `config` at None, so
+    signal_engine read `cryptocompare_api_key` and `newsapi_key` off an empty
+    dict and fired unauthenticated news requests — a steady stream of HTTP 401s
+    from 2026-08-16 until this default was added. The keys live in config.json,
+    not the environment, so there is nothing else to fall back to.
+    """
+    from portfolio.file_utils import load_json
+
+    return load_json("config.json", default=None) or {}
+
+
 def evaluate(
     inst, horizon="1d", chart_fn=None, config=None, alpaca_fn=None, ticker_fn=None
 ):
@@ -103,6 +117,9 @@ def evaluate(
     actually has no data is worse than one that shows nothing.
     """
     from portfolio.indicators import compute_indicators
+
+    if config is None:
+        config = _default_config()
 
     key = inst.key
     signal_ticker = UNDERLYING.get(key, key)
@@ -343,6 +360,10 @@ def evaluate_universe(
     """Sequentially evaluate the universe. Sequential for the same reason
     pricing.sweep is: the real-money metals loop shares this Avanza session."""
     keys = list(INSTRUMENTS if keys is None else keys)
+    # Resolve the config once for the whole sweep rather than letting each
+    # evaluate() re-read config.json off disk per instrument.
+    if config is None:
+        config = _default_config()
     # No result cache. A previous version memoised whole result rows per
     # underlying, which could never hit in production (underlyings cannot be
     # book keys — book.py validates against INSTRUMENTS — and no two keys share
