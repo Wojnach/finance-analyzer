@@ -238,26 +238,30 @@ def _fetch_crypto_headlines(
     return _merge_headlines(cc, na, yf, limit=limit)
 
 
-# Mapping from short crypto ticker to yfinance symbol for fallback
+# Mapping from short crypto ticker to yfinance symbol
 _CRYPTO_YFINANCE_MAP = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
 
 
 def _fetch_crypto_headlines_yahoo_fallback(ticker, limit=20):
-    """Fallback: fetch crypto headlines via yfinance when CryptoCompare fails."""
+    """Yahoo Finance crypto headlines — a merge source, despite the name.
+
+    Kept under the historical name because callers and tests reference it.
+    Since 2026-08-16 it is one of three sources merged by
+    _fetch_crypto_headlines, not a last resort, so the log line no longer
+    claims to be a CryptoCompare fallback — it said "fallback" while running
+    on every pass, which is exactly the kind of misleading log that hid the
+    401 storm for as long as it did.
+    """
     yf_symbol = _CRYPTO_YFINANCE_MAP.get(ticker.upper())
     if not yf_symbol:
         return []
     try:
         articles = _fetch_yahoo_headlines(yf_symbol, limit=limit)
         if articles:
-            logger.info(
-                "[CryptoCompare] fallback to Yahoo Finance for %s: %d articles",
-                ticker,
-                len(articles),
-            )
+            logger.debug("[Yahoo News] %s: %d crypto articles", ticker, len(articles))
         return articles
     except Exception as e:
-        logger.debug("[Yahoo News] crypto fallback error for %s: %s", ticker, e)
+        logger.debug("[Yahoo News] crypto error for %s: %s", ticker, e)
         return []
 
 
