@@ -77,8 +77,9 @@ def _is_crypto(ticker):
 _SENT_TO_ACTION = {"positive": "BUY", "negative": "SELL", "neutral": "HOLD"}
 
 
-def _log_sub_vote(signal_name: str, ticker: str, sentiment_label: str,
-                  avg_scores: dict) -> None:
+def _log_sub_vote(
+    signal_name: str, ticker: str, sentiment_label: str, avg_scores: dict
+) -> None:
     """Emit a probability-log row for one sentiment sub-model.
 
     Added 2026-05-15 LLM shadow-enrollment. Each sentiment sub-voter
@@ -99,54 +100,142 @@ def _log_sub_vote(signal_name: str, ticker: str, sentiment_label: str,
     """
     try:
         from portfolio.llm_probability_log import derive_probs_from_result, log_vote
+
         action = _SENT_TO_ACTION.get(sentiment_label, "HOLD")
         confidence = float(avg_scores.get(sentiment_label, 0.0))
         indicators = {"avg_scores": avg_scores}
         probs = derive_probs_from_result(
-            signal_name, action, confidence, indicators=indicators,
+            signal_name,
+            action,
+            confidence,
+            indicators=indicators,
         )
         if probs is None:
             return
         log_vote(
-            signal_name, ticker, probs,
-            horizon="1d", chosen=action, confidence=confidence,
+            signal_name,
+            ticker,
+            probs,
+            horizon="1d",
+            chosen=action,
+            confidence=confidence,
         )
     except Exception:
-        logger.debug("sub-vote log failed for %s/%s", signal_name, ticker, exc_info=True)
+        logger.debug(
+            "sub-vote log failed for %s/%s", signal_name, ticker, exc_info=True
+        )
 
 
-def _fetch_crypto_headlines(ticker="BTC", limit=20, *, cryptocompare_api_key=None):
+def _fetch_cryptocompare_headlines(ticker, limit, api_key):
+    """CryptoCompare headlines, or [] — never raises, never falls back itself.
+
+    Returns empty on any API-level error, including the over-quota response
+    ("You are over your rate limit please upgrade your account!"). The free
+    tier is 100 calls/month, which a 600s loop exhausts in days, so an empty
+    return here is the expected steady state until the account is upgraded.
+    """
     category = TICKER_CATEGORIES.get(ticker.upper(), ticker.upper())
     url = f"{CRYPTOCOMPARE_URL}&categories={category}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    if cryptocompare_api_key:
-        headers["Authorization"] = f"Apikey {cryptocompare_api_key}"
-    data = fetch_json(
-        url,
-        headers=headers,
-        timeout=15,
-        label="crypto_headlines",
-    )
+    if api_key:
+        headers["Authorization"] = f"Apikey {api_key}"
+    else:
+        # Unauthenticated requests 401 outright; skip the pointless round-trip.
+        logger.debug("[CryptoCompare] no API key supplied for %s", ticker)
+        return []
+
+    data = fetch_json(url, headers=headers, timeout=15, label="crypto_headlines")
     if data is None:
-        return _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
+        return []
     if isinstance(data, dict) and data.get("Response") == "Error":
-        logger.warning("[CryptoCompare] API error: %s", data.get("Message", "unknown"))
-        return _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
+        logger.info("[CryptoCompare] unavailable: %s", data.get("Message", "unknown"))
+        return []
     raw = data.get("Data", [])
     articles = list(raw)[:limit] if isinstance(raw, list) else []
-    parsed = [
+    return [
         {
             "title": a["title"],
             "source": a.get("source", "unknown"),
-            "published": datetime.fromtimestamp(
-                a["published_on"], tz=UTC
-            ).isoformat(),
+            "published": datetime.fromtimestamp(a["published_on"], tz=UTC).isoformat(),
         }
         for a in articles
+        if a.get("title") and a.get("published_on")
     ]
-    if not parsed:
-        return _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
-    return parsed
+
+
+def _merge_headlines(*sources, limit=20):
+    """Merge headline lists newest-first, dropping duplicate stories.
+
+    The same story routinely appears in more than one feed; we keep whichever
+    copy carries the fresher timestamp so recency ranking stays honest.
+    """
+    best = {}
+    for articles in sources:
+        for a in articles or []:
+            title = (a.get("title") or "").strip()
+            if not title:
+                continue
+            key = " ".join(title.lower().split())
+            prev = best.get(key)
+            if prev is None or (a.get("published") or "") > (
+                prev.get("published") or ""
+            ):
+                best[key] = a
+    merged = sorted(best.values(), key=lambda a: a.get("published") or "", reverse=True)
+    return merged[:limit]
+
+
+def _fetch_crypto_headlines(
+    ticker="BTC", limit=20, *, cryptocompare_api_key=None, newsapi_key=None
+):
+    """Crypto headlines from every source we have, freshest first.
+
+    Before 2026-08-16 this consulted CryptoCompare alone, so when that account
+    went over quota the crypto news feed went dark even though a working
+    NewsAPI key sat in the same config. Both are queried now and merged;
+    Yahoo remains the fallback for when both come back empty.
+    """
+    cc = _fetch_cryptocompare_headlines(ticker, limit, cryptocompare_api_key)
+
+    na = []
+    if newsapi_key:
+        try:
+            from portfolio.shared_state import (
+                _cached,
+                newsapi_quota_ok,
+                newsapi_search_query,
+                newsapi_ttl_for_ticker,
+            )
+
+            ttl = newsapi_ttl_for_ticker(ticker)
+            if ttl is not None and newsapi_quota_ok():
+                na = (
+                    _cached(
+                        f"newsapi_{ticker}",
+                        ttl,
+                        _fetch_newsapi_with_tracking,
+                        ticker,
+                        newsapi_key,
+                        limit,
+                        newsapi_search_query(ticker),
+                    )
+                    or []
+                )
+        except Exception as e:
+            logger.debug("[NewsAPI] crypto error for %s: %s", ticker, e)
+
+    # Yahoo competes on recency rather than sitting behind the others. It was
+    # fallback-only until 2026-08-16, when NewsAPI was observed returning
+    # Aug-15 stories while Yahoo already had Aug-16 ones — the feed served the
+    # staler set purely because of call ordering. It costs nothing (no key, no
+    # quota) and _cached keeps it to roughly one call per TTL.
+    yf = []
+    try:
+        yf = _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
+    except Exception as e:
+        logger.debug("[Yahoo News] crypto error for %s: %s", ticker, e)
+
+    return _merge_headlines(cc, na, yf, limit=limit)
 
 
 # Mapping from short crypto ticker to yfinance symbol for fallback
@@ -161,8 +250,11 @@ def _fetch_crypto_headlines_yahoo_fallback(ticker, limit=20):
     try:
         articles = _fetch_yahoo_headlines(yf_symbol, limit=limit)
         if articles:
-            logger.info("[CryptoCompare] fallback to Yahoo Finance for %s: %d articles",
-                        ticker, len(articles))
+            logger.info(
+                "[CryptoCompare] fallback to Yahoo Finance for %s: %d articles",
+                ticker,
+                len(articles),
+            )
         return articles
     except Exception as e:
         logger.debug("[Yahoo News] crypto fallback error for %s: %s", ticker, e)
@@ -202,8 +294,12 @@ def _fetch_newsapi_headlines(ticker, api_key, limit=10, query=None):
     search_q = query or ticker
     data = fetch_json(
         "https://newsapi.org/v2/everything",
-        params={"q": search_q, "language": "en", "sortBy": "publishedAt",
-                "pageSize": limit},
+        params={
+            "q": search_q,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": limit,
+        },
         headers={"User-Agent": "Mozilla/5.0", "X-Api-Key": api_key},
         timeout=15,
         label=f"newsapi:{ticker}",
@@ -229,6 +325,7 @@ def _fetch_newsapi_with_tracking(ticker, api_key, limit=10, query=None):
     (not on empty responses or errors), preventing spurious budget exhaustion.
     """
     from portfolio.shared_state import newsapi_track_call
+
     result = _fetch_newsapi_headlines(ticker, api_key, limit=limit, query=query)
     if result:  # only count against budget when we actually got data
         newsapi_track_call()
@@ -282,8 +379,13 @@ def _fetch_stock_headlines(ticker, newsapi_key=None, limit=20):
     newsapi_count = len([a for a in articles if a.get("source", "") != "Yahoo Finance"])
     yahoo_count = len(articles) - newsapi_count
     if articles:
-        logger.debug("[Headlines %s] %d NewsAPI + %d Yahoo = %d total",
-                     ticker, newsapi_count, yahoo_count, len(articles))
+        logger.debug(
+            "[Headlines %s] %d NewsAPI + %d Yahoo = %d total",
+            ticker,
+            newsapi_count,
+            yahoo_count,
+            len(articles),
+        )
 
     return articles[:limit]
 
@@ -314,6 +416,7 @@ def _run_model(script, texts):
     if model_name is not None:
         try:
             from portfolio.bert_sentiment import predict as _bert_predict
+
             return _bert_predict(model_name, texts)
         except Exception as e:
             # Log once per (model, exception class) to keep the log clean if
@@ -321,7 +424,8 @@ def _run_model(script, texts):
             # has its own logger configured.
             logger.warning(
                 "In-process BERT %s failed, falling back to subprocess: %s",
-                model_name, e,
+                model_name,
+                e,
             )
 
     # Legacy subprocess path (also used if script is not one of the three
@@ -495,12 +599,18 @@ def flush_ab_log() -> None:
                             headlines=entry["all_articles"],
                             dissemination_mult=entry.get("diss_mult", 1.0),
                         )
-                        shadow.append({
-                            "model": usable[0].get("model", "fingpt:finance-llama-8b"),
-                            "sentiment": fg_overall,
-                            "confidence": round(fg_avg[fg_overall], 4),
-                            "avg_scores": {k: round(v, 4) for k, v in fg_avg.items()},
-                        })
+                        shadow.append(
+                            {
+                                "model": usable[0].get(
+                                    "model", "fingpt:finance-llama-8b"
+                                ),
+                                "sentiment": fg_overall,
+                                "confidence": round(fg_avg[fg_overall], 4),
+                                "avg_scores": {
+                                    k: round(v, 4) for k, v in fg_avg.items()
+                                },
+                            }
+                        )
                         # 2026-05-15 LLM shadow-enrollment: emit a fingpt row
                         # to llm_probability_log so it joins the synchronous
                         # trading_hero/cryptobert/finbert rows in the same
@@ -510,11 +620,13 @@ def flush_ab_log() -> None:
                         _log_sub_vote(
                             "fingpt",
                             entry.get("log_ticker_full", entry["ticker"]),
-                            fg_overall, fg_avg,
+                            fg_overall,
+                            fg_avg,
                         )
                     except Exception:
                         logger.debug(
-                            "fingpt headlines aggregation failed for %s", ab_key,
+                            "fingpt headlines aggregation failed for %s",
+                            ab_key,
                             exc_info=True,
                         )
 
@@ -523,12 +635,14 @@ def flush_ab_log() -> None:
                 cum = entry["fingpt_cumulatives_raw"][_sub_key]
                 if cum is None:
                     continue
-                shadow.append({
-                    "model": cum.get("model", "fingpt:cumulative"),
-                    "sentiment": cum.get("sentiment", "neutral"),
-                    "confidence": cum.get("confidence", 0.0),
-                    "headline_count": cum.get("headline_count", 0),
-                })
+                shadow.append(
+                    {
+                        "model": cum.get("model", "fingpt:cumulative"),
+                        "sentiment": cum.get("sentiment", "neutral"),
+                        "confidence": cum.get("confidence", 0.0),
+                        "headline_count": cum.get("headline_count", 0),
+                    }
+                )
 
             # FinBERT shadow (already aggregated inline during get_sentiment).
             finbert = entry.get("finbert_shadow")
@@ -562,6 +676,7 @@ def _run_finbert(texts):
 # ---------------------------------------------------------------------------
 # Headline clustering (Phase 3B)
 # ---------------------------------------------------------------------------
+
 
 def _cluster_headlines(articles):
     """Group headlines by keyword overlap and time proximity.
@@ -618,17 +733,61 @@ def _cluster_headlines(articles):
 
 
 _STOPWORDS = {
-    "about", "after", "again", "being", "between", "could", "during",
-    "every", "first", "their", "there", "these", "those", "under",
-    "which", "while", "would", "other", "still", "where", "before",
-    "should", "since", "until", "years", "might", "price", "stock",
-    "market", "shares", "today", "report", "quarter",
+    "about",
+    "after",
+    "again",
+    "being",
+    "between",
+    "could",
+    "during",
+    "every",
+    "first",
+    "their",
+    "there",
+    "these",
+    "those",
+    "under",
+    "which",
+    "while",
+    "would",
+    "other",
+    "still",
+    "where",
+    "before",
+    "should",
+    "since",
+    "until",
+    "years",
+    "might",
+    "price",
+    "stock",
+    "market",
+    "shares",
+    "today",
+    "report",
+    "quarter",
 }
 
 _SIGNIFICANT_KEYWORDS = {
-    "tariff", "tariffs", "war", "crash", "sanctions", "hack", "recession",
-    "inflation", "rate", "cut", "hike", "layoffs", "earnings", "fomc",
-    "bitcoin", "ethereum", "crypto", "nvidia", "semiconductor",
+    "tariff",
+    "tariffs",
+    "war",
+    "crash",
+    "sanctions",
+    "hack",
+    "recession",
+    "inflation",
+    "rate",
+    "cut",
+    "hike",
+    "layoffs",
+    "earnings",
+    "fomc",
+    "bitcoin",
+    "ethereum",
+    "crypto",
+    "nvidia",
+    "semiconductor",
 }
 
 
@@ -642,16 +801,17 @@ _SIGNIFICANT_KEYWORDS = {
 # a real margin before committing to a non-neutral verdict, and we default to
 # label-majority over score-averaging so a few decisive headlines are not
 # drowned by many tepid-neutral peers.
-_DECISIVE_MARGIN_AVG = 0.05      # avg-mode: top-vs-second margin in prob units
+_DECISIVE_MARGIN_AVG = 0.05  # avg-mode: top-vs-second margin in prob units
 _DECISIVE_MARGIN_PER_HEADLINE = 0.10  # majority-mode: per-headline label margin
 _DECISIVE_MARGIN_MAJORITY = 1e-9  # majority-mode: top-vs-second weight margin
-                                  # (zero-tolerance — exact ties go neutral)
+# (zero-tolerance — exact ties go neutral)
 
 
 def _compute_weights(sentiments, headlines, dissemination_mult):
     """Return per-sentiment weights from keyword scoring + dissemination."""
     if headlines and len(headlines) == len(sentiments):
         from portfolio.news_keywords import score_headline
+
         weights = []
         for h in headlines:
             title = h.get("title", "") if isinstance(h, dict) else str(h)
@@ -662,8 +822,9 @@ def _compute_weights(sentiments, headlines, dissemination_mult):
     return weights
 
 
-def _aggregate_sentiments(sentiments, headlines=None, dissemination_mult=1.0,
-                           *, mode="majority"):
+def _aggregate_sentiments(
+    sentiments, headlines=None, dissemination_mult=1.0, *, mode="majority"
+):
     """Aggregate sentiment scores into a single (label, avg_dict) verdict.
 
     mode="majority" (default, 2026-04-28): label-majority vote.
@@ -698,7 +859,7 @@ def _aggregate_sentiments(sentiments, headlines=None, dissemination_mult=1.0,
     avg = {
         "positive": pos_sum / total_w,
         "negative": neg_sum / total_w,
-        "neutral":  neu_sum / total_w,
+        "neutral": neu_sum / total_w,
     }
 
     if mode == "majority":
@@ -806,9 +967,15 @@ def _log_ab_result(ticker, primary_result, shadow_results):
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
-                   *, cryptocompare_api_key=None,
-                   _log_ticker_full: str | None = None) -> dict:
+
+def get_sentiment(
+    ticker="BTC",
+    newsapi_key=None,
+    social_posts=None,
+    *,
+    cryptocompare_api_key=None,
+    _log_ticker_full: str | None = None,
+) -> dict:
     """Get sentiment for a ticker using primary model + shadow A/B models.
 
     2026-04-28 (fix/sentiment-relevance-and-aggregation): two changes here.
@@ -835,7 +1002,9 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
 
     if is_crypto:
         articles = _fetch_crypto_headlines(
-            short, cryptocompare_api_key=cryptocompare_api_key,
+            short,
+            cryptocompare_api_key=cryptocompare_api_key,
+            newsapi_key=newsapi_key,
         )
     else:
         articles = _fetch_stock_headlines(short, newsapi_key=newsapi_key)
@@ -870,14 +1039,16 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
     diss_mult = 1.0
     try:
         from portfolio.news_keywords import dissemination_score
+
         diss_mult = dissemination_score(all_articles)
     except Exception:
         logger.debug("Dissemination score failed, using default 1.0", exc_info=True)
 
     # --- Primary model (votes in consensus) ---
     sentiments = _run_model(model_script, titles)
-    overall, avg = _aggregate_sentiments(sentiments, headlines=all_articles,
-                                         dissemination_mult=diss_mult)
+    overall, avg = _aggregate_sentiments(
+        sentiments, headlines=all_articles, dissemination_mult=diss_mult
+    )
 
     details = []
     for article, sent in zip(all_articles, sentiments):
@@ -940,7 +1111,11 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
     # SYNCHRONOUSLY — batching only affects the shadow log, not the vote.
     ab_key = f"{short}:{datetime.now(UTC).isoformat()}"
     _stash_ab_context(
-        ab_key, short, primary_result, all_articles, diss_mult,
+        ab_key,
+        short,
+        primary_result,
+        all_articles,
+        diss_mult,
         log_ticker_full=log_ticker,
     )
 
@@ -958,9 +1133,11 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
     # which is fine for long-running statistical comparison.
     try:
         from portfolio.llm_batch import enqueue_fingpt, is_llm_on_cycle
+
         if is_llm_on_cycle("fingpt"):
             enqueue_fingpt(
-                ab_key, "headlines",
+                ab_key,
+                "headlines",
                 {"mode": "headlines", "texts": titles, "ticker": short},
             )
             clusters = _cluster_headlines(all_articles)
@@ -968,8 +1145,13 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
                 if len(cluster) >= 3:
                     cluster_titles = [a["title"] for a in cluster]
                     enqueue_fingpt(
-                        ab_key, f"cumul:{idx}",
-                        {"mode": "cumulative", "texts": cluster_titles, "ticker": short},
+                        ab_key,
+                        f"cumul:{idx}",
+                        {
+                            "mode": "cumulative",
+                            "texts": cluster_titles,
+                            "ticker": short,
+                        },
                     )
     except Exception as e:
         logger.debug("FinGPT enqueue failed: %s", e)
@@ -984,12 +1166,15 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
             fb_overall, fb_avg = _aggregate_sentiments(
                 finbert_results, headlines=all_articles, dissemination_mult=diss_mult
             )
-            _stash_finbert_shadow(ab_key, {
-                "model": "FinBERT",
-                "sentiment": fb_overall,
-                "confidence": round(fb_avg[fb_overall], 4),
-                "avg_scores": {k: round(v, 4) for k, v in fb_avg.items()},
-            })
+            _stash_finbert_shadow(
+                ab_key,
+                {
+                    "model": "FinBERT",
+                    "sentiment": fb_overall,
+                    "confidence": round(fb_avg[fb_overall], 4),
+                    "avg_scores": {k: round(v, 4) for k, v in fb_avg.items()},
+                },
+            )
             _log_sub_vote("finbert", log_ticker, fb_overall, fb_avg)
     except Exception as e:
         logger.debug("FinBERT shadow failed: %s", e)
@@ -1004,14 +1189,19 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
             crypto_results = _run_model(CRYPTOBERT_SCRIPT, titles)
             if crypto_results:
                 cb_overall, cb_avg = _aggregate_sentiments(
-                    crypto_results, headlines=all_articles, dissemination_mult=diss_mult,
+                    crypto_results,
+                    headlines=all_articles,
+                    dissemination_mult=diss_mult,
                 )
-                _stash_cryptobert_shadow(ab_key, {
-                    "model": "CryptoBERT",
-                    "sentiment": cb_overall,
-                    "confidence": round(cb_avg[cb_overall], 4),
-                    "avg_scores": {k: round(v, 4) for k, v in cb_avg.items()},
-                })
+                _stash_cryptobert_shadow(
+                    ab_key,
+                    {
+                        "model": "CryptoBERT",
+                        "sentiment": cb_overall,
+                        "confidence": round(cb_avg[cb_overall], 4),
+                        "avg_scores": {k: round(v, 4) for k, v in cb_avg.items()},
+                    },
+                )
                 _log_sub_vote("cryptobert", log_ticker, cb_overall, cb_avg)
         except Exception as e:
             logger.debug("CryptoBERT shadow failed: %s", e)

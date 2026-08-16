@@ -22,7 +22,11 @@ from portfolio.main import (
     generate_signal,
     technical_signal,
 )
-from portfolio.sentiment import _aggregate_sentiments, _fetch_crypto_headlines
+from portfolio.sentiment import (
+    _aggregate_sentiments,
+    _fetch_crypto_headlines,
+    _fetch_cryptocompare_headlines,
+)
 
 # --- compute_indicators ---
 
@@ -51,8 +55,9 @@ class TestComputeIndicators:
             "rsi_p80",
             "adx",
         }
-        assert expected.issubset(set(ind.keys())), \
-            f"missing keys: {expected - set(ind.keys())}"
+        assert expected.issubset(
+            set(ind.keys())
+        ), f"missing keys: {expected - set(ind.keys())}"
         assert "adx" in ind
 
     def test_rsi_range(self):
@@ -103,8 +108,12 @@ class TestTechnicalSignal:
     def test_strong_buy(self):
         # RSI < 30 (BUY), MACD crossover neg->pos (BUY), EMA gap > 0.5% bullish (BUY), BB below_lower (BUY)
         ind = make_indicators(
-            rsi=25, macd_hist=5.0, macd_hist_prev=-1.0,
-            ema9=70000, ema21=69000, price_vs_bb="below_lower",
+            rsi=25,
+            macd_hist=5.0,
+            macd_hist_prev=-1.0,
+            ema9=70000,
+            ema21=69000,
+            price_vs_bb="below_lower",
         )
         action, conf = technical_signal(ind)
         assert action == "BUY"
@@ -113,8 +122,12 @@ class TestTechnicalSignal:
     def test_strong_sell(self):
         # RSI > 70 (SELL), MACD crossover pos->neg (SELL), EMA gap > 0.5% bearish (SELL), BB above_upper (SELL)
         ind = make_indicators(
-            rsi=75, macd_hist=-5.0, macd_hist_prev=1.0,
-            ema9=68000, ema21=69000, price_vs_bb="above_upper",
+            rsi=75,
+            macd_hist=-5.0,
+            macd_hist_prev=1.0,
+            ema9=68000,
+            ema21=69000,
+            price_vs_bb="above_upper",
         )
         action, conf = technical_signal(ind)
         assert action == "SELL"
@@ -124,8 +137,12 @@ class TestTechnicalSignal:
         # RSI=50 (neutral), MACD no crossover (neutral), EMA gap < 0.5% (neutral), BB inside (neutral)
         # All signals abstain -> HOLD with 0.0 confidence
         ind = make_indicators(
-            rsi=50, macd_hist=5.0, macd_hist_prev=4.0,
-            ema9=69000, ema21=69000, price_vs_bb="inside",
+            rsi=50,
+            macd_hist=5.0,
+            macd_hist_prev=4.0,
+            ema9=69000,
+            ema21=69000,
+            price_vs_bb="inside",
         )
         action, conf = technical_signal(ind)
         assert action == "HOLD"
@@ -134,8 +151,12 @@ class TestTechnicalSignal:
     def test_three_buy_one_sell(self):
         # RSI < 30 (BUY), MACD crossover neg->pos (BUY), EMA gap > 0.5% bearish (SELL), BB below_lower (BUY)
         ind = make_indicators(
-            rsi=25, macd_hist=5.0, macd_hist_prev=-1.0,
-            ema9=68000, ema21=69000, price_vs_bb="below_lower",
+            rsi=25,
+            macd_hist=5.0,
+            macd_hist_prev=-1.0,
+            ema9=68000,
+            ema21=69000,
+            price_vs_bb="below_lower",
         )
         action, conf = technical_signal(ind)
         assert action == "BUY"
@@ -144,8 +165,12 @@ class TestTechnicalSignal:
     def test_confidence_is_ratio(self):
         # RSI > 70 (SELL), MACD crossover pos->neg (SELL), EMA gap > 0.5% bullish (BUY), BB above_upper (SELL)
         ind = make_indicators(
-            rsi=75, macd_hist=-5.0, macd_hist_prev=1.0,
-            ema9=70000, ema21=69000, price_vs_bb="above_upper",
+            rsi=75,
+            macd_hist=-5.0,
+            macd_hist_prev=1.0,
+            ema9=70000,
+            ema21=69000,
+            price_vs_bb="above_upper",
         )
         action, conf = technical_signal(ind)
         assert action == "SELL"
@@ -164,8 +189,12 @@ class TestGenerateSignal:
         assert action == "HOLD"
         assert extra["_voters"] < MIN_VOTERS_CRYPTO
 
-    @mock.patch("portfolio.signal_engine._cached",
-                side_effect=lambda k, t, f, *a: {} if ("accuracy" in k or "activation_rates" in k) else None)
+    @mock.patch(
+        "portfolio.signal_engine._cached",
+        side_effect=lambda k, t, f, *a: (
+            {} if ("accuracy" in k or "activation_rates" in k) else None
+        ),
+    )
     def test_buy_on_rsi_oversold_ema_up(self, _mock):
         # RSI=25(BUY) + MACD crossover(BUY) + BB below_lower(BUY) → 3 voters → BUY
         ind = make_indicators(
@@ -176,12 +205,18 @@ class TestGenerateSignal:
             ema21=69000,  # no EMA gap; EMA gated in ranging anyway
             price_vs_bb="below_lower",
         )
-        action, conf, extra = generate_signal(ind, config={"confidence_penalties": {"enabled": False}})
+        action, conf, extra = generate_signal(
+            ind, config={"confidence_penalties": {"enabled": False}}
+        )
         assert action == "BUY"
         assert conf > 0.5
 
-    @mock.patch("portfolio.signal_engine._cached",
-                side_effect=lambda k, t, f, *a: {} if ("accuracy" in k or "activation_rates" in k) else None)
+    @mock.patch(
+        "portfolio.signal_engine._cached",
+        side_effect=lambda k, t, f, *a: (
+            {} if ("accuracy" in k or "activation_rates" in k) else None
+        ),
+    )
     def test_sell_on_rsi_overbought_ema_down(self, _mock):
         # RSI=75(SELL) + MACD crossover(SELL) + BB above_upper(SELL) → 3 voters → SELL
         ind = make_indicators(
@@ -192,12 +227,18 @@ class TestGenerateSignal:
             ema21=69000,  # no EMA gap; EMA gated in ranging anyway
             price_vs_bb="above_upper",
         )
-        action, conf, extra = generate_signal(ind, config={"confidence_penalties": {"enabled": False}})
+        action, conf, extra = generate_signal(
+            ind, config={"confidence_penalties": {"enabled": False}}
+        )
         assert action == "SELL"
         assert conf > 0.5
 
-    @mock.patch("portfolio.signal_engine._cached",
-                side_effect=lambda k, t, f, *a: {} if ("accuracy" in k or "activation_rates" in k) else None)
+    @mock.patch(
+        "portfolio.signal_engine._cached",
+        side_effect=lambda k, t, f, *a: (
+            {} if ("accuracy" in k or "activation_rates" in k) else None
+        ),
+    )
     def test_rsi_votes_alone(self, _mock):
         """RSI=25 (oversold) provides at least 1 active vote."""
         ind = make_indicators(
@@ -326,7 +367,9 @@ class TestSentimentMajority:
             {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
             {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
             {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
-            {"scores": {"positive": 0.40, "negative": 0.30, "neutral": 0.30}},  # margin 0.10 — borderline
+            {
+                "scores": {"positive": 0.40, "negative": 0.30, "neutral": 0.30}
+            },  # margin 0.10 — borderline
         ]
         overall, _ = _aggregate_sentiments(sentiments, mode="majority")
         assert overall == "neutral"
@@ -346,16 +389,24 @@ class TestSentimentMajority:
         # 1 critical-keyword headline (weight 3.0) outvotes 2 normal neutrals
         # CRITICAL_KEYWORDS: tariff = 3.0
         sentiments = [
-            {"scores": {"positive": 0.10, "negative": 0.85, "neutral": 0.05}},  # decisive negative
-            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},  # neutral
-            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},  # neutral
+            {
+                "scores": {"positive": 0.10, "negative": 0.85, "neutral": 0.05}
+            },  # decisive negative
+            {
+                "scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}
+            },  # neutral
+            {
+                "scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}
+            },  # neutral
         ]
         headlines = [
             {"title": "China tariff escalation hits semis"},
             {"title": "Stocks mixed in afternoon trade"},
             {"title": "Yields ease slightly"},
         ]
-        overall, _ = _aggregate_sentiments(sentiments, mode="majority", headlines=headlines)
+        overall, _ = _aggregate_sentiments(
+            sentiments, mode="majority", headlines=headlines
+        )
         # critical-keyword weight 3.0 vs 1.0+1.0 = 2.0 for neutral
         assert overall == "negative"
 
@@ -384,20 +435,54 @@ class TestCryptoCompareAPI:
     def test_empty_dict_response_handled(self):
         """CryptoCompare sometimes returns Data:{} instead of Data:[]"""
         # sentiment now uses fetch_json; also block Yahoo fallback to isolate the test
-        with mock.patch("portfolio.sentiment.fetch_json", return_value={"Data": {}, "Type": 100}), \
-             mock.patch("portfolio.sentiment._fetch_crypto_headlines_yahoo_fallback", return_value=[]):
+        with (
+            mock.patch(
+                "portfolio.sentiment.fetch_json", return_value={"Data": {}, "Type": 100}
+            ),
+            mock.patch(
+                "portfolio.sentiment._fetch_crypto_headlines_yahoo_fallback",
+                return_value=[],
+            ),
+        ):
             result = _fetch_crypto_headlines("BTC")
         assert result == []
 
     def test_normal_list_response(self):
+        """CryptoCompare rows parse and reach the merged feed.
+
+        2026-08-16: _fetch_crypto_headlines merges CryptoCompare + NewsAPI +
+        Yahoo, so this asserts on the CryptoCompare contribution rather than
+        the whole return value, and stubs the other two out. An API key is
+        now required — unauthenticated CryptoCompare calls 401, so the fetcher
+        short-circuits without one instead of making a doomed request.
+        Newest-first ordering puts "ETH dips" (the later published_on) first.
+        """
         fake_articles = [
             {"title": "BTC pumps", "source": "Test", "published_on": 1700000000},
             {"title": "ETH dips", "source": "Test", "published_on": 1700001000},
         ]
-        with mock.patch("portfolio.sentiment.fetch_json", return_value={"Data": fake_articles, "Type": 100}):
-            result = _fetch_crypto_headlines("BTC", limit=5)
+        with (
+            mock.patch(
+                "portfolio.sentiment.fetch_json",
+                return_value={"Data": fake_articles, "Type": 100},
+            ),
+            mock.patch(
+                "portfolio.sentiment._fetch_crypto_headlines_yahoo_fallback",
+                return_value=[],
+            ),
+        ):
+            result = _fetch_crypto_headlines(
+                "BTC", limit=5, cryptocompare_api_key="TESTKEY"
+            )
         assert len(result) == 2
-        assert result[0]["title"] == "BTC pumps"
+        assert {a["title"] for a in result} == {"BTC pumps", "ETH dips"}
+        assert result[0]["title"] == "ETH dips"
+
+    def test_unauthenticated_call_is_skipped_not_attempted(self):
+        """No key means a guaranteed 401 — do not spend the round-trip."""
+        with mock.patch("portfolio.sentiment.fetch_json") as fj:
+            assert _fetch_cryptocompare_headlines("BTC", 5, None) == []
+        fj.assert_not_called()
 
 
 # --- ministral_trader ---
@@ -410,16 +495,21 @@ class TestMinistralTrader:
         from portfolio.ministral_trader import predict
 
         fake_response = {
-            "choices": [{
-                "text": '{"action":"SELL","reasoning":"Momentum and trend are bearish."}'
-            }]
+            "choices": [
+                {
+                    "text": '{"action":"SELL","reasoning":"Momentum and trend are bearish."}'
+                }
+            ]
         }
         fake_model = mock.MagicMock(return_value=fake_response)
 
-        with mock.patch(
-            "portfolio.ministral_trader.load_model", return_value=fake_model
-        ), mock.patch(
-            "portfolio.ministral_trader._can_use_native_cli", return_value=False
+        with (
+            mock.patch(
+                "portfolio.ministral_trader.load_model", return_value=fake_model
+            ),
+            mock.patch(
+                "portfolio.ministral_trader._can_use_native_cli", return_value=False
+            ),
         ):
             ctx = {"ticker": "BTC", "price_usd": 69000.0}
             result = predict(ctx)
@@ -437,10 +527,13 @@ class TestMinistralTrader:
         }
         fake_model = mock.MagicMock(return_value=fake_response)
 
-        with mock.patch(
-            "portfolio.ministral_trader.load_model", return_value=fake_model
-        ), mock.patch(
-            "portfolio.ministral_trader._can_use_native_cli", return_value=False
+        with (
+            mock.patch(
+                "portfolio.ministral_trader.load_model", return_value=fake_model
+            ),
+            mock.patch(
+                "portfolio.ministral_trader._can_use_native_cli", return_value=False
+            ),
         ):
             ctx = {
                 "ticker": "BTC",
@@ -472,10 +565,13 @@ class TestMinistralTrader:
         }
         fake_model = mock.MagicMock(return_value=fake_response)
 
-        with mock.patch(
-            "portfolio.ministral_trader.load_model", return_value=fake_model
-        ), mock.patch(
-            "portfolio.ministral_trader._can_use_native_cli", return_value=False
+        with (
+            mock.patch(
+                "portfolio.ministral_trader.load_model", return_value=fake_model
+            ),
+            mock.patch(
+                "portfolio.ministral_trader._can_use_native_cli", return_value=False
+            ),
         ):
             ctx = {"ticker": "ETH", "price_usd": 2000.0}
             result = predict(ctx)
@@ -491,10 +587,13 @@ class TestMinistralTrader:
         }
         fake_model = mock.MagicMock(return_value=fake_response)
 
-        with mock.patch(
-            "portfolio.ministral_trader.load_model", return_value=fake_model
-        ), mock.patch(
-            "portfolio.ministral_trader._can_use_native_cli", return_value=False
+        with (
+            mock.patch(
+                "portfolio.ministral_trader.load_model", return_value=fake_model
+            ),
+            mock.patch(
+                "portfolio.ministral_trader._can_use_native_cli", return_value=False
+            ),
         ):
             ctx = {"ticker": "BTC", "price_usd": 69000.0}
             result = predict(ctx)
@@ -552,15 +651,25 @@ class TestMinistralSignalWrapper:
 
         fake_result = mock.MagicMock()
         fake_result.returncode = 0
-        fake_result.stdout = '{"action": "BUY", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
+        fake_result.stdout = (
+            '{"action": "BUY", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
+        )
 
-        with mock.patch("portfolio.ministral_signal.query_llama_server", return_value=None), \
-             mock.patch("portfolio.llama_server.model_load_safe", return_value=True), \
-             mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result) as run_mock:
+        with (
+            mock.patch(
+                "portfolio.ministral_signal.query_llama_server", return_value=None
+            ),
+            mock.patch("portfolio.llama_server.model_load_safe", return_value=True),
+            mock.patch(
+                "portfolio.ministral_signal.run_safe", return_value=fake_result
+            ) as run_mock,
+        ):
             get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
 
         cmd = run_mock.call_args.args[0]
-        assert cmd[1].endswith("portfolio\\ministral_trader.py") or cmd[1].endswith("portfolio/ministral_trader.py")
+        assert cmd[1].endswith("portfolio\\ministral_trader.py") or cmd[1].endswith(
+            "portfolio/ministral_trader.py"
+        )
 
     def test_parses_json_output(self):
         import unittest.mock as mock
@@ -573,9 +682,13 @@ class TestMinistralSignalWrapper:
             '{"action": "BUY", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
         )
 
-        with mock.patch("portfolio.ministral_signal.query_llama_server", return_value=None), \
-             mock.patch("portfolio.llama_server.model_load_safe", return_value=True), \
-             mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result):
+        with (
+            mock.patch(
+                "portfolio.ministral_signal.query_llama_server", return_value=None
+            ),
+            mock.patch("portfolio.llama_server.model_load_safe", return_value=True),
+            mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result),
+        ):
             result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
         assert result["original"]["action"] == "BUY"
         assert result["original"]["model"] == "CryptoTrader-LM"
@@ -592,9 +705,13 @@ class TestMinistralSignalWrapper:
             '{"action": "SELL", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
         )
 
-        with mock.patch("portfolio.ministral_signal.query_llama_server", return_value=None), \
-             mock.patch("portfolio.llama_server.model_load_safe", return_value=True), \
-             mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result):
+        with (
+            mock.patch(
+                "portfolio.ministral_signal.query_llama_server", return_value=None
+            ),
+            mock.patch("portfolio.llama_server.model_load_safe", return_value=True),
+            mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result),
+        ):
             result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
         assert result["original"]["action"] == "SELL"
 
@@ -607,9 +724,13 @@ class TestMinistralSignalWrapper:
         fake_result.returncode = 1
         fake_result.stderr = "Error: model not found"
 
-        with mock.patch("portfolio.ministral_signal.query_llama_server", return_value=None), \
-             mock.patch("portfolio.llama_server.model_load_safe", return_value=True), \
-             mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result):
+        with (
+            mock.patch(
+                "portfolio.ministral_signal.query_llama_server", return_value=None
+            ),
+            mock.patch("portfolio.llama_server.model_load_safe", return_value=True),
+            mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result),
+        ):
             with pytest.raises(RuntimeError, match="Ministral failed"):
                 get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
 
@@ -733,7 +854,9 @@ class TestTriggerSystem:
             check_triggers(sigs, prices, {}, {"BTC-USD": "positive"})
         # Sustain "negative" for SUSTAINED_CHECKS cycles to trigger reversal
         for _ in range(SUSTAINED_CHECKS):
-            triggered, reasons = check_triggers(sigs, prices, {}, {"BTC-USD": "negative"})
+            triggered, reasons = check_triggers(
+                sigs, prices, {}, {"BTC-USD": "negative"}
+            )
         assert triggered
         assert any("sentiment" in r for r in reasons)
 
@@ -782,8 +905,18 @@ class TestAlpacaKlines:
         fake_resp.json.return_value = fake_bars
         fake_resp.raise_for_status = mock.MagicMock()
 
-        with mock.patch("portfolio.data_collector.fetch_with_retry", return_value=fake_resp), \
-             mock.patch("portfolio.data_collector.get_alpaca_headers", return_value={"APCA-API-KEY-ID": "PK_TEST", "APCA-API-SECRET-KEY": "SK_TEST"}):
+        with (
+            mock.patch(
+                "portfolio.data_collector.fetch_with_retry", return_value=fake_resp
+            ),
+            mock.patch(
+                "portfolio.data_collector.get_alpaca_headers",
+                return_value={
+                    "APCA-API-KEY-ID": "PK_TEST",
+                    "APCA-API-SECRET-KEY": "SK_TEST",
+                },
+            ),
+        ):
             df = alpaca_klines("MSTR", interval="15m", limit=100)
 
         assert list(df.columns) >= ["open", "high", "low", "close", "volume", "time"]
@@ -798,8 +931,18 @@ class TestAlpacaKlines:
         fake_resp.json.return_value = {"bars": None}
         fake_resp.raise_for_status = mock.MagicMock()
 
-        with mock.patch("portfolio.data_collector.fetch_with_retry", return_value=fake_resp), \
-             mock.patch("portfolio.data_collector.get_alpaca_headers", return_value={"APCA-API-KEY-ID": "PK_TEST", "APCA-API-SECRET-KEY": "SK_TEST"}):
+        with (
+            mock.patch(
+                "portfolio.data_collector.fetch_with_retry", return_value=fake_resp
+            ),
+            mock.patch(
+                "portfolio.data_collector.get_alpaca_headers",
+                return_value={
+                    "APCA-API-KEY-ID": "PK_TEST",
+                    "APCA-API-SECRET-KEY": "SK_TEST",
+                },
+            ),
+        ):
             with pytest.raises(ValueError, match="No Alpaca data"):
                 alpaca_klines("MSTR", interval="15m", limit=100)
 
@@ -897,8 +1040,11 @@ class TestIntegrationHerc2:
         import subprocess
 
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free,utilization.gpu",
-             "--format=csv,noheader"],
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total,memory.free,utilization.gpu",
+                "--format=csv,noheader",
+            ],
             capture_output=True,
             text=True,
             timeout=10,
@@ -927,7 +1073,9 @@ class TestIntegrationHerc2:
         _check_gpu()
 
         model_venv = r"Q:\models\.venv-llm\Scripts\python.exe"
-        model_script = str(Path(__file__).resolve().parents[1] / "portfolio" / "ministral_trader.py")
+        model_script = str(
+            Path(__file__).resolve().parents[1] / "portfolio" / "ministral_trader.py"
+        )
 
         if not os.path.exists(model_venv):
             pytest.skip(f"Model venv not found: {model_venv}")

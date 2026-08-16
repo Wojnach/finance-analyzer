@@ -52,26 +52,33 @@ def _cached(key, ttl, func, *args):
         # Evict expired entries when cache grows too large
         # Use TTL-aware eviction: entries expire after ttl * _MAX_STALE_FACTOR
         if len(_tool_cache) > _CACHE_MAX_SIZE:
-            expired = [k for k, v in _tool_cache.items()
-                       if now - v["time"] > v.get("ttl", 3600) * _MAX_STALE_FACTOR]
+            expired = [
+                k
+                for k, v in _tool_cache.items()
+                if now - v["time"] > v.get("ttl", 3600) * _MAX_STALE_FACTOR
+            ]
             for k in expired:
                 del _tool_cache[k]
             # LRU fallback: if still over limit (all entries fresh), evict oldest 25%
             if len(_tool_cache) > _CACHE_MAX_SIZE:
-                sorted_keys = sorted(
-                    _tool_cache, key=lambda k: _tool_cache[k]["time"]
-                )
+                sorted_keys = sorted(_tool_cache, key=lambda k: _tool_cache[k]["time"])
                 evict_count = len(sorted_keys) // 4 or 1
                 for k in sorted_keys[:evict_count]:
                     del _tool_cache[k]
 
         # C11/SS1: Evict stuck loading keys older than _LOADING_TIMEOUT seconds.
-        stuck = [k for k, ts in _loading_timestamps.items()
-                 if now - ts > _LOADING_TIMEOUT]
+        stuck = [
+            k for k, ts in _loading_timestamps.items() if now - ts > _LOADING_TIMEOUT
+        ]
         for k in stuck:
             _loading_keys.discard(k)
             stuck_duration = now - _loading_timestamps.pop(k, now)
-            logger.warning("[%s] evicted stuck loading key after %.0fs (timeout %ds)", k, stuck_duration, _LOADING_TIMEOUT)
+            logger.warning(
+                "[%s] evicted stuck loading key after %.0fs (timeout %ds)",
+                k,
+                stuck_duration,
+                _LOADING_TIMEOUT,
+            )
 
         # BUG-166: Dogpile prevention — if another thread is already loading
         # this key, return stale data instead of calling func redundantly.
@@ -80,10 +87,14 @@ def _cached(key, ttl, func, *args):
                 age = now - _tool_cache[key]["time"]
                 max_stale = ttl * _MAX_STALE_FACTOR
                 if age <= max_stale:
-                    logger.debug("[%s] stale-while-revalidate (another thread loading)", key)
+                    logger.debug(
+                        "[%s] stale-while-revalidate (another thread loading)", key
+                    )
                     return _tool_cache[key]["data"]
             # No stale data available — return None rather than pile on
-            logger.debug("[%s] no stale data, another thread loading — returning None", key)
+            logger.debug(
+                "[%s] no stale data, another thread loading — returning None", key
+            )
             return None
         _loading_keys.add(key)
         _loading_timestamps[key] = time.time()
@@ -117,7 +128,9 @@ def _cached(key, ttl, func, *args):
                 if age > max_stale:
                     logger.warning(
                         "[%s] stale data too old (%.0fs > %.0fs max), returning None",
-                        key, age, max_stale,
+                        key,
+                        age,
+                        max_stale,
                     )
                     return None
                 _tool_cache[key]["time"] = now - ttl + _RETRY_COOLDOWN
@@ -133,8 +146,9 @@ def invalidate_cached(key: str) -> bool:
     return removed
 
 
-def _cached_or_enqueue(key, ttl, enqueue_fn, context,
-                        should_enqueue_fn=None, max_stale_factor=None):
+def _cached_or_enqueue(
+    key, ttl, enqueue_fn, context, should_enqueue_fn=None, max_stale_factor=None
+):
     """Check cache — if fresh return it, if expired enqueue for batch and return stale.
 
     Unlike _cached(), this never calls the model directly. On miss, it adds
@@ -201,11 +215,17 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context,
             except Exception as e:
                 logger.warning(
                     "[%s] should_enqueue_fn raised, defaulting to enqueue: %s",
-                    key, e,
+                    key,
+                    e,
                 )
                 should_enq = True
 
-        if should_enq and enqueue_fn and context is not None and key not in _loading_keys:
+        if (
+            should_enq
+            and enqueue_fn
+            and context is not None
+            and key not in _loading_keys
+        ):
             _loading_keys.add(key)
             # C11/SS1: Track enqueue time for stuck-key eviction.
             _loading_timestamps[key] = time.time()
@@ -259,8 +279,10 @@ _regime_lock = threading.Lock()
 
 # --- Rate limiters ---
 
+
 class _RateLimiter:
     """Token-bucket rate limiter. Sleeps when calls exceed rate."""
+
     def __init__(self, max_per_minute, name=""):
         self.interval = 60.0 / max_per_minute
         self.last_call = 0.0
@@ -315,13 +337,21 @@ _NEWSAPI_DAILY_BUDGET = 90  # leave 10-call margin
 _newsapi_lock = threading.Lock()
 
 # Tier 1 = 20-min TTL during active hours; Tier 2 = 3h; rest = Yahoo-only
-_NEWSAPI_PRIORITY = {"XAU": 1, "XAG": 1, "MSTR": 2}
+# Priority 3 (crypto) added 2026-08-16, when CryptoCompare went over its free
+# monthly quota and left BTC/ETH news on Yahoo alone. Deliberately the cheapest
+# tier: metals at 20min already cost ~84 of the 90/day budget, so crypto gets a
+# 6h TTL (~4 calls/day/ticker). If the budget does run out the quota gate simply
+# refuses and crypto falls back to Yahoo + Reddit — metals must never be starved
+# by crypto, it is the real-money book.
+_NEWSAPI_PRIORITY = {"XAU": 1, "XAG": 1, "MSTR": 2, "BTC": 3, "ETH": 3}
 
 # Better search queries — raw ticker symbols return sparse results on NewsAPI
 _NEWSAPI_SEARCH_QUERIES = {
     "XAU": "gold AND (price OR market OR ounce OR bullion OR futures OR commodity)",
     "XAG": "silver AND (price OR market OR ounce OR bullion OR futures OR commodity)",
     "MSTR": "MicroStrategy OR MSTR",
+    "BTC": "bitcoin OR BTC",
+    "ETH": "ethereum OR ETH",
 }
 
 _NEWSAPI_ACTIVE_START_CET = 8
@@ -335,9 +365,12 @@ def newsapi_quota_ok() -> bool:
     with _newsapi_lock:
         # Reset counter at midnight UTC
         from datetime import datetime
-        today_start = datetime.now(UTC).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).timestamp()
+
+        today_start = (
+            datetime.now(UTC)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
         if _newsapi_daily_reset < today_start:
             _newsapi_daily_count = 0
             _newsapi_daily_reset = now
@@ -350,8 +383,11 @@ def newsapi_track_call():
     with _newsapi_lock:
         _newsapi_daily_count += 1
         if _newsapi_daily_count == _NEWSAPI_DAILY_BUDGET:
-            logger.warning("NewsAPI daily budget exhausted (%d/%d), falling back to Yahoo",
-                          _newsapi_daily_count, _NEWSAPI_DAILY_BUDGET)
+            logger.warning(
+                "NewsAPI daily budget exhausted (%d/%d), falling back to Yahoo",
+                _newsapi_daily_count,
+                _NEWSAPI_DAILY_BUDGET,
+            )
 
 
 def newsapi_ttl_for_ticker(ticker: str):
@@ -368,13 +404,16 @@ def newsapi_ttl_for_ticker(ticker: str):
 
     from datetime import datetime
     from zoneinfo import ZoneInfo
+
     hour_cet = datetime.now(ZoneInfo("Europe/Stockholm")).hour
     is_active = _NEWSAPI_ACTIVE_START_CET <= hour_cet < _NEWSAPI_ACTIVE_END_CET
 
     if is_active:
         if priority == 1:
-            return 1200   # 20 min — metals
-        return 10800      # 3h — secondary (MSTR etc.)
+            return 1200  # 20 min — metals
+        if priority == 2:
+            return 10800  # 3h — secondary (MSTR etc.)
+        return 21600  # 6h — crypto, cheapest tier (see _NEWSAPI_PRIORITY)
     return None  # off-hours: Yahoo-only
 
 
@@ -386,11 +425,11 @@ def newsapi_search_query(ticker: str) -> str:
 
 # TTL constants for tool caching
 FUNDAMENTALS_TTL = 86400  # 24 hours
-ONCHAIN_TTL = 43200      # 12 hours (on-chain data updates slowly)
-FEAR_GREED_TTL = 300     # 5 min
-SENTIMENT_TTL = 900      # 15 min
-MINISTRAL_TTL = 900      # 15 min
-ML_SIGNAL_TTL = 900      # 15 min
-FUNDING_RATE_TTL = 900   # 15 min
-VOLUME_TTL = 300         # 5 min
-NEWSAPI_TTL = 1800       # 30 min fallback — overridden by newsapi_ttl_for_ticker()
+ONCHAIN_TTL = 43200  # 12 hours (on-chain data updates slowly)
+FEAR_GREED_TTL = 300  # 5 min
+SENTIMENT_TTL = 900  # 15 min
+MINISTRAL_TTL = 900  # 15 min
+ML_SIGNAL_TTL = 900  # 15 min
+FUNDING_RATE_TTL = 900  # 15 min
+VOLUME_TTL = 300  # 5 min
+NEWSAPI_TTL = 1800  # 30 min fallback — overridden by newsapi_ttl_for_ticker()
