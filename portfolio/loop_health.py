@@ -22,11 +22,13 @@ during cycle end and clears on the next cycle.
 NOT a replacement for the per-loop scorecards. Scorecards report on
 trade quality; this module reports on whether the loop is even running.
 """
+
 from __future__ import annotations
 
 import datetime
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,135 @@ logger = logging.getLogger("loop_health")
 # 5 minutes is definitely a problem. Scripts can override per-loop if
 # they want tighter or looser bounds.
 STALE_THRESHOLD_SECONDS = 300
+
+
+# --- suspend-aware heartbeat (data/heartbeat.txt) --------------------------
+#
+# This host is a Steam Deck and deep-suspends constantly: measured 2026-08-17,
+# it had spent 48 of its last 96 uptime hours suspended. Wall-clock staleness
+# therefore says nothing about loop health — main.py's cadence is anchored to
+# time.monotonic(), which excludes suspend, so the loop stays on schedule while
+# a wall-clock reader screams that it died.
+#
+# Naively subtracting total suspend-since-boot is NOT safe: after an 8h
+# overnight suspend it would happily mask a genuine 30-minute stall the next
+# morning. Instead each heartbeat records the monotonic clock at write time,
+# so age can be measured in awake seconds exactly. The boot_id scopes that
+# anchor — monotonic restarts at zero on reboot, so a heartbeat from a previous
+# boot has no comparable reading and reports awake age as unknown rather than
+# inventing one.
+
+_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+
+
+def _awake_seconds() -> float:
+    """Seconds of wall time the host has been AWAKE since boot.
+
+    CLOCK_MONOTONIC on Linux excludes time spent suspended, which is the
+    property this whole module hangs on. Falls back to time.monotonic() on
+    platforms without the named clock.
+    """
+    try:
+        return time.clock_gettime(time.CLOCK_MONOTONIC)
+    except (AttributeError, OSError):  # pragma: no cover - non-Linux
+        return time.monotonic()
+
+
+def _boot_id() -> str:
+    """Current host boot identifier, or "" when unavailable (non-Linux)."""
+    try:
+        with open(_BOOT_ID_PATH, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:  # pragma: no cover - non-Linux
+        return ""
+
+
+def write_wall_heartbeat(path, now: datetime.datetime | None = None) -> bool:
+    """Write Layer 1's own heartbeat with a suspend-proof age anchor.
+
+    Best-effort like write_heartbeat(): a telemetry failure must never take
+    down the loop.
+    """
+    stamp = now or datetime.datetime.now(datetime.UTC)
+    payload = {
+        "ts": stamp.isoformat(),
+        "awake_s": float(_awake_seconds()),
+        "boot_id": _boot_id(),
+    }
+    try:
+        from portfolio.file_utils import atomic_write_text
+
+        atomic_write_text(Path(path), json.dumps(payload))
+        return True
+    except Exception:
+        logger.warning("heartbeat write failed for %s", path, exc_info=True)
+        return False
+
+
+def read_heartbeat_age(path) -> dict[str, Any]:
+    """Age of a heartbeat written by write_wall_heartbeat().
+
+    Returns ``{"ts", "wall_age_s", "awake_age_s", "same_boot"}``.
+
+    ``awake_age_s`` is None whenever it cannot be known honestly — a legacy
+    bare-ISO file, a heartbeat from a previous boot, or an unreadable file.
+    Callers must fall back to ``wall_age_s`` and accept its suspend blindness
+    rather than treat a missing anchor as zero age.
+    """
+    out: dict[str, Any] = {
+        "ts": None,
+        "wall_age_s": None,
+        "awake_age_s": None,
+        "same_boot": False,
+    }
+    try:
+        raw = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return out
+    if not raw:
+        return out
+
+    stamp_text, awake_s, boot_id = raw, None, None
+    if raw.startswith("{"):
+        try:
+            payload = json.loads(raw)
+            stamp_text = payload.get("ts") or ""
+            awake_s = payload.get("awake_s")
+            boot_id = payload.get("boot_id")
+        except (ValueError, AttributeError):
+            return out
+
+    try:
+        stamp = datetime.datetime.fromisoformat(stamp_text)
+    except (ValueError, TypeError):
+        return out
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=datetime.UTC)
+
+    out["ts"] = stamp.isoformat()
+    out["wall_age_s"] = (datetime.datetime.now(datetime.UTC) - stamp).total_seconds()
+
+    if isinstance(awake_s, (int, float)) and boot_id and boot_id == _boot_id():
+        out["same_boot"] = True
+        out["awake_age_s"] = max(0.0, _awake_seconds() - float(awake_s))
+    return out
+
+
+def heartbeat_is_stale(path, threshold_s: float) -> bool:
+    """True when a heartbeat is older than threshold_s of AWAKE time.
+
+    Prefers the suspend-proof anchor and falls back to wall clock only when
+    there is none. A missing/unreadable heartbeat is not reported stale here —
+    "absent" is a different condition and callers handle it separately.
+    """
+    info = read_heartbeat_age(path)
+    age = info["awake_age_s"]
+    if age is None:
+        age = info["wall_age_s"]
+    if age is None:
+        return False
+    return age > threshold_s
+
 
 # Map of loop_name -> heartbeat file path (relative to repo root). The
 # main loop (PF-DataLoop) is intentionally NOT here — it has its own
@@ -160,8 +291,10 @@ def read_loop_health(
     for name, rel_path in files.items():
         full_path = repo_root / rel_path
         status = read_loop_status(
-            name, full_path,
-            now=now, stale_threshold_seconds=stale_threshold_seconds,
+            name,
+            full_path,
+            now=now,
+            stale_threshold_seconds=stale_threshold_seconds,
         )
         loops[name] = status
         if status["state"] != "fresh":
@@ -208,6 +341,7 @@ def write_heartbeat(
     """
     try:
         from portfolio.file_utils import atomic_write_json
+
         ts = (now or _now_utc()).isoformat()
         payload: dict[str, Any] = {
             "ts": ts,

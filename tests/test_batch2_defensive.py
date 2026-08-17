@@ -15,11 +15,13 @@ class TestBug24NewsEventNoneTicker:
 
     def test_fetch_headlines_none_ticker(self):
         from portfolio.signals.news_event import _fetch_headlines
+
         result = _fetch_headlines(None, {})
         assert result == []
 
     def test_fetch_headlines_empty_string(self):
         from portfolio.signals.news_event import _fetch_headlines
+
         result = _fetch_headlines("", {})
         assert result == []
 
@@ -28,8 +30,16 @@ class TestBug24NewsEventNoneTicker:
         import pandas as pd
 
         from portfolio.signals.news_event import compute_news_event_signal
-        df = pd.DataFrame({"close": [100] * 30, "volume": [1000] * 30,
-                          "high": [101] * 30, "low": [99] * 30, "open": [100] * 30})
+
+        df = pd.DataFrame(
+            {
+                "close": [100] * 30,
+                "volume": [1000] * 30,
+                "high": [101] * 30,
+                "low": [99] * 30,
+                "open": [100] * 30,
+            }
+        )
         result = compute_news_event_signal(df, context={"ticker": None, "config": {}})
         assert result["action"] == "HOLD"
 
@@ -38,8 +48,16 @@ class TestBug24NewsEventNoneTicker:
         import pandas as pd
 
         from portfolio.signals.news_event import compute_news_event_signal
-        df = pd.DataFrame({"close": [100] * 30, "volume": [1000] * 30,
-                          "high": [101] * 30, "low": [99] * 30, "open": [100] * 30})
+
+        df = pd.DataFrame(
+            {
+                "close": [100] * 30,
+                "volume": [1000] * 30,
+                "high": [101] * 30,
+                "low": [99] * 30,
+                "open": [100] * 30,
+            }
+        )
         result = compute_news_event_signal(df)
         assert result["action"] == "HOLD"
 
@@ -51,16 +69,20 @@ class TestBug25LoadJsonOSError:
     def test_load_json_permission_error_returns_default(self, tmp_path):
         """BUG-139: PermissionError (file locked by antivirus) → returns default."""
         from portfolio.file_utils import load_json
+
         path = tmp_path / "test.json"
         path.write_text('{"key": "value"}', encoding="utf-8")
 
-        with patch.object(Path, "read_text", side_effect=PermissionError("Access denied")):
+        with patch.object(
+            Path, "read_text", side_effect=PermissionError("Access denied")
+        ):
             result = load_json(path, default={"fallback": True})
         assert result == {"fallback": True}
 
     def test_load_json_oserror_returns_default(self, tmp_path):
         """BUG-139: OSError → returns default (graceful degradation on Windows)."""
         from portfolio.file_utils import load_json
+
         path = tmp_path / "test.json"
         path.write_text('{"key": "value"}', encoding="utf-8")
 
@@ -70,12 +92,14 @@ class TestBug25LoadJsonOSError:
 
     def test_load_json_still_handles_missing_file(self, tmp_path):
         from portfolio.file_utils import load_json
+
         path = tmp_path / "nonexistent.json"
         result = load_json(path, default={"fallback": True})
         assert result == {"fallback": True}
 
     def test_load_json_still_handles_bad_json(self, tmp_path):
         from portfolio.file_utils import load_json
+
         path = tmp_path / "bad.json"
         path.write_text("{invalid json", encoding="utf-8")
         result = load_json(path, default={"fallback": True})
@@ -83,6 +107,7 @@ class TestBug25LoadJsonOSError:
 
     def test_load_json_valid_file(self, tmp_path):
         from portfolio.file_utils import load_json
+
         path = tmp_path / "good.json"
         path.write_text('{"hello": "world"}', encoding="utf-8")
         result = load_json(path)
@@ -97,6 +122,7 @@ class TestBug26HeartbeatAfterInitialRun:
         import inspect
 
         from portfolio import main
+
         source = inspect.getsource(main.loop)
         # Find heartbeat write near initial run
         lines = source.split("\n")
@@ -105,13 +131,19 @@ class TestBug26HeartbeatAfterInitialRun:
         for _i, line in enumerate(lines):
             if "run(force_report=True)" in line:
                 found_initial_run = True
-            if found_initial_run and "heartbeat" in line and "write_text" in line:
+            # 2026-08-17: the call became write_wall_heartbeat() when the
+            # heartbeat gained its suspend-proof monotonic anchor. Same
+            # requirement, different helper — it used to be a bare
+            # atomic_write_text(... "heartbeat.txt" ...).
+            if found_initial_run and "write_wall_heartbeat" in line:
                 found_heartbeat_after = True
                 break
             if found_initial_run and "while True" in line:
                 # Went past initial run block without finding heartbeat
                 break
-        assert found_heartbeat_after, "heartbeat.txt write must be in the initial run() block"
+        assert (
+            found_heartbeat_after
+        ), "heartbeat.txt write must be in the initial run() block"
 
 
 class TestBug27TriggerPassRemoved:
@@ -122,6 +154,7 @@ class TestBug27TriggerPassRemoved:
         import inspect
 
         from portfolio import trigger
+
         source = inspect.getsource(trigger._check_recent_trade)
         lines = source.split("\n")
         for i, line in enumerate(lines):
@@ -131,6 +164,7 @@ class TestBug27TriggerPassRemoved:
                 for j in range(i - 1, -1, -1):
                     prev = lines[j].strip()
                     if prev:
-                        assert "logger" not in prev, \
-                            f"Redundant 'pass' after logger call on line {i}"
+                        assert (
+                            "logger" not in prev
+                        ), f"Redundant 'pass' after logger call on line {i}"
                         break

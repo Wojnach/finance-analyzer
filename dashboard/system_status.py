@@ -289,7 +289,11 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
         # unresolved=None (NOT 0): a degraded reader must never fabricate a
         # clean count — _color surfaces None/error as YELLOW so a broken
         # critical-errors check can't silently flip the hero GREEN.
-        return {"unresolved": None, "recent": [], "error": f"errors load: {type(e).__name__}: {e}"}
+        return {
+            "unresolved": None,
+            "recent": [],
+            "error": f"errors load: {type(e).__name__}: {e}",
+        }
     try:
         # Reuse the canonical gate logic (window + auto-resolve-stale) so there
         # is a single source of truth. Lazy import keeps the dashboard's other
@@ -301,9 +305,13 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
         unresolved.sort(key=lambda x: x.get("ts", ""), reverse=True)
         recent = [_error_row(e) for e in unresolved[:5]]
         recent_system = [
-            _error_row(e) for e in unresolved if not _is_avanza_category(e.get("category"))
+            _error_row(e)
+            for e in unresolved
+            if not _is_avanza_category(e.get("category"))
         ][:5]
-        avanza_unresolved = sum(1 for e in unresolved if _is_avanza_category(e.get("category")))
+        avanza_unresolved = sum(
+            1 for e in unresolved if _is_avanza_category(e.get("category"))
+        )
         return {
             "unresolved": len(unresolved),
             "recent": recent,
@@ -315,7 +323,11 @@ def _errors_unresolved(dd: Path) -> dict[str, Any]:
         # unresolved=None (NOT 0): if the gate import/logic fails, do NOT report
         # a clean zero — that is exactly the "silently flipped to GREEN" class
         # the Codex P1 2026-05-04 note guards against. _color turns this YELLOW.
-        return {"unresolved": None, "recent": [], "error": f"errors aggregate: {type(e).__name__}: {e}"}
+        return {
+            "unresolved": None,
+            "recent": [],
+            "error": f"errors aggregate: {type(e).__name__}: {e}",
+        }
 
 
 def _violations_recent(dd: Path) -> dict[str, Any]:
@@ -359,7 +371,11 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
             dd / "contract_violations.jsonl", hours=24, ts_field="ts"
         )
     except Exception as e:
-        return {"unresolved": 0, "recent": [], "error": f"violations load: {type(e).__name__}: {e}"}
+        return {
+            "unresolved": 0,
+            "recent": [],
+            "error": f"violations load: {type(e).__name__}: {e}",
+        }
     try:
         crit_idx = _critical_errors_index(dd)
         latest_l2_journal_ts = _latest_layer2_journal_ts(dd)
@@ -401,7 +417,11 @@ def _violations_recent(dd: Path) -> dict[str, Any]:
         ]
         return {"unresolved": len(recent), "recent": recent[:5]}
     except Exception as e:
-        return {"unresolved": 0, "recent": [], "error": f"violations aggregate: {type(e).__name__}: {e}"}
+        return {
+            "unresolved": 0,
+            "recent": [],
+            "error": f"violations aggregate: {type(e).__name__}: {e}",
+        }
 
 
 def _critical_errors_index(dd: Path) -> dict[str, Any]:
@@ -447,9 +467,7 @@ def _critical_errors_index(dd: Path) -> dict[str, Any]:
         # critical_errors rows record the invariant in either ``caller``
         # or ``category`` (the dispatcher uses the invariant name for
         # both). Prefer caller; fall back to category.
-        invariant = (
-            entry.get("caller") or entry.get("category") or ""
-        )
+        invariant = entry.get("caller") or entry.get("category") or ""
         key = (str(invariant), _identity_key_for_dict(entry))
         if ts in resolved_ts:
             resolved_keys.add(key)
@@ -496,10 +514,7 @@ def _identity_key_for_dict(entry: dict) -> str:
     # category="contract_violation" + caller=invariant_name
     # (loop_contract:471-476) — prefer caller, fall back to category.
     invariant = (
-        entry.get("invariant")
-        or entry.get("caller")
-        or entry.get("category")
-        or ""
+        entry.get("invariant") or entry.get("caller") or entry.get("category") or ""
     )
     raw_msg = entry.get("message") or ""
     # ViolationTracker promotes warnings by prepending
@@ -574,7 +589,9 @@ def _llm_inference(dd: Path) -> dict[str, Any]:
         if not isinstance(sh, dict):
             sh = {}
         llm_report = load_json(dd / "local_llm_report_latest.json", default={}) or {}
-        llm_health = llm_report.get("health", {}) if isinstance(llm_report, dict) else {}
+        llm_health = (
+            llm_report.get("health", {}) if isinstance(llm_report, dict) else {}
+        )
         if not isinstance(llm_health, dict):
             llm_health = {}
 
@@ -633,8 +650,11 @@ def _llm_inference(dd: Path) -> dict[str, Any]:
 
         return {"models": models, "overall_pct": overall_pct}
     except Exception as e:
-        return {"models": [], "overall_pct": None,
-                "error": f"llm_inference: {type(e).__name__}: {e}"}
+        return {
+            "models": [],
+            "overall_pct": None,
+            "error": f"llm_inference: {type(e).__name__}: {e}",
+        }
 
 
 def _layer2_24h(dd: Path) -> dict[str, Any]:
@@ -781,8 +801,11 @@ def _signal_aggregate(dd: Path) -> dict[str, Any]:
     try:
         tickers_dict = last.get("tickers", {}) or {}
         if not isinstance(tickers_dict, dict):
-            return {"ts": last.get("ts"), "tickers": [],
-                    "error": "signal_log.tickers is not a JSON object"}
+            return {
+                "ts": last.get("ts"),
+                "tickers": [],
+                "error": "signal_log.tickers is not a JSON object",
+            }
         tickers: list[dict[str, Any]] = []
         for sym, data in tickers_dict.items():
             if not isinstance(data, dict):
@@ -911,6 +934,18 @@ def _source_freshness(dd: Path, filename: str) -> dict[str, Any]:
             "enabled": enabled,
         }
     age_sec = int(time.time() - mtime)
+    # heartbeat.txt carries its own monotonic anchor, so its age can be read in
+    # awake seconds. Everything else is mtime-only and stays wall-clock: this
+    # host suspends for hours (48 of its last 96 uptime hours, 2026-08-17), and
+    # a wall-clock read painted a healthy Layer 1 loop "frozen" after every
+    # resume. Only heartbeat.txt is fixable here — the other sources would need
+    # the same anchor written into them, which their writers do not do yet.
+    if filename == "heartbeat.txt":
+        from portfolio.loop_health import read_heartbeat_age
+
+        awake = read_heartbeat_age(dd / filename).get("awake_age_s")
+        if awake is not None:
+            age_sec = int(awake)
     if filename in _SOURCE_NEVER_FROZEN:
         frozen = False
     else:
@@ -978,10 +1013,12 @@ def _layer1(dd: Path) -> dict[str, Any]:
     try:
         active = _systemctl_user_query(_LAYER1_UNIT, "is-active") == "active"
         enabled = _systemctl_user_query(_LAYER1_UNIT, "is-enabled") == "enabled"
-        try:
-            last_cycle_ts = (dd / "heartbeat.txt").read_text(encoding="utf-8").strip() or None
-        except OSError:
-            last_cycle_ts = None
+        # Parsed, not raw: heartbeat.txt became JSON (ts + monotonic anchor) on
+        # 2026-08-16, and read_text() would hand the whole blob to a field the
+        # UI renders as a timestamp.
+        from portfolio.loop_health import read_heartbeat_age
+
+        last_cycle_ts = read_heartbeat_age(dd / "heartbeat.txt")["ts"]
         return {
             "unit": _LAYER1_UNIT,
             "active": active,
@@ -1019,11 +1056,16 @@ def _avanza_status(dd: Path, *, config_path: Path | None = None) -> dict[str, An
         if not isinstance(av_cfg, dict):
             av_cfg = {}
         creds_configured = bool(
-            av_cfg.get("username") and av_cfg.get("password") and av_cfg.get("totp_secret")
+            av_cfg.get("username")
+            and av_cfg.get("password")
+            and av_cfg.get("totp_secret")
         )
         return {"creds_configured": creds_configured}
     except Exception as e:
-        return {"creds_configured": None, "error": f"avanza status: {type(e).__name__}: {e}"}
+        return {
+            "creds_configured": None,
+            "error": f"avanza status: {type(e).__name__}: {e}",
+        }
 
 
 # Curated voter watch-list — the signals whose "green" health has
@@ -1045,7 +1087,9 @@ _VOTER_NAMES: tuple[str, ...] = (
 # NOTE: "ml" is a joblib/sklearn classifier, not an LLM — it doesn't
 # actually depend on local_llm_gate today, but is included here per the
 # Phase 1 spec; flagged as a discrepancy for the Phase 4 registry cleanup.
-_LLM_FLAG_GATED_SIGNALS: frozenset[str] = frozenset({"ministral", "qwen3", "sentiment", "ml"})
+_LLM_FLAG_GATED_SIGNALS: frozenset[str] = frozenset(
+    {"ministral", "qwen3", "sentiment", "ml"}
+)
 
 
 def _voter_state(
@@ -1089,7 +1133,11 @@ def _voter_state(
                 "reason": f"{reason}; {paused}" if reason else paused,
                 "last_activity_ts": last_activity_ts,
             }
-        return {"state": "VOTING", "reason": reason, "last_activity_ts": last_activity_ts}
+        return {
+            "state": "VOTING",
+            "reason": reason,
+            "last_activity_ts": last_activity_ts,
+        }
 
     if not registry.is_globally_disabled(name, ticker=None):
         # None of the curated names are expected to be globally enabled
@@ -1107,7 +1155,9 @@ def _voter_state(
             available = False
         tickers_str = ", ".join(rescued_tickers)
         if available:
-            reason = f"force-HOLD globally; remote LLM reachable, voting for: {tickers_str}"
+            reason = (
+                f"force-HOLD globally; remote LLM reachable, voting for: {tickers_str}"
+            )
             note = _shadow_throttle_note(name)
             if note:
                 reason = f"{reason}; {note}"
@@ -1199,12 +1249,18 @@ def _voters(dd: Path, *, layer1_active: bool = True) -> dict[str, Any]:
         overrides = _voter_overrides()
 
         health = load_json(dd / "health_state.json", default={}) or {}
-        signal_health = health.get("signal_health", {}) if isinstance(health, dict) else {}
+        signal_health = (
+            health.get("signal_health", {}) if isinstance(health, dict) else {}
+        )
         if not isinstance(signal_health, dict):
             signal_health = {}
 
         shadow_registry = load_json(dd / "shadow_registry.json", default={}) or {}
-        shadows = shadow_registry.get("shadows", {}) if isinstance(shadow_registry, dict) else {}
+        shadows = (
+            shadow_registry.get("shadows", {})
+            if isinstance(shadow_registry, dict)
+            else {}
+        )
         if not isinstance(shadows, dict):
             shadows = {}
 
