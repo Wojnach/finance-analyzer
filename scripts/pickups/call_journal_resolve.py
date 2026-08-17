@@ -15,43 +15,98 @@ import sys
 from pathlib import Path
 
 
-def _price_map(repo_root: Path, keys):
-    """Live marks, Swedbank instruments first, watchlist orderbooks second."""
+def _swedbank_prices(keys):
+    """Marks for instruments pinned in the Swedbank book."""
     from portfolio.fx_rates import fetch_usd_sek
     from portfolio.swedbank.instruments import INSTRUMENTS
     from portfolio.swedbank.pricing import sweep
 
     out = {}
     pinned = [k for k in keys if k in INSTRUMENTS]
-    if pinned:
-        s = sweep(keys=pinned, fx_fn=fetch_usd_sek)
-        quotes = s.quotes if hasattr(s, "quotes") else s
-        for k, q in quotes.items():
-            if q is not None and getattr(q, "mark", None):
-                out[k] = float(q.mark)
+    if not pinned:
+        return out
+    s = sweep(keys=pinned, fx_fn=fetch_usd_sek)
+    quotes = s.quotes if hasattr(s, "quotes") else s
+    for k, q in quotes.items():
+        if q is not None and getattr(q, "mark", None):
+            out[k] = float(q.mark)
+    return out
 
-    missing = [k for k in keys if k not in out]
-    if missing:
-        from portfolio.avanza_session import api_get
-        from portfolio.file_utils import load_json
 
-        cache = load_json(str(repo_root / "data" / "watchlist_instruments.json")) or {}
-        by_ticker = {}
-        for e in cache.get("entries") or []:
-            t = (e.get("ticker") or "").strip()
-            if t:
-                by_ticker[t] = e["ob"]
-        for k in missing:
-            ob = by_ticker.get(k)
-            if not ob:
-                continue
-            try:
-                g = api_get(f"/_api/market-guide/stock/{ob}")
-                last = (g.get("quote") or {}).get("last")
-                if last:
-                    out[k] = float(last)
-            except Exception:
-                continue
+def _watchlist_prices(repo_root: Path, keys):
+    """Last prints for tickers carrying an Avanza watchlist orderbook ID."""
+    from portfolio.avanza_session import api_get
+    from portfolio.file_utils import load_json
+
+    out = {}
+    cache = load_json(str(repo_root / "data" / "watchlist_instruments.json")) or {}
+    by_ticker = {}
+    for e in cache.get("entries") or []:
+        t = (e.get("ticker") or "").strip()
+        if t:
+            by_ticker[t] = e["ob"]
+    for k in keys:
+        ob = by_ticker.get(k)
+        if not ob:
+            continue
+        try:
+            g = api_get(f"/_api/market-guide/stock/{ob}")
+            last = (g.get("quote") or {}).get("last")
+            if last:
+                out[k] = float(last)
+        except Exception:
+            continue
+    return out
+
+
+def _price_source_prices(keys):
+    """Last close from portfolio.price_source — the Tier-1 universe.
+
+    Added 2026-08-17. Without this, XAU-USD/XAG-USD could never be priced:
+    they are Binance FAPI synthetics, absent from both the Swedbank book and
+    the Avanza watchlist, so CALLS-VERIFY-1D reported "Resolved 0/2 due calls,
+    unpriced: ['XAG-USD', 'XAU-USD']" and would have deferred forever — the
+    scoring pickup silently failing to score is the one outcome that defeats
+    its whole purpose.
+    """
+    out = {}
+    for k in keys:
+        try:
+            from portfolio.price_source import fetch_klines
+
+            df = fetch_klines(k, interval="1h", limit=2)
+            close = df["close"]
+            last = close.iloc[-1] if hasattr(close, "iloc") else close[-1]
+            if last:
+                out[k] = float(last)
+        except Exception:
+            continue
+    return out
+
+
+def _price_map(repo_root: Path, keys):
+    """Live marks in source order, most authoritative first.
+
+    Avanza-backed sources win where they have a quote — they are the venue the
+    operator actually trades — and price_source backfills everything else.
+    Never raises: a pricing outage must leave calls open for the next run
+    rather than bank a resolution against a missing price.
+    """
+    out = {}
+    for tier in (
+        lambda ks: _swedbank_prices(ks),
+        lambda ks: _watchlist_prices(repo_root, ks),
+        lambda ks: _price_source_prices(ks),
+    ):
+        missing = [k for k in keys if k not in out]
+        if not missing:
+            break
+        try:
+            for k, v in (tier(missing) or {}).items():
+                if k not in out:
+                    out[k] = v
+        except Exception:
+            continue
     return out
 
 

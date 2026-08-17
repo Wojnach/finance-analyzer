@@ -8,6 +8,7 @@ Coverage:
 - Failure path swallows exceptions and returns False.
 - Override timestamp produces deterministic output.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -88,6 +89,7 @@ def test_failure_returns_false_and_does_not_raise(tmp_path, monkeypatch):
         raise OSError("disk full (simulated)")
 
     from portfolio import file_utils
+
     monkeypatch.setattr(file_utils, "atomic_write_json", _boom)
 
     result = loop_health.write_heartbeat(hb, cycle=1)
@@ -95,14 +97,22 @@ def test_failure_returns_false_and_does_not_raise(tmp_path, monkeypatch):
     assert not hb.exists()
 
 
-def test_round_trips_through_read_loop_status(tmp_path):
+def test_round_trips_through_read_loop_status(tmp_path, monkeypatch):
     """End-to-end: write_heartbeat output is read as 'fresh' by the
-    consumer side — guarantees the schema match."""
+    consumer side — guarantees the schema match.
+
+    2026-08-17: age now comes off the awake clock when the heartbeat carries
+    an anchor, so the ``now`` override no longer drives it — drive
+    _awake_seconds instead. The 60s-old / fresh assertion is unchanged in
+    substance.
+    """
     hb = tmp_path / "metals_loop.heartbeat"
     pinned = datetime.datetime(2026, 5, 3, 12, 0, 0, tzinfo=datetime.UTC)
+    monkeypatch.setattr(loop_health, "_awake_seconds", lambda: 5000.0)
     loop_health.write_heartbeat(hb, cycle=99, n_positions=2, now=pinned)
 
-    # Read 60s later — should be 'fresh'.
+    # Read 60 awake seconds later — should be 'fresh'.
+    monkeypatch.setattr(loop_health, "_awake_seconds", lambda: 5060.0)
     later = pinned + datetime.timedelta(seconds=60)
     status = loop_health.read_loop_status("metals", hb, now=later)
     assert status["state"] == "fresh"
@@ -136,10 +146,12 @@ def test_round_trips_through_read_loop_health(tmp_path):
 # fresh and that the schema (ts/status/cycle/ok/n_positions) is preserved.
 # ---------------------------------------------------------------------------
 
+
 class TestWrapperShims:
     def test_crypto_wrapper_produces_compatible_payload(self, tmp_path, monkeypatch):
         """data/crypto_loop.write_heartbeat unpacks `extra` correctly."""
         from data import crypto_loop
+
         hb = tmp_path / "crypto_loop.heartbeat"
         monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
 
@@ -157,19 +169,26 @@ class TestWrapperShims:
     def test_crypto_wrapper_passes_through_unknown_keys(self, tmp_path, monkeypatch):
         """Extra keys not in the canonical set ride along as context."""
         from data import crypto_loop
+
         hb = tmp_path / "crypto_loop.heartbeat"
         monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
 
-        crypto_loop.write_heartbeat({
-            "cycle": 1, "ok": True, "n_positions": 0,
-            "fast_tick_alerts": 3, "slow_phase_seen": False,
-        })
+        crypto_loop.write_heartbeat(
+            {
+                "cycle": 1,
+                "ok": True,
+                "n_positions": 0,
+                "fast_tick_alerts": 3,
+                "slow_phase_seen": False,
+            }
+        )
         payload = _read(hb)
         assert payload["fast_tick_alerts"] == 3
         assert payload["slow_phase_seen"] is False
 
     def test_oil_wrapper_produces_compatible_payload(self, tmp_path, monkeypatch):
         from data import oil_loop
+
         hb = tmp_path / "oil_loop.heartbeat"
         monkeypatch.setattr(oil_loop, "HEARTBEAT_FILE", str(hb))
 
@@ -209,6 +228,7 @@ class TestWrapperShims:
 
         # Force the inner import to fail.
         import builtins
+
         real_import = builtins.__import__
 
         def _failing_import(name, *args, **kwargs):
@@ -227,9 +247,11 @@ class TestWrapperShims:
 # raise out to the live trading loop.
 # ---------------------------------------------------------------------------
 
+
 class TestWrapperCoercionSafety:
     def test_crypto_wrapper_swallows_non_int_cycle(self, tmp_path, monkeypatch):
         from data import crypto_loop
+
         hb = tmp_path / "crypto_loop.heartbeat"
         monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
 
@@ -242,11 +264,13 @@ class TestWrapperCoercionSafety:
 
     def test_crypto_wrapper_swallows_non_int_n_positions(self, tmp_path, monkeypatch):
         from data import crypto_loop
+
         hb = tmp_path / "crypto_loop.heartbeat"
         monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
 
-        crypto_loop.write_heartbeat({"cycle": 1, "ok": True,
-                                      "n_positions": {"weird": "shape"}})
+        crypto_loop.write_heartbeat(
+            {"cycle": 1, "ok": True, "n_positions": {"weird": "shape"}}
+        )
         payload = _read(hb)
         assert payload["n_positions"] == 0
 
@@ -254,6 +278,7 @@ class TestWrapperCoercionSafety:
         """If a future caller passes a list (or any non-dict), the dict()
         coercion would raise — must be caught silently."""
         from data import crypto_loop
+
         hb = tmp_path / "crypto_loop.heartbeat"
         monkeypatch.setattr(crypto_loop, "HEARTBEAT_FILE", str(hb))
 
@@ -264,6 +289,7 @@ class TestWrapperCoercionSafety:
 
     def test_oil_wrapper_swallows_non_int_cycle(self, tmp_path, monkeypatch):
         from data import oil_loop
+
         hb = tmp_path / "oil_loop.heartbeat"
         monkeypatch.setattr(oil_loop, "HEARTBEAT_FILE", str(hb))
         oil_loop.write_heartbeat({"cycle": None, "ok": True, "n_positions": 0})
@@ -275,6 +301,7 @@ class TestWrapperCoercionSafety:
 # 2026-05-04 codex P3-1: load_jsonl_tail must keep the first decoded
 # line when the seek lands exactly on a newline boundary.
 # ---------------------------------------------------------------------------
+
 
 class TestLoadJsonlTailBoundary:
     """Note: tests write files in BINARY mode so Windows' default
@@ -300,9 +327,11 @@ class TestLoadJsonlTailBoundary:
         rows = load_jsonl_tail(f, max_entries=10, tail_bytes=target_tail_bytes)
         # Must return entries 7, 8, 9 (3 entries) — NOT 8, 9 (which would be
         # the bug where the first intact line was dropped).
-        assert [e["i"] for e in rows] == [7, 8, 9], (
-            f"got {[e['i'] for e in rows]} — first intact line dropped on boundary"
-        )
+        assert [e["i"] for e in rows] == [
+            7,
+            8,
+            9,
+        ], f"got {[e['i'] for e in rows]} — first intact line dropped on boundary"
 
     def test_drops_first_line_when_seek_lands_mid_line(self, tmp_path):
         """When seek lands inside a record (not on \\n), the first
