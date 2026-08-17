@@ -1486,11 +1486,19 @@ def _warn_if_heartbeat_stale():
 
     age_seconds = info["awake_age_s"]
     if age_seconds is None:
-        logger.info(
-            "Previous heartbeat predates this boot (wall age %dm) — host "
-            "reboot, not a crash signal.",
-            int(info["wall_age_s"] // 60),
-        )
+        wall_min = int(info["wall_age_s"] // 60)
+        if info["has_anchor"]:
+            logger.info(
+                "Previous heartbeat is from an earlier boot (wall age %dm) — "
+                "host reboot, not a crash signal.",
+                wall_min,
+            )
+        else:
+            logger.info(
+                "Previous heartbeat has no monotonic anchor (legacy format, "
+                "wall age %dm) — cannot judge staleness; next cycle fixes it.",
+                wall_min,
+            )
         return
 
     if age_seconds <= 1200:

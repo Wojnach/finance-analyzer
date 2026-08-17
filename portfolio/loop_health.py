@@ -118,6 +118,12 @@ def read_heartbeat_age(path) -> dict[str, Any]:
         "wall_age_s": None,
         "awake_age_s": None,
         "same_boot": False,
+        # has_anchor distinguishes "written before this feature existed"
+        # (legacy bare-ISO, no anchor) from "written by a previous boot"
+        # (anchor present, boot_id differs). Both leave awake_age_s None, but
+        # only the second is evidence of a reboot — conflating them logged a
+        # reboot for a heartbeat written 0 minutes earlier.
+        "has_anchor": False,
     }
     try:
         raw = Path(path).read_text(encoding="utf-8").strip()
@@ -146,7 +152,8 @@ def read_heartbeat_age(path) -> dict[str, Any]:
     out["ts"] = stamp.isoformat()
     out["wall_age_s"] = (datetime.datetime.now(datetime.UTC) - stamp).total_seconds()
 
-    if isinstance(awake_s, (int, float)) and boot_id and boot_id == _boot_id():
+    out["has_anchor"] = isinstance(awake_s, (int, float)) and bool(boot_id)
+    if out["has_anchor"] and boot_id == _boot_id():
         out["same_boot"] = True
         out["awake_age_s"] = max(0.0, _awake_seconds() - float(awake_s))
     return out
