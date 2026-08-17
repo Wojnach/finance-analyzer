@@ -257,7 +257,17 @@ def read_loop_status(
         out["error"] = f"ts parse: {exc}"
         return out
 
+    # Prefer awake time over wall clock. On a host that suspends for hours,
+    # wall age says nothing about whether the loop is running — it only says
+    # the machine was off. Falls back to wall clock for heartbeats written
+    # before the anchor existed, or by a previous boot (monotonic restarts at
+    # zero on reboot, so a cross-boot reading is not comparable).
     age_seconds = (now - ts).total_seconds()
+    awake_s = payload.get("awake_s")
+    boot_id = payload.get("boot_id")
+    if isinstance(awake_s, (int, float)) and boot_id and boot_id == _boot_id():
+        age_seconds = max(0.0, _awake_seconds() - float(awake_s))
+
     out["age_seconds"] = round(age_seconds, 2)
     out["state"] = "fresh" if age_seconds <= stale_threshold_seconds else "stale"
     return out
@@ -356,6 +366,12 @@ def write_heartbeat(
             "cycle": cycle,
             "ok": ok,
             "n_positions": n_positions,
+            # Additive awake-time anchor (2026-08-17), same contract as
+            # write_wall_heartbeat. read_loop_status prefers it so a host
+            # suspend cannot make a running loop look stale to the watchdog.
+            # Existing readers ignore the extra keys.
+            "awake_s": float(_awake_seconds()),
+            "boot_id": _boot_id(),
         }
         if extra:
             payload.update(extra)
