@@ -197,3 +197,51 @@ def test_dashboard_layer1_reports_parsed_timestamp_not_raw_json(tmp_path):
     from datetime import datetime
 
     datetime.fromisoformat(ts)  # raises if this is not a real timestamp
+
+
+def test_legacy_file_is_labelled_legacy_not_a_reboot(tmp_path, caplog):
+    """A bare-ISO heartbeat has no anchor — that is not evidence of a reboot.
+
+    Shipped wrong once: the first deploy logged "predates this boot" for a
+    heartbeat written 0 minutes earlier in the same boot, purely because the
+    legacy format carries no boot_id.
+    """
+    import logging
+
+    import portfolio.main as main_mod
+
+    (tmp_path / "heartbeat.txt").write_text(
+        __import__("datetime").datetime.now(
+            __import__("datetime").UTC
+        ).isoformat()
+    )
+
+    info = loop_health.read_heartbeat_age(tmp_path / "heartbeat.txt")
+    assert info["has_anchor"] is False
+
+    caplog.set_level(logging.INFO)
+    import unittest.mock as mock
+
+    with mock.patch.object(main_mod, "DATA_DIR", tmp_path):
+        main_mod._warn_if_heartbeat_stale()
+    text = caplog.text.lower()
+    assert "reboot" not in text, f"legacy file mislabelled as a reboot: {caplog.text}"
+
+
+def test_genuine_reboot_still_says_reboot(tmp_path, caplog, monkeypatch):
+    import logging
+
+    import portfolio.main as main_mod
+
+    monkeypatch.setattr(loop_health, "_boot_id", lambda: "boot-A")
+    loop_health.write_wall_heartbeat(tmp_path / "heartbeat.txt")
+    monkeypatch.setattr(loop_health, "_boot_id", lambda: "boot-B")
+
+    info = loop_health.read_heartbeat_age(tmp_path / "heartbeat.txt")
+    assert info["has_anchor"] is True
+    assert info["same_boot"] is False
+
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(main_mod, "DATA_DIR", tmp_path)
+    main_mod._warn_if_heartbeat_stale()
+    assert "reboot" in caplog.text.lower(), caplog.text
