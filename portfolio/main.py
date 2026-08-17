@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, atomic_write_text, load_json
+from portfolio.loop_health import write_wall_heartbeat
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
@@ -231,7 +232,12 @@ from portfolio.telegram_notifications import (  # noqa: E402, F401
     escape_markdown_v1,
     send_telegram,
 )
-from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYMBOLS  # noqa: E402, F401
+from portfolio.tickers import (
+    CRYPTO_SYMBOLS,
+    METALS_SYMBOLS,
+    STOCK_SYMBOLS,
+    SYMBOLS,
+)  # noqa: E402, F401
 
 CONFIG_FILE = BASE_DIR / "config.json"
 
@@ -240,7 +246,9 @@ CONFIG_FILE = BASE_DIR / "config.json"
 
 import re as _re
 
-_TICKER_PAT = _re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped|sentiment)')
+_TICKER_PAT = _re.compile(
+    r"^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped|sentiment)"
+)
 
 
 def _extract_triggered_tickers(reasons):
@@ -266,6 +274,7 @@ def _run_post_cycle(config, report=None):
         config: Application config dict.
         report: Optional CycleReport to track task success/failure.
     """
+
     def _track(name, func, *args):
         """Run a post-cycle task, tracking success on report if provided."""
         try:
@@ -282,11 +291,13 @@ def _run_post_cycle(config, report=None):
     # Market health refresh (hourly via internal cache, self-checking)
     try:
         from portfolio.market_health import maybe_refresh_market_health
+
         _track("market_health", maybe_refresh_market_health)
     except Exception as e_mh:
         logger.warning("market health import failed: %s", e_mh)
     try:
         from portfolio.daily_digest import maybe_send_daily_digest
+
         _track("daily_digest", maybe_send_daily_digest, config)
     except Exception as e_dd:
         logger.warning("daily digest import failed: %s", e_dd)
@@ -300,9 +311,9 @@ def _run_post_cycle(config, report=None):
             maybe_save_daily_snapshot,
             maybe_send_degradation_summary,
         )
+
         _track("accuracy_snapshot", maybe_save_daily_snapshot, config)
-        _track("accuracy_degradation_summary",
-               maybe_send_degradation_summary, config)
+        _track("accuracy_degradation_summary", maybe_send_degradation_summary, config)
     except Exception as e_deg:
         logger.warning("accuracy degradation import failed: %s", e_deg)
     # 2026-05-04: pre-warm the four dashboard horizons (1d/3d/5d/10d)
@@ -311,22 +322,29 @@ def _run_post_cycle(config, report=None):
     # per hour internally — cheap on every other cycle.
     try:
         from portfolio.accuracy_stats import maybe_prewarm_dashboard_accuracy
+
         _track("dashboard_accuracy_prewarm", maybe_prewarm_dashboard_accuracy)
     except Exception as e_pw:
         logger.warning("dashboard accuracy prewarm import failed: %s", e_pw)
     try:
         from portfolio.message_throttle import flush_and_send
+
         _track("message_throttle", flush_and_send, config)
     except Exception as e_mt:
         logger.warning("message throttle import failed: %s", e_mt)
     try:
-        from portfolio.alpha_vantage import refresh_fundamentals_batch, should_batch_refresh
+        from portfolio.alpha_vantage import (
+            refresh_fundamentals_batch,
+            should_batch_refresh,
+        )
+
         if should_batch_refresh(config):
             _track("alpha_vantage", refresh_fundamentals_batch, config)
     except Exception as e_av:
         logger.warning("Alpha Vantage import failed: %s", e_av)
     try:
         from portfolio.local_llm_report import maybe_export_local_llm_report
+
         export = maybe_export_local_llm_report(config=config)
         if export:
             logger.info(
@@ -343,20 +361,28 @@ def _run_post_cycle(config, report=None):
     # Metals deep context precompute (every 4h, self-checking)
     try:
         from portfolio.metals_precompute import maybe_precompute_metals
+
         _track("metals_precompute", maybe_precompute_metals, config)
     except Exception as e_metals:
         logger.warning("Metals precompute import failed: %s", e_metals)
     # Oil deep context precompute (every 2h, self-checking)
     try:
         from portfolio.oil_precompute import maybe_precompute_oil
+
         _track("oil_precompute", maybe_precompute_oil, config)
     except Exception as e_oil:
         logger.warning("Oil precompute import failed: %s", e_oil)
     # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59).
     # Per-file isolation: a locked file doesn't block the others.
     from portfolio.file_utils import prune_jsonl
+
     _prune_failures = []
-    for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl", "claude_invocations.jsonl"):
+    for name in (
+        "invocations.jsonl",
+        "layer2_journal.jsonl",
+        "telegram_messages.jsonl",
+        "claude_invocations.jsonl",
+    ):
         try:
             prune_jsonl(DATA_DIR / name, max_entries=5000)
         except Exception as e_prune:
@@ -367,12 +393,14 @@ def _run_post_cycle(config, report=None):
     # Fin command self-improvement: backfill outcomes + evolve lessons (daily)
     try:
         from portfolio.fin_evolve import maybe_evolve
+
         _track("fin_evolve", maybe_evolve, config)
     except Exception as e_evolve:
         logger.warning("Fin evolve import failed: %s", e_evolve)
     # Scheduled crypto analysis report (08:00, 13:00, 18:00 CET)
     try:
         from portfolio.crypto_scheduler import maybe_run_crypto_report
+
         _track("crypto_scheduler", maybe_run_crypto_report, config)
     except Exception as e_crypto:
         logger.warning("Crypto scheduler import failed: %s", e_crypto)
@@ -380,6 +408,7 @@ def _run_post_cycle(config, report=None):
     try:
         from portfolio.file_utils import load_json as _lj
         from portfolio.signal_postmortem import POSTMORTEM_FILE, generate_postmortem
+
         pm = _lj(POSTMORTEM_FILE)
         # Regenerate if missing or stale (>20 hours old)
         if not pm or (time.time() - pm.get("_epoch", 0)) > 72000:
@@ -387,6 +416,7 @@ def _run_post_cycle(config, report=None):
             if result:
                 result["_epoch"] = time.time()
                 from portfolio.file_utils import atomic_write_json as _awj
+
                 _awj(POSTMORTEM_FILE, result)
         if report is not None:
             report.post_cycle_results["signal_postmortem"] = True
@@ -405,12 +435,20 @@ def _run_post_cycle(config, report=None):
     if should_rotate_logs:
         try:
             from portfolio.log_rotation import rotate_all
+
             rotation_output = rotate_all()
-            rotation_results = rotation_output["results"] if isinstance(rotation_output, dict) else rotation_output
+            rotation_results = (
+                rotation_output["results"]
+                if isinstance(rotation_output, dict)
+                else rotation_output
+            )
             rotated = [r for r in rotation_results if r.get("status") == "rotated"]
             if rotated:
-                logger.info("Log rotation: %d file(s) rotated: %s",
-                            len(rotated), [r["file"] for r in rotated])
+                logger.info(
+                    "Log rotation: %d file(s) rotated: %s",
+                    len(rotated),
+                    [r["file"] for r in rotated],
+                )
             if report is not None:
                 report.post_cycle_results["log_rotation"] = True
             _ss._last_log_rotation_ts = _now_rot_ts
@@ -438,7 +476,8 @@ def run(force_report=False, active_symbols=None):
         if completion:
             logger.info(
                 "Agent completed: status=%s tier=%s duration=%.1fs",
-                completion.get("status"), completion.get("tier"),
+                completion.get("status"),
+                completion.get("tier"),
                 completion.get("duration_s", 0),
             )
     except Exception as e:
@@ -466,6 +505,7 @@ def run(force_report=False, active_symbols=None):
 
     # Loop contract: track what actually happens this cycle
     from portfolio.loop_contract import CycleReport
+
     report = CycleReport(cycle_id=_ss._run_cycle_id, active_tickers=set(active))
     report.cycle_start = _run_start
 
@@ -474,7 +514,9 @@ def run(force_report=False, active_symbols=None):
     # Rate limiters, cache locks, and GPU gate are already thread-safe.
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    active_items = [(name, source) for name, source in SYMBOLS.items() if name in active]
+    active_items = [
+        (name, source) for name, source in SYMBOLS.items() if name in active
+    ]
 
     def _process_ticker(name, source):
         """Fetch data + generate signals for one ticker. Fully thread-safe."""
@@ -491,9 +533,11 @@ def run(force_report=False, active_symbols=None):
             # its 1h close would be mislabeled as the live 15m price and stored as
             # the signal_log base price. Match on label and fall back to an
             # explicit 15m re-fetch otherwise.
-            now_entry = next(
-                (entry for label, entry in tfs if label == "Now"), None
-            ) if tfs else None
+            now_entry = (
+                next((entry for label, entry in tfs if label == "Now"), None)
+                if tfs
+                else None
+            )
             now_df = None
             if now_entry and "indicators" in now_entry:
                 ind = now_entry["indicators"]
@@ -516,7 +560,10 @@ def run(force_report=False, active_symbols=None):
             total_elapsed = time.monotonic() - t0
             logger.info(
                 "%s: timing: tf=%.1fs sig=%.1fs total=%.1fs",
-                name, tf_elapsed, sig_elapsed, total_elapsed,
+                name,
+                tf_elapsed,
+                sig_elapsed,
+                total_elapsed,
             )
 
             extra_str = ""
@@ -537,10 +584,23 @@ def run(force_report=False, active_symbols=None):
                 if parts:
                     extra_str = f" | {' '.join(parts)}"
             enh_parts = []
-            for esig in ("trend", "momentum", "volume_flow", "volatility_sig",
-                         "candlestick", "structure", "fibonacci", "smart_money",
-                         "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-                         "macro_regime", "momentum_factors", "futures_flow"):
+            for esig in (
+                "trend",
+                "momentum",
+                "volume_flow",
+                "volatility_sig",
+                "candlestick",
+                "structure",
+                "fibonacci",
+                "smart_money",
+                "oscillators",
+                "heikin_ashi",
+                "mean_reversion",
+                "calendar",
+                "macro_regime",
+                "momentum_factors",
+                "futures_flow",
+            ):
                 ea = extra.get(f"{esig}_action", "HOLD")
                 if ea != "HOLD":
                     enh_parts.append(f"{esig[:4].title()}:{ea[0]}")
@@ -548,22 +608,38 @@ def run(force_report=False, active_symbols=None):
 
             logger.info(
                 "%s: $%s | RSI %.0f | MACD %+.1f%s%s | %s (%.0f%%)",
-                name, f"{price:,.2f}", ind['rsi'], ind['macd_hist'], extra_str, enh_str, action, conf * 100
+                name,
+                f"{price:,.2f}",
+                ind["rsi"],
+                ind["macd_hist"],
+                extra_str,
+                enh_str,
+                action,
+                conf * 100,
             )
 
             for label, entry in tfs[1:]:
                 if "error" in entry:
-                    logger.warning("%s: %s", label, entry['error'])
+                    logger.warning("%s: %s", label, entry["error"])
                 else:
                     ei = entry["indicators"]
                     logger.info(
                         "%s: %s %.0f%% | RSI %.0f | MACD %+.1f",
-                        label, entry['action'], entry['confidence'] * 100, ei['rsi'], ei['macd_hist']
+                        label,
+                        entry["action"],
+                        entry["confidence"] * 100,
+                        ei["rsi"],
+                        ei["macd_hist"],
                     )
 
             return name, {
-                "tfs": tfs, "ind": ind, "now_df": now_df, "price": price,
-                "action": action, "confidence": conf, "extra": extra,
+                "tfs": tfs,
+                "ind": ind,
+                "now_df": now_df,
+                "price": price,
+                "action": action,
+                "confidence": conf,
+                "extra": extra,
             }
         except Exception as e:
             logger.error("%s: %s", name, e, exc_info=True)
@@ -642,6 +718,7 @@ def run(force_report=False, active_symbols=None):
         try:
             from portfolio.signal_engine import get_last_signal as _get_last
             from portfolio.signal_engine import get_phase_log as _get_phase_log
+
             last_sigs = {n: _get_last(n) for n in timed_out}
             # 2026-04-15: also dump per-ticker phase breakdown when the pool
             # times out. This tells us WHICH post-dispatch phase
@@ -655,7 +732,9 @@ def run(force_report=False, active_symbols=None):
             phase_logs = {}
         logger.error(
             "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
-            _TICKER_POOL_TIMEOUT, timed_out, last_sigs,
+            _TICKER_POOL_TIMEOUT,
+            timed_out,
+            last_sigs,
         )
         for name, phases in phase_logs.items():
             if phases:
@@ -682,9 +761,12 @@ def run(force_report=False, active_symbols=None):
         from portfolio.llm_batch import _lock as _llm_lock
         from portfolio.llm_batch import _ministral_queue, _qwen3_queue, flush_llm_batch
         from portfolio.shared_state import MINISTRAL_TTL, _update_cache
+
         # H24/SS2: Capture queued keys before flush to clear stuck loading keys.
         with _llm_lock:
-            _queued_keys = {k for k, _ in _ministral_queue} | {k for k, _ in _qwen3_queue}
+            _queued_keys = {k for k, _ in _ministral_queue} | {
+                k for k, _ in _qwen3_queue
+            }
         batch_results = flush_llm_batch()
         for cache_key, result in batch_results.items():
             _update_cache(cache_key, result, ttl=MINISTRAL_TTL)
@@ -697,6 +779,7 @@ def run(force_report=False, active_symbols=None):
         # the sentiment_ab_log.jsonl rows for this cycle. Must run AFTER
         # flush_llm_batch so the fingpt shadow data is available.
         from portfolio.sentiment import flush_ab_log
+
         flush_ab_log()
         report.llm_batch_flushed = True
     except Exception as e_batch:
@@ -706,7 +789,9 @@ def run(force_report=False, active_symbols=None):
     _run_elapsed = time.monotonic() - _run_start
     logger.info(
         "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",
-        signals_ok, signals_failed, _run_elapsed,
+        signals_ok,
+        signals_failed,
+        _run_elapsed,
         _run_elapsed / max(signals_ok + signals_failed, 1),
     )
 
@@ -729,13 +814,15 @@ def run(force_report=False, active_symbols=None):
         try:
             from portfolio.signal_engine import get_last_signal as _get_last
             from portfolio.signal_engine import get_phase_log as _get_phase_log
+
             # Use signals.keys() because those are the tickers that successfully
             # returned from the pool. Timed-out tickers are already named by the
             # BUG-178 handler's Last signals log line.
             last_sigs = {n: _get_last(n) for n in signals}
             logger.warning(
                 "Slow cycle diagnostic: %.1fs total, last signals tracked: %s",
-                _run_elapsed, last_sigs,
+                _run_elapsed,
+                last_sigs,
             )
             # 2026-04-15: also dump the post-dispatch phase breakdown for each
             # ticker that returned successfully. On a slow cycle the phase log
@@ -754,6 +841,7 @@ def run(force_report=False, active_symbols=None):
     # BUG-85: Flush batched sentiment state to disk once per cycle (not per-ticker)
     try:
         from portfolio.signal_engine import flush_sentiment_state
+
         flush_sentiment_state()
     except Exception:
         logger.warning("Failed to flush sentiment state", exc_info=True)
@@ -779,6 +867,7 @@ def run(force_report=False, active_symbols=None):
         _fail_msg = f"*LOOP ERRORS* ({int(_run_elapsed)}s cycle)\n" + "\n".join(_parts)
         try:
             from portfolio.message_store import send_or_store
+
             send_or_store(_fail_msg, config, category="error")
         except Exception as _e:
             logger.warning("Failed to send cycle error alert: %s", _e)
@@ -789,7 +878,12 @@ def run(force_report=False, active_symbols=None):
     if initial_val is None:
         initial_val = INITIAL_CASH_SEK
     pnl_pct = ((total - initial_val) / initial_val) * 100 if initial_val else 0.0
-    logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", f"{total:,.0f}", pnl_pct, "{:,.0f}".format(state['cash_sek']))
+    logger.info(
+        "Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK",
+        f"{total:,.0f}",
+        pnl_pct,
+        "{:,.0f}".format(state["cash_sek"]),
+    )
 
     if not STATE_FILE.exists():
         save_state(state)
@@ -797,6 +891,7 @@ def run(force_report=False, active_symbols=None):
     # Log hourly price snapshot for cumulative tracking
     try:
         from portfolio.cumulative_tracker import maybe_log_hourly_snapshot
+
         maybe_log_hourly_snapshot(prices_usd)
     except Exception as e:
         logger.warning("hourly snapshot failed: %s", e)
@@ -824,13 +919,16 @@ def run(force_report=False, active_symbols=None):
     # When >0, buffer accumulates reasons and only emits on window
     # expiry or escalation force-flush (see portfolio/trigger_buffer.py).
     try:
-        _budget_cfg = (config.get("claude_budget") or {}) if isinstance(config, dict) else {}
+        _budget_cfg = (
+            (config.get("claude_budget") or {}) if isinstance(config, dict) else {}
+        )
         _batch_window = int(_budget_cfg.get("batch_window_s", 0) or 0)
     except Exception:
         _batch_window = 0
     if triggered and _batch_window > 0 and not force_report:
         try:
             from portfolio import trigger_buffer
+
             trigger_buffer.add(reasons_list, time.time())
             flushed = trigger_buffer.flush_due(time.time(), window_s=_batch_window)
             if not flushed:
@@ -842,30 +940,34 @@ def run(force_report=False, active_symbols=None):
                 reasons_list = []
             else:
                 reasons_list = flushed
-                logger.info(
-                    "trigger_buffer: flushed %d merged reason(s)", len(flushed)
-                )
+                logger.info("trigger_buffer: flushed %d merged reason(s)", len(flushed))
         except Exception as e:
             logger.warning("trigger_buffer: error (%s), pass-through", e)
 
     if triggered or force_report:
         if not reasons_list:
             reasons_list = ["startup"]
-        summary = write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
+        summary = write_agent_summary(
+            signals, prices_usd, fx_rate, state, tf_data, reasons_list
+        )
         report.summary_written = True
-        logger.info("Trigger: %s", ', '.join(reasons_list))
+        logger.info("Trigger: %s", ", ".join(reasons_list))
 
         # Classify tier and write tier-specific context
         from portfolio.reporting import write_tiered_summary
         from portfolio.trigger import classify_tier, update_tier_state
+
         tier = classify_tier(reasons_list)
         triggered_tickers = _extract_triggered_tickers(reasons_list)
         write_tiered_summary(summary, tier, triggered_tickers)
         update_tier_state(tier)
-        logger.info("Tier: T%d (%s)", tier, TIER_CONFIG.get(tier, {}).get('label', 'UNKNOWN'))
+        logger.info(
+            "Tier: T%d (%s)", tier, TIER_CONFIG.get(tier, {}).get("label", "UNKNOWN")
+        )
 
         try:
             from portfolio.outcome_tracker import log_signal_snapshot
+
             log_signal_snapshot(signals, prices_usd, fx_rate, reasons_list)
         except Exception as e:
             logger.warning("signal logging failed: %s", e)
@@ -895,7 +997,9 @@ def run(force_report=False, active_symbols=None):
         if os.environ.get("NO_TELEGRAM"):
             logger.info("[NO_TELEGRAM] Skipping agent invocation")
             _log_trigger(reasons_list, "skipped_test", tier=tier)
-        elif layer2_cfg.get("enabled", True) and budget_cfg.get("autonomous_first_enabled", False):
+        elif layer2_cfg.get("enabled", True) and budget_cfg.get(
+            "autonomous_first_enabled", False
+        ):
             # Batch D / item 6: autonomous-first routing. Default to
             # autonomous_decision() and only spawn Claude when escalation
             # criteria match. See portfolio/escalation_router.py.
@@ -903,12 +1007,14 @@ def run(force_report=False, active_symbols=None):
                 should_escalate_to_claude,
                 record_decision_snapshot,
             )
+
             # Compute current drawdown for both strategies (cheap — reads
             # portfolio state + agent_summary, no network).
             dd_patient = 0.0
             dd_bold = 0.0
             try:
                 from portfolio.risk_management import check_drawdown
+
                 dd_patient = check_drawdown(
                     str(STATE_FILE),
                     max_drawdown_pct=100.0,  # we want the number, not the breach
@@ -923,8 +1029,12 @@ def run(force_report=False, active_symbols=None):
                 logger.warning("escalation_router: drawdown calc failed: %s", e)
 
             escalate, why = should_escalate_to_claude(
-                reasons_list, tier, signals,
-                escalate_drawdown_pct=float(budget_cfg.get("escalate_drawdown_pct", 5.0)),
+                reasons_list,
+                tier,
+                signals,
+                escalate_drawdown_pct=float(
+                    budget_cfg.get("escalate_drawdown_pct", 5.0)
+                ),
                 current_drawdown_patient=dd_patient,
                 current_drawdown_bold=dd_bold,
             )
@@ -935,30 +1045,42 @@ def run(force_report=False, active_symbols=None):
             if escalate and budget_cfg.get("ministral_pregate_enabled", False):
                 try:
                     from portfolio import escalation_gate
+
                     held_positions = {"patient": [], "bold": []}
                     try:
                         p_state = load_json(str(STATE_FILE), default={}) or {}
                         held_positions["patient"] = [
-                            t for t, h in (p_state.get("holdings") or {}).items()
+                            t
+                            for t, h in (p_state.get("holdings") or {}).items()
                             if isinstance(h, dict) and (h.get("shares") or 0) > 0
                         ]
                         bold_path = STATE_FILE.parent / "portfolio_state_bold.json"
                         if bold_path.exists():
                             b_state = load_json(str(bold_path), default={}) or {}
                             held_positions["bold"] = [
-                                t for t, h in (b_state.get("holdings") or {}).items()
+                                t
+                                for t, h in (b_state.get("holdings") or {}).items()
                                 if isinstance(h, dict) and (h.get("shares") or 0) > 0
                             ]
                     except Exception as e:
-                        logger.warning("escalation_gate: held-pos collect failed: %s", e)
+                        logger.warning(
+                            "escalation_gate: held-pos collect failed: %s", e
+                        )
                     m_escalate, m_conf, m_why = escalation_gate.should_escalate(
-                        reasons_list, tier, signals, prices_usd, held_positions,
+                        reasons_list,
+                        tier,
+                        signals,
+                        prices_usd,
+                        held_positions,
                     )
-                    min_score = float(budget_cfg.get("ministral_pregate_min_score", 0.5))
+                    min_score = float(
+                        budget_cfg.get("ministral_pregate_min_score", 0.5)
+                    )
                     if not m_escalate and m_conf >= min_score:
                         logger.info(
                             "escalation_gate: Ministral overrides → autonomous (%s, conf %.2f)",
-                            m_why, m_conf,
+                            m_why,
+                            m_conf,
                         )
                         escalate = False
                         why = f"ministral_override:{m_why}"
@@ -981,21 +1103,31 @@ def run(force_report=False, active_symbols=None):
                 else:
                     logger.debug(
                         "invoke_agent declined (%s) — see invoke_agent's own "
-                        "invocations.jsonl row for the accurate status", why,
+                        "invocations.jsonl row for the accurate status",
+                        why,
                     )
             else:
                 if escalate:
                     logger.info(
                         "escalation_router: escalate=%s but outside agent window — autonomous (%s)",
-                        why, why,
+                        why,
+                        why,
                     )
                 else:
                     logger.info("escalation_router: autonomous handles (%s)", why)
                 from portfolio.autonomous import autonomous_decision
+
                 with heartbeat_keepalive():
                     autonomous_decision(
-                        config, signals, prices_usd, fx_rate, state,
-                        reasons_list, tf_data, tier, triggered_tickers,
+                        config,
+                        signals,
+                        prices_usd,
+                        fx_rate,
+                        state,
+                        reasons_list,
+                        tf_data,
+                        tier,
+                        triggered_tickers,
                     )
                 _log_trigger(reasons_list, f"autonomous_{why}", tier=tier)
             # Snapshot drawdown for next escalation comparison regardless of path.
@@ -1023,10 +1155,18 @@ def run(force_report=False, active_symbols=None):
         else:
             logger.info("Layer 2 disabled — autonomous mode")
             from portfolio.autonomous import autonomous_decision
+
             with heartbeat_keepalive():
                 autonomous_decision(
-                    config, signals, prices_usd, fx_rate, state,
-                    reasons_list, tf_data, tier, triggered_tickers,
+                    config,
+                    signals,
+                    prices_usd,
+                    fx_rate,
+                    state,
+                    reasons_list,
+                    tf_data,
+                    tier,
+                    triggered_tickers,
                 )
             _log_trigger(reasons_list, "autonomous", tier=tier)
     else:
@@ -1043,6 +1183,7 @@ def run(force_report=False, active_symbols=None):
         try:
             from portfolio.bigbet import check_bigbet
             from portfolio.health import heartbeat_keepalive
+
             with heartbeat_keepalive():
                 check_bigbet(signals, prices_usd, fx_rate, tf_data, config)
         except Exception as e:
@@ -1055,6 +1196,7 @@ def run(force_report=False, active_symbols=None):
     try:
         from portfolio.health import heartbeat_keepalive
         from portfolio.iskbets import check_iskbets
+
         with heartbeat_keepalive():
             check_iskbets(signals, prices_usd, fx_rate, tf_data, config)
     except Exception as e:
@@ -1063,6 +1205,7 @@ def run(force_report=False, active_symbols=None):
     # Avanza pending order confirmations
     try:
         from portfolio.avanza_orders import check_pending_orders
+
         check_pending_orders(config)
     except Exception as e:
         logger.warning("Avanza order check failed: %s", e)
@@ -1070,6 +1213,7 @@ def run(force_report=False, active_symbols=None):
     # Periodic trade reflection
     try:
         from portfolio.reflection import maybe_reflect
+
         maybe_reflect(config)
     except Exception as e:
         logger.warning("reflection check failed: %s", e)
@@ -1077,6 +1221,7 @@ def run(force_report=False, active_symbols=None):
     # Health update
     try:
         from portfolio.health import update_health
+
         trigger_reason = reasons[0] if (triggered or force_report) and reasons else None
         update_health(
             cycle_count=_ss._run_cycle_id,
@@ -1095,28 +1240,37 @@ def run(force_report=False, active_symbols=None):
     if _ss._run_cycle_id % 100 == 0 and _ss._run_cycle_id > 0:
         try:
             from portfolio.health import check_dead_signals, check_outcome_staleness
+
             outcome_status = check_outcome_staleness()
             if outcome_status["stale"]:
                 age = outcome_status["newest_outcome_age_hours"]
-                msg = (f"⚠️ SAFEGUARD: Outcome backfill stale! "
-                       f"Newest outcome: {age:.0f}h ago. "
-                       f"Entries missing outcomes: {outcome_status['entries_without_outcomes']}/50. "
-                       f"Accuracy data is degrading.")
+                msg = (
+                    f"⚠️ SAFEGUARD: Outcome backfill stale! "
+                    f"Newest outcome: {age:.0f}h ago. "
+                    f"Entries missing outcomes: {outcome_status['entries_without_outcomes']}/50. "
+                    f"Accuracy data is degrading."
+                )
                 logger.warning(msg)
                 try:
                     from portfolio.message_store import send_or_store
+
                     send_or_store(msg, config, category="error")
                 except Exception:
-                    logger.warning("Failed to send outcome staleness alert", exc_info=True)
+                    logger.warning(
+                        "Failed to send outcome staleness alert", exc_info=True
+                    )
 
             dead_signals = check_dead_signals()
             if dead_signals:
-                msg = (f"⚠️ SAFEGUARD: Dead signals (100% HOLD in last 20 entries): "
-                       f"{', '.join(dead_signals)}. "
-                       f"These signals contribute nothing to consensus.")
+                msg = (
+                    f"⚠️ SAFEGUARD: Dead signals (100% HOLD in last 20 entries): "
+                    f"{', '.join(dead_signals)}. "
+                    f"These signals contribute nothing to consensus."
+                )
                 logger.warning(msg)
                 try:
                     from portfolio.message_store import send_or_store
+
                     send_or_store(msg, config, category="error")
                 except Exception:
                     logger.warning("Failed to send dead signals alert", exc_info=True)
@@ -1130,6 +1284,7 @@ def run(force_report=False, active_symbols=None):
     if _ss._run_cycle_id % 6 == 3 and _ss._run_cycle_id > 0:
         try:
             from portfolio.ic_computation import compute_and_cache_ic
+
             for _ic_h in ("3h", "1d"):
                 compute_and_cache_ic(_ic_h)
         except Exception as e:
@@ -1138,6 +1293,7 @@ def run(force_report=False, active_symbols=None):
     # Log portfolio equity snapshot for dashboard chart
     try:
         from portfolio.risk_management import log_portfolio_value
+
         log_portfolio_value()
     except Exception as e:
         logger.warning("equity snapshot failed: %s", e)
@@ -1166,10 +1322,13 @@ def _load_crash_counter() -> int:
 
 def _save_crash_counter(count: int) -> None:
     """Persist crash counter to survive process restarts."""
-    atomic_write_json(_CRASH_COUNTER_FILE, {
-        "count": count,
-        "updated": datetime.now(UTC).isoformat(),
-    })
+    atomic_write_json(
+        _CRASH_COUNTER_FILE,
+        {
+            "count": count,
+            "updated": datetime.now(UTC).isoformat(),
+        },
+    )
 
 
 _consecutive_crashes = _load_crash_counter()
@@ -1190,7 +1349,9 @@ def _crash_alert(error_msg):
     if _consecutive_crashes > _MAX_CRASH_ALERTS:
         logger.error(
             "Crash #%d (alerts suppressed after %d): %s",
-            _consecutive_crashes, _MAX_CRASH_ALERTS, error_msg[:200],
+            _consecutive_crashes,
+            _MAX_CRASH_ALERTS,
+            error_msg[:200],
         )
         # Periodic summary so operators don't lose visibility
         if _consecutive_crashes % _CRASH_SUMMARY_INTERVAL == 0:
@@ -1202,6 +1363,7 @@ def _crash_alert(error_msg):
                     f"Latest: {error_msg[:2000]}"
                 )
                 from portfolio.message_store import send_or_store
+
                 send_or_store(text, config, category="error")
             except Exception as e:
                 logger.debug("Crash summary send failed: %s", e)
@@ -1214,6 +1376,7 @@ def _crash_alert(error_msg):
         if _consecutive_crashes == _MAX_CRASH_ALERTS:
             text += "\n\n_Further crash alerts suppressed until recovery._"
         from portfolio.message_store import send_or_store
+
         send_or_store(text, config, category="error")
     except Exception as e:
         logger.debug("Crash alert send failed: %s", e)
@@ -1227,7 +1390,9 @@ def _crash_sleep():
     """
     base_delay = min(10 * (2 ** (_consecutive_crashes - 1)), _MAX_CRASH_BACKOFF)
     delay = base_delay * (0.5 + random.random())  # jitter: 50-150% of base
-    logger.info("Crash backoff: sleeping %.0fs (crash #%d)", delay, _consecutive_crashes)
+    logger.info(
+        "Crash backoff: sleeping %.0fs (crash #%d)", delay, _consecutive_crashes
+    )
     time.sleep(delay)
 
 
@@ -1296,8 +1461,58 @@ def _reset_crash_counter():
         _save_crash_counter(0)
 
 
-def _sleep_for_next_cycle(previous_cycle_started, interval_s, beat=None,
-                          beat_interval_s=60.0):
+def _warn_if_heartbeat_stale():
+    """Alert if the previous loop session died mid-flight.
+
+    Measured in AWAKE seconds, not wall clock. This host suspends for hours at
+    a time (48 of its last 96 uptime hours, measured 2026-08-17) and the loop's
+    cadence is anchored to time.monotonic(), which excludes suspend — so a
+    wall-clock comparison reported "Possible crash" on every single resume
+    while the loop was perfectly healthy. False alarms train you to ignore the
+    real ones, so the check now speaks the same clock the loop runs on.
+
+    2026-05-29: 1200s = 2x the 600s cycle interval. heartbeat.txt is a
+    cycle-END-only marker, so after a CLEAN shutdown it is already up to ~600s
+    old; the old 300s threshold false-fired on every clean restart.
+
+    A heartbeat from a previous boot has no comparable monotonic anchor. That
+    is a host reboot, not evidence of a crash, so it is logged and not alerted.
+    """
+    from portfolio.loop_health import read_heartbeat_age
+
+    info = read_heartbeat_age(DATA_DIR / "heartbeat.txt")
+    if info["wall_age_s"] is None:
+        return
+
+    age_seconds = info["awake_age_s"]
+    if age_seconds is None:
+        logger.info(
+            "Previous heartbeat predates this boot (wall age %dm) — host "
+            "reboot, not a crash signal.",
+            int(info["wall_age_s"] // 60),
+        )
+        return
+
+    if age_seconds <= 1200:
+        return
+
+    age_min = int(age_seconds // 60)
+    msg = (
+        f"_LOOP RESTARTED_ — previous heartbeat was {age_min}m ago "
+        f"(awake time). Possible crash."
+    )
+    logger.warning(msg)
+    try:
+        from portfolio.message_store import send_or_store
+
+        send_or_store(msg, _load_config(), category="error")
+    except Exception as e:
+        logger.debug("Restart notification failed: %s", e)
+
+
+def _sleep_for_next_cycle(
+    previous_cycle_started, interval_s, beat=None, beat_interval_s=60.0
+):
     """Sleep until the next scheduled cycle start.
 
     Anchors cadence to cycle start time so the loop period remains close to the
@@ -1361,36 +1576,47 @@ def _heartbeat_beat(fail_streak: int) -> int:
     t0 = time.monotonic()
     try:
         from portfolio.health import heartbeat as _hb
+
         _hb()
     except Exception:
         fail_streak += 1
-        logger.warning("inter-cycle heartbeat beat failed (streak=%d)",
-                       fail_streak, exc_info=True)
+        logger.warning(
+            "inter-cycle heartbeat beat failed (streak=%d)", fail_streak, exc_info=True
+        )
         if fail_streak == _BEAT_ESCALATE_AFTER:
             try:
                 from portfolio.claude_gate import record_critical_error
+
                 record_critical_error(
                     category="heartbeat_write_failing",
                     caller="main._heartbeat_beat",
-                    message=(f"Inter-cycle heartbeat write failed "
-                             f"{_BEAT_ESCALATE_AFTER}x consecutively; "
-                             "health_state.json may be unwritable (disk full / "
-                             "permissions). Loop is running but liveness is frozen — "
-                             "the dashboard will flag it stale."),
+                    message=(
+                        f"Inter-cycle heartbeat write failed "
+                        f"{_BEAT_ESCALATE_AFTER}x consecutively; "
+                        "health_state.json may be unwritable (disk full / "
+                        "permissions). Loop is running but liveness is frozen — "
+                        "the dashboard will flag it stale."
+                    ),
                     context={"streak": fail_streak},
                 )
             except Exception:
-                logger.error("failed to escalate heartbeat_write_failing", exc_info=True)
+                logger.error(
+                    "failed to escalate heartbeat_write_failing", exc_info=True
+                )
         return fail_streak
     dur = time.monotonic() - t0
     if dur > _BEAT_SLOW_WARN_S:
-        logger.warning("inter-cycle heartbeat beat slow: %.1fs "
-                       "(_health_lock / disk contention?)", dur)
+        logger.warning(
+            "inter-cycle heartbeat beat slow: %.1fs "
+            "(_health_lock / disk contention?)",
+            dur,
+        )
     return 0
 
 
 def loop(interval=None):
     from portfolio.logging_config import setup_logging
+
     setup_logging()
 
     # Prevent duplicate loop instances
@@ -1401,6 +1627,7 @@ def loop(interval=None):
 
     # Validate config on startup (fail fast if misconfigured)
     from portfolio.config_validator import validate_config_file
+
     validate_config_file()
 
     # 2026-06-11 (audit B5, premortem hook 7): reap any Layer 2 agent
@@ -1410,37 +1637,16 @@ def loop(interval=None):
     # (PID-reuse safe) — see agent_invocation.reap_stale_agent.
     try:
         from portfolio.agent_invocation import reap_stale_agent
+
         reap_stale_agent()
     except Exception as e:
         logger.warning("stale Layer 2 agent reap failed: %s", e)
 
-    # Check if previous loop crashed (stale heartbeat)
-    heartbeat_file = DATA_DIR / "heartbeat.txt"
-    if heartbeat_file.exists():
-        try:
-            last_beat = datetime.fromisoformat(heartbeat_file.read_text().strip())
-            age_seconds = (datetime.now(UTC) - last_beat).total_seconds()
-            # 2026-05-29: 1200s = 2x the 600s cycle interval. heartbeat.txt is a
-            # cycle-END-only marker, so after a CLEAN shutdown it is already up to
-            # ~600s old; the old 300s threshold false-fired "previous loop likely
-            # crashed" on every clean restart. 1200s still catches a genuine
-            # multi-cycle silent death (heartbeat.txt would be far older) while
-            # suppressing the clean-restart false positive.
-            if age_seconds > 1200:  # 2x cycle interval — previous loop likely crashed
-                age_min = int(age_seconds // 60)
-                msg = f"_LOOP RESTARTED_ — previous heartbeat was {age_min}m ago. Possible crash."
-                logger.warning(msg)
-                try:
-                    config = _load_config()
-                    from portfolio.message_store import send_or_store
-                    send_or_store(msg, config, category="error")
-                except Exception as e2:
-                    logger.debug("Restart notification failed: %s", e2)
-        except Exception as e:
-            logger.warning("Failed to check heartbeat staleness: %s", e)
+    _warn_if_heartbeat_stale()
 
     # Reset session start_time so uptime_seconds is accurate for this session
     from portfolio.health import reset_session_start
+
     reset_session_start()
 
     logger.info("Loop started")
@@ -1448,6 +1654,7 @@ def loop(interval=None):
     # Load Alpha Vantage fundamentals cache from disk
     try:
         from portfolio.alpha_vantage import load_persistent_cache
+
         load_persistent_cache()
     except Exception as e:
         logger.warning("Failed to load fundamentals cache: %s", e)
@@ -1458,6 +1665,7 @@ def loop(interval=None):
     try:
         from portfolio.iskbets import handle_command
         from portfolio.telegram_poller import TelegramPoller
+
         poller = TelegramPoller(config, on_command=handle_command)
         poller.start()
         logger.info("ISKBETS Telegram poller started")
@@ -1469,7 +1677,7 @@ def loop(interval=None):
         _run_post_cycle(config, report=initial_report)
         _reset_crash_counter()
         try:
-            atomic_write_text(DATA_DIR / "heartbeat.txt", datetime.now(UTC).isoformat())
+            write_wall_heartbeat(DATA_DIR / "heartbeat.txt")
             if initial_report is not None:
                 initial_report.heartbeat_updated = True
         except Exception as e:
@@ -1479,6 +1687,7 @@ def loop(interval=None):
         return
     except Exception as e:
         import traceback
+
         # OR-P1-2 (2026-05-02): wrap alert+sleep in _safe_crash_recovery so
         # an alert helper failure (disk full on crash counter, etc.) still
         # leaves a minimum backoff before the next try.
@@ -1507,7 +1716,9 @@ def loop(interval=None):
         if market_state != last_state:
             logger.info(
                 "Schedule: %s — %d instruments, %ds interval",
-                market_state, len(active_symbols), sleep_interval
+                market_state,
+                len(active_symbols),
+                sleep_interval,
             )
             last_state = market_state
         _sleep_for_next_cycle(last_cycle_started, sleep_interval, beat=_cycle_beat)
@@ -1521,12 +1732,18 @@ def loop(interval=None):
             break
         except Exception as e:
             import traceback
+
             tb_text = traceback.format_exc()
             logger.error("in run: %s", e)
             try:
                 from portfolio.health import update_health
-                update_health(cycle_count=_ss._run_cycle_id, signals_ok=0, signals_failed=0,
-                              error=str(e))
+
+                update_health(
+                    cycle_count=_ss._run_cycle_id,
+                    signals_ok=0,
+                    signals_failed=0,
+                    error=str(e),
+                )
             except Exception as e2:
                 logger.warning("Health update after crash failed: %s", e2)
             # OR-P1-2 (2026-05-02): _safe_crash_recovery guarantees a
@@ -1538,7 +1755,7 @@ def loop(interval=None):
             report = None
         last_cycle_started = cycle_started
         try:
-            atomic_write_text(DATA_DIR / "heartbeat.txt", datetime.now(UTC).isoformat())
+            write_wall_heartbeat(DATA_DIR / "heartbeat.txt")
             if report is not None:
                 report.heartbeat_updated = True
         except Exception as e:
@@ -1547,6 +1764,7 @@ def loop(interval=None):
         if report is not None:
             try:
                 from portfolio.loop_contract import verify_and_act
+
                 verify_and_act(report, config)
             except Exception as e_contract:
                 logger.warning("Loop contract check failed: %s", e_contract)
@@ -1557,12 +1775,14 @@ if __name__ == "__main__":
     if "--check-outcomes" in args:
         print("=== Outcome Backfill ===")
         from portfolio.outcome_tracker import backfill_outcomes
+
         updated = backfill_outcomes()
         print(f"Updated {updated} entries")
         # Also backfill forecast outcomes
         print("\n=== Forecast Outcome Backfill ===")
         try:
             from portfolio.forecast_accuracy import backfill_forecast_outcomes
+
             fc_updated = backfill_forecast_outcomes()
             print(f"Updated {fc_updated} forecast entries")
         except Exception as e:
@@ -1571,6 +1791,7 @@ if __name__ == "__main__":
         print("\n=== Decision Outcome Backfill ===")
         try:
             from portfolio.decision_outcome_tracker import backfill_decision_outcomes
+
             dec_updated = backfill_decision_outcomes()
             print(f"Updated {dec_updated} decision outcome entries")
         except Exception as e:
@@ -1579,6 +1800,7 @@ if __name__ == "__main__":
         print("\n=== Signal Decay Check ===")
         try:
             from portfolio.signal_decay_alert import run_decay_check
+
             decay_alerts = run_decay_check()
             if decay_alerts:
                 print(f"Found {len(decay_alerts)} decaying signals")
@@ -1588,38 +1810,58 @@ if __name__ == "__main__":
             print(f"Signal decay check failed: {e}")
     elif "--accuracy" in args:
         from portfolio.accuracy_stats import print_accuracy_report
+
         print_accuracy_report()
     elif "--forecast-accuracy" in args:
         from portfolio.forecast_accuracy import print_forecast_accuracy_report
+
         print_forecast_accuracy_report()
     elif "--local-llm-report" in args:
         from portfolio.local_llm_report import print_local_llm_report
+
         idx = args.index("--local-llm-report")
-        days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
+        days = (
+            int(args[idx + 1])
+            if idx + 1 < len(args) and not args[idx + 1].startswith("--")
+            else 30
+        )
         print_local_llm_report(days=days)
     elif "--export-local-llm-report" in args:
-        from portfolio.local_llm_report import HISTORY_FILE, LATEST_REPORT_FILE, export_local_llm_report
+        from portfolio.local_llm_report import (
+            HISTORY_FILE,
+            LATEST_REPORT_FILE,
+            export_local_llm_report,
+        )
+
         idx = args.index("--export-local-llm-report")
-        days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
+        days = (
+            int(args[idx + 1])
+            if idx + 1 < len(args) and not args[idx + 1].startswith("--")
+            else 30
+        )
         export = export_local_llm_report(days=days)
         print(f"Exported local LLM report for {export['date']} ({days}d window)")
         print(f"Latest: {LATEST_REPORT_FILE}")
         print(f"History: {HISTORY_FILE}")
     elif "--prophecy-review" in args:
         from portfolio.prophecy import print_prophecy_review
+
         print_prophecy_review()
     elif "--forecast-outcomes" in args:
         print("=== Forecast Outcome Backfill ===")
         from portfolio.forecast_accuracy import backfill_forecast_outcomes
+
         updated = backfill_forecast_outcomes()
         print(f"Updated {updated} forecast entries with actual outcomes")
     elif "--retrain" in args:
         print("=== ML Retraining ===")
         print("Refreshing data from Binance API...")
         from portfolio.data_refresh import refresh_all
+
         refresh_all(days=365)
         print("\nTraining model...")
         from portfolio.ml_trainer import load_data, train_final
+
         data = load_data()
         feature_cols = [c for c in data.columns if c not in ("target", "month")]
         print(f"Dataset: {len(data):,} rows, {len(feature_cols)} features")
@@ -1632,46 +1874,66 @@ if __name__ == "__main__":
             sys.exit(1)
         ticker = args[idx + 1].upper()
         from portfolio.analyze import run_analysis
+
         run_analysis(ticker)
     elif "--analyze-focus" in args:
         idx = args.index("--analyze-focus")
-        raw = args[idx + 1] if idx + 1 < len(args) and not args[idx + 1].startswith("--") else ""
+        raw = (
+            args[idx + 1]
+            if idx + 1 < len(args) and not args[idx + 1].startswith("--")
+            else ""
+        )
         tickers = [t.strip() for t in raw.split(",") if t.strip()] if raw else None
         from portfolio.focus_analysis import run_focus_analysis
+
         msg = run_focus_analysis(tickers=tickers)
         print(msg)
     elif "--watch" in args:
         idx = args.index("--watch")
-        pos_args = args[idx + 1:]
+        pos_args = args[idx + 1 :]
         if not pos_args:
             print("Usage: --watch TICKER:ENTRY [TICKER:ENTRY ...]")
             print("Example: --watch BTC:66500 ETH:1920 AMD:150")
             sys.exit(1)
         from portfolio.analyze import watch_positions
+
         watch_positions(pos_args)
     elif "--price-targets" in args:
         from pathlib import Path as _Path
+
         _data = _Path("data")
         _summary = load_json(_data / "agent_summary.json", default={})
         _patient = load_json(_data / "portfolio_state.json", default={})
         _bold = load_json(_data / "portfolio_state_bold.json", default={})
         from portfolio.api_utils import load_config as _pt_load
         from portfolio.price_targets import compute_all_targets
+
         _pt_cfg = _pt_load().get("price_targets", {})
-        results = compute_all_targets(_summary, {"patient": _patient, "bold": _bold}, _pt_cfg)
+        results = compute_all_targets(
+            _summary, {"patient": _patient, "bold": _bold}, _pt_cfg
+        )
         for ticker, data in (results or {}).items():
             side = data["side"].upper()
-            print(f"\n=== {ticker} {side} @ ${data['price_usd']:.2f} ({data['hours_remaining']:.1f}h left) ===")
+            print(
+                f"\n=== {ticker} {side} @ ${data['price_usd']:.2f} ({data['hours_remaining']:.1f}h left) ==="
+            )
             ext = data.get("extremes", {})
             label = "Running max" if data["side"] == "sell" else "Running min"
-            print(f"{label}: p25=${ext.get('p25',0):.2f}  p50=${ext.get('p50',0):.2f}  p75=${ext.get('p75',0):.2f}  p90=${ext.get('p90',0):.2f}")
+            print(
+                f"{label}: p25=${ext.get('p25',0):.2f}  p50=${ext.get('p50',0):.2f}  p75=${ext.get('p75',0):.2f}  p90=${ext.get('p90',0):.2f}"
+            )
             for t in data.get("targets", [])[:5]:
-                print(f"  {t['label']:<14} ${t['price']:.2f}  fill={t['fill_prob']:.0%}  EV={t['ev_sek']:+,.0f} SEK")
+                print(
+                    f"  {t['label']:<14} ${t['price']:.2f}  fill={t['fill_prob']:.0%}  EV={t['ev_sek']:+,.0f} SEK"
+                )
             rec = data.get("recommended")
             if rec:
-                print(f"  >>> RECOMMENDED: ${rec['price']:.2f}  fill={rec['fill_prob']:.0%}  EV={rec['ev_sek']:+,.0f} SEK")
+                print(
+                    f"  >>> RECOMMENDED: ${rec['price']:.2f}  fill={rec['fill_prob']:.0%}  EV={rec['ev_sek']:+,.0f} SEK"
+                )
     elif "--avanza-status" in args:
         from portfolio.avanza_client import get_portfolio_value, get_positions
+
         positions = get_positions()
         value = get_portfolio_value()
         print(f"Portfolio value: {value:,.0f} SEK")
