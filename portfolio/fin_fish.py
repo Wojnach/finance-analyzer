@@ -30,7 +30,7 @@ from typing import Any
 import requests
 
 from portfolio.file_utils import atomic_append_jsonl, load_json
-from portfolio.monte_carlo import drift_from_probability, volatility_from_atr
+from portfolio.monte_carlo import annualized_vol_from_atr, drift_from_probability
 from portfolio.price_targets import (
     fill_probability,
     fill_probability_buy,
@@ -182,15 +182,27 @@ _DEFAULT_SL_CASCADE: list[Any] = [
 _DEFAULT_PREFER_AVA = True
 
 # Resolve config vs defaults
-WARRANT_CATALOG: dict[str, dict] = _CFG_CATALOG if _CFG_CATALOG is not None else _DEFAULT_CATALOG
+WARRANT_CATALOG: dict[str, dict] = (
+    _CFG_CATALOG if _CFG_CATALOG is not None else _DEFAULT_CATALOG
+)
 PREFERRED_INSTRUMENTS: dict[tuple[str, str], str] = (
     _CFG_PREFERRED if _CFG_PREFERRED is not None else _DEFAULT_PREFERRED
 )
-FISHING_BUDGET_SEK: float = _CFG_BUDGET if _CFG_BUDGET is not None else _DEFAULT_BUDGET_SEK
-FISHING_MIN_FILL_PROB: float = _CFG_MIN_FILL if _CFG_MIN_FILL is not None else _DEFAULT_MIN_FILL_PROB
-FISHING_TP_CASCADE: list[Any] = _CFG_TP_CASCADE if _CFG_TP_CASCADE is not None else _DEFAULT_TP_CASCADE
-FISHING_SL_CASCADE: list[Any] = _CFG_SL_CASCADE if _CFG_SL_CASCADE is not None else _DEFAULT_SL_CASCADE
-FISHING_PREFER_AVA: bool = _CFG_PREFER_AVA if _CFG_PREFER_AVA is not None else _DEFAULT_PREFER_AVA
+FISHING_BUDGET_SEK: float = (
+    _CFG_BUDGET if _CFG_BUDGET is not None else _DEFAULT_BUDGET_SEK
+)
+FISHING_MIN_FILL_PROB: float = (
+    _CFG_MIN_FILL if _CFG_MIN_FILL is not None else _DEFAULT_MIN_FILL_PROB
+)
+FISHING_TP_CASCADE: list[Any] = (
+    _CFG_TP_CASCADE if _CFG_TP_CASCADE is not None else _DEFAULT_TP_CASCADE
+)
+FISHING_SL_CASCADE: list[Any] = (
+    _CFG_SL_CASCADE if _CFG_SL_CASCADE is not None else _DEFAULT_SL_CASCADE
+)
+FISHING_PREFER_AVA: bool = (
+    _CFG_PREFER_AVA if _CFG_PREFER_AVA is not None else _DEFAULT_PREFER_AVA
+)
 
 # Avanza warrant hours (CET)
 AVANZA_OPEN_H, AVANZA_OPEN_M = 8, 15
@@ -203,6 +215,7 @@ DEFAULT_BOUNCE_PCT = 2.0  # +2% underlying = take-profit target
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
     try:
@@ -247,13 +260,17 @@ def fetch_daily_ranges(ticker: str, days: int = 10) -> list[dict]:
             high = float(c[2])
             low = float(c[3])
             close = float(c[4])
-            result.append({
-                "date": datetime.datetime.fromtimestamp(c[0] / 1000).strftime("%m-%d"),
-                "high": high,
-                "low": low,
-                "close": close,
-                "range_pct": round((high - low) / low * 100, 2) if low > 0 else 0,
-            })
+            result.append(
+                {
+                    "date": datetime.datetime.fromtimestamp(c[0] / 1000).strftime(
+                        "%m-%d"
+                    ),
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "range_pct": round((high - low) / low * 100, 2) if low > 0 else 0,
+                }
+            )
         return result
     except Exception as e:
         logger.warning("Daily candles error for %s: %s", ticker, e)
@@ -264,14 +281,20 @@ def session_hours_remaining() -> float:
     """Compute hours remaining in the Avanza warrant session (CET)."""
     try:
         import zoneinfo
+
         cet = zoneinfo.ZoneInfo("Europe/Stockholm")
     except Exception:
         import dateutil.tz  # type: ignore[import-untyped]
+
         cet = dateutil.tz.gettz("Europe/Stockholm")
 
     now = datetime.datetime.now(cet)
-    close = now.replace(hour=AVANZA_CLOSE_H, minute=AVANZA_CLOSE_M, second=0, microsecond=0)
-    open_time = now.replace(hour=AVANZA_OPEN_H, minute=AVANZA_OPEN_M, second=0, microsecond=0)
+    close = now.replace(
+        hour=AVANZA_CLOSE_H, minute=AVANZA_CLOSE_M, second=0, microsecond=0
+    )
+    open_time = now.replace(
+        hour=AVANZA_OPEN_H, minute=AVANZA_OPEN_M, second=0, microsecond=0
+    )
 
     if now < open_time:
         return 0.0  # before market open
@@ -294,7 +317,12 @@ def load_signal_data(ticker: str) -> dict:
         "focus": focus,
         "price_usd": _safe_float(entry.get("price_usd")),
         "rsi": _safe_float(entry.get("rsi")),
+        # 15-minute ATR, kept for display and the existing range heuristics.
         "atr_pct": _safe_float(entry.get("atr_pct"), 0.5),
+        # DAILY ATR — what the volatility model needs. 3.0 is a daily-scale
+        # last resort; falling back to the 15m value above would understate
+        # vol ~12x (docs/BUG_2026-08-20-monte-carlo-vol.md).
+        "daily_atr_pct": _safe_float(entry.get("daily_atr_pct"), 3.0),
         "regime": str(entry.get("regime") or ""),
         "action": str(entry.get("action") or "HOLD"),
         "weighted_confidence": _safe_float(entry.get("weighted_confidence")),
@@ -308,6 +336,7 @@ def fetch_fx_rate() -> float:
     """Fetch USD/SEK exchange rate."""
     try:
         from portfolio.fx_rates import fetch_usd_sek
+
         return fetch_usd_sek()
     except Exception:
         return 10.0  # fallback
@@ -338,16 +367,23 @@ def _compute_vol_and_drift(
         ``"LONG"`` biases drift downward (we want dips), ``"SHORT"`` biases
         drift upward (we want spikes).
     """
-    atr_pct = signal["atr_pct"]
     p_up = _safe_float((signal["focus"].get("3h") or {}).get("probability"), 0.5)
 
-    # Hourly ATR path — volatility_from_atr assumes hourly candles
-    vol = volatility_from_atr(atr_pct)
+    # Daily ATR path. Was `volatility_from_atr(signal["atr_pct"])`, which fed a
+    # 15-minute ATR through the sqrt(days/period) formula and floored metals at
+    # MIN_VOLATILITY (5% against ~58% realized on XAG). This branch is the only
+    # source of vol when daily_ranges is thin, so the floor made the ladder
+    # collapse onto spot exactly when history was too sparse to correct it.
+    daily_atr_pct = _safe_float(signal.get("daily_atr_pct"), 3.0)
+    vol = annualized_vol_from_atr(daily_atr_pct)
 
-    # Daily range path — annualize daily sigma directly with sqrt(252)
-    # (volatility_from_atr uses sqrt(252/14) which is wrong for daily data)
+    # Daily range path — annualize daily sigma directly with sqrt(252).
+    # Kept: it measures realized range rather than ATR, and max() below means
+    # whichever estimate is more conservative wins.
     if daily_ranges and len(daily_ranges) >= 3:
-        recent_ranges = [c["range_pct"] for c in daily_ranges[-5:] if c["range_pct"] > 0.5]
+        recent_ranges = [
+            c["range_pct"] for c in daily_ranges[-5:] if c["range_pct"] > 0.5
+        ]
         if recent_ranges:
             avg_range = sum(recent_ranges) / len(recent_ranges)
             daily_sigma = avg_range / 1.5 / 100.0
@@ -373,6 +409,7 @@ def _compute_vol_and_drift(
 # ---------------------------------------------------------------------------
 # Direction selection
 # ---------------------------------------------------------------------------
+
 
 def choose_fishing_directions(signal: dict) -> list[dict]:
     """Decide whether to fish BULL, BEAR, or both.
@@ -421,9 +458,9 @@ def choose_fishing_directions(signal: dict) -> list[dict]:
     if fg is not None:
         fg_val = _safe_float(fg)
         if fg_val <= 20:
-            bull_conv += 0.15   # extreme fear → buy dips
+            bull_conv += 0.15  # extreme fear → buy dips
         elif fg_val >= 80:
-            bear_conv += 0.15   # extreme greed → sell peaks
+            bear_conv += 0.15  # extreme greed → sell peaks
 
     # --- Econ calendar (FOMC/CPI imminent → risk-off) ---
     econ_action = signal.get("econ_action", "HOLD")
@@ -454,6 +491,7 @@ def choose_fishing_directions(signal: dict) -> list[dict]:
 # Core fishing level computation — BULL (dip) and BEAR (spike)
 # ---------------------------------------------------------------------------
 
+
 def compute_fishing_levels_bull(
     ticker: str,
     spot: float,
@@ -472,8 +510,13 @@ def compute_fishing_levels_bull(
 
     # 1. ATR-based offsets below spot
     atr_pct = signal["atr_pct"]
-    for n, label in [(0.5, "ATR 0.5x"), (1.0, "ATR 1x"), (1.5, "ATR 1.5x"),
-                     (2.0, "ATR 2x"), (3.0, "ATR 3x")]:
+    for n, label in [
+        (0.5, "ATR 0.5x"),
+        (1.0, "ATR 1x"),
+        (1.5, "ATR 1.5x"),
+        (2.0, "ATR 2x"),
+        (3.0, "ATR 3x"),
+    ]:
         level = spot * (1 - n * atr_pct / 100)
         candidates[round(level, 4)] = label
 
@@ -516,8 +559,13 @@ def compute_fishing_levels_bear(
 
     # 1. ATR-based offsets above spot
     atr_pct = signal["atr_pct"]
-    for n, label in [(0.5, "ATR 0.5x"), (1.0, "ATR 1x"), (1.5, "ATR 1.5x"),
-                     (2.0, "ATR 2x"), (3.0, "ATR 3x")]:
+    for n, label in [
+        (0.5, "ATR 0.5x"),
+        (1.0, "ATR 1x"),
+        (1.5, "ATR 1.5x"),
+        (2.0, "ATR 2x"),
+        (3.0, "ATR 3x"),
+    ]:
         level = spot * (1 + n * atr_pct / 100)
         candidates[round(level, 4)] = label
 
@@ -562,16 +610,18 @@ def _score_candidates_buy(
         modest_bounce_pct = round(DEFAULT_BOUNCE_PCT, 2)
         modest_bounce_target = round(level * (1 + DEFAULT_BOUNCE_PCT / 100), 4)
 
-        results.append({
-            "level": level,
-            "source": source,
-            "dip_pct": dip_pct,
-            "move_pct": dip_pct,  # normalized: how far from spot
-            "fill_prob": round(fp, 4),
-            "bounce_to_spot_pct": round(bounce_pct, 2),
-            "modest_bounce_pct": modest_bounce_pct,
-            "modest_bounce_target": modest_bounce_target,
-        })
+        results.append(
+            {
+                "level": level,
+                "source": source,
+                "dip_pct": dip_pct,
+                "move_pct": dip_pct,  # normalized: how far from spot
+                "fill_prob": round(fp, 4),
+                "bounce_to_spot_pct": round(bounce_pct, 2),
+                "modest_bounce_pct": modest_bounce_pct,
+                "modest_bounce_target": modest_bounce_target,
+            }
+        )
 
     return _dedupe_and_rank(results, key_field="level")
 
@@ -598,16 +648,18 @@ def _score_candidates_sell(
         modest_bounce_pct = round(DEFAULT_BOUNCE_PCT, 2)
         modest_bounce_target = round(level * (1 - DEFAULT_BOUNCE_PCT / 100), 4)
 
-        results.append({
-            "level": level,
-            "source": source,
-            "dip_pct": spike_pct,   # legacy name — represents distance from spot
-            "move_pct": spike_pct,
-            "fill_prob": round(fp, 4),
-            "bounce_to_spot_pct": round(bounce_pct, 2),
-            "modest_bounce_pct": modest_bounce_pct,
-            "modest_bounce_target": modest_bounce_target,
-        })
+        results.append(
+            {
+                "level": level,
+                "source": source,
+                "dip_pct": spike_pct,  # legacy name — represents distance from spot
+                "move_pct": spike_pct,
+                "fill_prob": round(fp, 4),
+                "bounce_to_spot_pct": round(bounce_pct, 2),
+                "modest_bounce_pct": modest_bounce_pct,
+                "modest_bounce_target": modest_bounce_target,
+            }
+        )
 
     return _dedupe_and_rank(results, key_field="level")
 
@@ -617,7 +669,10 @@ def _dedupe_and_rank(results: list[dict], key_field: str = "level") -> list[dict
     sorted_results = sorted(results, key=lambda x: x[key_field], reverse=True)
     deduped: list[dict] = []
     for r in sorted_results:
-        if not deduped or abs(r[key_field] - deduped[-1][key_field]) / r[key_field] > 0.002:
+        if (
+            not deduped
+            or abs(r[key_field] - deduped[-1][key_field]) / r[key_field] > 0.002
+        ):
             deduped.append(r)
 
     for r in deduped:
@@ -646,6 +701,7 @@ def compute_fishing_levels(
 # Warrant evaluation
 # ---------------------------------------------------------------------------
 
+
 def _select_warrants(
     ticker: str,
     direction: str,
@@ -664,7 +720,8 @@ def _select_warrants(
 
     # Collect all matching warrants
     matching = [
-        w for w in WARRANT_CATALOG.values()
+        w
+        for w in WARRANT_CATALOG.values()
         if w["underlying"] == ticker and w["direction"] == direction
     ]
 
@@ -764,9 +821,13 @@ def evaluate_warrants(
                 warrant_price_at_fish = None  # unknown without Avanza quote
             else:
                 if direction == "LONG":
-                    warrant_price_at_fish = max(0.01, (level - barrier) / parity * fx_rate)
+                    warrant_price_at_fish = max(
+                        0.01, (level - barrier) / parity * fx_rate
+                    )
                 else:
-                    warrant_price_at_fish = max(0.01, (barrier - level) / parity * fx_rate)
+                    warrant_price_at_fish = max(
+                        0.01, (barrier - level) / parity * fx_rate
+                    )
 
             # Underlying move that generates profit
             bounce_underlying_pct = fl["bounce_to_spot_pct"]
@@ -793,41 +854,49 @@ def evaluate_warrants(
                 if net_gain_pct <= 0:
                     continue
 
-                assert warrant_price_at_fish is not None  # MINI warrants always have a price
+                assert (
+                    warrant_price_at_fish is not None
+                )  # MINI warrants always have a price
                 qty = max(1, int(budget_sek / warrant_price_at_fish))
                 invest_sek = round(qty * warrant_price_at_fish, 0)
-                gross_sek = round(qty * warrant_price_at_fish * warrant_gain_pct / 100, 2)
-                spread_cost_sek = round(qty * warrant_price_at_fish * spread_pct / 100, 2)
+                gross_sek = round(
+                    qty * warrant_price_at_fish * warrant_gain_pct / 100, 2
+                )
+                spread_cost_sek = round(
+                    qty * warrant_price_at_fish * spread_pct / 100, 2
+                )
                 gain_sek = round(gross_sek - spread_cost_sek - commission, 2)
                 display_price = round(warrant_price_at_fish, 2)
 
             ev_sek = round(fl["fill_prob"] * gain_sek, 2)
 
-            results.append({
-                "level": level,
-                "source": fl["source"],
-                "dip_pct": fl["dip_pct"],
-                "move_pct": fl.get("move_pct", fl["dip_pct"]),
-                "fill_prob": fl["fill_prob"],
-                "warrant": name,
-                "ob_id": warrant["ob_id"],
-                "issuer": issuer,
-                "leverage": leverage,
-                "barrier": barrier,
-                "barrier_dist_pct": fish_barrier_dist,
-                "warrant_price": display_price,
-                "qty": qty,
-                "invest_sek": invest_sek,
-                "bounce_pct": bounce_underlying_pct,
-                "warrant_gain_pct": warrant_gain_pct,
-                "spread_pct": spread_pct,
-                "spread_cost_sek": spread_cost_sek,
-                "net_gain_pct": net_gain_pct,
-                "gain_sek": gain_sek,
-                "ev_sek": ev_sek,
-                "direction": direction,
-                "is_daily_cert": is_daily_cert,
-            })
+            results.append(
+                {
+                    "level": level,
+                    "source": fl["source"],
+                    "dip_pct": fl["dip_pct"],
+                    "move_pct": fl.get("move_pct", fl["dip_pct"]),
+                    "fill_prob": fl["fill_prob"],
+                    "warrant": name,
+                    "ob_id": warrant["ob_id"],
+                    "issuer": issuer,
+                    "leverage": leverage,
+                    "barrier": barrier,
+                    "barrier_dist_pct": fish_barrier_dist,
+                    "warrant_price": display_price,
+                    "qty": qty,
+                    "invest_sek": invest_sek,
+                    "bounce_pct": bounce_underlying_pct,
+                    "warrant_gain_pct": warrant_gain_pct,
+                    "spread_pct": spread_pct,
+                    "spread_cost_sek": spread_cost_sek,
+                    "net_gain_pct": net_gain_pct,
+                    "gain_sek": gain_sek,
+                    "ev_sek": ev_sek,
+                    "direction": direction,
+                    "is_daily_cert": is_daily_cert,
+                }
+            )
 
     results.sort(key=lambda x: x["ev_sek"], reverse=True)
 
@@ -850,6 +919,7 @@ def evaluate_warrants(
 # ---------------------------------------------------------------------------
 # Structured plan output (for snipe manager)
 # ---------------------------------------------------------------------------
+
 
 def _build_instrument_info(warrant_results: list[dict], direction: str) -> dict:
     """Extract instrument metadata from the best warrant result."""
@@ -912,13 +982,22 @@ def compute_fishing_plan(
 
         # Compute fishing levels
         if direction == "LONG":
-            levels = compute_fishing_levels_bull(ticker, spot, signal, hours, daily_ranges)
+            levels = compute_fishing_levels_bull(
+                ticker, spot, signal, hours, daily_ranges
+            )
         else:
-            levels = compute_fishing_levels_bear(ticker, spot, signal, hours, daily_ranges)
+            levels = compute_fishing_levels_bear(
+                ticker, spot, signal, hours, daily_ranges
+            )
 
         # Evaluate warrants for these levels
         warrant_results = evaluate_warrants(
-            ticker, spot, levels, budget_sek, fx_rate, direction=direction,
+            ticker,
+            spot,
+            levels,
+            budget_sek,
+            fx_rate,
+            direction=direction,
         )
 
         # Filter by minimum fill probability
@@ -931,16 +1010,18 @@ def compute_fishing_plan(
 
         instrument_info = _build_instrument_info(warrant_results, direction)
 
-        plans.append({
-            "ticker": ticker,
-            "spot": spot,
-            "direction": direction,
-            "conviction": conviction,
-            "levels": warrant_results,
-            "instrument": instrument_info,
-            "tp_cascade": list(FISHING_TP_CASCADE),
-            "sl_cascade": list(FISHING_SL_CASCADE),
-        })
+        plans.append(
+            {
+                "ticker": ticker,
+                "spot": spot,
+                "direction": direction,
+                "conviction": conviction,
+                "levels": warrant_results,
+                "instrument": instrument_info,
+                "tp_cascade": list(FISHING_TP_CASCADE),
+                "sl_cascade": list(FISHING_SL_CASCADE),
+            }
+        )
 
     return plans
 
@@ -948,6 +1029,7 @@ def compute_fishing_plan(
 # ---------------------------------------------------------------------------
 # Telegram summary
 # ---------------------------------------------------------------------------
+
 
 def format_telegram_plan(plans: list[dict], avanza_online: bool = False) -> str:
     """Format fishing plans into a concise Telegram message.
@@ -996,6 +1078,7 @@ def format_telegram_plan(plans: list[dict], avanza_online: bool = False) -> str:
 # CLI report formatting
 # ---------------------------------------------------------------------------
 
+
 def format_report(
     ticker: str,
     spot_data: dict,
@@ -1009,10 +1092,14 @@ def format_report(
     spot = spot_data["price"]
     lines: list[str] = []
     lines.append(f"=== {ticker} -- ${spot:.2f} ===")
-    lines.append(f"  24h: ${spot_data['low_24h']:.2f} - ${spot_data['high_24h']:.2f} "
-                 f"({spot_data['change_pct']:+.2f}%) | Vol ${spot_data['volume_usd']/1e6:.0f}M")
-    lines.append(f"  Regime: {signal['regime']} | RSI: {signal['rsi']:.1f} | "
-                 f"ATR: {signal['atr_pct']:.2f}% | Signal: {signal['action']}")
+    lines.append(
+        f"  24h: ${spot_data['low_24h']:.2f} - ${spot_data['high_24h']:.2f} "
+        f"({spot_data['change_pct']:+.2f}%) | Vol ${spot_data['volume_usd']/1e6:.0f}M"
+    )
+    lines.append(
+        f"  Regime: {signal['regime']} | RSI: {signal['rsi']:.1f} | "
+        f"ATR: {signal['atr_pct']:.2f}% | Signal: {signal['action']}"
+    )
     # Signal boosters line
     fg = signal.get("fear_greed")
     fg_str = f"F&G: {fg}" if fg is not None else "F&G: n/a"
@@ -1027,10 +1114,16 @@ def format_report(
         recent = daily_ranges[-5:]
         lines.append(f"  Daily ranges (last {len(recent)}d):")
         for c in recent:
-            lines.append(f"    {c['date']}: ${c['low']:.2f}-${c['high']:.2f} ({c['range_pct']:.1f}%)")
+            lines.append(
+                f"    {c['date']}: ${c['low']:.2f}-${c['high']:.2f} ({c['range_pct']:.1f}%)"
+            )
         avg_range = sum(c["range_pct"] for c in recent) / len(recent)
-        avg_low_dip = sum((c["high"] - c["low"]) / c["high"] * 100 for c in recent) / len(recent)
-        lines.append(f"  Avg daily range: {avg_range:.1f}% | Avg dip from high: {avg_low_dip:.1f}%")
+        avg_low_dip = sum(
+            (c["high"] - c["low"]) / c["high"] * 100 for c in recent
+        ) / len(recent)
+        lines.append(
+            f"  Avg daily range: {avg_range:.1f}% | Avg dip from high: {avg_low_dip:.1f}%"
+        )
 
     # Direction analysis
     directions = choose_fishing_directions(signal)
@@ -1057,8 +1150,10 @@ def format_report(
         inst_lev = instrument.get("leverage", 1)
         warrant_results = plan["levels"]
 
-        lines.append(f"  --- {label} fishing (conviction {conviction:.0%}) "
-                     f"via {inst_name} (X{inst_lev:.1f}) ---")
+        lines.append(
+            f"  --- {label} fishing (conviction {conviction:.0%}) "
+            f"via {inst_name} (X{inst_lev:.1f}) ---"
+        )
 
         if not warrant_results:
             lines.append("    No viable levels.")
@@ -1067,13 +1162,19 @@ def format_report(
 
         # Table header
         if direction == "LONG":
-            lines.append(f"    {'Level':>9} {'Dip%':>6} {'Fill%':>6} {'Gross':>6} {'Sprd':>5} "
-                         f"{'Net%':>5} {'EV/SEK':>7} {'Barr%':>6} {'Source':<20}")
+            lines.append(
+                f"    {'Level':>9} {'Dip%':>6} {'Fill%':>6} {'Gross':>6} {'Sprd':>5} "
+                f"{'Net%':>5} {'EV/SEK':>7} {'Barr%':>6} {'Source':<20}"
+            )
         else:
-            lines.append(f"    {'Level':>9} {'Spike%':>6} {'Fill%':>6} {'Gross':>6} {'Sprd':>5} "
-                         f"{'Net%':>5} {'EV/SEK':>7} {'Barr%':>6} {'Source':<20}")
-        lines.append(f"    {'-'*9} {'-'*6} {'-'*6} {'-'*6} {'-'*5} "
-                     f"{'-'*5} {'-'*7} {'-'*6} {'-'*20}")
+            lines.append(
+                f"    {'Level':>9} {'Spike%':>6} {'Fill%':>6} {'Gross':>6} {'Sprd':>5} "
+                f"{'Net%':>5} {'EV/SEK':>7} {'Barr%':>6} {'Source':<20}"
+            )
+        lines.append(
+            f"    {'-'*9} {'-'*6} {'-'*6} {'-'*6} {'-'*5} "
+            f"{'-'*5} {'-'*7} {'-'*6} {'-'*20}"
+        )
 
         shown = 0
         for r in warrant_results:
@@ -1091,7 +1192,9 @@ def format_report(
             shown += 1
 
         if shown == 0:
-            lines.append(f"    All levels have <{FISHING_MIN_FILL_PROB:.0%} fill probability.")
+            lines.append(
+                f"    All levels have <{FISHING_MIN_FILL_PROB:.0%} fill probability."
+            )
 
         # TP/SL cascade (handles both dict-style and float-style entries)
         tp_str = ", ".join(
@@ -1113,32 +1216,71 @@ def format_report(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Fin Fish: compute optimal dip/spike fishing levels for metals warrants."
     )
-    parser.add_argument("--hours", type=float, default=0,
-                        help="Override planning horizon (default: auto-compute from session).")
-    parser.add_argument("--budget", type=float, default=FISHING_BUDGET_SEK,
-                        help=f"Budget per fishing level in SEK (default: {FISHING_BUDGET_SEK}).")
-    parser.add_argument("--metals", default="silver",
-                        help="Comma-separated: silver,gold (default: silver).")
-    parser.add_argument("--max-levels", type=int, default=8,
-                        help="Max fishing levels to display per metal (default: 8).")
-    parser.add_argument("--direction", choices=["bull", "bear", "auto"], default="auto",
-                        help="Force direction: bull, bear, or auto (default: auto).")
-    parser.add_argument("--telegram", action="store_true",
-                        help="Print Telegram-format summary instead of full report.")
-    parser.add_argument("--monitor", action="store_true",
-                        help="Enter smart monitoring mode after analysis.")
-    parser.add_argument("--entry-price", type=float, default=0,
-                        help="Entry price for monitoring (default: current spot).")
-    parser.add_argument("--cert-price", type=float, default=0,
-                        help="Certificate entry price in SEK for P&L tracking.")
-    parser.add_argument("--cert-units", type=int, default=0,
-                        help="Number of certificate units held.")
-    parser.add_argument("--leverage", type=float, default=5.0,
-                        help="Certificate leverage (default: 5x).")
+    parser.add_argument(
+        "--hours",
+        type=float,
+        default=0,
+        help="Override planning horizon (default: auto-compute from session).",
+    )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=FISHING_BUDGET_SEK,
+        help=f"Budget per fishing level in SEK (default: {FISHING_BUDGET_SEK}).",
+    )
+    parser.add_argument(
+        "--metals",
+        default="silver",
+        help="Comma-separated: silver,gold (default: silver).",
+    )
+    parser.add_argument(
+        "--max-levels",
+        type=int,
+        default=8,
+        help="Max fishing levels to display per metal (default: 8).",
+    )
+    parser.add_argument(
+        "--direction",
+        choices=["bull", "bear", "auto"],
+        default="auto",
+        help="Force direction: bull, bear, or auto (default: auto).",
+    )
+    parser.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Print Telegram-format summary instead of full report.",
+    )
+    parser.add_argument(
+        "--monitor",
+        action="store_true",
+        help="Enter smart monitoring mode after analysis.",
+    )
+    parser.add_argument(
+        "--entry-price",
+        type=float,
+        default=0,
+        help="Entry price for monitoring (default: current spot).",
+    )
+    parser.add_argument(
+        "--cert-price",
+        type=float,
+        default=0,
+        help="Certificate entry price in SEK for P&L tracking.",
+    )
+    parser.add_argument(
+        "--cert-units", type=int, default=0, help="Number of certificate units held."
+    )
+    parser.add_argument(
+        "--leverage",
+        type=float,
+        default=5.0,
+        help="Certificate leverage (default: 5x).",
+    )
     args = parser.parse_args()
 
     metals = [m.strip().lower() for m in args.metals.split(",")]
@@ -1169,6 +1311,7 @@ def main() -> int:
     preflight_results = {}
     try:
         from scripts.fish_preflight import compute_preflight, print_preflight
+
         for ticker in tickers:
             pf = compute_preflight(ticker)
             preflight_results[ticker] = pf
@@ -1182,6 +1325,7 @@ def main() -> int:
             format_profile_briefing,
             get_profile,
         )
+
         signal_data = load_json(BASE_DIR / "data" / "agent_summary_compact.json")
         for ticker in tickers:
             profile = get_profile(ticker)
@@ -1192,10 +1336,16 @@ def main() -> int:
                 print(format_profile_briefing(ticker, signal_data))
 
                 # Show signal reliability ranking for this ticker
-                reliability = (signal_data or {}).get("signal_reliability", {}).get(ticker, {})
+                reliability = (
+                    (signal_data or {}).get("signal_reliability", {}).get(ticker, {})
+                )
                 if reliability:
                     ranked = sorted(
-                        [(k, v) for k, v in reliability.items() if isinstance(v, dict) and v.get("total", 0) >= 30],
+                        [
+                            (k, v)
+                            for k, v in reliability.items()
+                            if isinstance(v, dict) and v.get("total", 0) >= 30
+                        ],
                         key=lambda x: x[1].get("accuracy", 0),
                         reverse=True,
                     )
@@ -1204,27 +1354,43 @@ def main() -> int:
                         for name, data in ranked[:10]:
                             acc = data.get("accuracy", 0)
                             n = data.get("total", 0)
-                            marker = " *" if name in profile.get("trusted_signals", []) else ""
+                            marker = (
+                                " *"
+                                if name in profile.get("trusted_signals", [])
+                                else ""
+                            )
                             print(f"    {name:20s} {acc:5.1%} ({n:4d} samples){marker}")
                         if len(ranked) > 10:
                             print("    ...")
                             for name, data in ranked[-3:]:
                                 acc = data.get("accuracy", 0)
                                 n = data.get("total", 0)
-                                marker = " X" if name in profile.get("ignored_signals", []) else ""
-                                print(f"    {name:20s} {acc:5.1%} ({n:4d} samples){marker}")
+                                marker = (
+                                    " X"
+                                    if name in profile.get("ignored_signals", [])
+                                    else ""
+                                )
+                                print(
+                                    f"    {name:20s} {acc:5.1%} ({n:4d} samples){marker}"
+                                )
 
                 # Show deep context summary if available (with staleness check)
                 precompute_path = BASE_DIR / profile.get("precompute_file", "")
                 deep_ctx = load_json(precompute_path)
                 if deep_ctx:
                     import datetime as _dt
+
                     _gen = deep_ctx.get("generated_at", "")
                     if _gen:
                         with suppress(Exception):
-                            _age_s = (_dt.datetime.now(_dt.UTC) - _dt.datetime.fromisoformat(_gen)).total_seconds()
+                            _age_s = (
+                                _dt.datetime.now(_dt.UTC)
+                                - _dt.datetime.fromisoformat(_gen)
+                            ).total_seconds()
                             if _age_s > 7200:  # 2 hours
-                                print(f"  ⚠ Deep context STALE ({_age_s/3600:.1f}h old)")
+                                print(
+                                    f"  ⚠ Deep context STALE ({_age_s/3600:.1f}h old)"
+                                )
                     analyst = deep_ctx.get("analyst_targets", {})
                     if analyst:
                         targets = []
@@ -1269,53 +1435,89 @@ def main() -> int:
         if args.direction != "auto":
             forced_dir = "LONG" if args.direction == "bull" else "SHORT"
             if forced_dir == "LONG":
-                levels = compute_fishing_levels_bull(ticker, spot, signal, hours, daily_ranges)
+                levels = compute_fishing_levels_bull(
+                    ticker, spot, signal, hours, daily_ranges
+                )
             else:
-                levels = compute_fishing_levels_bear(ticker, spot, signal, hours, daily_ranges)
+                levels = compute_fishing_levels_bear(
+                    ticker, spot, signal, hours, daily_ranges
+                )
 
             warrant_results = evaluate_warrants(
-                ticker, spot, levels, args.budget, fx_rate, direction=forced_dir,
+                ticker,
+                spot,
+                levels,
+                args.budget,
+                fx_rate,
+                direction=forced_dir,
             )
-            warrant_results = [r for r in warrant_results if r["fill_prob"] >= FISHING_MIN_FILL_PROB]
+            warrant_results = [
+                r for r in warrant_results if r["fill_prob"] >= FISHING_MIN_FILL_PROB
+            ]
 
             inst_info = _build_instrument_info(warrant_results, forced_dir)
-            plans = [{
-                "ticker": ticker, "spot": spot, "direction": forced_dir,
-                "conviction": 1.0, "levels": warrant_results,
-                "instrument": inst_info,
-                "tp_cascade": list(FISHING_TP_CASCADE),
-                "sl_cascade": list(FISHING_SL_CASCADE),
-            }] if warrant_results else []
+            plans = (
+                [
+                    {
+                        "ticker": ticker,
+                        "spot": spot,
+                        "direction": forced_dir,
+                        "conviction": 1.0,
+                        "levels": warrant_results,
+                        "instrument": inst_info,
+                        "tp_cascade": list(FISHING_TP_CASCADE),
+                        "sl_cascade": list(FISHING_SL_CASCADE),
+                    }
+                ]
+                if warrant_results
+                else []
+            )
         else:
             print(f"Computing fishing plan for {ticker}...")
-            plans = compute_fishing_plan(ticker, spot, signal, hours, daily_ranges,
-                                         budget_sek=args.budget, fx_rate=fx_rate)
+            plans = compute_fishing_plan(
+                ticker,
+                spot,
+                signal,
+                hours,
+                daily_ranges,
+                budget_sek=args.budget,
+                fx_rate=fx_rate,
+            )
 
         all_plans.extend(plans)
 
-        report = format_report(ticker, sd, signal, daily_ranges, plans,
-                               hours, max_levels=args.max_levels)
+        report = format_report(
+            ticker, sd, signal, daily_ranges, plans, hours, max_levels=args.max_levels
+        )
         reports.append(report)
 
         # Build log entry
-        log_entries.append({
-            "ticker": ticker,
-            "spot": spot,
-            "hours": hours,
-            "regime": signal["regime"],
-            "rsi": signal["rsi"],
-            "atr_pct": signal["atr_pct"],
-            "plans": [{
-                "direction": p["direction"],
-                "conviction": p["conviction"],
-                "top_levels": [{
-                    "level": r["level"],
-                    "fill_prob": r["fill_prob"],
-                    "ev_sek": r["ev_sek"],
-                    "warrant": r["warrant"],
-                } for r in p["levels"][:args.max_levels]],
-            } for p in plans],
-        })
+        log_entries.append(
+            {
+                "ticker": ticker,
+                "spot": spot,
+                "hours": hours,
+                "regime": signal["regime"],
+                "rsi": signal["rsi"],
+                "atr_pct": signal["atr_pct"],
+                "plans": [
+                    {
+                        "direction": p["direction"],
+                        "conviction": p["conviction"],
+                        "top_levels": [
+                            {
+                                "level": r["level"],
+                                "fill_prob": r["fill_prob"],
+                                "ev_sek": r["ev_sek"],
+                                "warrant": r["warrant"],
+                            }
+                            for r in p["levels"][: args.max_levels]
+                        ],
+                    }
+                    for p in plans
+                ],
+            }
+        )
 
     if args.telegram:
         # Print Telegram-format summary for each ticker's plans
@@ -1326,7 +1528,9 @@ def main() -> int:
                 print()
     else:
         print("\n" + "=" * 80)
-        print(f"FISHING PLAN -- {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} CET")
+        print(
+            f"FISHING PLAN -- {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} CET"
+        )
         print(f"Budget: {args.budget:.0f} SEK per level | FX: {fx_rate:.2f}")
         print("=" * 80 + "\n")
 
@@ -1355,12 +1559,20 @@ def main() -> int:
         # Try to detect active positions
         try:
             from portfolio.avanza_session import get_positions
+
             positions = get_positions()
-            silver_keywords = ("silver", "silv", "xag", "mini s silver", "mini l silver",
-                               "bull silver", "bear silver")
+            silver_keywords = (
+                "silver",
+                "silv",
+                "xag",
+                "mini s silver",
+                "mini l silver",
+                "bull silver",
+                "bear silver",
+            )
             gold_keywords = ("guld", "gold", "xau", "bull guld", "bear guld")
 
-            for pos in (positions or []):
+            for pos in positions or []:
                 name = (pos.get("name") or "").lower()
                 vol = pos.get("volume", 0)
                 if vol <= 0:
@@ -1379,7 +1591,9 @@ def main() -> int:
                             "is_short": any(k in name for k in ("bear", "mini s")),
                         }
                         should_monitor = True
-                        print(f"\n  Active position detected: {pos.get('name')} ({vol}u)")
+                        print(
+                            f"\n  Active position detected: {pos.get('name')} ({vol}u)"
+                        )
                         print("  Auto-starting smart monitor...\n")
                         break
                 if detected_position:
@@ -1387,10 +1601,13 @@ def main() -> int:
         except Exception:
             # Avanza unavailable — check persisted state
             with suppress(Exception):
-                pos_state = load_json(BASE_DIR / "data" / "metals_positions_state.json") or {}
+                pos_state = (
+                    load_json(BASE_DIR / "data" / "metals_positions_state.json") or {}
+                )
                 for key, pos in pos_state.items():
-                    if pos.get("active") and any(t.lower().replace("-", "") in key.lower()
-                                                  for t in tickers):
+                    if pos.get("active") and any(
+                        t.lower().replace("-", "") in key.lower() for t in tickers
+                    ):
                         detected_position = {
                             "ticker": tickers[0],
                             "name": key,
@@ -1433,10 +1650,13 @@ def main() -> int:
             entry_conviction = 50
             if ticker in preflight_results:
                 pf = preflight_results[ticker]
-                entry_conviction = pf["bull_score"] if direction == "LONG" else pf["bear_score"]
+                entry_conviction = (
+                    pf["bull_score"] if direction == "LONG" else pf["bear_score"]
+                )
 
             try:
                 from portfolio.fish_monitor_smart import SmartFishMonitor
+
                 monitor = SmartFishMonitor(
                     ticker=ticker,
                     entry_price=entry,
