@@ -264,12 +264,42 @@ also passes under the old vol.
 10 new tests, 4 stale expectations corrected, 216 tests green across every
 affected suite. Full suite shows **zero regressions**: the 5 deltas versus the
 prior worktree baseline are 4 herc2-reachability-dependent applicable-count
-tests (all reproduce with the change stashed) plus one known hash-order
-nondeterminism — `signal_engine.py:2718` does `max()` over a **set**, which
-passes at `PYTHONHASHSEED=0` and fails at 1-5. That one is a real, separate,
-unfixed bug: on an exact accuracy tie the correlation-group leader is chosen by
-string-hash order and the loser eats a 0.3x follower penalty that can flip
-consensus direction. One-line fix: `key=lambda s: (_leader_accuracy_key(s), s)`.
+tests (all reproduce with the change stashed) plus one hash-order nondeterminism in
+`signal_engine.py` — **now fixed**, see below.
+
+### Follow-up: the group-leader tie-break (fixed, `850e9188` / `d2bb4d49`)
+
+`_weighted_consensus` chose its correlation-group leader with
+`max(active_in_group, key=_leader_accuracy_key)`. `active_in_group` is a **set**
+and the key returned a bare float, so on an exact accuracy tie `max()` returned
+whichever element set iteration yielded first — randomized per process by
+PYTHONHASHSEED. The loser eats the follower penalty (0.15x-0.35x), so when tied
+signals voted in opposite directions the **consensus direction flipped**:
+
+| | before | after |
+|---|---|---|
+| PYTHONHASHSEED=0 | SELL 0.8415 | SELL 0.8415 |
+| PYTHONHASHSEED=1-5 | **BUY 0.7638** | SELL 0.8415 |
+
+(bb=BUY vs rsi=SELL, both 0.60 accuracy, both in `momentum_cluster`.)
+
+Fixed with a new module-level `_group_leader_key` returning a total order
+`(accuracy, sample_count, name)` — accuracy first as before, then sample count
+so an equal-accuracy tie prefers the estimate measured on more data, then name
+so no outcome can be hash-dependent. The sibling `_topn_accuracy_key` in the
+same function already returned `(base, s)` for this exact reason.
+
+**Live impact, stated honestly:** no exact tie exists among active signals on
+today's data (1d accuracies 0.443 / 0.449 / 0.490 / 0.557 / 0.612 / 0.667, all
+distinct), so no live decision was being flipped at the time of the fix. The tie
+is reachable whenever two active same-group signals both fall back to the 0.5
+default — precisely the state during the 2026-07-17..08-20 outcome-backfill
+blackout, when accuracy data was frozen and `1d_recent` was all zeros.
+
+It fixed **three** flaky tests, not one. The two `metals_swing` failures were
+hash-order victims as well; an earlier note in this session wrongly grouped them
+with the herc2-reachability family, because the stash test only proved they were
+not caused by the *ladder* change, not that herc2 was the cause.
 
 ### Still not migrated
 
