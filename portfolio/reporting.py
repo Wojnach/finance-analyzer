@@ -132,7 +132,10 @@ def daily_atr_pct_from_timeframes(tf_entries):
         if "error" in entry:
             return None
         atr_pct = (entry.get("indicators") or {}).get("atr_pct")
-        return atr_pct if atr_pct else None
+        # 3dp, not the sibling field's 2dp: the raw float leaked
+        # 6.001724835787434 into agent_summary for MSTR, but this value feeds
+        # the vol model so keep a digit more precision than the display field.
+        return round(atr_pct, 3) if atr_pct else None
     return None
 
 

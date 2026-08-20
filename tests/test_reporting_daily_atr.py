@@ -130,3 +130,12 @@ class TestDailyAtrIsPublishedInSignals:
         }
         out = self._run(tf)
         assert out["signals"]["BTC-USD"].get("daily_atr_pct") is None
+
+
+def test_daily_atr_pct_is_rounded():
+    """Keep 3dp — one more than the display-only `atr_pct` field, since this
+    value feeds the volatility model.
+
+    Observed live 2026-08-20: MSTR published 6.001724835787434.
+    """
+    assert daily_atr_pct_from_timeframes([("7d", _entry(6.001724835787434))]) == 6.002
