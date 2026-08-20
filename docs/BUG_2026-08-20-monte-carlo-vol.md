@@ -188,3 +188,92 @@ this understates the true probability of a stop being hit. It is now at least
 vol-sensitive (0.021 XAU, 0.044 XAG) rather than identically zero, but a
 path-minimum barrier calculation would be the correct model. Distinct from the
 volatility defect above.
+
+---
+
+## Stage 2 — order-placing callers migrated (2026-08-20)
+
+Commit `0fdfd7f6`, merged `eaf2919d`. The metals loop was verified stopped
+first: `pf-metalsloop` / `pf-silvermonitor` / `pf-golddigger` all
+inactive+disabled, no matching processes, heartbeats 796h stale, last metals
+decision 2026-07-17, `grid_fisher_state.json` untouched since 2026-07-17, zero
+order POSTs in the journal.
+
+### Migrated
+
+| call site | was | now |
+|---|---|---|
+| `price_targets.compute_targets` | `volatility_from_atr(15m)` | `annualized_vol_from_atr(daily)` |
+| `price_targets.compute_all_targets` | `extra.atr_pct` | `daily_atr_pct` |
+| `fin_fish._compute_vol_and_drift` | `volatility_from_atr(15m)` | `annualized_vol_from_atr(daily)` |
+| `fin_fish.load_signal_data` | — | surfaces `daily_atr_pct` |
+| `metals_ladder` (x2) | `atr_pct`, default 0.3 | `_daily_atr_pct()`, default 3.0 |
+| `metals_execution_engine` (2 atr sources, 2 drift calls, `_warrant_vol_from_underlying`) | 15m | daily |
+
+`swedbank/signals.py` needed **no change**: it builds indicators from
+`("one_year", "day")` bars, so its `atr_pct` was already daily and simply became
+correct. Live values 2.4–9.6% confirm the scale.
+
+**`volatility_from_atr` is REMOVED.** After the migration it had zero
+production callers. Leaving mathematically wrong code importable is precisely
+what let this bug persist — `fin_fish` carried a comment saying the function was
+wrong for daily data and used it anyway.
+
+### Measured effect on the live XAG ladder (5x warrant, 6h to close)
+
+| | buy rung | exit target |
+|---|---|---|
+| before (15m ATR) | −0.140% | +0.078% |
+| after (daily ATR) | **−1.605%** | **+0.909%** |
+
+**The exit target is the material finding.** +0.078% underlying x5 leverage is
+**+0.39% on the warrant against a 0.50% spread** on `BULL_SILVER_X5_AVA_3` —
+the old ladder's exit sat **inside the spread** and could not profit even on a
+perfect fill (net −0.11%). Corrected: +4.55% gross, **+4.05% net**. Instruments
+with 0.07–0.20% spreads squeaked by; the 5x AVA certs the grid actually trades
+did not.
+
+**Operational expectation:** materially fewer fills. A 1.6% dip is much rarer
+in a 6h window than a 0.14% one. The ladder's character changes from
+noise-scalping to genuine dip-fishing, with a viable edge per fill instead of a
+high fill rate at negative expectancy.
+
+### Two interaction bugs surfaced by the correction
+
+**1. Flash reserve collapsed onto the working rung.** `flash_underlying =
+min(working_underlying, spot*(1-flash_drop))` was implicitly safe while vol was
+understated and the working rung always shallow. With correct vol,
+`extremes.p25` can already be deeper than the historical post-open drop, so that
+`min()` returned `working_underlying` and the ladder emitted
+`flash_price == working_price` — **two identical live orders**. Fixed: the flash
+rung must clear the working rung by `_FLASH_MIN_EDGE_PCT` (0.15%) or it is
+disabled. It arms at daily ATR <=2% and disarms above ~3%.
+
+**2. A regime-dependent test assumption.** `test_metals_execution_engine`
+asserted a positive Chronos drift always *raises* `expected_close_underlying`.
+That held only while vol was floored: `drift_from_probability` scales with vol,
+so at the old 0.22 vol the signal drift was ~2.3 against a Chronos drift of
+~2.86 (Chronos pulled up). At the corrected ~0.70 vol the signal drift is ~7.3,
+making +18%/24h the *less* bullish view, which correctly tempers the expectation
+downward. Rewritten to the durable invariant: the 0.7/0.3 blend must land
+strictly between the signal-only and chronos-only expectations — a form that
+also passes under the old vol.
+
+### Verification
+
+10 new tests, 4 stale expectations corrected, 216 tests green across every
+affected suite. Full suite shows **zero regressions**: the 5 deltas versus the
+prior worktree baseline are 4 herc2-reachability-dependent applicable-count
+tests (all reproduce with the change stashed) plus one known hash-order
+nondeterminism — `signal_engine.py:2718` does `max()` over a **set**, which
+passes at `PYTHONHASHSEED=0` and fails at 1-5. That one is a real, separate,
+unfixed bug: on an exact accuracy tie the correlation-group leader is chosen by
+string-hash order and the loser eats a 0.3x follower penalty that can flip
+consensus direction. One-line fix: `key=lambda s: (_leader_accuracy_key(s), s)`.
+
+### Still not migrated
+
+Nothing. `grid_fisher.py` consumes `price_targets` / `metals_ladder` output
+rather than calling the vol function directly, so it inherits the correction.
+Re-tune its ladder spacing against the new, wider rungs before the metals loop
+is restarted.
