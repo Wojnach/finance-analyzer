@@ -27,9 +27,15 @@ from scipy.stats import norm
 logger = logging.getLogger("portfolio.monte_carlo")
 
 # Default parameters
-DEFAULT_N_PATHS = 10_000   # 5K pairs with antithetic variates
+DEFAULT_N_PATHS = 10_000  # 5K pairs with antithetic variates
 DEFAULT_HORIZONS = [1, 3]  # days
-MIN_VOLATILITY = 0.05      # 5% annualized floor (prevents degenerate sims)
+MIN_VOLATILITY = 0.05  # 5% annualized floor (prevents degenerate sims)
+
+# ATR-to-stdev divisor for DAILY bars. ~1.2 is the expected range of a Gaussian
+# bar, and matches measurement: the ATR/realized-vol ratio across
+# BTC/ETH/XAU/XAG on daily bars was 1.24/1.02/1.25/1.33 (mean 1.21) on
+# 2026-08-20. Do not reuse this for intraday bars — see annualized_vol_from_atr.
+ATR_TO_SD = 1.2
 
 TRADING_DAYS_CRYPTO = 365
 TRADING_DAYS_METALS = 365
@@ -38,11 +44,13 @@ TRADING_DAYS_STOCKS = 252
 
 def trading_days_for_ticker(ticker: str) -> int:
     from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
+
     if ticker in CRYPTO_SYMBOLS:
         return TRADING_DAYS_CRYPTO
     if ticker in METALS_SYMBOLS:
         return TRADING_DAYS_METALS
     return TRADING_DAYS_STOCKS
+
 
 # Per-asset-class ATR fallbacks when actual ATR is missing from signals.
 # The generic 2.0% underestimates tail risk for crypto/metals.
@@ -57,8 +65,55 @@ _ATR_DEFAULT_BY_CLASS = {
 # Volatility & drift estimation from existing system data
 # ---------------------------------------------------------------------------
 
-def volatility_from_atr(atr_pct: float, period: int = 14, trading_days: int = 365) -> float:
-    """Convert ATR% (14-period) to annualized volatility.
+
+def annualized_vol_from_atr(
+    atr_pct: float, trading_days: int = 365, atr_to_sd: float = ATR_TO_SD
+) -> float:
+    """Annualize a **DAILY** ATR(14) percentage into a volatility decimal.
+
+    ATR(14) is the *mean of 14 one-bar true ranges*, so it is itself a one-bar
+    measure. Annualizing it needs sqrt(trading_days) — NOT
+    sqrt(trading_days / period), which is what the deprecated
+    `volatility_from_atr` below does and which understates vol by sqrt(14).
+
+    The caller MUST supply a daily ATR. Passing an intraday ATR yields a
+    nonsense-low number that lands on MIN_VOLATILITY: naive sqrt-scaling of
+    intraday ranges is not usable here. Measured 2026-08-20, the
+    ATR->realized-vol ratio on daily bars is stable at 1.02-1.33 across
+    BTC/ETH/XAU/XAG, but on 15m bars it ranges 0.97-3.20 — microstructure and
+    24/7 trading break the sqrt-of-time assumption intraday.
+
+    Args:
+        atr_pct: DAILY ATR(14) as a percentage of price (e.g. 2.15 = 2.15%).
+        trading_days: 365 for crypto/metals, 252 for stocks.
+        atr_to_sd: ATR-to-stdev divisor. ~1.2 both theoretically (expected
+            range of a Gaussian bar) and empirically (mean 1.21 measured
+            across the Tier-1 universe on daily bars).
+
+    Returns:
+        Annualized volatility as a decimal, floored at MIN_VOLATILITY.
+    """
+    per_bar_sd = (atr_pct / 100.0) / atr_to_sd
+    vol = per_bar_sd * math.sqrt(float(trading_days))
+    return max(vol, MIN_VOLATILITY)
+
+
+def volatility_from_atr(
+    atr_pct: float, period: int = 14, trading_days: int = 365
+) -> float:
+    """DEPRECATED — mathematically wrong. Use `annualized_vol_from_atr`.
+
+    The `sqrt(trading_days / period)` factor treats ATR(14) as a 14-period
+    cumulative range. It is the *mean of 14 one-bar ranges*, so this understates
+    volatility by sqrt(period) = 3.74x. Full analysis:
+    docs/BUG_2026-08-20-monte-carlo-vol.md.
+
+    Deliberately left in place and unchanged. Its remaining callers —
+    `fin_fish.py`, `price_targets.py` and through them `grid_fisher.py` — size
+    real Avanza limit ladders and stop levels, and may have been empirically
+    tuned against the understated number. Correcting it underneath them would
+    widen every live rung and stop at once. Migrate them deliberately, with the
+    metals loop stopped, re-tuning ladder spacing rather than inheriting it.
 
     Args:
         atr_pct: ATR as percentage of price (e.g., 3.5 means 3.5%).
@@ -74,7 +129,9 @@ def volatility_from_atr(atr_pct: float, period: int = 14, trading_days: int = 36
     return max(vol, MIN_VOLATILITY)
 
 
-def drift_from_probability(p_up: float, volatility: float, trading_days: int = 365) -> float:
+def drift_from_probability(
+    p_up: float, volatility: float, trading_days: int = 365
+) -> float:
     """Convert directional probability P(up) into annualized drift.
 
     Uses the inverse of the GBM CDF relationship:
@@ -97,6 +154,7 @@ def drift_from_probability(p_up: float, volatility: float, trading_days: int = 3
 def _atr_default_for_ticker(ticker: str) -> float:
     """Return the per-asset-class ATR fallback for a ticker."""
     from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
+
     if ticker in CRYPTO_SYMBOLS:
         return _ATR_DEFAULT_BY_CLASS["crypto"]
     if ticker in METALS_SYMBOLS:
@@ -107,6 +165,7 @@ def _atr_default_for_ticker(ticker: str) -> float:
 # ---------------------------------------------------------------------------
 # Core simulation engine
 # ---------------------------------------------------------------------------
+
 
 class MonteCarloEngine:
     """Geometric Brownian Motion price path simulator with antithetic variates.
@@ -123,9 +182,16 @@ class MonteCarloEngine:
         seed: Random seed for reproducibility.
     """
 
-    def __init__(self, price: float, volatility: float, drift: float = 0.0,
-                 horizon_days: float = 1.0, n_paths: int = DEFAULT_N_PATHS,
-                 seed: int | None = None, trading_days: int = 365):
+    def __init__(
+        self,
+        price: float,
+        volatility: float,
+        drift: float = 0.0,
+        horizon_days: float = 1.0,
+        n_paths: int = DEFAULT_N_PATHS,
+        seed: int | None = None,
+        trading_days: int = 365,
+    ):
         self.price = price
         self.volatility = max(volatility, MIN_VOLATILITY)
         self.drift = drift
@@ -261,10 +327,14 @@ class MonteCarloEngine:
 # Convenience: simulate a single ticker from agent_summary data
 # ---------------------------------------------------------------------------
 
-def simulate_ticker(ticker: str, agent_summary: dict,
-                    n_paths: int = DEFAULT_N_PATHS,
-                    horizons: list[int] | None = None,
-                    seed: int | None = None) -> dict | None:
+
+def simulate_ticker(
+    ticker: str,
+    agent_summary: dict,
+    n_paths: int = DEFAULT_N_PATHS,
+    horizons: list[int] | None = None,
+    seed: int | None = None,
+) -> dict | None:
     """Simulate price distribution for a ticker using agent_summary data.
 
     Extracts price, ATR volatility, and directional probability from the
@@ -294,10 +364,21 @@ def simulate_ticker(ticker: str, agent_summary: dict,
         return None
 
     extra = ticker_data.get("extra", {})
-    atr_pct = extra.get("atr_pct") or ticker_data.get("atr_pct") or _atr_default_for_ticker(ticker)
+    # DAILY ATR only. `signals[tkr]["atr_pct"]` and `extra["atr_pct"]` are
+    # 15-MINUTE values — main.py:546 builds the "Now" horizon from
+    # interval="15m" — so consuming them here understated volatility ~4x and
+    # placed the "2x ATR" stop ~1.1% below spot instead of ~4.3%. The
+    # class defaults in _ATR_DEFAULT_BY_CLASS are already daily-scale, so
+    # falling through to them is safe; falling back to the intraday value
+    # would silently reintroduce the bug.
+    atr_pct = (
+        ticker_data.get("daily_atr_pct")
+        or extra.get("daily_atr_pct")
+        or _atr_default_for_ticker(ticker)
+    )
 
     td = trading_days_for_ticker(ticker)
-    vol = volatility_from_atr(atr_pct, trading_days=td)
+    vol = annualized_vol_from_atr(atr_pct, trading_days=td)
     p_up = _get_directional_probability(ticker, ticker_data, agent_summary)
     drift = drift_from_probability(p_up, vol, trading_days=td)
 
@@ -335,8 +416,9 @@ def simulate_ticker(ticker: str, agent_summary: dict,
     return result
 
 
-def _get_directional_probability(ticker: str, ticker_data: dict,
-                                  agent_summary: dict) -> float:
+def _get_directional_probability(
+    ticker: str, ticker_data: dict, agent_summary: dict
+) -> float:
     """Extract directional probability from available data.
 
     Priority:
@@ -354,7 +436,9 @@ def _get_directional_probability(ticker: str, ticker_data: dict,
     # 2. Derive from weighted confidence + action
     extra = ticker_data.get("extra", {})
     action = extra.get("_weighted_action") or ticker_data.get("action", "HOLD")
-    conf = extra.get("_weighted_confidence") or ticker_data.get("weighted_confidence", 0.5)
+    conf = extra.get("_weighted_confidence") or ticker_data.get(
+        "weighted_confidence", 0.5
+    )
 
     if action == "BUY":
         return 0.5 + conf * 0.3  # Scale to 0.5-0.8 range
@@ -368,8 +452,13 @@ def _get_directional_probability(ticker: str, ticker_data: dict,
 # Batch simulation for all interesting tickers
 # ---------------------------------------------------------------------------
 
-def simulate_all(agent_summary: dict, tickers: list[str] | None = None,
-                 n_paths: int = DEFAULT_N_PATHS, seed: int | None = None) -> dict:
+
+def simulate_all(
+    agent_summary: dict,
+    tickers: list[str] | None = None,
+    n_paths: int = DEFAULT_N_PATHS,
+    seed: int | None = None,
+) -> dict:
     """Run MC simulation for multiple tickers.
 
     Args:
@@ -391,8 +480,9 @@ def simulate_all(agent_summary: dict, tickers: list[str] | None = None,
             # without a seed; `seed + i` was crashing every cycle with
             # TypeError and silently disabling MC risk sim for all tickers.
             ticker_seed = None if seed is None else seed + i
-            result = simulate_ticker(ticker, agent_summary,
-                                     n_paths=n_paths, seed=ticker_seed)
+            result = simulate_ticker(
+                ticker, agent_summary, n_paths=n_paths, seed=ticker_seed
+            )
             if result:
                 results[ticker] = result
         except Exception:

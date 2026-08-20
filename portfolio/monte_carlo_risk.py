@@ -30,18 +30,18 @@ from scipy.stats import t as t_dist
 from portfolio.monte_carlo import (
     MIN_VOLATILITY,
     drift_from_probability,
-    volatility_from_atr,
 )
 
 logger = logging.getLogger("portfolio.monte_carlo_risk")
 
-DEFAULT_DF = 4        # Degrees of freedom for t-copula (4 = moderate fat tails)
+DEFAULT_DF = 4  # Degrees of freedom for t-copula (4 = moderate fat tails)
 DEFAULT_N_PATHS = 10_000
 
 
 # ---------------------------------------------------------------------------
 # Correlation matrix estimation
 # ---------------------------------------------------------------------------
+
 
 def estimate_correlation_matrix(
     returns: dict[str, np.ndarray],
@@ -109,7 +109,10 @@ def _nearest_psd(matrix: np.ndarray) -> np.ndarray:
 # Known correlation pairs (fallback when no historical data)
 # ---------------------------------------------------------------------------
 
-from portfolio.correlation_priors import CORRELATION_PRIORS, get_prior as _get_prior_correlation
+from portfolio.correlation_priors import (
+    CORRELATION_PRIORS,
+    get_prior as _get_prior_correlation,
+)
 
 
 def build_correlation_matrix(
@@ -135,7 +138,8 @@ def build_correlation_matrix(
     if historical_returns:
         # Check if we have sufficient data (>= 30 observations per ticker)
         has_data = sum(
-            1 for t in tickers
+            1
+            for t in tickers
             if t in historical_returns and len(historical_returns[t]) >= 30
         )
         if has_data >= 2:
@@ -155,6 +159,7 @@ def build_correlation_matrix(
 # ---------------------------------------------------------------------------
 # Portfolio risk simulator
 # ---------------------------------------------------------------------------
+
 
 class PortfolioRiskSimulator:
     """Multi-position portfolio risk simulator using Student-t copula.
@@ -203,7 +208,7 @@ class PortfolioRiskSimulator:
         self._trading_days = 365
 
         self._returns = None  # (n_paths, n_assets) log-returns
-        self._pnl = None      # (n_paths,) portfolio P&L in USD
+        self._pnl = None  # (n_paths,) portfolio P&L in USD
 
     def simulate_correlated_returns(self) -> np.ndarray:
         """Generate correlated returns using t-copula.
@@ -224,7 +229,7 @@ class PortfolioRiskSimulator:
             return self._returns
 
         rng = np.random.default_rng(self.seed)
-        T = self.horizon_days / float(getattr(self, '_trading_days', 365))
+        T = self.horizon_days / float(getattr(self, "_trading_days", 365))
 
         # Step 1: Cholesky decomposition
         try:
@@ -380,6 +385,7 @@ class PortfolioRiskSimulator:
 # Convenience: compute portfolio VaR from system data structures
 # ---------------------------------------------------------------------------
 
+
 def compute_portfolio_var(
     portfolio_state: dict,
     agent_summary: dict,
@@ -412,6 +418,7 @@ def compute_portfolio_var(
     # the same [7,15] sanity band + disk-cache + FX_RATE_FALLBACK fallback as the
     # drawdown path, so both modules agree on a single source of truth.
     from portfolio.risk_management import _resolve_fx_rate
+
     fx_rate = _resolve_fx_rate(agent_summary)
 
     # Build positions dict
@@ -429,12 +436,25 @@ def compute_portfolio_var(
             continue
 
         extra = ticker_data.get("extra", {})
-        atr_pct = extra.get("atr_pct") or ticker_data.get("atr_pct", 2.0)
-        from portfolio.monte_carlo import trading_days_for_ticker
+        # DAILY ATR only — `atr_pct` is the 15-minute "Now" value and using it
+        # here produced drawdown_1pct_prob = 0.0 on a 34%-vol book.
+        # See docs/BUG_2026-08-20-monte-carlo-vol.md.
+        from portfolio.monte_carlo import (
+            _atr_default_for_ticker,
+            annualized_vol_from_atr,
+            trading_days_for_ticker,
+        )
+
+        atr_pct = (
+            ticker_data.get("daily_atr_pct")
+            or extra.get("daily_atr_pct")
+            or _atr_default_for_ticker(ticker)
+        )
         td = trading_days_for_ticker(ticker)
-        vol = volatility_from_atr(atr_pct, trading_days=td)
+        vol = annualized_vol_from_atr(atr_pct, trading_days=td)
 
         from portfolio.monte_carlo import _get_directional_probability
+
         p_up = _get_directional_probability(ticker, ticker_data, agent_summary)
         drift = drift_from_probability(p_up, vol, trading_days=td)
 

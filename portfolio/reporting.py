@@ -37,7 +37,9 @@ _module_lock = threading.Lock()
 _FAILURE_STREAK_THRESHOLD = 10  # ~10 minutes at 60s cycles
 
 
-def _track_module_outcome(name: str, ok: bool, exc: BaseException | None = None) -> None:
+def _track_module_outcome(
+    name: str, ok: bool, exc: BaseException | None = None
+) -> None:
     """Track consecutive failures for a reporting submodule. Escalate once
     per streak when the threshold is crossed. Resets on success."""
     with _module_lock:
@@ -47,12 +49,15 @@ def _track_module_outcome(name: str, ok: bool, exc: BaseException | None = None)
             return
         streak = _module_failure_streaks.get(name, 0) + 1
         _module_failure_streaks[name] = streak
-        should_escalate = streak >= _FAILURE_STREAK_THRESHOLD and name not in _module_escalated
+        should_escalate = (
+            streak >= _FAILURE_STREAK_THRESHOLD and name not in _module_escalated
+        )
         if should_escalate:
             _module_escalated.add(name)
     if should_escalate:
         try:
             from portfolio.claude_gate import record_critical_error
+
             record_critical_error(
                 category="reporting_module_failure_streak",
                 caller=f"reporting.{name}",
@@ -72,25 +77,63 @@ def _track_module_outcome(name: str, ok: bool, exc: BaseException | None = None)
         except Exception as e:
             logger.error("Failed to escalate %s failure streak: %s", name, e)
 
+
 # Extra keys to preserve per-ticker in compact/tiered summaries.
 # Defined once to prevent drift between _write_compact_summary and _write_tier2_summary.
-_KEEP_EXTRA_FULL = frozenset({
-    "fear_greed", "fear_greed_class",
-    "sentiment", "sentiment_conf",
-    "ml_action", "ml_confidence",
-    "funding_rate", "funding_action",
-    "volume_ratio", "volume_action",
-    "ministral_action",
-    "_voters", "_total_applicable", "_buy_count", "_sell_count",
-    "_votes", "_weighted_action", "_weighted_confidence",
-    "_confluence_score",
-})
+_KEEP_EXTRA_FULL = frozenset(
+    {
+        "fear_greed",
+        "fear_greed_class",
+        "sentiment",
+        "sentiment_conf",
+        "ml_action",
+        "ml_confidence",
+        "funding_rate",
+        "funding_action",
+        "volume_ratio",
+        "volume_action",
+        "ministral_action",
+        "_voters",
+        "_total_applicable",
+        "_buy_count",
+        "_sell_count",
+        "_votes",
+        "_weighted_action",
+        "_weighted_confidence",
+        "_confluence_score",
+    }
+)
 
 
 _CROSS_ASSET_PAIRS = {
     "ETH-USD": "BTC-USD",
     "XAG-USD": "XAU-USD",
 }
+
+
+# The timeframe label whose bars are DAILY. Monte Carlo needs a daily ATR;
+# `signals[tkr]["atr_pct"]` is the 15-minute "Now" value (main.py:546), and
+# feeding that to the vol model understated volatility ~4x until 2026-08-20.
+# tests/test_reporting_daily_atr.py asserts this label really is a 1d timeframe
+# in both TIMEFRAMES and STOCK_TIMEFRAMES.
+DAILY_ATR_HORIZON = "7d"
+
+
+def daily_atr_pct_from_timeframes(tf_entries):
+    """Daily ATR% from the already-fetched daily timeframe, or None.
+
+    Returns None rather than a fallback so the caller can distinguish "no daily
+    reading available" from a real one — Monte Carlo substitutes a daily-scale
+    class default in that case, never the intraday value.
+    """
+    for label, entry in tf_entries or []:
+        if label != DAILY_ATR_HORIZON or not isinstance(entry, dict):
+            continue
+        if "error" in entry:
+            return None
+        atr_pct = (entry.get("indicators") or {}).get("atr_pct")
+        return atr_pct if atr_pct else None
+    return None
 
 
 def _cross_asset_signals(all_signals):
@@ -116,17 +159,21 @@ def write_agent_summary(
 ):
     # Load config once for the entire function (BUG-46: was loaded 3+ times)
     from portfolio.api_utils import load_config as _load_config_once
+
     _report_config = _load_config_once()
 
     total = portfolio_value(state, prices_usd, fx_rate)
     initial = state.get("initial_value_sek", 500000)
-    pnl_pct = ((total - initial) / initial) * 100 if initial else 0  # BUG-99: zero guard
+    pnl_pct = (
+        ((total - initial) / initial) * 100 if initial else 0
+    )  # BUG-99: zero guard
 
     # Macro-window status — surface in agent_summary so Layer 2 sees the
     # regime context. Stayed orthogonal to the existing per-ticker
     # `regime` field which is price-based (ranging/trending/high-vol).
     try:
         from portfolio.signal_engine import _is_macro_window_cached
+
         _macro_active = bool(_is_macro_window_cached())
     except Exception:
         _macro_active = False
@@ -193,13 +240,26 @@ def write_agent_summary(
             "macd_hist": round(ind["macd_hist"], 5),
             "bb_position": ind["price_vs_bb"],
             "atr": round(ind.get("atr", 0), 4),
+            # 15-MINUTE ATR — `ind` comes from the "Now" horizon
+            # (main.py:546, interval="15m"). Kept for display and for the
+            # consumers that were tuned against it.
             "atr_pct": round(ind.get("atr_pct", 0), 2),
+            # DAILY ATR, lifted from the "7d" horizon which already fetches 1d
+            # bars every cycle. Monte Carlo and portfolio VaR read this; feeding
+            # them the 15m value above understated volatility ~4x (see
+            # docs/BUG_2026-08-20-monte-carlo-vol.md). None when the daily
+            # fetch failed — never silently backfilled with the intraday value.
+            "daily_atr_pct": daily_atr_pct_from_timeframes(tf_data.get(name)),
             "regime": detect_regime(ind, is_crypto=name in CRYPTO_SYMBOLS),
             "enhanced_signals": enhanced,
             "extra": extra_clean,
         }
         # Mark extended-hours data for stocks (yfinance prepost during off-hours)
-        if name in STOCK_SYMBOLS and _ss._current_market_state in ("closed", "weekend", "holiday"):
+        if name in STOCK_SYMBOLS and _ss._current_market_state in (
+            "closed",
+            "weekend",
+            "holiday",
+        ):
             sig_entry["extended_hours"] = True
         summary["signals"][name] = sig_entry
         if "fear_greed" in extra:
@@ -252,6 +312,7 @@ def write_agent_summary(
         # VIX (CBOE Volatility Index) — market fear gauge
         try:
             from portfolio.data_collector import fetch_vix
+
             vix = _cached("vix", 900, fetch_vix)  # 15min cache
             if vix:
                 macro["vix"] = vix
@@ -270,6 +331,7 @@ def write_agent_summary(
     # Market health (distribution days, FTD, breadth score)
     try:
         from portfolio.market_health import get_market_health
+
         mh = get_market_health()
         if mh:
             summary["market_health"] = mh
@@ -282,6 +344,7 @@ def write_agent_summary(
     # Earnings proximity for stock tickers
     try:
         from portfolio.earnings_calendar import get_all_earnings_proximity
+
         earnings = get_all_earnings_proximity()
         if earnings:
             summary["earnings_proximity"] = earnings
@@ -295,13 +358,18 @@ def write_agent_summary(
     try:
         from portfolio.exposure_coach import compute_exposure_recommendation
         from portfolio.market_health import get_market_health as _get_mh
+
         mh_data = summary.get("market_health") or _get_mh()
         # Use most common regime across tickers as portfolio-level regime
         regime_counts: dict[str, int] = {}
         for sig_data in summary.get("signals", {}).values():
             r = sig_data.get("extra", {}).get("_regime", "range-bound")
             regime_counts[r] = regime_counts.get(r, 0) + 1
-        dominant_regime = max(regime_counts, key=regime_counts.get) if regime_counts else "range-bound"
+        dominant_regime = (
+            max(regime_counts, key=regime_counts.get)
+            if regime_counts
+            else "range-bound"
+        )
         exposure = compute_exposure_recommendation(mh_data, regime=dominant_regime)
         summary["exposure_recommendation"] = exposure
     except Exception:
@@ -311,6 +379,7 @@ def write_agent_summary(
     # Signal postmortem context (regime insights, correlations)
     try:
         from portfolio.signal_postmortem import get_postmortem_context
+
         pm = get_postmortem_context()
         if pm:
             summary["signal_postmortem"] = pm
@@ -338,9 +407,9 @@ def write_agent_summary(
         cons_acc = consensus_accuracy("1d")
         bw = best_worst_signals("1d", acc=sig_acc)
         from portfolio.tickers import DISABLED_SIGNALS as _DISABLED
+
         qualified = {
-            k: v for k, v in sig_acc.items()
-            if v["total"] >= 5 and k not in _DISABLED
+            k: v for k, v in sig_acc.items() if v["total"] >= 5 and k not in _DISABLED
         }
         if qualified:
             summary["signal_accuracy_1d"] = {
@@ -348,7 +417,9 @@ def write_agent_summary(
                     k: {
                         "accuracy": round(v["accuracy"], 3),
                         "samples": v["total"],
-                        "blended": round(blended[k]["accuracy"], 3) if k in blended else None,
+                        "blended": (
+                            round(blended[k]["accuracy"], 3) if k in blended else None
+                        ),
                     }
                     for k, v in qualified.items()
                 },
@@ -372,6 +443,7 @@ def write_agent_summary(
                 write_accuracy_cache("5d", sig_acc_5d)
         if sig_acc_5d:
             from portfolio.tickers import DISABLED_SIGNALS as _DISABLED_5D
+
             strong_5d = {
                 k: {"accuracy": round(v["accuracy"], 3), "samples": v["total"]}
                 for k, v in sig_acc_5d.items()
@@ -385,6 +457,7 @@ def write_agent_summary(
     # Per-ticker per-signal accuracy (cross-tabulation for Layer 2)
     try:
         from portfolio.accuracy_stats import accuracy_by_ticker_signal
+
         ticker_sig_acc = accuracy_by_ticker_signal("1d", min_samples=10)
         if ticker_sig_acc:
             # Compact: only top 5 and bottom 3 signals per ticker, with accuracy + samples
@@ -407,6 +480,7 @@ def write_agent_summary(
     # Signal activation rates (normalized weights for Layer 2 reference)
     try:
         from portfolio.accuracy_stats import load_cached_activation_rates
+
         act_rates = load_cached_activation_rates()
         if act_rates:
             summary["signal_weights"] = {
@@ -425,6 +499,7 @@ def write_agent_summary(
     # Alpha Vantage fundamentals (stocks only, daily refresh)
     try:
         from portfolio.alpha_vantage import get_all_fundamentals
+
         all_funds = get_all_fundamentals()
         if all_funds:
             summary["fundamentals"] = all_funds
@@ -435,12 +510,12 @@ def write_agent_summary(
     # BGeometrics on-chain data (BTC only, 12h cache)
     try:
         from portfolio.onchain_data import get_onchain_data, interpret_onchain
+
         onchain = get_onchain_data()
         if onchain:
             interp = interpret_onchain(onchain)
             summary["onchain"] = {
-                k: v for k, v in onchain.items()
-                if k != "ts" and v is not None
+                k: v for k, v in onchain.items() if k != "ts" and v is not None
             }
             if interp:
                 summary["onchain"]["interpretation"] = interp
@@ -452,6 +527,7 @@ def write_agent_summary(
     try:
         from portfolio.futures_data import get_all_futures_data
         from portfolio.tickers import CRYPTO_SYMBOLS as _CRYPTO
+
         futures_section = {}
         for ticker in _CRYPTO:
             fdata = get_all_futures_data(ticker)
@@ -479,7 +555,9 @@ def write_agent_summary(
                 entry["funding_rate_pct"] = round(funding[-1]["fundingRate"] * 100, 4)
                 if len(funding) >= 3:
                     recent = [d["fundingRate"] for d in funding[-3:]]
-                    entry["funding_3period_avg"] = round(sum(recent) / len(recent) * 100, 4)
+                    entry["funding_3period_avg"] = round(
+                        sum(recent) / len(recent) * 100, 4
+                    )
             if entry:
                 futures_section[ticker] = entry
         if futures_section:
@@ -499,6 +577,7 @@ def write_agent_summary(
     # Trade guard warnings (overtrading prevention)
     try:
         from portfolio.trade_guards import get_all_guard_warnings
+
         guard_result = get_all_guard_warnings(signals, _patient_pf, _bold_pf)
         if guard_result.get("warnings"):
             summary["trade_guard_warnings"] = guard_result
@@ -509,6 +588,7 @@ def write_agent_summary(
     # Risk audit flags (concentration, regime mismatch, correlation, ATR proximity)
     try:
         from portfolio.risk_management import compute_all_risk_flags
+
         risk_result = compute_all_risk_flags(signals, _patient_pf, _bold_pf, summary)
         if risk_result.get("flags"):
             summary["risk_warnings"] = risk_result
@@ -549,8 +629,10 @@ def write_agent_summary(
         _pt_cfg = _report_config.get("price_targets", {})
         if _pt_cfg.get("enabled", True):
             from portfolio.price_targets import compute_all_targets
-            pt_results = compute_all_targets(summary,
-                {"patient": _patient_pf, "bold": _bold_pf}, _pt_cfg)
+
+            pt_results = compute_all_targets(
+                summary, {"patient": _patient_pf, "bold": _bold_pf}, _pt_cfg
+            )
             if pt_results:
                 summary["price_targets"] = pt_results
     except Exception:
@@ -560,19 +642,25 @@ def write_agent_summary(
     # Surface price levels for Layer 2 visibility (compact per-ticker dict)
     try:
         from portfolio.price_targets import structural_levels as _struct_levels
+
         price_levels_summary: dict = {}
         for _pl_ticker, _pl_sig in summary.get("signals", {}).items():
-            _pl_bb = {k: _pl_sig.get(k)
-                      for k in ("bb_mid", "bb_upper", "bb_lower")
-                      if _pl_sig.get(k) is not None}
+            _pl_bb = {
+                k: _pl_sig.get(k)
+                for k in ("bb_mid", "bb_upper", "bb_lower")
+                if _pl_sig.get(k) is not None
+            }
             if not _pl_bb:
                 _pl_extra = _pl_sig.get("extra", {})
-                _pl_bb = {k: _pl_extra.get(k)
-                          for k in ("bb_mid", "bb_upper", "bb_lower")
-                          if _pl_extra.get(k) is not None}
+                _pl_bb = {
+                    k: _pl_extra.get(k)
+                    for k in ("bb_mid", "bb_upper", "bb_lower")
+                    if _pl_extra.get(k) is not None
+                }
             _pl_extra = _pl_sig.get("extra", {})
             _pl_levels = _struct_levels(
-                _pl_sig.get("price_usd", 0), _pl_bb or None, _pl_extra or None)
+                _pl_sig.get("price_usd", 0), _pl_bb or None, _pl_extra or None
+            )
             if _pl_levels:
                 price_levels_summary[_pl_ticker] = _pl_levels
         if price_levels_summary:
@@ -583,6 +671,7 @@ def write_agent_summary(
     # Portfolio trade metrics (per-trade performance)
     try:
         from portfolio.equity_curve import compute_trade_metrics
+
         metrics = {}
         for label, pf in [("patient", _patient_pf), ("bold", _bold_pf)]:
             txns = pf.get("transactions", [])
@@ -599,6 +688,7 @@ def write_agent_summary(
     # Avanza-tracked instruments (Tier 2: Nordic equities, Tier 3: warrants)
     try:
         from portfolio.avanza_tracker import fetch_avanza_prices
+
         avanza_prices = fetch_avanza_prices()
         if avanza_prices:
             summary["avanza_instruments"] = avanza_prices
@@ -612,6 +702,7 @@ def write_agent_summary(
         focus_tickers = _report_config.get("notification", {}).get("focus_tickers", [])
         if focus_tickers:
             from portfolio.ticker_accuracy import get_focus_probabilities
+
             focus_probs = get_focus_probabilities(focus_tickers, signals)
             if focus_probs:
                 summary["focus_probabilities"] = focus_probs
@@ -625,6 +716,7 @@ def write_agent_summary(
             get_all_ticker_accuracies,
             get_forecast_accuracy_summary,
         )
+
         _fa_focus = focus_tickers if focus_tickers else None
         fa_summary = get_forecast_accuracy_summary(
             focus_tickers=_fa_focus,
@@ -640,6 +732,7 @@ def write_agent_summary(
                 _HOLD_THRESHOLD,
                 _MIN_SAMPLES,
             )
+
             all_acc = get_all_ticker_accuracies(horizon="24h", days=7)
             if all_acc:
                 gating = {}
@@ -702,6 +795,7 @@ def write_agent_summary(
     # Cumulative price changes (rolling 1d/3d/7d)
     try:
         from portfolio.cumulative_tracker import get_cumulative_summary
+
         cumulative = get_cumulative_summary()
         if cumulative and cumulative.get("ticker_changes"):
             summary["cumulative_gains"] = cumulative
@@ -712,6 +806,7 @@ def write_agent_summary(
     # Warrant portfolio summary
     try:
         from portfolio.warrant_portfolio import get_warrant_summary
+
         warrant_summary = get_warrant_summary(prices_usd, fx_rate)
         if warrant_summary and warrant_summary.get("positions"):
             summary["warrant_portfolio"] = warrant_summary
@@ -724,6 +819,7 @@ def write_agent_summary(
         from portfolio.cost_model import get_cost_model
         from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
         from portfolio.session_calendar import get_session_info
+
         warrant_state_path = DATA_DIR / "portfolio_state_warrants.json"
         warrant_state = load_json(warrant_state_path)
         if warrant_state is not None:
@@ -743,7 +839,11 @@ def write_agent_summary(
                     qty=wpos["units"],
                     entry_price_sek=wpos.get("entry_price", 0),
                     entry_underlying_usd=wpos.get("entry_underlying", und_price),
-                    entry_ts=datetime.fromisoformat(wpos["entry_ts"]) if wpos.get("entry_ts") else datetime.now(UTC),
+                    entry_ts=(
+                        datetime.fromisoformat(wpos["entry_ts"])
+                        if wpos.get("entry_ts")
+                        else datetime.now(UTC)
+                    ),
                     instrument_type="warrant",
                     leverage=wpos.get("leverage", 5.0),
                     financing_level=wpos.get("financing_level"),
@@ -755,8 +855,11 @@ def write_agent_summary(
                     usdsek=fx_rate,
                 )
                 plan = compute_exit_plan(
-                    position, market, sess.session_end,
-                    costs=get_cost_model("warrant"), n_paths=3000,
+                    position,
+                    market,
+                    sess.session_end,
+                    costs=get_cost_model("warrant"),
+                    n_paths=3000,
                 )
                 exit_plans[wk] = plan.to_dict()
             if exit_plans:
@@ -768,11 +871,14 @@ def write_agent_summary(
     # Prophecy/belief context for Layer 2
     try:
         from portfolio.prophecy import evaluate_checkpoints, get_context_for_layer2
+
         # Evaluate checkpoints against current prices
         triggered_cps = evaluate_checkpoints(prices_usd)
         if triggered_cps:
-            logger.info("Prophecy checkpoints triggered: %s",
-                        [f"{cp['belief_id']}:{cp['condition']}" for cp in triggered_cps])
+            logger.info(
+                "Prophecy checkpoints triggered: %s",
+                [f"{cp['belief_id']}:{cp['condition']}" for cp in triggered_cps],
+            )
         # Build compact context
         prophecy_ctx = get_context_for_layer2(prices_usd)
         if prophecy_ctx and prophecy_ctx.get("total_active", 0) > 0:
@@ -799,7 +905,9 @@ def write_agent_summary(
                             if stale_since:
                                 try:
                                     stale_dt = datetime.fromisoformat(stale_since)
-                                    hours_stale = (now_utc - stale_dt).total_seconds() / 3600
+                                    hours_stale = (
+                                        now_utc - stale_dt
+                                    ).total_seconds() / 3600
                                     if hours_stale > _STALE_MAX_HOURS:
                                         continue  # drop this ticker — too old
                                 except (ValueError, TypeError):
@@ -823,6 +931,7 @@ def write_agent_summary(
     # BUG-89: don't let a failure here crash summary output.
     try:
         from portfolio.health import update_module_failures
+
         update_module_failures(_module_warnings)
     except Exception:
         logger.warning("[reporting] persisting module failures failed", exc_info=True)
@@ -864,6 +973,7 @@ def _update_signal_state_since(summary: dict) -> None:
     """
     try:
         from portfolio.signal_state_since import update_state_since
+
         current_votes: dict[str, dict[str, str]] = {}
         for ticker, sig_data in (summary.get("signals") or {}).items():
             if not isinstance(sig_data, dict):
@@ -892,6 +1002,7 @@ def _get_held_tickers():
     Cached per cycle (via _run_cycle_id) to avoid repeated disk reads.
     """
     from portfolio.shared_state import _run_cycle_id
+
     if _held_tickers_cache["cycle_id"] == _run_cycle_id:
         return _held_tickers_cache["tickers"]
 
@@ -917,19 +1028,31 @@ def _write_compact_summary(summary):
     """
     # Minimal extra for HOLD-no-position tickers (just counts, no per-signal votes)
     KEEP_EXTRA_MINIMAL = {
-        "_voters", "_total_applicable", "_buy_count", "_sell_count",
-        "_weighted_action", "_weighted_confidence",
+        "_voters",
+        "_total_applicable",
+        "_buy_count",
+        "_sell_count",
+        "_weighted_action",
+        "_weighted_confidence",
     }
     # Minimal top-level fields for HOLD-no-position tickers
     KEEP_TICKER_MINIMAL = {
-        "action", "confidence", "price_usd", "rsi", "regime", "extra",
+        "action",
+        "confidence",
+        "price_usd",
+        "rsi",
+        "regime",
+        "extra",
     }
 
     held_tickers = _get_held_tickers()
 
     # Build compact version without full deep copy — only copy sub-dicts we modify
-    compact = {k: v for k, v in summary.items()
-               if k not in ("signals", "timeframes", "fear_greed", "signal_weights")}
+    compact = {
+        k: v
+        for k, v in summary.items()
+        if k not in ("signals", "timeframes", "fear_greed", "signal_weights")
+    }
 
     compact["signals"] = {}
     for ticker, ticker_data in summary.get("signals", {}).items():
@@ -941,8 +1064,7 @@ def _write_compact_summary(summary):
             # Keep all fields except enhanced_signals
             td = {k: v for k, v in ticker_data.items() if k != "enhanced_signals"}
             if "extra" in td:
-                extra = {k: v for k, v in td["extra"].items()
-                         if k in _KEEP_EXTRA_FULL}
+                extra = {k: v for k, v in td["extra"].items() if k in _KEEP_EXTRA_FULL}
                 # For non-held tickers, collapse _votes dict into a compact string
                 # to save ~23 lines per ticker while preserving the info
                 if not is_held and "_votes" in extra:
@@ -959,11 +1081,17 @@ def _write_compact_summary(summary):
                 td["extra"] = extra
         else:
             # Minimal — just enough to know price and that it's HOLD
-            td = {k: v for k, v in ticker_data.items()
-                  if k in KEEP_TICKER_MINIMAL and k != "extra"}
+            td = {
+                k: v
+                for k, v in ticker_data.items()
+                if k in KEEP_TICKER_MINIMAL and k != "extra"
+            }
             if "extra" in ticker_data:
-                td["extra"] = {k: v for k, v in ticker_data["extra"].items()
-                               if k in KEEP_EXTRA_MINIMAL}
+                td["extra"] = {
+                    k: v
+                    for k, v in ticker_data["extra"].items()
+                    if k in KEEP_EXTRA_MINIMAL
+                }
 
         compact["signals"][ticker] = td
 
@@ -973,8 +1101,11 @@ def _write_compact_summary(summary):
         action = summary.get("signals", {}).get(ticker, {}).get("action", "HOLD")
         if action != "HOLD" or ticker in held_tickers:
             compact["timeframes"][ticker] = [
-                {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
-                if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+                (
+                    {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+                    if "error" not in tf
+                    else {"horizon": tf["horizon"], "error": tf["error"]}
+                )
                 for tf in tf_list
             ]
 
@@ -990,11 +1121,18 @@ def _write_compact_summary(summary):
             is_held = ticker in held_tickers
             if action != "HOLD" or is_held:
                 condensed[ticker] = {
-                    k: fund[k] for k in (
-                        "pe_ratio", "forward_pe", "revenue_growth_yoy",
-                        "profit_margin", "sector", "analyst_target",
-                        "w52_high", "w52_low",
-                    ) if fund.get(k) is not None
+                    k: fund[k]
+                    for k in (
+                        "pe_ratio",
+                        "forward_pe",
+                        "revenue_growth_yoy",
+                        "profit_margin",
+                        "sector",
+                        "analyst_target",
+                        "w52_high",
+                        "w52_low",
+                    )
+                    if fund.get(k) is not None
                 }
         if condensed:
             compact["fundamentals"] = condensed
@@ -1020,18 +1158,23 @@ def _write_compact_summary(summary):
         compact["onchain"] = onchain
 
     # Propagate focus mode sections to compact (small, relevant to Layer 2)
-    for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio",
-                        "prophecy", "forecast_accuracy", "forecast_signals",
-                        "forecast_gating", "exit_plans"):
+    for section_key in (
+        "focus_probabilities",
+        "cumulative_gains",
+        "warrant_portfolio",
+        "prophecy",
+        "forecast_accuracy",
+        "forecast_signals",
+        "forecast_gating",
+        "exit_plans",
+    ):
         section_data = summary.get(section_key)
         if section_data:
             compact[section_key] = section_data
 
     # Load system lessons if available (small, actionable)
     try:
-        system_lessons = load_json(
-            DATA_DIR / "system_lessons.json", default=None
-        )
+        system_lessons = load_json(DATA_DIR / "system_lessons.json", default=None)
         if system_lessons:
             compact["system_lessons"] = {
                 "calibration_advice": system_lessons.get("calibration_advice"),
@@ -1049,12 +1192,15 @@ def _write_compact_summary(summary):
     # Add signal health summary (failure rates for each signal)
     try:
         from portfolio.health import get_signal_health_summary
+
         sh = get_signal_health_summary()
         if sh:
             # Only include signals with failures or <90% success rate
             degraded = {
-                name: data for name, data in sh.items()
-                if data.get("success_rate_pct", 100) < 90 or data.get("total_failures", 0) > 0
+                name: data
+                for name, data in sh.items()
+                if data.get("success_rate_pct", 100) < 90
+                or data.get("total_failures", 0) > 0
             }
             if degraded:
                 compact["signal_health"] = degraded
@@ -1068,6 +1214,7 @@ def _write_compact_summary(summary):
 # Tiered summary generators (T1 quick-check, T2 signal-analysis)
 # T3 uses the existing compact summary unchanged.
 # ---------------------------------------------------------------------------
+
 
 def write_tiered_summary(summary, tier, triggered_tickers=None):
     """Write a tier-specific context file for Layer 2 invocation.
@@ -1185,7 +1332,9 @@ def _write_tier1_summary(summary):
     timeframes = summary.get("timeframes", {})
 
     # Extract prices for accurate portfolio valuation
-    prices_usd = {t: s.get("price_usd", 0) for t, s in signals.items() if s.get("price_usd")}
+    prices_usd = {
+        t: s.get("price_usd", 0) for t, s in signals.items() if s.get("price_usd")
+    }
     fx_rate = summary.get("fx_rate", 0)
 
     t1 = {
@@ -1194,8 +1343,12 @@ def _write_tier1_summary(summary):
         "trigger_reasons": summary.get("trigger_reasons", []),
         "fx_rate": fx_rate,
         "held_positions": {},
-        "portfolio_patient": _portfolio_snapshot(DATA_DIR / "portfolio_state.json", prices_usd, fx_rate),
-        "portfolio_bold": _portfolio_snapshot(DATA_DIR / "portfolio_state_bold.json", prices_usd, fx_rate),
+        "portfolio_patient": _portfolio_snapshot(
+            DATA_DIR / "portfolio_state.json", prices_usd, fx_rate
+        ),
+        "portfolio_bold": _portfolio_snapshot(
+            DATA_DIR / "portfolio_state_bold.json", prices_usd, fx_rate
+        ),
         "macro_headline": _macro_headline(summary),
         "all_prices": {},
     }
@@ -1287,15 +1440,19 @@ def _write_tier2_summary(summary, triggered_tickers=None):
             # Full detail — same as compact summary for held/interesting tickers
             td = {k: v for k, v in sig.items() if k != "enhanced_signals"}
             if "extra" in td:
-                td["extra"] = {k: v for k, v in td["extra"].items()
-                               if k in _KEEP_EXTRA_FULL}
+                td["extra"] = {
+                    k: v for k, v in td["extra"].items() if k in _KEEP_EXTRA_FULL
+                }
             t2["signals"][ticker] = td
             # Include timeframes
             tf_list = timeframes.get(ticker, [])
             if tf_list:
                 t2["timeframes"][ticker] = [
-                    {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
-                    if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+                    (
+                        {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+                        if "error" not in tf
+                        else {"horizon": tf["horizon"], "error": tf["error"]}
+                    )
                     for tf in tf_list
                 ]
         elif ticker in medium_tickers:
@@ -1319,8 +1476,11 @@ def _write_tier2_summary(summary, triggered_tickers=None):
             tf_list = timeframes.get(ticker, [])
             if tf_list:
                 t2["timeframes"][ticker] = [
-                    {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
-                    if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+                    (
+                        {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+                        if "error" not in tf
+                        else {"horizon": tf["horizon"], "error": tf["error"]}
+                    )
                     for tf in tf_list
                 ]
         else:
@@ -1351,10 +1511,19 @@ def _write_tier2_summary(summary, triggered_tickers=None):
         t2["signal_density"] = density
 
     # Include macro, accuracy, portfolio, and market health sections from full summary
-    for key in ("macro", "signal_accuracy_1d", "signal_accuracy_5d_strong",
-                "signal_reliability", "onchain",
-                "cross_asset_leads", "avanza_instruments", "portfolio",
-                "market_health", "exposure_recommendation", "earnings_proximity"):
+    for key in (
+        "macro",
+        "signal_accuracy_1d",
+        "signal_accuracy_5d_strong",
+        "signal_reliability",
+        "onchain",
+        "cross_asset_leads",
+        "avanza_instruments",
+        "portfolio",
+        "market_health",
+        "exposure_recommendation",
+        "earnings_proximity",
+    ):
         if key in summary:
             t2[key] = summary[key]
 
