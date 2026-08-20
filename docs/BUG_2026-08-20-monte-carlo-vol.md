@@ -1,6 +1,8 @@
 # Monte Carlo annualized volatility is understated ~7-12x
 
-**Found:** 2026-08-20 · **Severity:** high (risk model) · **Status:** diagnosed, NOT fixed
+**Found:** 2026-08-20 · **Severity:** high (risk model) · **Status:** FIXED for the
+Monte Carlo family (`47a49c67`, `aeb0f020`). Order-placing callers deliberately
+left on the old function — see "Deliberately not migrated" at the bottom.
 
 ## Symptom
 
@@ -115,3 +117,74 @@ bar_interval, trading_days)`) that takes the bar interval explicitly, so the
    stopped, and re-tune ladder spacing deliberately rather than inheriting it.
 5. Consider removing or lowering `MIN_VOLATILITY = 0.05`; its only effect here was
    to hide the bug behind a constant.
+
+---
+
+## Resolution (2026-08-20)
+
+Commits `7682514d` (fix) · `c59777e5` (rounding) · merged `47a49c67`, `aeb0f020`.
+
+**New API.** `annualized_vol_from_atr(atr_pct, trading_days, atr_to_sd)` in
+`portfolio/monte_carlo.py`. Requires a **daily** ATR and says so in the
+docstring. Divides by `ATR_TO_SD = 1.2` — both the expected range of a Gaussian
+bar and the measured ratio (1.24 / 1.02 / 1.25 / 1.33 across BTC/ETH/XAU/XAG,
+mean 1.21).
+
+**Why the interval had to change too.** The measured ATR-to-realized-vol ratio
+is stable on daily bars but not intraday:
+
+| bars | BTC | ETH | XAU | XAG |
+|---|---|---|---|---|
+| daily | 1.24 | 1.02 | 1.25 | 1.33 |
+| 1h | 2.79 | 2.98 | 1.14 | 1.33 |
+| 15m | 3.20 | 2.06 | 0.97 | 1.13 |
+
+So rescaling the 15m input was not an option — microstructure and 24/7 trading
+break sqrt-of-time intraday. Instead the daily ATR is lifted from the **"7d"
+horizon**, which already fetches `interval="1d"` every cycle
+(`data_collector.TIMEFRAMES`); `compute_indicators` computed `atr_pct` from it
+and reporting was discarding it. **Zero new network calls.** Published as
+`signals[tkr].daily_atr_pct`, rounded to 3dp.
+
+Fallback is `_ATR_DEFAULT_BY_CLASS` (already daily-scale), never the intraday
+value — falling back to that would silently reinstate the bug.
+
+**Migrated:** `simulate_ticker`, `compute_portfolio_var`.
+
+### Live before/after, verified in agent_summary.json
+
+| | before | after | realized |
+|---|---|---|---|
+| BTC `volatility_annual` | 0.05 (floor) | **0.429** | ~0.34 |
+| ETH | 0.05 (floor) | **0.618** | 0.626 |
+| XAU | 0.05 | **0.285** | 0.287 |
+| XAG | 0.05 | **0.515** | 0.433 |
+| `drawdown_1pct_prob` | **0.0** | **0.665** | — |
+| `drawdown_5pct_prob` | **0.0** | **0.135** | — |
+| VaR95 as % of exposure | 0.27% | **6.3%** | — |
+| 2xATR stop distance | ~1.1% | **3.6-7.8%** | — |
+
+ETH and XAU land within 2% of realized. XAG runs ~19% high and BTC ~26% high
+because ATR's 14-day window weights the recent shock differently than a 30-day
+stdev — expected for a proxy, and far inside the ±25% the tests assert.
+
+### Deliberately not migrated
+
+`fin_fish.py:345`, `price_targets.py:333`, and through them `grid_fisher.py`
+still call the deprecated `volatility_from_atr`. Those size **real Avanza limit
+ladders and stop levels** and may have been empirically tuned against the
+understated number; correcting it underneath them would widen every live rung
+and stop simultaneously. `volatility_from_atr` is therefore left in place,
+behaviour unchanged, with a docstring stating it is wrong and why it survives.
+
+To migrate: stop the metals loop, switch the call, and **re-tune ladder spacing
+deliberately** rather than inheriting whatever the wrong vol produced.
+
+### Separate limitation noticed, NOT fixed
+
+`p_stop_hit_*` is computed as `mc.probability_below(stop_price)` on the
+**terminal** simulated price. A stop can be touched intraday and recover, so
+this understates the true probability of a stop being hit. It is now at least
+vol-sensitive (0.021 XAU, 0.044 XAG) rather than identically zero, but a
+path-minimum barrier calculation would be the correct model. Distinct from the
+volatility defect above.
