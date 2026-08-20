@@ -140,7 +140,29 @@ class TestExecutionRecommendations:
 
         base_sell = baseline["sell"]["silver301"]
         sell = enriched["sell"]["silver301"]
-        assert sell["expected_close_underlying"] > base_sell["expected_close_underlying"]
+
+        # `drift = 0.7*signal_drift + 0.3*chronos_drift` is a weighted average,
+        # so the blended expectation must land strictly BETWEEN the pure-signal
+        # expectation and the pure-Chronos one. That is the durable invariant.
+        #
+        # Until 2026-08-20 this asserted simply `>` (Chronos always raises it),
+        # which held only because volatility was floored. drift_from_probability
+        # scales with vol: at the old 0.22 vol the signal drift was ~2.3 against
+        # a Chronos drift of ~2.86, so Chronos pulled up. With the corrected
+        # daily-ATR vol (~0.70) the signal drift is ~7.3, making +18%/24h the
+        # LESS bullish view, which correctly tempers the expectation downward.
+        # See docs/BUG_2026-08-20-monte-carlo-vol.md.
+        chronos_annual = sell["plan_features"]["chronos_drift_annual"]
+        assert chronos_annual is not None
+        chronos_only = mex._expected_terminal_price(
+            prices["silver301"]["underlying"], chronos_annual, 8.0
+        )
+        lo, hi = sorted([base_sell["expected_close_underlying"], chronos_only])
+        assert lo < sell["expected_close_underlying"] < hi, (
+            f"blended {sell['expected_close_underlying']} not between "
+            f"signal-only {base_sell['expected_close_underlying']} and "
+            f"chronos-only {chronos_only}"
+        )
         assert sell["candidates"][0]["label"].startswith("fib_")
         assert seen["extra"] == base_signal["XAG-USD"]["extra"]
         assert seen["regime"] == "trending-up"
@@ -219,7 +241,9 @@ class TestExecutionRecommendations:
         assert buy["plan_features"]["extra_level_count"] == 1
 
     def test_bearish_signal_prefers_short_instrument(self):
-        signal_data = {"XAG-USD": _base_signal(action="SELL", buy_count=1, sell_count=6)}
+        signal_data = {
+            "XAG-USD": _base_signal(action="SELL", buy_count=1, sell_count=6)
+        }
         warrant_catalog = {
             "LONG": {
                 "name": "MINI L SILVER SG",

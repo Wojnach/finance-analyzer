@@ -73,8 +73,8 @@ def annualized_vol_from_atr(
 
     ATR(14) is the *mean of 14 one-bar true ranges*, so it is itself a one-bar
     measure. Annualizing it needs sqrt(trading_days) — NOT
-    sqrt(trading_days / period), which is what the deprecated
-    `volatility_from_atr` below does and which understates vol by sqrt(14).
+    sqrt(trading_days / period), which is what the removed `volatility_from_atr`
+    did and which understated vol by sqrt(14).
 
     The caller MUST supply a daily ATR. Passing an intraday ATR yields a
     nonsense-low number that lands on MIN_VOLATILITY: naive sqrt-scaling of
@@ -95,37 +95,6 @@ def annualized_vol_from_atr(
     """
     per_bar_sd = (atr_pct / 100.0) / atr_to_sd
     vol = per_bar_sd * math.sqrt(float(trading_days))
-    return max(vol, MIN_VOLATILITY)
-
-
-def volatility_from_atr(
-    atr_pct: float, period: int = 14, trading_days: int = 365
-) -> float:
-    """DEPRECATED — mathematically wrong. Use `annualized_vol_from_atr`.
-
-    The `sqrt(trading_days / period)` factor treats ATR(14) as a 14-period
-    cumulative range. It is the *mean of 14 one-bar ranges*, so this understates
-    volatility by sqrt(period) = 3.74x. Full analysis:
-    docs/BUG_2026-08-20-monte-carlo-vol.md.
-
-    Deliberately left in place and unchanged. Its remaining callers —
-    `fin_fish.py`, `price_targets.py` and through them `grid_fisher.py` — size
-    real Avanza limit ladders and stop levels, and may have been empirically
-    tuned against the understated number. Correcting it underneath them would
-    widen every live rung and stop at once. Migrate them deliberately, with the
-    metals loop stopped, re-tuning ladder spacing rather than inheriting it.
-
-    Args:
-        atr_pct: ATR as percentage of price (e.g., 3.5 means 3.5%).
-        period: ATR lookback period (default 14).
-        trading_days: Trading days per year (365 for crypto/metals, 252 for stocks).
-
-    Returns:
-        Annualized volatility as a decimal (e.g., 0.20 = 20%).
-    """
-    atr_frac = atr_pct / 100.0
-    annual_factor = math.sqrt(float(trading_days) / period)
-    vol = atr_frac * annual_factor
     return max(vol, MIN_VOLATILITY)
 
 

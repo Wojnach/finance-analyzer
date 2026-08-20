@@ -11,7 +11,7 @@ import datetime as _dt
 import math
 from typing import Any
 
-from portfolio.monte_carlo import drift_from_probability, volatility_from_atr
+from portfolio.monte_carlo import annualized_vol_from_atr, drift_from_probability
 from portfolio.price_targets import compute_targets, fill_probability, fill_probability_buy
 
 try:
@@ -164,8 +164,17 @@ def _instrument_price_from_underlying(
 
 
 def _warrant_vol_from_underlying(atr_pct: float, leverage: float) -> float:
+    """Annualized vol of a leveraged warrant from its underlying's DAILY ATR.
+
+    `atr_pct` must be a DAILY ATR. It used to receive the 15-minute value and
+    run it through the sqrt(days/period) formula, which floored the result at
+    MIN_VOLATILITY even after multiplying by 5x leverage — so fill
+    probabilities on warrant limit orders were computed as if a 5x silver
+    certificate had 5% annualized volatility.
+    See docs/BUG_2026-08-20-monte-carlo-vol.md.
+    """
     warrant_atr = max(0.1, atr_pct * max(1.0, abs(leverage)))
-    return volatility_from_atr(warrant_atr)
+    return annualized_vol_from_atr(warrant_atr)
 
 
 def _build_candidate_rows(
@@ -336,8 +345,14 @@ def build_execution_recommendations(
         signal_entry = _signal_entry(signal_data, ticker)
         signal_extra = _signal_extra(signal_data, ticker)
         chronos_drift = _chronos_drift(signal_data, ticker)
-        atr_pct = _safe_float(signal_entry.get("atr_pct"), _DEFAULT_ATR.get(ticker, 3.0))
-        drift_under = drift_from_probability(prob_up, volatility_from_atr(atr_pct))
+        # DAILY ATR — `atr_pct` is the 15-minute "Now" value. _DEFAULT_ATR is
+        # already daily-scale, so it is the correct fallback.
+        atr_pct = _safe_float(
+            signal_entry.get("daily_atr_pct"), _DEFAULT_ATR.get(ticker, 3.0)
+        )
+        drift_under = drift_from_probability(
+            prob_up, annualized_vol_from_atr(atr_pct)
+        )
         if chronos_drift is not None:
             drift_under = 0.7 * drift_under + 0.3 * chronos_drift
         expected_underlying = _expected_terminal_price(underlying_price, drift_under, hours_remaining)
@@ -447,8 +462,14 @@ def build_execution_recommendations(
             }
             continue
 
-        atr_pct = _safe_float(signal_entry.get("atr_pct"), _DEFAULT_ATR.get(ticker, 3.0))
-        drift_under = drift_from_probability(prob_up, volatility_from_atr(atr_pct))
+        # DAILY ATR — `atr_pct` is the 15-minute "Now" value. _DEFAULT_ATR is
+        # already daily-scale, so it is the correct fallback.
+        atr_pct = _safe_float(
+            signal_entry.get("daily_atr_pct"), _DEFAULT_ATR.get(ticker, 3.0)
+        )
+        drift_under = drift_from_probability(
+            prob_up, annualized_vol_from_atr(atr_pct)
+        )
         if chronos_drift is not None:
             drift_under = 0.7 * drift_under + 0.3 * chronos_drift
         expected_underlying = _expected_terminal_price(underlying_price, drift_under, hours_remaining)

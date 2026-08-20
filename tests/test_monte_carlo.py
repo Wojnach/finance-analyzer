@@ -230,28 +230,6 @@ class TestDriftFromProbability:
         assert d < 0
 
 
-class TestVolatilityFromATR:
-    """Test annualized volatility estimation from ATR%."""
-
-    def test_atr_to_annual_vol(self):
-        from portfolio.monte_carlo import volatility_from_atr
-        # ATR% of 2% (14-period) → annualized
-        vol = volatility_from_atr(2.0)
-        # sqrt(252/14) ≈ 4.24, so 0.02 * 4.24 ≈ 0.085
-        assert 0.05 < vol < 0.15
-
-    def test_higher_atr_higher_vol(self):
-        from portfolio.monte_carlo import volatility_from_atr
-        vol_low = volatility_from_atr(1.0)
-        vol_high = volatility_from_atr(5.0)
-        assert vol_high > vol_low
-
-    def test_zero_atr_gives_minimum_vol(self):
-        from portfolio.monte_carlo import volatility_from_atr
-        vol = volatility_from_atr(0.0)
-        assert vol > 0  # Should have a floor, not zero
-
-
 class TestSimulateTicker:
     """Test the convenience function for simulating a single ticker."""
 

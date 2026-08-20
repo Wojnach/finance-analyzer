@@ -8,10 +8,20 @@ from portfolio.metals_ladder import (
 )
 
 
-def _signal_entry():
+def _signal_entry(daily_atr_pct=1.0):
+    """Ladder fixture.
+
+    `daily_atr_pct` defaults to a calm 1.0%, which is the regime where the
+    flash reserve is meaningful. Above ~3% the working rung already fishes
+    deeper than the historical post-open drop and the flash reserve is
+    deliberately disabled rather than duplicated — see
+    tests/test_ladder_daily_atr_migration.py and
+    docs/BUG_2026-08-20-monte-carlo-vol.md.
+    """
     return {
         "price_usd": 86.9,
-        "atr_pct": 0.35,
+        "atr_pct": 0.35,  # 15-minute value, no longer used for volatility
+        "daily_atr_pct": daily_atr_pct,
         "regime": "ranging",
         "extra": {
             "volatility_sig_indicators": {"bb_squeeze_on": False},

@@ -7,7 +7,6 @@ Fix: separate annualization path for daily ranges using sqrt(252).
 
 from __future__ import annotations
 
-import math
 import sys
 
 import pytest
@@ -19,14 +18,19 @@ from portfolio.fin_fish import (
     compute_fishing_levels_bull,
     evaluate_warrants,
 )
-from portfolio.monte_carlo import MIN_VOLATILITY
+from portfolio.monte_carlo import MIN_VOLATILITY, annualized_vol_from_atr
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_signal(atr_pct=0.55, rsi=46.0, p_up_3h=0.52):
-    """Minimal signal dict for testing."""
+def _make_signal(atr_pct=0.55, rsi=46.0, p_up_3h=0.52, daily_atr_pct=None):
+    """Minimal signal dict for testing.
+
+    `daily_atr_pct` is what the volatility model reads (2026-08-20). It mirrors
+    `atr_pct` by default so the historical expectations in this file keep the
+    same magnitude of input; `atr_pct` itself is now display-only.
+    """
     return {
         "entry": {
             "extra": {
@@ -37,6 +41,7 @@ def _make_signal(atr_pct=0.55, rsi=46.0, p_up_3h=0.52):
             "3h": {"probability": p_up_3h},
         },
         "atr_pct": atr_pct,
+        "daily_atr_pct": atr_pct if daily_atr_pct is None else daily_atr_pct,
         "rsi": rsi,
         "regime": "ranging",
         "action": "HOLD",
@@ -94,13 +99,19 @@ class TestVolAnnualization:
         assert vol > 0.25, f"Daily range should dominate: got {vol:.3f}"
 
     def test_no_daily_ranges_falls_back_to_atr(self):
-        """With no daily ranges, uses hourly ATR annualization."""
+        """With no daily ranges, the DAILY ATR path is the only source of vol.
+
+        Updated 2026-08-20: was asserting `0.02 * sqrt(365/14)`, i.e. the
+        sqrt(days/period) bug itself, against a 15-minute ATR. The corrected
+        annualization is `(atr/100) / ATR_TO_SD * sqrt(365)`.
+        """
         signal = _make_signal(atr_pct=2.0)
         vol, _ = _compute_vol_and_drift(signal, [], "LONG")
 
-        # hourly ATR 2% -> volatility_from_atr -> atr_frac * sqrt(365/14)
-        expected = 0.02 * math.sqrt(365 / 14)
+        expected = annualized_vol_from_atr(2.0, trading_days=365)
         assert abs(vol - expected) < 0.01
+        # Sanity: a 2% daily ATR is ~32% annualized, not ~10%.
+        assert 0.25 < vol < 0.36
 
     def test_narrow_daily_ranges_ignored(self):
         """Daily ranges < 0.5% are filtered, so atr path used instead."""
@@ -108,9 +119,12 @@ class TestVolAnnualization:
         daily_ranges = _make_daily_ranges([0.1, 0.2, 0.3])
 
         vol, _ = _compute_vol_and_drift(signal, daily_ranges, "LONG")
-        # All ranges < 0.5%, so daily path skipped, hourly ATR used
-        # vol = 0.0055 * sqrt(18) ~ 0.023
+        # All ranges < 0.5%, so the daily-range path is skipped and the ATR
+        # path decides. 0.55% daily ATR -> ~8.8% annualized.
         assert vol < 0.10, f"Should use ATR path: got {vol:.3f}"
+        assert vol == pytest.approx(
+            annualized_vol_from_atr(0.55, trading_days=365), rel=1e-6
+        )
 
     def test_vol_floor_respected(self):
         """Returned vol is never below MIN_VOLATILITY."""

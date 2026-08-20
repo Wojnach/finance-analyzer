@@ -74,6 +74,26 @@ def flash_crash_drop_pct(analysis: dict | None) -> float:
     return max(mean_drop_pct, avg_range_pct * FLASH_RANGE_FRACTION)
 
 
+# Minimum edge, in percent of the working rung, that the flash-crash level must
+# have before it is worth its own order. Below this the two rungs are the same
+# price to within rounding and the flash reserve is disabled instead.
+_FLASH_MIN_EDGE_PCT = 0.15
+
+
+def _daily_atr_pct(signal_entry: dict) -> float:
+    """DAILY ATR for the vol model.
+
+    `signal_entry["atr_pct"]` is the 15-minute "Now" value (main.py:546). Passing
+    it to compute_targets floored XAG volatility at MIN_VOLATILITY (5% against
+    ~58% realized) and put every rung ~2x too close to spot for its own stated
+    fill probability. 3.0 is a daily-scale last resort, never the intraday value.
+    See docs/BUG_2026-08-20-monte-carlo-vol.md.
+    """
+    if not isinstance(signal_entry, dict):
+        return 3.0
+    return _safe_float(signal_entry.get("daily_atr_pct"), 3.0)
+
+
 def build_intraday_ladder(
     signal_entry: dict,
     focus_probabilities: dict | None,
@@ -87,15 +107,19 @@ def build_intraday_ladder(
     direction_sign: int = 1,
 ) -> dict:
     """Build a working bid / flash reserve / exit ladder for one instrument."""
-    p_up = _safe_float((focus_probabilities or {}).get("3h", {}).get("probability"), 0.5)
+    p_up = _safe_float(
+        (focus_probabilities or {}).get("3h", {}).get("probability"), 0.5
+    )
     extra = signal_entry.get("extra") if isinstance(signal_entry, dict) else None
-    squeeze_on = bool(((extra or {}).get("volatility_sig_indicators") or {}).get("bb_squeeze_on"))
+    squeeze_on = bool(
+        ((extra or {}).get("volatility_sig_indicators") or {}).get("bb_squeeze_on")
+    )
 
     buy_targets = compute_targets(
         ticker,
         side="buy",
         price_usd=_safe_float(signal_entry.get("price_usd"), current_underlying_price),
-        atr_pct=_safe_float(signal_entry.get("atr_pct"), 0.3),
+        atr_pct=_daily_atr_pct(signal_entry),
         p_up=p_up,
         hours_remaining=hours_remaining,
         indicators=signal_entry,
@@ -107,7 +131,7 @@ def build_intraday_ladder(
         ticker,
         side="sell",
         price_usd=_safe_float(signal_entry.get("price_usd"), current_underlying_price),
-        atr_pct=_safe_float(signal_entry.get("atr_pct"), 0.3),
+        atr_pct=_daily_atr_pct(signal_entry),
         p_up=p_up,
         hours_remaining=hours_remaining,
         indicators=signal_entry,
@@ -117,20 +141,37 @@ def build_intraday_ladder(
     )
 
     working_underlying = min(
-        _safe_float((buy_targets.get("recommended") or {}).get("price"), current_underlying_price),
-        _safe_float((buy_targets.get("extremes") or {}).get("p25"), current_underlying_price),
+        _safe_float(
+            (buy_targets.get("recommended") or {}).get("price"),
+            current_underlying_price,
+        ),
+        _safe_float(
+            (buy_targets.get("extremes") or {}).get("p25"), current_underlying_price
+        ),
     )
-    mean_underlying = _safe_float((buy_targets.get("recommended") or {}).get("price"), working_underlying)
+    mean_underlying = _safe_float(
+        (buy_targets.get("recommended") or {}).get("price"), working_underlying
+    )
     flash_drop_pct = flash_crash_drop_pct(analysis)
     flash_underlying = 0.0
     if flash_drop_pct > 0:
-        flash_underlying = min(
-            working_underlying,
-            current_underlying_price * (1.0 - flash_drop_pct / 100.0),
-        )
+        flash_level = current_underlying_price * (1.0 - flash_drop_pct / 100.0)
+        # The flash reserve only earns its own order if it sits meaningfully
+        # BELOW the working rung. This used to be `min(working, flash_level)`,
+        # which was implicitly safe while volatility was understated and the
+        # working rung was always shallow. With the corrected daily-ATR vol
+        # (2026-08-20) `extremes.p25` can already be deeper than the historical
+        # post-open drop, and that min() then returned working_underlying —
+        # emitting flash_price == working_price, i.e. two identical live orders.
+        if flash_level < working_underlying * (1.0 - _FLASH_MIN_EDGE_PCT / 100.0):
+            flash_underlying = flash_level
 
-    exit_underlying = _safe_float((sell_targets.get("recommended") or {}).get("price"), current_underlying_price)
-    stretch_exit_underlying = _safe_float((sell_targets.get("extremes") or {}).get("p75"), exit_underlying)
+    exit_underlying = _safe_float(
+        (sell_targets.get("recommended") or {}).get("price"), current_underlying_price
+    )
+    stretch_exit_underlying = _safe_float(
+        (sell_targets.get("extremes") or {}).get("p75"), exit_underlying
+    )
 
     result = {
         "ticker": ticker,
@@ -184,5 +225,7 @@ def build_intraday_ladder(
         if flash_underlying > 0
         else 0.0
     )
-    result["flash_underlying"] = round(flash_underlying, 4) if flash_underlying > 0 else 0.0
+    result["flash_underlying"] = (
+        round(flash_underlying, 4) if flash_underlying > 0 else 0.0
+    )
     return result

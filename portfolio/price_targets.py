@@ -22,7 +22,10 @@ import math
 import numpy as np
 from scipy.stats import norm
 
-from portfolio.monte_carlo import MIN_VOLATILITY, drift_from_probability, volatility_from_atr
+from portfolio.monte_carlo import (
+    MIN_VOLATILITY,
+    drift_from_probability,
+)
 
 logger = logging.getLogger("portfolio.price_targets")
 
@@ -54,9 +57,15 @@ def _is_valid_level(val: object) -> bool:
 # Core functions
 # ---------------------------------------------------------------------------
 
-def fill_probability(price: float, target: float, vol_annual: float,
-                     drift_annual: float, hours_remaining: float,
-                     is_24h: bool = True) -> float:
+
+def fill_probability(
+    price: float,
+    target: float,
+    vol_annual: float,
+    drift_annual: float,
+    hours_remaining: float,
+    is_24h: bool = True,
+) -> float:
     """First-passage-time probability for GBM reaching *target* within window.
 
     For SELL (target >= price): probability running max hits target.
@@ -72,7 +81,7 @@ def fill_probability(price: float, target: float, vol_annual: float,
     # target > price: compute first-passage for running max
     T = _year_fraction(hours_remaining, is_24h)
     sigma = max(vol_annual, MIN_VOLATILITY)
-    mu_adj = drift_annual - 0.5 * sigma ** 2
+    mu_adj = drift_annual - 0.5 * sigma**2
     x = math.log(target / price)
 
     sqrt_T = math.sqrt(T)
@@ -82,7 +91,7 @@ def fill_probability(price: float, target: float, vol_annual: float,
     d1 = (-x + mu_adj * T) / (sigma * sqrt_T)
     d2 = (-x - mu_adj * T) / (sigma * sqrt_T)
 
-    exponent = 2.0 * mu_adj * x / (sigma ** 2)
+    exponent = 2.0 * mu_adj * x / (sigma**2)
     exponent = max(-500.0, min(500.0, exponent))  # clamp for numerical safety
 
     p = norm.cdf(d1) + math.exp(exponent) * norm.cdf(d2)
@@ -95,22 +104,39 @@ def _on_easy_side(price: float, target: float, side: str) -> bool:
     return target >= price
 
 
-def fill_probability_buy(price: float, target: float, vol_annual: float,
-                         drift_annual: float, hours_remaining: float,
-                         is_24h: bool = True) -> float:
+def fill_probability_buy(
+    price: float,
+    target: float,
+    vol_annual: float,
+    drift_annual: float,
+    hours_remaining: float,
+    is_24h: bool = True,
+) -> float:
     """Fill probability for a BUY limit order (target <= price)."""
     if target >= price:
         return 1.0
     # Flip: P(min <= target) = P(max of -process >= -target)
     # Symmetry: negate drift, swap price/target relationship
-    return fill_probability(price, price ** 2 / target if target > 0 else price,
-                            vol_annual, -drift_annual, hours_remaining, is_24h)
+    return fill_probability(
+        price,
+        price**2 / target if target > 0 else price,
+        vol_annual,
+        -drift_annual,
+        hours_remaining,
+        is_24h,
+    )
 
 
-def running_extremes(price: float, vol_annual: float, drift_annual: float,
-                     hours_remaining: float, side: str = "sell",
-                     n_paths: int = 10_000, n_steps: int = 50,
-                     is_24h: bool = True) -> dict:
+def running_extremes(
+    price: float,
+    vol_annual: float,
+    drift_annual: float,
+    hours_remaining: float,
+    side: str = "sell",
+    n_paths: int = 10_000,
+    n_steps: int = 50,
+    is_24h: bool = True,
+) -> dict:
     """MC simulation of running max (sell) or running min (buy)."""
     if hours_remaining <= 0 or price <= 0:
         v = float(price) if price > 0 else 0.0
@@ -119,7 +145,7 @@ def running_extremes(price: float, vol_annual: float, drift_annual: float,
     T = _year_fraction(hours_remaining, is_24h)
     sigma = max(vol_annual, MIN_VOLATILITY)
     dt = T / n_steps
-    drift_dt = (drift_annual - 0.5 * sigma ** 2) * dt
+    drift_dt = (drift_annual - 0.5 * sigma**2) * dt
     vol_dt = sigma * math.sqrt(dt)
 
     rng = np.random.default_rng(42)
@@ -149,8 +175,9 @@ def running_extremes(price: float, vol_annual: float, drift_annual: float,
     }
 
 
-def structural_levels(price: float, indicators: dict | None,
-                      extra: dict | None = None) -> dict:
+def structural_levels(
+    price: float, indicators: dict | None, extra: dict | None = None
+) -> dict:
     """Extract all available price levels from indicators and enhanced signal data.
 
     Sources:
@@ -219,8 +246,12 @@ def structural_levels(price: float, indicators: dict | None,
     # -- Volatility levels (Keltner, Donchian) -----------------------------
     vol_ind = extra.get("volatility_sig_indicators", {})
     if vol_ind:
-        for key in ("keltner_upper", "keltner_lower",
-                     "donchian_upper", "donchian_lower"):
+        for key in (
+            "keltner_upper",
+            "keltner_lower",
+            "donchian_upper",
+            "donchian_lower",
+        ):
             val = vol_ind.get(key)
             if _is_valid_level(val):
                 levels[key] = float(val)
@@ -243,14 +274,16 @@ def structural_levels(price: float, indicators: dict | None,
     return levels
 
 
-def expected_value(fill_prob: float, gain_if_filled: float,
-                   gain_at_fallback: float) -> float:
+def expected_value(
+    fill_prob: float, gain_if_filled: float, gain_at_fallback: float
+) -> float:
     """Probability-weighted expected value."""
     return fill_prob * gain_if_filled + (1.0 - fill_prob) * gain_at_fallback
 
 
-def _apply_regime_adjustment(targets: list[dict], regime: str, side: str,
-                             price_usd: float, bb_mid: float | None) -> None:
+def _apply_regime_adjustment(
+    targets: list[dict], regime: str, side: str, price_usd: float, bb_mid: float | None
+) -> None:
     """Mutate *targets* in-place with regime-aware confidence adjustments.
 
     - ranging/range-bound: penalize far targets, boost targets near bb_mid
@@ -290,18 +323,35 @@ def _apply_regime_adjustment(targets: list[dict], regime: str, side: str,
                 t["fill_prob"] = round(fp * 0.90, 4)
 
 
-def compute_targets(ticker: str, side: str, price_usd: float,
-                    atr_pct: float, p_up: float, hours_remaining: float,
-                    indicators: dict | None = None, extra: dict | None = None,
-                    warrant_leverage: float = 1.0,
-                    position_units: int = 1, fx_rate: float = 1.0,
-                    is_24h: bool = True, n_paths: int = 10_000,
-                    regime: str = "", bb_squeeze: bool = False,
-                    chronos_drift: float | None = None) -> dict:
+def compute_targets(
+    ticker: str,
+    side: str,
+    price_usd: float,
+    atr_pct: float,
+    p_up: float,
+    hours_remaining: float,
+    indicators: dict | None = None,
+    extra: dict | None = None,
+    warrant_leverage: float = 1.0,
+    position_units: int = 1,
+    fx_rate: float = 1.0,
+    is_24h: bool = True,
+    n_paths: int = 10_000,
+    regime: str = "",
+    bb_squeeze: bool = False,
+    chronos_drift: float | None = None,
+) -> dict:
     """Main entry point: compute ranked price targets with fill probabilities.
 
     Parameters
     ----------
+    atr_pct : float
+        **DAILY** ATR as a percentage of price. Not the 15-minute value in
+        ``signals[tkr]["atr_pct"]`` — pass ``signals[tkr]["daily_atr_pct"]``.
+        Used only to derive annualized volatility; ``structural_levels`` does
+        not see it. Feeding the intraday value understated vol ~12x on metals
+        and put every rung ~2x too close to spot for its stated fill
+        probability (docs/BUG_2026-08-20-monte-carlo-vol.md).
     extra : dict | None
         Enhanced signal indicator dicts (fibonacci_indicators, etc.)
         passed through to ``structural_levels``.
@@ -328,9 +378,10 @@ def compute_targets(ticker: str, side: str, price_usd: float,
     if hours_remaining <= 0 or price_usd <= 0 or atr_pct <= 0:
         return result
 
-    from portfolio.monte_carlo import trading_days_for_ticker
+    from portfolio.monte_carlo import annualized_vol_from_atr, trading_days_for_ticker
+
     td = trading_days_for_ticker(ticker)
-    vol = volatility_from_atr(atr_pct, trading_days=td)
+    vol = annualized_vol_from_atr(atr_pct, trading_days=td)
     # BUG (fixed 2026-08-01): the buy branch used `1.0 - p_up`, double-negating
     # the direction. `fill_probability_buy` already negates drift internally, but
     # that negation is the REFLECTION transform for P(min <= target) — paired
@@ -354,8 +405,15 @@ def compute_targets(ticker: str, side: str, price_usd: float,
     levels = structural_levels(price_usd, indicators, extra=extra)
 
     # Running extremes
-    extremes = running_extremes(price_usd, vol, drift, hours_remaining,
-                                side=side, n_paths=n_paths, is_24h=is_24h)
+    extremes = running_extremes(
+        price_usd,
+        vol,
+        drift,
+        hours_remaining,
+        side=side,
+        n_paths=n_paths,
+        is_24h=is_24h,
+    )
     result["extremes"] = extremes
 
     # Build candidate targets
@@ -396,26 +454,34 @@ def compute_targets(ticker: str, side: str, price_usd: float,
         if side == "sell":
             if target_price < price_usd:
                 continue
-            fp = fill_probability(price_usd, target_price, vol, drift,
-                                  hours_remaining, is_24h)
-            gain_if_filled = (target_price - price_usd) * position_units * warrant_leverage * fx_rate
+            fp = fill_probability(
+                price_usd, target_price, vol, drift, hours_remaining, is_24h
+            )
+            gain_if_filled = (
+                (target_price - price_usd) * position_units * warrant_leverage * fx_rate
+            )
         else:
             if target_price > price_usd:
                 continue
-            fp = fill_probability_buy(price_usd, target_price, vol, drift,
-                                      hours_remaining, is_24h)
-            gain_if_filled = (price_usd - target_price) * position_units * warrant_leverage * fx_rate
+            fp = fill_probability_buy(
+                price_usd, target_price, vol, drift, hours_remaining, is_24h
+            )
+            gain_if_filled = (
+                (price_usd - target_price) * position_units * warrant_leverage * fx_rate
+            )
 
         if fp < min_fill:
             continue
 
         ev = expected_value(fp, gain_if_filled, 0.0)
-        targets.append({
-            "price": round(target_price, 4),
-            "fill_prob": round(fp, 4),
-            "ev_sek": round(ev, 2),
-            "label": label,
-        })
+        targets.append(
+            {
+                "price": round(target_price, 4),
+                "fill_prob": round(fp, 4),
+                "ev_sek": round(ev, 2),
+                "label": label,
+            }
+        )
 
     # Regime-aware adjustments
     bb_mid_val = levels.get("bb_mid")
@@ -424,9 +490,19 @@ def compute_targets(ticker: str, side: str, price_usd: float,
         # Re-compute EV after fill_prob adjustment
         for t in targets:
             if side == "sell":
-                gain = (t["price"] - price_usd) * position_units * warrant_leverage * fx_rate
+                gain = (
+                    (t["price"] - price_usd)
+                    * position_units
+                    * warrant_leverage
+                    * fx_rate
+                )
             else:
-                gain = (price_usd - t["price"]) * position_units * warrant_leverage * fx_rate
+                gain = (
+                    (price_usd - t["price"])
+                    * position_units
+                    * warrant_leverage
+                    * fx_rate
+                )
             t["ev_sek"] = round(expected_value(t["fill_prob"], gain, 0.0), 2)
 
     # BB squeeze warning: reduce confidence on all targets
@@ -436,9 +512,19 @@ def compute_targets(ticker: str, side: str, price_usd: float,
             t["fill_prob"] = round(t["fill_prob"] * 0.7, 4)
             # Re-compute EV after squeeze adjustment
             if side == "sell":
-                gain = (t["price"] - price_usd) * position_units * warrant_leverage * fx_rate
+                gain = (
+                    (t["price"] - price_usd)
+                    * position_units
+                    * warrant_leverage
+                    * fx_rate
+                )
             else:
-                gain = (price_usd - t["price"]) * position_units * warrant_leverage * fx_rate
+                gain = (
+                    (price_usd - t["price"])
+                    * position_units
+                    * warrant_leverage
+                    * fx_rate
+                )
             t["ev_sek"] = round(expected_value(t["fill_prob"], gain, 0.0), 2)
 
     # Filter out targets that dropped below min_fill after adjustments
@@ -451,8 +537,9 @@ def compute_targets(ticker: str, side: str, price_usd: float,
     return result
 
 
-def compute_all_targets(agent_summary: dict, portfolio_states: dict,
-                        config: dict) -> dict | None:
+def compute_all_targets(
+    agent_summary: dict, portfolio_states: dict, config: dict
+) -> dict | None:
     """Batch wrapper for the reporting pipeline."""
     from portfolio.focus_analysis import hours_to_us_close
 
@@ -491,7 +578,10 @@ def compute_all_targets(agent_summary: dict, portfolio_states: dict,
             continue
 
         extra = sig.get("extra", {})
-        atr_pct = extra.get("atr_pct") or sig.get("atr_pct", 2.0)
+        # DAILY ATR — `atr_pct` / `extra.atr_pct` are the 15-minute "Now"
+        # values and compute_targets needs a daily one. 2.0 is a daily-scale
+        # last resort, never the intraday value.
+        atr_pct = sig.get("daily_atr_pct") or extra.get("daily_atr_pct") or 2.0
         is_24h_asset = _is_24h(ticker)
 
         # Directional probability
@@ -507,19 +597,29 @@ def compute_all_targets(agent_summary: dict, portfolio_states: dict,
                 hours = float(default_hours)
 
         # Indicators for structural levels (BB from main signal data)
-        indicators = {k: sig.get(k) for k in ("bb_mid", "bb_upper", "bb_lower")
-                      if sig.get(k) is not None}
+        indicators = {
+            k: sig.get(k)
+            for k in ("bb_mid", "bb_upper", "bb_lower")
+            if sig.get(k) is not None
+        }
         if not indicators:
-            indicators = {k: extra.get(k) for k in ("bb_mid", "bb_upper", "bb_lower")
-                          if extra.get(k) is not None}
+            indicators = {
+                k: extra.get(k)
+                for k in ("bb_mid", "bb_upper", "bb_lower")
+                if extra.get(k) is not None
+            }
 
         # Chronos drift from forecast signal
         chronos_drift_val = None
         fc_data = forecast_signals.get(ticker, {})
         chronos_pct = fc_data.get("chronos_24h_pct", 0)
         chronos_conf = fc_data.get("chronos_24h_conf", 0)
-        if isinstance(chronos_conf, (int, float)) and chronos_conf > 0.3 \
-                and isinstance(chronos_pct, (int, float)) and chronos_pct != 0:
+        if (
+            isinstance(chronos_conf, (int, float))
+            and chronos_conf > 0.3
+            and isinstance(chronos_pct, (int, float))
+            and chronos_pct != 0
+        ):
             chronos_drift_val = (chronos_pct / 100.0) * math.sqrt(365)
 
         # BB squeeze detection
@@ -531,7 +631,12 @@ def compute_all_targets(agent_summary: dict, portfolio_states: dict,
 
         try:
             res = compute_targets(
-                ticker, side, price, atr_pct, p_up, hours,
+                ticker,
+                side,
+                price,
+                atr_pct,
+                p_up,
+                hours,
                 indicators=indicators or None,
                 extra=extra or None,
                 is_24h=is_24h_asset,
