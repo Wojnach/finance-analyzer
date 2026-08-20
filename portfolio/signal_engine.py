@@ -24,7 +24,14 @@ from portfolio.shared_state import (
 )
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
-from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, GPU_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
+from portfolio.tickers import (
+    CRYPTO_SYMBOLS,
+    DISABLED_SIGNALS,
+    GPU_SIGNALS,
+    METALS_SYMBOLS,
+    SIGNAL_NAMES,
+    STOCK_SYMBOLS,
+)
 
 logger = logging.getLogger("portfolio.signal_engine")
 
@@ -34,7 +41,9 @@ _LOCAL_MODEL_ACCURACY_TTL = 1800
 # ADX computation cache — content-keyed by (len, first_close, last_close)
 # to prevent stale hits from Python address reuse after GC.
 _adx_cache: dict[tuple[int, float, float], float | None] = {}
-_adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
+_adx_lock = (
+    threading.Lock()
+)  # BUG-86: protect concurrent access from ThreadPoolExecutor
 _ADX_CACHE_MAX = 200  # prevent unbounded growth
 
 # BUG-178 diagnostics: per-ticker last-signal tracker.
@@ -103,7 +112,10 @@ def _reset_phase_log(ticker: str) -> None:
     if not ticker:
         return
     with _phase_log_lock:
-        if len(_phase_log_per_ticker) >= _PHASE_LOG_MAX_TICKERS and ticker not in _phase_log_per_ticker:
+        if (
+            len(_phase_log_per_ticker) >= _PHASE_LOG_MAX_TICKERS
+            and ticker not in _phase_log_per_ticker
+        ):
             # Evict oldest half — we don't need true LRU, just bounded memory.
             # `iter(dict)` yields insertion order in CPython 3.7+; dropping
             # the first half gives us amortized O(1) per call.
@@ -138,6 +150,7 @@ def get_phase_log(ticker: str) -> list[tuple[str, float]]:
     """
     with _phase_log_lock:
         return list(_phase_log_per_ticker.get(ticker, []))
+
 
 _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
@@ -366,8 +379,9 @@ def _candlestick_dead_zone_vote(df, lookback=_CANDLE_BODY_LOOKBACK):
     return "HOLD", 0.0
 
 
-def _forecast_dead_zone_vote(df, forecast_indicators,
-                             lookback=_FORECAST_SLOPE_LOOKBACK):
+def _forecast_dead_zone_vote(
+    df, forecast_indicators, lookback=_FORECAST_SLOPE_LOOKBACK
+):
     """Return (vote, conf) when forecast voted HOLD but price+EMA align.
 
     Fallback secondary derivative: compare the slope of close prices to
@@ -411,9 +425,7 @@ def _forecast_dead_zone_vote(df, forecast_indicators,
         # Linear: last - value-`lookback`-bars-ago. Sign is what
         # matters, magnitude is informational.
         price_slope = float(close.iloc[-1] - close.iloc[-1 - lookback])
-        ema21_slope = float(
-            ema21_series.iloc[-1] - ema21_series.iloc[-1 - lookback]
-        )
+        ema21_slope = float(ema21_series.iloc[-1] - ema21_series.iloc[-1 - lookback])
     except (KeyError, IndexError, ValueError, TypeError):
         return "HOLD", 0.0
     if price_slope > 0 and ema21_slope > 0:
@@ -481,8 +493,13 @@ def _rescue_weight_penalty(dir_acc: float) -> float:
         return _DIRECTIONAL_RESCUE_WEIGHT_CAP
     if dir_acc <= _DIRECTIONAL_RESCUE_THRESHOLD:
         return _DIRECTIONAL_RESCUE_WEIGHT_FLOOR
-    t = (dir_acc - _DIRECTIONAL_RESCUE_THRESHOLD) / (0.85 - _DIRECTIONAL_RESCUE_THRESHOLD)
-    return _DIRECTIONAL_RESCUE_WEIGHT_FLOOR + t * (_DIRECTIONAL_RESCUE_WEIGHT_CAP - _DIRECTIONAL_RESCUE_WEIGHT_FLOOR)
+    t = (dir_acc - _DIRECTIONAL_RESCUE_THRESHOLD) / (
+        0.85 - _DIRECTIONAL_RESCUE_THRESHOLD
+    )
+    return _DIRECTIONAL_RESCUE_WEIGHT_FLOOR + t * (
+        _DIRECTIONAL_RESCUE_WEIGHT_CAP - _DIRECTIONAL_RESCUE_WEIGHT_FLOOR
+    )
+
 
 # LLM confidence gate: suppress BUY/SELL from local LLM signals (Qwen3,
 # Ministral) when model self-reported confidence is below this threshold.
@@ -519,8 +536,8 @@ _ACCURACY_TIER_THRESHOLDS = (
     (0.65, 1.25),  # strong edge: 1.25x boost (regime signals at 67-68%)
     (0.60, 1.15),  # good edge: 1.15x
     (0.55, 1.05),  # moderate: 1.05x (barely noticeable)
-    (0.50, 1.0),   # baseline: no adjustment
-    (0.0,  1.0),   # below baseline: no penalty (accuracy gate handles this)
+    (0.50, 1.0),  # baseline: no adjustment
+    (0.0, 1.0),  # below baseline: no penalty (accuracy gate handles this)
 )
 
 
@@ -555,12 +572,12 @@ _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
 # directional tailwind. Direction-balanced voters (rsi bias=0.11,
 # bb 0.15, momentum 0.04) are unaffected. See docs/PLAN.md.
 _BIAS_MODERATE_THRESHOLD = 0.65  # 0.65 < bias <= 0.85
-_BIAS_MODERATE_PENALTY = 0.7     # 0.7x weight for moderate-bias signals
-_BIAS_THRESHOLD = 0.85           # 0.85 < bias <= 0.90 → "high"
-_BIAS_PENALTY = 0.5              # 0.5x weight for high-bias signals
-_BIAS_EXTREME_THRESHOLD = 0.90   # bias > 0.90 → extreme
-_BIAS_EXTREME_PENALTY = 0.2      # 0.2x weight for extreme-bias signals
-_BIAS_MIN_ACTIVE = 30            # need enough active votes to judge bias
+_BIAS_MODERATE_PENALTY = 0.7  # 0.7x weight for moderate-bias signals
+_BIAS_THRESHOLD = 0.85  # 0.85 < bias <= 0.90 → "high"
+_BIAS_PENALTY = 0.5  # 0.5x weight for high-bias signals
+_BIAS_EXTREME_THRESHOLD = 0.90  # bias > 0.90 → extreme
+_BIAS_EXTREME_PENALTY = 0.2  # 0.2x weight for extreme-bias signals
+_BIAS_MIN_ACTIVE = 30  # need enough active votes to judge bias
 
 # Stamped into agent_summary.json so dashboard / backtester /
 # accuracy-history consumers can mark the "before / after" line
@@ -593,18 +610,19 @@ def _resolve_bias_penalty(bias: float) -> float:
         return _BIAS_MODERATE_PENALTY
     return 1.0
 
+
 # IC-based weight multiplier (2026-04-18): adjusts signal weight based on
 # Information Coefficient — the rank correlation between a signal's votes and
 # actual return magnitude. A signal with 55% accuracy but IC=0.15 catches big
 # moves; one with 58% accuracy but IC=0.00 is riding market drift.
-_IC_ALPHA = 2.0         # IC sensitivity: IC=0.10 → 1.20x boost
-_IC_MULT_FLOOR = 0.6    # never zero out a signal via IC alone
-_IC_MULT_CAP = 1.5      # cap to prevent IC from dominating
-_IC_MIN_SAMPLES = 100   # need reliable IC estimate
+_IC_ALPHA = 2.0  # IC sensitivity: IC=0.10 → 1.20x boost
+_IC_MULT_FLOOR = 0.6  # never zero out a signal via IC alone
+_IC_MULT_CAP = 1.5  # cap to prevent IC from dominating
+_IC_MIN_SAMPLES = 100  # need reliable IC estimate
 _IC_STABILITY_MIN = 0.10  # minimum |ICIR| to trust the IC value
-_IC_ZERO_PENALTY = 0.85   # phantom performers (|IC|<0.01, 500+ samples) get 0.85x
+_IC_ZERO_PENALTY = 0.85  # phantom performers (|IC|<0.01, 500+ samples) get 0.85x
 _IC_ZERO_MIN_SAMPLES = 500  # sample floor for zero-IC penalty
-_IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
+_IC_DATA_TTL = 3600  # IC cache TTL (matches ic_computation.py)
 
 # Signal persistence filter (2026-04-20): require signals to maintain their
 # vote for MIN_PERSISTENCE_CYCLES consecutive cycles before counting in
@@ -617,10 +635,14 @@ _IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
 # When it flips direction or goes HOLD→non-HOLD for the first time, cycles=1.
 # Only signals with cycles >= _PERSISTENCE_MIN_CYCLES get their vote passed
 # to consensus; others are treated as HOLD for consensus purposes only.
-_PERSISTENCE_MIN_CYCLES = 2        # require 2+ consecutive same-direction votes
-_PERSISTENCE_ENABLED = True        # toggle for easy disable
-_PERSISTENCE_MAX_TICKERS = 32      # bound on tracked tickers (prod=5, cap guards tests/probes)
-_persistence_state: dict[str, dict[str, dict]] = {}  # {ticker: {signal: {"vote": str, "cycles": int}}}
+_PERSISTENCE_MIN_CYCLES = 2  # require 2+ consecutive same-direction votes
+_PERSISTENCE_ENABLED = True  # toggle for easy disable
+_PERSISTENCE_MAX_TICKERS = (
+    32  # bound on tracked tickers (prod=5, cap guards tests/probes)
+)
+_persistence_state: dict[str, dict[str, dict]] = (
+    {}
+)  # {ticker: {signal: {"vote": str, "cycles": int}}}
 _persistence_lock = threading.Lock()
 
 # 2026-05-11: per-asset relaxation. Stocks keep 2 cycles because
@@ -633,6 +655,8 @@ _PERSISTENCE_CYCLES_BY_ASSET = {
     "CRYPTO": 2,
     "STOCK": 2,
 }
+
+
 def _persistence_cycles_for(ticker: str | None) -> int:
     """Return how many same-direction cycles a signal must hold to count."""
     if ticker is None:
@@ -645,15 +669,20 @@ def _persistence_cycles_for(ticker: str | None) -> int:
         return _PERSISTENCE_CYCLES_BY_ASSET["CRYPTO"]
     return _PERSISTENCE_CYCLES_BY_ASSET["STOCK"]
 
+
 # Cross-ticker consensus cache: stores the most recent consensus action per
 # ticker so synthetic cross-asset signals can reference other tickers' results.
 # Stale reads (MSTR processing before BTC in the same cycle) are acceptable —
 # the 60s loop ensures data is at most one cycle old.
-_cross_ticker_consensus: dict[tuple, dict] = {}  # {(ticker, horizon): {"action": str, "confidence": float}}
+_cross_ticker_consensus: dict[tuple, dict] = (
+    {}
+)  # {(ticker, horizon): {"action": str, "confidence": float}}
 _cross_ticker_lock = threading.Lock()
 
 
-def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict[str, str]:
+def _apply_persistence_filter(
+    votes: dict[str, str], ticker: str | None
+) -> dict[str, str]:
     """Filter votes to only include signals that persisted for MIN_PERSISTENCE_CYCLES.
 
     Returns a new dict with non-persistent signals forced to HOLD.
@@ -724,28 +753,30 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
 # Format: {(signal_name, ticker)} — if (sig, ticker) is in this set, the
 # signal is computed and votes for that ticker despite being globally disabled.
 # Evidence: data/disabled_signal_rescue_2026-04-18.json
-_DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
-    # ml on ETH-USD: 55.1% at 3h (1206 samples). Globally disabled at 41.7%
-    # because BTC-USD pulls it down to 26.4%. ETH-USD has genuine edge.
-    ("ml", "ETH-USD"),
-    # williams_vix_fix: REMOVED 2026-05-31. Was 76.5% XAU (68 sam), 60.9%
-    # XAG (92 sam) when added 2026-05-25, but recent accuracy collapsed to
-    # 30.5% (131 sam). Actively harmful for metals consensus.
-    # realized_skewness: globally 51.6% (disabled) but XAU 60.3% (572 sam).
-    # Bad for XAG (42.9%) — only re-enable for gold.
-    ("realized_skewness", "XAU-USD"),
-    # phi4_mini: promoted 2026-07-13 from 3,848+1,924-row historical
-    # backtests (docs/plans/2026-07-12-llm-audit-and-research.md).
-    # BTC/ETH 66.7% @1d, XAU 61.2% all horizons, XAG 63.9% @3h.
-    # MSTR untested — deliberately NOT enabled there.
-    ("phi4_mini", "BTC-USD"),
-    ("phi4_mini", "ETH-USD"),
-    ("phi4_mini", "XAU-USD"),
-    ("phi4_mini", "XAG-USD"),
-    # credit_spread_risk: REMOVED 2026-05-26. Was 57.4% per-ticker when added,
-    # but signal formally disabled 2026-05-21 at 20% recent blended accuracy.
-    # Override was re-enabling a broken signal for BTC/ETH. See tickers.py:119.
-})
+_DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset(
+    {
+        # ml on ETH-USD: 55.1% at 3h (1206 samples). Globally disabled at 41.7%
+        # because BTC-USD pulls it down to 26.4%. ETH-USD has genuine edge.
+        ("ml", "ETH-USD"),
+        # williams_vix_fix: REMOVED 2026-05-31. Was 76.5% XAU (68 sam), 60.9%
+        # XAG (92 sam) when added 2026-05-25, but recent accuracy collapsed to
+        # 30.5% (131 sam). Actively harmful for metals consensus.
+        # realized_skewness: globally 51.6% (disabled) but XAU 60.3% (572 sam).
+        # Bad for XAG (42.9%) — only re-enable for gold.
+        ("realized_skewness", "XAU-USD"),
+        # phi4_mini: promoted 2026-07-13 from 3,848+1,924-row historical
+        # backtests (docs/plans/2026-07-12-llm-audit-and-research.md).
+        # BTC/ETH 66.7% @1d, XAU 61.2% all horizons, XAG 63.9% @3h.
+        # MSTR untested — deliberately NOT enabled there.
+        ("phi4_mini", "BTC-USD"),
+        ("phi4_mini", "ETH-USD"),
+        ("phi4_mini", "XAU-USD"),
+        ("phi4_mini", "XAG-USD"),
+        # credit_spread_risk: REMOVED 2026-05-26. Was 57.4% per-ticker when added,
+        # but signal formally disabled 2026-05-21 at 20% recent blended accuracy.
+        # Override was re-enabling a broken signal for BTC/ETH. See tickers.py:119.
+    }
+)
 
 # Shadow-safe signals: disabled signals that are pure math (no network I/O)
 # and safe to compute every cycle without impacting cycle time. Their votes
@@ -766,61 +797,65 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
 # data/shadow_registry.json that point at expensive compute (modulo > 1).
 # Adding a name here costs nothing but mis-omitting one risks blowing
 # the cycle budget when the registry is unavailable.
-_KNOWN_SHADOW_LLMS = frozenset({
-    "forecast",
-    "claude_fundamental",
-    "finance_llama",
-    "cryptotrader_lm",
-    "meta_trader",
-    # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=10.
-    # Computed via the throttled _SHADOW_LLM_SIGNALS path (one rotating ticker
-    # per throttle-tick); listed here so the throttle-fails-closed guard covers
-    # the import/load-failure case.
-    "phi4_mini",
-})
+_KNOWN_SHADOW_LLMS = frozenset(
+    {
+        "forecast",
+        "claude_fundamental",
+        "finance_llama",
+        "cryptotrader_lm",
+        "meta_trader",
+        # 2026-06-01: Phi-4-mini-reasoning shadow enrollment. cycle_modulo=10.
+        # Computed via the throttled _SHADOW_LLM_SIGNALS path (one rotating ticker
+        # per throttle-tick); listed here so the throttle-fails-closed guard covers
+        # the import/load-failure case.
+        "phi4_mini",
+    }
+)
 
 
-_SHADOW_SAFE_SIGNALS = frozenset({
-    "hurst_regime",
-    "shannon_entropy",
-    # "statistical_jump_regime" — RE-ENABLED 2026-04-29 (52.7% at 110 sam)
-    "realized_skewness",
-    "oscillators",
-    # 2026-04-29: Added compute-only signals to accumulate accuracy data.
-    # These use local OHLCV data only — no network calls.
-    "complexity_gap_regime",
-    "mahalanobis_turbulence",
-    "crypto_evrp",
-    "hash_ribbons",
-    "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
-    "calendar",  # 2026-05-09: disabled at 29.3%, shadow-track for recovery
-    # 2026-05-11: Expanded shadow set — all pending-validation OHLCV-only signals.
-    # residual_pair_reversion excluded (uses yfinance).
-    # drift_regime_gate: REMOVED 2026-06-06 — active signal (re-enabled 2026-05-22)
-    "vol_ratio_regime",
-    "williams_vix_fix",
-    "intraday_seasonality",
-    "cubic_trend_persistence",
-    "vwap_zscore_mr",
-    "gold_overnight_bias",
-    # 2026-05-24: Expanded shadow set — OHLCV-only signals added since May 11.
-    # These compute locally with no network calls. Adding to shadow enables
-    # outcome tracking (was zero samples because forced-HOLD votes are skipped
-    # by outcome_tracker).
-    "ttm_squeeze",
-    "tsi_chop_mr",
-    # amihud_illiquidity_regime: REMOVED 2026-06-06 — active signal (re-enabled 2026-05-28)
-    "absorption_ratio_regime",
-    "trend_slope_momentum",
-    "sentiment_extremity_gate",
-    "connors_rsi2",
-    "adx_regime_switch",
-    "choppiness_regime_gate",
-    "autotune_adaptive_cycle",
-    "bocpd_regime_switch",
-    "momentum_factors",
-    "btc_proxy",
-})
+_SHADOW_SAFE_SIGNALS = frozenset(
+    {
+        "hurst_regime",
+        "shannon_entropy",
+        # "statistical_jump_regime" — RE-ENABLED 2026-04-29 (52.7% at 110 sam)
+        "realized_skewness",
+        "oscillators",
+        # 2026-04-29: Added compute-only signals to accumulate accuracy data.
+        # These use local OHLCV data only — no network calls.
+        "complexity_gap_regime",
+        "mahalanobis_turbulence",
+        "crypto_evrp",
+        "hash_ribbons",
+        "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
+        "calendar",  # 2026-05-09: disabled at 29.3%, shadow-track for recovery
+        # 2026-05-11: Expanded shadow set — all pending-validation OHLCV-only signals.
+        # residual_pair_reversion excluded (uses yfinance).
+        # drift_regime_gate: REMOVED 2026-06-06 — active signal (re-enabled 2026-05-22)
+        "vol_ratio_regime",
+        "williams_vix_fix",
+        "intraday_seasonality",
+        "cubic_trend_persistence",
+        "vwap_zscore_mr",
+        "gold_overnight_bias",
+        # 2026-05-24: Expanded shadow set — OHLCV-only signals added since May 11.
+        # These compute locally with no network calls. Adding to shadow enables
+        # outcome tracking (was zero samples because forced-HOLD votes are skipped
+        # by outcome_tracker).
+        "ttm_squeeze",
+        "tsi_chop_mr",
+        # amihud_illiquidity_regime: REMOVED 2026-06-06 — active signal (re-enabled 2026-05-28)
+        "absorption_ratio_regime",
+        "trend_slope_momentum",
+        "sentiment_extremity_gate",
+        "connors_rsi2",
+        "adx_regime_switch",
+        "choppiness_regime_gate",
+        "autotune_adaptive_cycle",
+        "bocpd_regime_switch",
+        "momentum_factors",
+        "btc_proxy",
+    }
+)
 
 # 2026-06-01 (FGL follow-up): EXPENSIVE LLM shadows that need to compute for
 # accuracy tracking but cost ~22s/call (GGUF GPU inference), unlike the pure-
@@ -876,6 +911,7 @@ def _shadow_llm_runs_now(sig_name: str, ticker: str | None, cyc: int) -> bool:
             get_status,
             should_run_this_cycle,
         )
+
         if get_status(sig_name) != "shadow":
             return False
         if not should_run_this_cycle(sig_name, cyc):
@@ -887,7 +923,9 @@ def _shadow_llm_runs_now(sig_name: str, ticker: str | None, cyc: int) -> bool:
         chosen = rotation[(cyc // modulo) % len(rotation)]
         return ticker == chosen
     except Exception:
-        logger.debug("shadow-LLM run-gate failed for %s/%s", sig_name, ticker, exc_info=True)
+        logger.debug(
+            "shadow-LLM run-gate failed for %s/%s", sig_name, ticker, exc_info=True
+        )
         return False
 
 
@@ -915,7 +953,7 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 # only the overall accuracy gate is relaxed.
 _MIN_ACTIVE_VOTERS_SOFT = 5
 _GATE_RELAXATION_STEP = 0.02  # relax by 2pp per step
-_GATE_RELAXATION_MAX = 0.02   # cap at 2pp below base gate (0.47 -> 0.45)
+_GATE_RELAXATION_MAX = 0.02  # cap at 2pp below base gate (0.47 -> 0.45)
 
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
@@ -948,39 +986,61 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         # per-horizon audit of 1d/3d/5d behaviors.
         # 2026-04-24 after-hours audit: added structure (metals), credit_spread_risk
         # and macro_regime (XAU), ema (crypto/metals), futures_flow (crypto).
-        "ETH-USD": frozenset({"news_event", "qwen3", "smart_money",
-                              "ema",           # 17.6% 1d (51 sam)
-                              "futures_flow",  # 32.6% 1d (675 sam)
-                              }),
-        "BTC-USD": frozenset({"smart_money", "heikin_ashi",
-                              "futures_flow",      # 39.7% 1d (511 sam)
-                              "crypto_evrp",       # 40.2% 7d recent (127 sam), gate to ETH-only — 2026-05-25
-                              }),
-        "XAG-USD": frozenset({"ministral", "credit_spread_risk",
-                              "metals_cross_asset", "smart_money",
-                              "structure",                 # 29.9% 1d (723 sam)
-                              "ema",                       # 14.7% 1d (34 sam)
-                              "sentiment",                 # 33.3% 1d (285 sam), 94% BUY-only
-                              "cubic_trend_persistence",   # 41.6% 1d (474 sam) — 2026-05-25 audit
-                              "realized_skewness",         # 42.9% 1d (518 sam) — bad for silver, good for gold
-                              }),
-        "XAU-USD": frozenset({"ministral", "metals_cross_asset",
-                              "structure",                 # 30.4% 1d (827 sam)
-                              "credit_spread_risk",        # 35.4% 1d (413 sam), 38.8% 3h — bad everywhere
-                              "macro_regime",              # 34.3% 1d (484 sam)
-                              "statistical_jump_regime",   # 50.2% 1d (887 sam) — noise for gold, 2026-05-25 audit
-                              }),
+        "ETH-USD": frozenset(
+            {
+                "news_event",
+                "qwen3",
+                "smart_money",
+                "ema",  # 17.6% 1d (51 sam)
+                "futures_flow",  # 32.6% 1d (675 sam)
+            }
+        ),
+        "BTC-USD": frozenset(
+            {
+                "smart_money",
+                "heikin_ashi",
+                "futures_flow",  # 39.7% 1d (511 sam)
+                "crypto_evrp",  # 40.2% 7d recent (127 sam), gate to ETH-only — 2026-05-25
+            }
+        ),
+        "XAG-USD": frozenset(
+            {
+                "ministral",
+                "credit_spread_risk",
+                "metals_cross_asset",
+                "smart_money",
+                "structure",  # 29.9% 1d (723 sam)
+                "ema",  # 14.7% 1d (34 sam)
+                "sentiment",  # 33.3% 1d (285 sam), 94% BUY-only
+                "cubic_trend_persistence",  # 41.6% 1d (474 sam) — 2026-05-25 audit
+                "realized_skewness",  # 42.9% 1d (518 sam) — bad for silver, good for gold
+            }
+        ),
+        "XAU-USD": frozenset(
+            {
+                "ministral",
+                "metals_cross_asset",
+                "structure",  # 30.4% 1d (827 sam)
+                "credit_spread_risk",  # 35.4% 1d (413 sam), 38.8% 3h — bad everywhere
+                "macro_regime",  # 34.3% 1d (484 sam)
+                "statistical_jump_regime",  # 50.2% 1d (887 sam) — noise for gold, 2026-05-25 audit
+            }
+        ),
         # 2026-04-16: trimmed from 7 to 2 (Batch 1). Full history in commit
         # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
-        "MSTR": frozenset({"claude_fundamental", "credit_spread_risk",
-                          "statistical_jump_regime",  # 27.0% 1d (74 sam)
-                          "realized_skewness",        # 36.0% 1d (50 sam)
-                          # 2026-05-10: crashed 40-58pp after never-sell policy broken May 5
-                          "sentiment",          # 90.4% -> 39.2%
-                          "volume_flow",        # 82.3% -> 33.7%
-                          "heikin_ashi",        # 78.6% -> 35.0%
-                          "momentum_factors",   # 88.7% -> 30.4%
-                          }),
+        "MSTR": frozenset(
+            {
+                "claude_fundamental",
+                "credit_spread_risk",
+                "statistical_jump_regime",  # 27.0% 1d (74 sam)
+                "realized_skewness",  # 36.0% 1d (50 sam)
+                # 2026-05-10: crashed 40-58pp after never-sell policy broken May 5
+                "sentiment",  # 90.4% -> 39.2%
+                "volume_flow",  # 82.3% -> 33.7%
+                "heikin_ashi",  # 78.6% -> 35.0%
+                "momentum_factors",  # 88.7% -> 30.4%
+            }
+        ),
     },
     # 2026-04-16 after-hours audit: signals that PASS global gate (>0.47)
     # but FAIL per-ticker (<0.45 with >=50 samples).
@@ -998,21 +1058,39 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
     "3h": {
         # 2026-04-30 audit: added sentiment (33.8% 3h_recent, 3629 sam, 94.9% BUY).
         # Also added bb for more tickers, forecast for BTC (38.3% 3h_recent).
-        "BTC-USD": frozenset({"volatility_sig", "bb",
-                              "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
-                              }),
-        "ETH-USD": frozenset({"credit_spread_risk",
-                              "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
-                              }),
+        "BTC-USD": frozenset(
+            {
+                "volatility_sig",
+                "bb",
+                "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
+            }
+        ),
+        "ETH-USD": frozenset(
+            {
+                "credit_spread_risk",
+                "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
+            }
+        ),
         # credit_spread_risk promoted to _default (2026-04-24)
-        "XAU-USD": frozenset({"sentiment",  # 33.8% 3h_recent (3629 sam)
-                              }),
-        "XAG-USD": frozenset({"forecast", "qwen3",
-                              "sentiment",  # 33.8% 3h_recent (3629 sam)
-                              }),
-        "MSTR": frozenset({"volume", "volatility_sig",
-                           "sentiment",  # 33.8% 3h_recent (3629 sam)
-                           }),
+        "XAU-USD": frozenset(
+            {
+                "sentiment",  # 33.8% 3h_recent (3629 sam)
+            }
+        ),
+        "XAG-USD": frozenset(
+            {
+                "forecast",
+                "qwen3",
+                "sentiment",  # 33.8% 3h_recent (3629 sam)
+            }
+        ),
+        "MSTR": frozenset(
+            {
+                "volume",
+                "volatility_sig",
+                "sentiment",  # 33.8% 3h_recent (3629 sam)
+            }
+        ),
     },
     "4h": {},
     "12h": {
@@ -1027,51 +1105,68 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         # volume_flow (35.8%), heikin_ashi (38.2%), crypto_macro (33.8%).
         # These signals are already auto-gated by the blended accuracy gate,
         # but per-horizon blacklists provide defense-in-depth.
-        "BTC-USD": frozenset({"news_event", "forecast",
-                              "econ_calendar",       # 1.8% 1d (113 sam)
-                              "ema",                 # 23.8% 1d (42 sam)
-                              "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
-                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
-                              "momentum_factors",    # 32.7% 1d_recent (910 sam), 60.1% at 3h — horizon divergence
-                              "volume_flow",         # 35.8% 1d_recent (924 sam)
-                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
-                              "crypto_macro",        # 33.8% 1d_recent (476 sam)
-                              "structure",           # 33.1% 1d_recent (758 sam)
-                              }),
-        "ETH-USD": frozenset({"econ_calendar",       # 1.8% 1d (113 sam)
-                              "funding",             # 12.5% 1d (64 sam)
-                              "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
-                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
-                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
-                              "volume_flow",         # 35.8% 1d_recent (924 sam)
-                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
-                              "crypto_macro",        # 33.8% 1d_recent (476 sam)
-                              "structure",           # 33.1% 1d_recent (758 sam)
-                              }),
-        "XAU-USD": frozenset({"candlestick",
-                              "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
-                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
-                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
-                              "volume_flow",         # 35.8% 1d_recent (924 sam)
-                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
-                              "smart_money",         # 34.2% 1d_recent (155 sam)
-                              }),
-        "XAG-USD": frozenset({"econ_calendar",       # 29.5% 1d (112 sam)
-                              "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
-                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
-                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
-                              "volume_flow",         # 35.8% 1d_recent (924 sam)
-                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
-                              }),
-        "MSTR": frozenset({"ema", "bb",
-                           "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
-                           "momentum_factors",    # 32.7% 1d_recent (910 sam)
-                           "volume_flow",         # 35.8% 1d_recent (924 sam)
-                           "heikin_ashi",         # 38.2% 1d_recent (709 sam)
-                           "smart_money",         # 34.2% 1d_recent (155 sam)
-                           "structure",           # 33.1% 1d_recent (758 sam)
-                           "macro_regime",        # 40.3% 1d (1475 sam) — moved from _default to preserve 3h
-                           }),
+        "BTC-USD": frozenset(
+            {
+                "news_event",
+                "forecast",
+                "econ_calendar",  # 1.8% 1d (113 sam)
+                "ema",  # 23.8% 1d (42 sam)
+                "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
+                "calendar",  # 30.8% 1d_recent (712 sam), 100% BUY-only
+                "momentum_factors",  # 32.7% 1d_recent (910 sam), 60.1% at 3h — horizon divergence
+                "volume_flow",  # 35.8% 1d_recent (924 sam)
+                "heikin_ashi",  # 38.2% 1d_recent (709 sam)
+                "crypto_macro",  # 33.8% 1d_recent (476 sam)
+                "structure",  # 33.1% 1d_recent (758 sam)
+            }
+        ),
+        "ETH-USD": frozenset(
+            {
+                "econ_calendar",  # 1.8% 1d (113 sam)
+                "funding",  # 12.5% 1d (64 sam)
+                "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
+                "calendar",  # 30.8% 1d_recent (712 sam), 100% BUY-only
+                "momentum_factors",  # 32.7% 1d_recent (910 sam)
+                "volume_flow",  # 35.8% 1d_recent (924 sam)
+                "heikin_ashi",  # 38.2% 1d_recent (709 sam)
+                "crypto_macro",  # 33.8% 1d_recent (476 sam)
+                "structure",  # 33.1% 1d_recent (758 sam)
+            }
+        ),
+        "XAU-USD": frozenset(
+            {
+                "candlestick",
+                "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                "calendar",  # 30.8% 1d_recent (712 sam), 100% BUY-only
+                "momentum_factors",  # 32.7% 1d_recent (910 sam)
+                "volume_flow",  # 35.8% 1d_recent (924 sam)
+                "heikin_ashi",  # 38.2% 1d_recent (709 sam)
+                "smart_money",  # 34.2% 1d_recent (155 sam)
+            }
+        ),
+        "XAG-USD": frozenset(
+            {
+                "econ_calendar",  # 29.5% 1d (112 sam)
+                "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                "calendar",  # 30.8% 1d_recent (712 sam), 100% BUY-only
+                "momentum_factors",  # 32.7% 1d_recent (910 sam)
+                "volume_flow",  # 35.8% 1d_recent (924 sam)
+                "heikin_ashi",  # 38.2% 1d_recent (709 sam)
+            }
+        ),
+        "MSTR": frozenset(
+            {
+                "ema",
+                "bb",
+                "calendar",  # 30.8% 1d_recent (712 sam), 100% BUY-only
+                "momentum_factors",  # 32.7% 1d_recent (910 sam)
+                "volume_flow",  # 35.8% 1d_recent (924 sam)
+                "heikin_ashi",  # 38.2% 1d_recent (709 sam)
+                "smart_money",  # 34.2% 1d_recent (155 sam)
+                "structure",  # 33.1% 1d_recent (758 sam)
+                "macro_regime",  # 40.3% 1d (1475 sam) — moved from _default to preserve 3h
+            }
+        ),
     },
     "3d": {
         # 2026-05-10: signals with <45% accuracy at 3d horizon (global).
@@ -1088,16 +1183,35 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         # funding 32.1% (728), news_event 42.2% (8251), ema 42.3% (15596),
         # credit_spread_risk 43.1% (1455), heikin_ashi 44.1% (24761).
         # 2026-05-31: ministral 37.5% at 3d (6373 sam), extrapolates worse at 5d.
-        "BTC-USD": frozenset({"funding", "news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi", "ministral"}),
-        "ETH-USD": frozenset({"funding", "news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi", "ministral"}),
-        "XAG-USD": frozenset({"news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi", "ministral"}),
-        "XAU-USD": frozenset({"news_event", "ema",
-                              "credit_spread_risk", "heikin_ashi", "ministral"}),
-        "MSTR": frozenset({"news_event", "ema",
-                           "credit_spread_risk", "heikin_ashi", "ministral"}),
+        "BTC-USD": frozenset(
+            {
+                "funding",
+                "news_event",
+                "ema",
+                "credit_spread_risk",
+                "heikin_ashi",
+                "ministral",
+            }
+        ),
+        "ETH-USD": frozenset(
+            {
+                "funding",
+                "news_event",
+                "ema",
+                "credit_spread_risk",
+                "heikin_ashi",
+                "ministral",
+            }
+        ),
+        "XAG-USD": frozenset(
+            {"news_event", "ema", "credit_spread_risk", "heikin_ashi", "ministral"}
+        ),
+        "XAU-USD": frozenset(
+            {"news_event", "ema", "credit_spread_risk", "heikin_ashi", "ministral"}
+        ),
+        "MSTR": frozenset(
+            {"news_event", "ema", "credit_spread_risk", "heikin_ashi", "ministral"}
+        ),
     },
     "10d": {},
 }
@@ -1106,19 +1220,25 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
 # P2-H (2026-04-17): module-load validation of _TICKER_DISABLED_BY_HORIZON
 # shape. Catches structural errors (missing _default, invalid horizon keys,
 # non-frozenset values) at import time rather than silently at runtime.
-_VALID_HORIZON_KEYS = frozenset({"_default", "3h", "4h", "12h", "1d", "3d", "5d", "10d"})
-assert "_default" in _TICKER_DISABLED_BY_HORIZON, (
-    "_TICKER_DISABLED_BY_HORIZON missing required '_default' key")
+_VALID_HORIZON_KEYS = frozenset(
+    {"_default", "3h", "4h", "12h", "1d", "3d", "5d", "10d"}
+)
+assert (
+    "_default" in _TICKER_DISABLED_BY_HORIZON
+), "_TICKER_DISABLED_BY_HORIZON missing required '_default' key"
 for _k, _inner in _TICKER_DISABLED_BY_HORIZON.items():
     assert _k in _VALID_HORIZON_KEYS, (
         f"_TICKER_DISABLED_BY_HORIZON has unknown horizon key {_k!r}; "
-        f"valid keys: {sorted(_VALID_HORIZON_KEYS)}")
-    assert isinstance(_inner, dict), (
-        f"_TICKER_DISABLED_BY_HORIZON[{_k!r}] must be a dict")
+        f"valid keys: {sorted(_VALID_HORIZON_KEYS)}"
+    )
+    assert isinstance(
+        _inner, dict
+    ), f"_TICKER_DISABLED_BY_HORIZON[{_k!r}] must be a dict"
     for _tk, _sigs in _inner.items():
         assert isinstance(_sigs, frozenset), (
             f"_TICKER_DISABLED_BY_HORIZON[{_k!r}][{_tk!r}] must be a "
-            f"frozenset (got {type(_sigs).__name__})")
+            f"frozenset (got {type(_sigs).__name__})"
+        )
 del _k, _inner, _tk, _sigs
 
 
@@ -1159,9 +1279,13 @@ _TICKER_DISABLED_SIGNALS = _TICKER_DISABLED_BY_HORIZON["_default"]
 # This overlay reduces the influence of those signals during the
 # macro window, then auto-reverts when the window passes. It composes
 # multiplicatively with the existing regime/horizon weight chain.
-MACRO_WINDOW_DOWNWEIGHT_SIGNALS = frozenset({
-    "sentiment", "momentum_factors", "structure",
-})
+MACRO_WINDOW_DOWNWEIGHT_SIGNALS = frozenset(
+    {
+        "sentiment",
+        "momentum_factors",
+        "structure",
+    }
+)
 MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER = 0.5
 
 # claude_fundamental has a known >75% BUY bias caught by its own
@@ -1190,13 +1314,17 @@ _MACRO_WINDOW_CACHE_TTL_S = 300
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
-MIN_VOTERS_STOCK = 3  # stocks have 24-26 signals (7 core + 17-19 enhanced, GPU-dependent) — need 3
+MIN_VOTERS_CRYPTO = (
+    3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
+)
+MIN_VOTERS_STOCK = (
+    3  # stocks have 24-26 signals (7 core + 17-19 enhanced, GPU-dependent) — need 3
+)
 MIN_VOTERS_METALS = 2  # 2026-05-11: metals run at noisier intraday horizon
-                       # (1m-1h target) where the standard 3-voter floor
-                       # almost never fires after persistence filter.
-                       # Empirical: XAG sees 5 raw voters → 2 post-persistence;
-                       # MIN_VOTERS=3 produced 0 trades in 20 days.
+# (1m-1h target) where the standard 3-voter floor
+# almost never fires after persistence filter.
+# Empirical: XAG sees 5 raw voters → 2 post-persistence;
+# MIN_VOTERS=3 produced 0 trades in 20 days.
 
 # P2-F (2026-04-17 adversarial review): derived floors used by the
 # circuit-breaker precondition. Placing here (after MIN_VOTERS_*) keeps the
@@ -1215,8 +1343,7 @@ _LONE_SIGNAL_FLOOR = _MIN_VOTERS_BASE
 # P2-G (2026-04-17): module-load assertions on constant relationships.
 # These catch misconfigurations at import time rather than producing silent
 # wrong behavior at runtime.
-assert MIN_VOTERS_CRYPTO > 0 and MIN_VOTERS_STOCK > 0, (
-    "MIN_VOTERS_* must be positive")
+assert MIN_VOTERS_CRYPTO > 0 and MIN_VOTERS_STOCK > 0, "MIN_VOTERS_* must be positive"
 assert _POST_EXCLUSION_MIN <= _MIN_ACTIVE_VOTERS_SOFT, (
     f"_POST_EXCLUSION_MIN ({_POST_EXCLUSION_MIN}) must be <= "
     f"_MIN_ACTIVE_VOTERS_SOFT ({_MIN_ACTIVE_VOTERS_SOFT}); "
@@ -1225,7 +1352,8 @@ assert _POST_EXCLUSION_MIN <= _MIN_ACTIVE_VOTERS_SOFT, (
 )
 assert _GATE_RELAXATION_STEP > 0, (
     "_GATE_RELAXATION_STEP must be positive (else ZeroDivisionError in "
-    "circuit-breaker step-count math).")
+    "circuit-breaker step-count math)."
+)
 assert _GATE_RELAXATION_MAX > 0, "_GATE_RELAXATION_MAX must be positive."
 assert (ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX) > _DIRECTIONAL_GATE_THRESHOLD, (
     f"Relaxed overall accuracy gate "
@@ -1239,20 +1367,35 @@ assert (ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX) > _DIRECTIONAL_GATE_THRE
 _rel_ratio = _GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP
 assert abs(_rel_ratio - round(_rel_ratio)) < 1e-9, (
     f"_GATE_RELAXATION_STEP ({_GATE_RELAXATION_STEP}) must divide "
-    f"_GATE_RELAXATION_MAX ({_GATE_RELAXATION_MAX}) cleanly.")
+    f"_GATE_RELAXATION_MAX ({_GATE_RELAXATION_MAX}) cleanly."
+)
 del _rel_ratio
 
 # Core signals that must have at least 1 active voter for non-HOLD consensus.
 # Enhanced signals can strengthen/weaken but never create consensus alone.
-CORE_SIGNAL_NAMES = frozenset({
-    "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-    "volume", "ministral", "qwen3", "claude_fundamental",
-})
+CORE_SIGNAL_NAMES = frozenset(
+    {
+        "rsi",
+        "macd",
+        "ema",
+        "bb",
+        "fear_greed",
+        "sentiment",
+        "volume",
+        "ministral",
+        "qwen3",
+        "claude_fundamental",
+    }
+)
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
-_prev_sentiment: dict[str, str] = {}  # in-memory cache; seeded from sentiment_state.json on first call
+_prev_sentiment: dict[str, str] = (
+    {}
+)  # in-memory cache; seeded from sentiment_state.json on first call
 _prev_sentiment_loaded = False
-_sentiment_lock = threading.Lock()  # BUG-85: protect concurrent access from ThreadPoolExecutor
+_sentiment_lock = (
+    threading.Lock()
+)  # BUG-85: protect concurrent access from ThreadPoolExecutor
 _sentiment_dirty = False  # Track whether in-memory state diverged from disk
 
 _SENTIMENT_STATE_FILE = DATA_DIR / "sentiment_state.json"
@@ -1265,11 +1408,13 @@ def _load_prev_sentiments():
             return
         try:
             from portfolio.file_utils import load_json as _load_json
+
             data = _load_json(str(_SENTIMENT_STATE_FILE), default=None)
             if data and isinstance(data, dict):
                 _prev_sentiment = data.get("prev_sentiment", {})
             # Prune entries for removed tickers
             from portfolio.tickers import ALL_TICKERS
+
             removed = [k for k in _prev_sentiment if k not in ALL_TICKERS]
             for k in removed:
                 del _prev_sentiment[k]
@@ -1308,32 +1453,49 @@ def flush_sentiment_state():
     # Write outside the lock to avoid holding it during I/O
     try:
         from portfolio.file_utils import atomic_write_json
+
         atomic_write_json(_SENTIMENT_STATE_FILE, {"prev_sentiment": snapshot})
         # BUG-101: Only clear dirty flag after successful write
         with _sentiment_lock:
             _sentiment_dirty = False
     except Exception:
         # Dirty flag remains True — next cycle will retry the write
-        logger.warning("Failed to persist sentiment state (will retry next cycle)", exc_info=True)
+        logger.warning(
+            "Failed to persist sentiment state (will retry next cycle)", exc_info=True
+        )
 
 
 REGIME_WEIGHTS = {
     "trending-up": {
-        "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
+        "ema": 1.5,
+        "macd": 1.3,
+        "rsi": 0.7,
+        "bb": 0.7,
         # Enhanced: boost trend-following, dampen mean-reversion
-        "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
-        "structure": 1.2, "smart_money": 1.1,
+        "trend": 1.4,
+        "momentum_factors": 1.3,
+        "heikin_ashi": 1.2,
+        "structure": 1.2,
+        "smart_money": 1.1,
         "mean_reversion": 0.6,  # fibonacci removed — disabled 2026-04-29
     },
     "trending-down": {
-        "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
+        "ema": 1.5,
+        "macd": 1.3,
+        "rsi": 0.7,
+        "bb": 0.7,
         # Enhanced: same as trending-up (trend signals work both ways)
-        "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
-        "structure": 1.2, "smart_money": 1.1,
+        "trend": 1.4,
+        "momentum_factors": 1.3,
+        "heikin_ashi": 1.2,
+        "structure": 1.2,
+        "smart_money": 1.1,
         "mean_reversion": 0.6,  # fibonacci removed — disabled 2026-04-29
     },
     "ranging": {
-        "rsi": 1.5, "bb": 1.5, "ema": 0.5,
+        "rsi": 1.5,
+        "bb": 1.5,
+        "ema": 0.5,
         # 2026-04-05 audit: macd 58.7% recent (crossover catches range turns)
         "macd": 1.3,
         # Enhanced: boost mean-reversion and level-based signals
@@ -1341,7 +1503,8 @@ REGIME_WEIGHTS = {
         # mean_reversion 65.4% recent — boost to 1.7 (was 1.5)
         # ministral 68.0% recent (Apr 5) — was 1.4x boost but collapsed to 41.5%
         # recent (Apr 26 audit, 41 sam). Removed boost, added to regime gate.
-        "mean_reversion": 1.7, "calendar": 1.2,  # fibonacci removed — disabled 2026-04-29
+        "mean_reversion": 1.7,
+        "calendar": 1.2,  # fibonacci removed — disabled 2026-04-29
         # 2026-04-05 audit: momentum 58.9% in ranging (2196 samples) — untapped edge
         "momentum": 1.3,
         # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
@@ -1349,16 +1512,25 @@ REGIME_WEIGHTS = {
         "oscillators": 0.3,
         # 2026-04-28 research: actual degradation 50-70% (BUY acc 13-25%),
         # previous 0.5-0.7x was insufficient. Lowered to 0.3x.
-        "trend": 0.3, "momentum_factors": 0.3, "heikin_ashi": 0.3,
-        "structure": 0.4, "fear_greed": 0.3,
+        "trend": 0.3,
+        "momentum_factors": 0.3,
+        "heikin_ashi": 0.3,
+        "structure": 0.4,
+        "fear_greed": 0.3,
     },
     "high-vol": {
-        "bb": 1.5, "volume": 1.3, "ema": 0.5,
+        "bb": 1.5,
+        "volume": 1.3,
+        "ema": 0.5,
         # Enhanced: boost volatility-aware and smart money signals
         # 2026-03-31: mean_reversion works in high-vol too (war overshoot/reversion)
-        "volatility_sig": 1.4, "smart_money": 1.3, "volume_flow": 1.2,
-        "candlestick": 1.2, "mean_reversion": 1.2,
-        "trend": 0.6, "calendar": 0.7,
+        "volatility_sig": 1.4,
+        "smart_money": 1.3,
+        "volume_flow": 1.2,
+        "candlestick": 1.2,
+        "mean_reversion": 1.2,
+        "trend": 0.6,
+        "calendar": 0.7,
     },
 }
 
@@ -1377,44 +1549,57 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # candlestick 44.5%, smart_money 39.6%.
         # The dynamic 45% accuracy gate also catches these, but explicit
         # regime gating is clearer and doesn't depend on blending math.
-        "_default": frozenset({
-            "trend", "momentum_factors", "ema", "heikin_ashi", "structure",
-            "fear_greed", "macro_regime",
-            # 2026-04-02: added based on 1d_recent audit
-            "news_event", "volatility_sig", "forecast", "smart_money",
-            # 2026-04-04: BUG-161/163 — oscillators 34-39% per-ticker,
-            # candlestick 44.5% recent (292 sam). Both noise in ranging.
-            "oscillators", "candlestick",
-            # 2026-04-09: funding 29.9% at 1d (536 sam) but 74.2% at 3h (535 sam).
-            # Gate at 1d, let it vote at 3h/4h.
-            "funding",
-            # 2026-04-12: econ_calendar 34.2% in ranging (1911 sam). SELL-only signal
-            # is actively harmful in range-bound markets. 62.8% overall is inflated by
-            # unknown-regime (86.8%, 2562 sam) and trending-up (25.9%) dominance.
-            "econ_calendar",
-            # 2026-04-26: volume_flow collapsed to 40.8% recent (-10.0pp, 1310 sam).
-            # credit_spread_risk collapsed to 39.0% recent (-15.2pp, 249 sam).
-            # ministral collapsed to 41.5% recent (41 sam) from 58.4% all-time.
-            # All three are noise in the current 141h+ ranging regime.
-            "volume_flow", "credit_spread_risk", "ministral",
-            # 2026-04-27: claude_fundamental 40.5% at 1d_recent (1178 sam),
-            # 78-83% BUY bias. Was only gated at 3h/4h but also harms 12h/1d/3d/5d.
-            "claude_fundamental",
-            # 2026-04-27: sentiment 40.1% at 1d_recent (202 sam), 33.8% at 3h.
-            # BUY-only bias. Was gated at 3h/4h in all regimes but still active
-            # at _default in ranging where it pushes false BUY consensus.
-            "sentiment",
-            # 2026-05-18: btc_proxy 46.5% all-time (71 sam), 47.5% recent (61 sam).
-            # MSTR-BTC leverage ratio expands in ranging — MSTR dropped 8.8% on
-            # BTC -1.5% (2026-05-18). Static proxy is noise in sideways markets.
-            "btc_proxy",
-            # 2026-05-20: crypto_macro 28.2% recent (387 sam), 100% BUY bias in
-            # ranging (188 BUY, 0 SELL across 50 snapshots). Options gravity and
-            # gold rotation sub-signals produce momentum-following votes that are
-            # noise in range-bound markets. Already in fundamental_cluster (0.3x)
-            # but still contributes false BUY consensus when ungated.
-            "crypto_macro",
-        }),
+        "_default": frozenset(
+            {
+                "trend",
+                "momentum_factors",
+                "ema",
+                "heikin_ashi",
+                "structure",
+                "fear_greed",
+                "macro_regime",
+                # 2026-04-02: added based on 1d_recent audit
+                "news_event",
+                "volatility_sig",
+                "forecast",
+                "smart_money",
+                # 2026-04-04: BUG-161/163 — oscillators 34-39% per-ticker,
+                # candlestick 44.5% recent (292 sam). Both noise in ranging.
+                "oscillators",
+                "candlestick",
+                # 2026-04-09: funding 29.9% at 1d (536 sam) but 74.2% at 3h (535 sam).
+                # Gate at 1d, let it vote at 3h/4h.
+                "funding",
+                # 2026-04-12: econ_calendar 34.2% in ranging (1911 sam). SELL-only signal
+                # is actively harmful in range-bound markets. 62.8% overall is inflated by
+                # unknown-regime (86.8%, 2562 sam) and trending-up (25.9%) dominance.
+                "econ_calendar",
+                # 2026-04-26: volume_flow collapsed to 40.8% recent (-10.0pp, 1310 sam).
+                # credit_spread_risk collapsed to 39.0% recent (-15.2pp, 249 sam).
+                # ministral collapsed to 41.5% recent (41 sam) from 58.4% all-time.
+                # All three are noise in the current 141h+ ranging regime.
+                "volume_flow",
+                "credit_spread_risk",
+                "ministral",
+                # 2026-04-27: claude_fundamental 40.5% at 1d_recent (1178 sam),
+                # 78-83% BUY bias. Was only gated at 3h/4h but also harms 12h/1d/3d/5d.
+                "claude_fundamental",
+                # 2026-04-27: sentiment 40.1% at 1d_recent (202 sam), 33.8% at 3h.
+                # BUY-only bias. Was gated at 3h/4h in all regimes but still active
+                # at _default in ranging where it pushes false BUY consensus.
+                "sentiment",
+                # 2026-05-18: btc_proxy 46.5% all-time (71 sam), 47.5% recent (61 sam).
+                # MSTR-BTC leverage ratio expands in ranging — MSTR dropped 8.8% on
+                # BTC -1.5% (2026-05-18). Static proxy is noise in sideways markets.
+                "btc_proxy",
+                # 2026-05-20: crypto_macro 28.2% recent (387 sam), 100% BUY bias in
+                # ranging (188 BUY, 0 SELL across 50 snapshots). Options gravity and
+                # gold rotation sub-signals produce momentum-following votes that are
+                # noise in range-bound markets. Already in fundamental_cluster (0.3x)
+                # but still contributes false BUY consensus when ungated.
+                "crypto_macro",
+            }
+        ),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
         # handle them dynamically at 3h.
@@ -1431,10 +1616,28 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # econ_calendar (36.4%). Correlation analysis shows these 3 share factor
         # exposure with the _default-gated cluster (r=0.75-0.94 with trend/macro_regime).
         # They produce noise at 3h in ranging but were ungated due to replace-semantics.
-        "3h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental",
-                         "momentum_factors", "structure", "econ_calendar"}),
-        "4h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental",
-                         "momentum_factors", "structure", "econ_calendar"}),
+        "3h": frozenset(
+            {
+                "fear_greed",
+                "macro_regime",
+                "sentiment",
+                "claude_fundamental",
+                "momentum_factors",
+                "structure",
+                "econ_calendar",
+            }
+        ),
+        "4h": frozenset(
+            {
+                "fear_greed",
+                "macro_regime",
+                "sentiment",
+                "claude_fundamental",
+                "momentum_factors",
+                "structure",
+                "econ_calendar",
+            }
+        ),
     },
     "trending-up": {
         # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
@@ -1447,13 +1650,25 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # Correlation audit: consensus accuracy in trending-up is 32.5% (4332 decisions).
         # Root cause: mean-reversion cluster (100% correlated, 6 signals) fires counter-
         # trend SELL into uptrends with amplified weight. Gate the whole cluster at _default.
-        "_default": frozenset({
-            "trend", "ema", "volume_flow", "macro_regime",
-            "momentum_factors", "claude_fundamental",
-            "funding", "fear_greed",
-            "rsi", "mean_reversion", "momentum", "bb",
-            "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix",
-        }),
+        "_default": frozenset(
+            {
+                "trend",
+                "ema",
+                "volume_flow",
+                "macro_regime",
+                "momentum_factors",
+                "claude_fundamental",
+                "funding",
+                "fear_greed",
+                "rsi",
+                "mean_reversion",
+                "momentum",
+                "bb",
+                "connors_rsi2",
+                "sentiment_extremity_gate",
+                "williams_vix_fix",
+            }
+        ),
         # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
         "3h": frozenset({"mean_reversion", "sentiment", "rsi", "bb"}),
         "4h": frozenset({"mean_reversion", "sentiment", "rsi", "bb"}),
@@ -1470,20 +1685,48 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # 2026-05-29: Added full mean-reversion cluster. Consensus accuracy in trending-
         # down is 35.8%. rsi/mean_reversion/momentum fire counter-trend BUY (buy the dip)
         # and get amplified by 100% correlation. Gate entire cluster at _default.
-        "_default": frozenset({
-            "bb", "claude_fundamental",
-            "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
-            "smart_money",
-            "funding", "fear_greed",
-            "sentiment",
-            "rsi", "mean_reversion", "momentum",
-            "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix",
-        }),
+        "_default": frozenset(
+            {
+                "bb",
+                "claude_fundamental",
+                "volume_flow",
+                "macro_regime",
+                "ema",
+                "trend",
+                "heikin_ashi",
+                "smart_money",
+                "funding",
+                "fear_greed",
+                "sentiment",
+                "rsi",
+                "mean_reversion",
+                "momentum",
+                "connors_rsi2",
+                "sentiment_extremity_gate",
+                "williams_vix_fix",
+            }
+        ),
         # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
-        "3h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment",
-                         "rsi", "momentum"}),
-        "4h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment",
-                         "rsi", "momentum"}),
+        "3h": frozenset(
+            {
+                "mean_reversion",
+                "bb",
+                "claude_fundamental",
+                "sentiment",
+                "rsi",
+                "momentum",
+            }
+        ),
+        "4h": frozenset(
+            {
+                "mean_reversion",
+                "bb",
+                "claude_fundamental",
+                "sentiment",
+                "rsi",
+                "momentum",
+            }
+        ),
     },
     "high-vol": {
         # 2026-04-09: funding gated at 1d, active at 3h
@@ -1526,25 +1769,26 @@ def _get_regime_gated(regime: str, horizon: str | None = None) -> frozenset[str]
         return regime_dict[horizon]
     return regime_dict.get("_default", frozenset())
 
+
 # Horizon-specific signal weight multipliers.
 # Signals with >15pp accuracy divergence between horizons get adjusted.
 # Updated: 2026-04-27 accuracy audit (3h_recent vs 1d_recent).
 HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
     "3h": {
-        "news_event": 1.4,      # 70.0% at 3h_recent (1762 sam)
-        "ema": 1.3,             # 62.9% at 3h (vs 48.6% at 1d)
-        "ministral": 1.3,       # 62.6% at 3h (vs 42.4% at 1d) — boosted from 1.2
-        "qwen3": 1.2,           # 61.8% at 3h
-        "trend": 1.2,           # 61.6% at 3h (vs 37.7% at 1d)
+        "news_event": 1.4,  # 70.0% at 3h_recent (1762 sam)
+        "ema": 1.3,  # 62.9% at 3h (vs 48.6% at 1d)
+        "ministral": 1.3,  # 62.6% at 3h (vs 42.4% at 1d) — boosted from 1.2
+        "qwen3": 1.2,  # 61.8% at 3h
+        "trend": 1.2,  # 61.6% at 3h (vs 37.7% at 1d)
         "volatility_sig": 1.2,  # 60.2% at 3h (304 sam)
-        "momentum_factors": 1.2, # 60.1% at 3h (vs 35.4% at 1d)
-        "momentum": 1.1,        # 56.1% at 3h (378 sam) — NEW 2026-04-27
-        "heikin_ashi": 1.1,     # 55.0% at 3h (vs 42.7% at 1d) — NEW 2026-04-27
-        "sentiment": 0.4,       # 33.8% at 3h — tightened from 0.5
-        "forecast": 0.5,        # 38.3% at 3h
-        "bb": 0.6,              # 41.7% at 3h (but 62.5% at 1d)
+        "momentum_factors": 1.2,  # 60.1% at 3h (vs 35.4% at 1d)
+        "momentum": 1.1,  # 56.1% at 3h (378 sam) — NEW 2026-04-27
+        "heikin_ashi": 1.1,  # 55.0% at 3h (vs 42.7% at 1d) — NEW 2026-04-27
+        "sentiment": 0.4,  # 33.8% at 3h — tightened from 0.5
+        "forecast": 0.5,  # 38.3% at 3h
+        "bb": 0.6,  # 41.7% at 3h (but 62.5% at 1d)
         "mean_reversion": 0.7,  # 45.5% at 3h (but 51.8% at 1d)
-        "volume_flow": 0.7,     # 46.4% at 3h — NEW 2026-04-27
+        "volume_flow": 0.7,  # 46.4% at 3h — NEW 2026-04-27
     },
     "4h": {
         "news_event": 1.4,
@@ -1573,37 +1817,37 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         # i.e. exactly the cache-loss-after-crash window where a 1.5x boost
         # on a contrarian-bear signal would fire into the recovery rally.
         "crypto_evrp": 1.0,
-        "news_event": 1.6,      # 78.4% at 1d_recent (208 sam) — still top performer
-        "amihud_illiquidity_regime": 1.5, # 69.6% at 1d_recent (618 sam) — NEW
+        "news_event": 1.6,  # 78.4% at 1d_recent (208 sam) — still top performer
+        "amihud_illiquidity_regime": 1.5,  # 69.6% at 1d_recent (618 sam) — NEW
         # 2026-06-10 (audit batch 2): sentiment neutralized 1.3 → 1.0. The
         # signal is force-HOLD in DISABLED_SIGNALS; the "recovered to 62.8%"
         # figure is shadow-vote accuracy from the same crash window. A >1.0
         # fallback weight pre-boosts it if it is ever re-enabled without
         # re-validation, and anchors future tuning sessions on burst stats.
         "sentiment": 1.0,
-        "ema": 1.1,             # 57.5% at 1d_recent (810 sam) — recovered from 46.6%
-        "statistical_jump_regime": 1.1, # 56.4% at 1d_recent (495 sam) — recovered from 46.9%
-        "momentum_factors": 1.1, # 55.6% at 1d_recent (689 sam) — recovered from 36.2%
-        "momentum": 1.1,        # 55.5% at 1d_recent (582 sam) — NEW
-        "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — kept from prior
-        "macd": 0.7,            # 47.7% at 1d_recent (197 sam) — dropped from 52.2%
-        "rsi": 0.7,             # 45.3% at 1d_recent (386 sam) — dropped from 57.5%
+        "ema": 1.1,  # 57.5% at 1d_recent (810 sam) — recovered from 46.6%
+        "statistical_jump_regime": 1.1,  # 56.4% at 1d_recent (495 sam) — recovered from 46.9%
+        "momentum_factors": 1.1,  # 55.6% at 1d_recent (689 sam) — recovered from 36.2%
+        "momentum": 1.1,  # 55.5% at 1d_recent (582 sam) — NEW
+        "volume": 1.1,  # 54.7% at 1d_recent (265 sam) — kept from prior
+        "macd": 0.7,  # 47.7% at 1d_recent (197 sam) — dropped from 52.2%
+        "rsi": 0.7,  # 45.3% at 1d_recent (386 sam) — dropped from 57.5%
         "mean_reversion": 0.7,  # 44.7% at 1d_recent (604 sam) — dropped from 56.7%
-        "bb": 0.5,              # 40.9% at 1d_recent (342 sam) — collapsed from 60.5%
-        "drift_regime_gate": 0.5, # 38.9% at 1d_recent (579 sam) — collapsed from 68.1%
-        "econ_calendar": 0.5,   # 35.1% at 1d_recent (465 sam) — NEW
-        "crypto_macro": 0.5,    # 21.4% at 1d_recent (234 sam) — collapsed from 53.6%
+        "bb": 0.5,  # 40.9% at 1d_recent (342 sam) — collapsed from 60.5%
+        "drift_regime_gate": 0.5,  # 38.9% at 1d_recent (579 sam) — collapsed from 68.1%
+        "econ_calendar": 0.5,  # 35.1% at 1d_recent (465 sam) — NEW
+        "crypto_macro": 0.5,  # 21.4% at 1d_recent (234 sam) — collapsed from 53.6%
         "credit_spread_risk": 0.3,  # 0.0% at 1d_recent (33 sam) — still dead
-        "williams_vix_fix": 0.5,    # 30.5% at 1d_recent — still collapsed
+        "williams_vix_fix": 0.5,  # 30.5% at 1d_recent — still collapsed
         "claude_fundamental": 0.5,  # kept from prior
-        "fear_greed": 0.4,      # 25.9% at 1d — still terrible
-        "macro_regime": 0.5,    # 36.8% at 1d_recent
+        "fear_greed": 0.4,  # 25.9% at 1d — still terrible
+        "macro_regime": 0.5,  # 36.8% at 1d_recent
         "volatility_sig": 0.5,  # 45.5% at 1d_recent
-        "structure": 0.5,       # 33.7% at 1d_recent
-        "forecast": 0.5,        # 44.6% at 1d_recent
-        "trend": 0.5,           # 37.7% at 1d_recent
-        "heikin_ashi": 0.5,     # 42.7% at 1d_recent — tightened from 0.6
-        "volume_flow": 0.5,     # 40.0% at 1d_recent
+        "structure": 0.5,  # 33.7% at 1d_recent
+        "forecast": 0.5,  # 44.6% at 1d_recent
+        "trend": 0.5,  # 37.7% at 1d_recent
+        "heikin_ashi": 0.5,  # 42.7% at 1d_recent — tightened from 0.6
+        "volume_flow": 0.5,  # 40.0% at 1d_recent
     },
 }
 
@@ -1615,10 +1859,10 @@ _ACTIVITY_RATE_PENALTY = 0.5
 
 # Dynamic horizon weight computation settings
 _DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
-_DYNAMIC_HORIZON_MIN_SAMPLES = 50   # need enough data per signal per horizon
-_DYNAMIC_HORIZON_CLAMP_LOW = 0.4    # minimum multiplier
-_DYNAMIC_HORIZON_CLAMP_HIGH = 1.5   # maximum multiplier
-_DYNAMIC_HORIZON_DEADBAND = 0.1     # ignore multipliers within ±10% of 1.0
+_DYNAMIC_HORIZON_MIN_SAMPLES = 50  # need enough data per signal per horizon
+_DYNAMIC_HORIZON_CLAMP_LOW = 0.4  # minimum multiplier
+_DYNAMIC_HORIZON_CLAMP_HIGH = 1.5  # maximum multiplier
+_DYNAMIC_HORIZON_DEADBAND = 0.1  # ignore multipliers within ±10% of 1.0
 
 # Cross-horizon pairs: for a given horizon, which other horizons to compare against
 _CROSS_HORIZON_PAIRS = {
@@ -1642,6 +1886,7 @@ def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
     """
     try:
         from portfolio.file_utils import load_json
+
         cache = load_json(DATA_DIR / "accuracy_cache.json")
         if not cache:
             return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
@@ -1687,14 +1932,18 @@ def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
             # Ratio of this-horizon accuracy to cross-horizon accuracy
             ratio = this_acc / cross_acc
             # Clamp
-            ratio = max(_DYNAMIC_HORIZON_CLAMP_LOW, min(_DYNAMIC_HORIZON_CLAMP_HIGH, ratio))
+            ratio = max(
+                _DYNAMIC_HORIZON_CLAMP_LOW, min(_DYNAMIC_HORIZON_CLAMP_HIGH, ratio)
+            )
             # Deadband: only include if meaningfully different from 1.0
             if abs(ratio - 1.0) > _DYNAMIC_HORIZON_DEADBAND:
                 weights[sig] = round(ratio, 2)
 
         return weights if weights else HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
     except Exception:
-        logger.debug("Dynamic horizon weights unavailable, using static fallback", exc_info=True)
+        logger.debug(
+            "Dynamic horizon weights unavailable, using static fallback", exc_info=True
+        )
         return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
 
 
@@ -1712,8 +1961,11 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
     # crash at runtime when None leaked through. Coerce to {} here so
     # the contract — "horizon weights are always a dict" — holds at the
     # boundary where the lie used to live.
-    weights = _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL,
-                      lambda: _compute_dynamic_horizon_weights(horizon))
+    weights = _cached(
+        cache_key,
+        _DYNAMIC_HORIZON_WEIGHT_TTL,
+        lambda: _compute_dynamic_horizon_weights(horizon),
+    )
     return cast(dict[str, float], weights) if weights else {}
 
 
@@ -1797,11 +2049,17 @@ def _sig_globally_disabled(signal: str, ticker: str, config: dict | None) -> boo
     """
     if _use_registry(config):
         from portfolio.component_registry import get_registry
+
         return get_registry().is_globally_disabled(signal, ticker)
-    return signal in DISABLED_SIGNALS and (signal, ticker) not in _DISABLED_SIGNAL_OVERRIDES
+    return (
+        signal in DISABLED_SIGNALS
+        and (signal, ticker) not in _DISABLED_SIGNAL_OVERRIDES
+    )
 
 
-def _ticker_horizon_disabled(ticker: str, horizon: str | None, config: dict | None) -> frozenset:
+def _ticker_horizon_disabled(
+    ticker: str, horizon: str | None, config: dict | None
+) -> frozenset:
     """Signals force-HELD for (ticker, horizon), independent of the global
     disable/override/promotion state -- mirrors _get_horizon_disabled_signals
     when the flag is off (byte-identical: both are the static "_default" ∪
@@ -1810,9 +2068,11 @@ def _ticker_horizon_disabled(ticker: str, horizon: str | None, config: dict | No
     """
     if _use_registry(config):
         from portfolio.component_registry import get_registry
+
         reg = get_registry()
         return frozenset(
-            s for s in SIGNAL_NAMES
+            s
+            for s in SIGNAL_NAMES
             if reg.is_ticker_horizon_blacklisted(s, ticker, horizon)
         )
     return _get_horizon_disabled_signals(ticker, horizon)
@@ -1825,6 +2085,7 @@ def _applicable_count(ticker: str, skip_gpu: bool, config: dict | None) -> int:
     """
     if _use_registry(config):
         from portfolio.component_registry import get_registry
+
         return get_registry().applicable_count(ticker, skip_gpu=skip_gpu)
     return _compute_applicable_count(ticker, skip_gpu=skip_gpu)
 
@@ -1844,7 +2105,11 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
     action = result.get("action")
     if action not in _VALID_ACTIONS:
         if sig_name:
-            logger.warning("Signal %s returned invalid action=%r, defaulting to HOLD", sig_name, action)
+            logger.warning(
+                "Signal %s returned invalid action=%r, defaulting to HOLD",
+                sig_name,
+                action,
+            )
         action = "HOLD"
 
     conf = result.get("confidence", 0.0)
@@ -1854,7 +2119,11 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
         conf = 0.0
     if not np.isfinite(conf):
         if sig_name:
-            logger.warning("Signal %s returned non-finite confidence=%r, defaulting to 0.0", sig_name, conf)
+            logger.warning(
+                "Signal %s returned non-finite confidence=%r, defaulting to 0.0",
+                sig_name,
+                conf,
+            )
         conf = 0.0
     conf = max(0.0, min(max_confidence, conf))
 
@@ -1879,7 +2148,7 @@ _DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
 # Agreement rate only counts pairs where at least one signal voted non-HOLD.
 _DYNAMIC_CORR_THRESHOLD = 0.75  # agreement rate threshold for clustering (lowered 0.85→0.75 on 2026-05-16: empirical analysis showed pairs at 0.75-0.84 that should cluster)
 _DYNAMIC_CORR_MIN_SAMPLES = 30  # minimum signal log entries for reliable correlation
-_DYNAMIC_CORR_MIN_PAIRS = 20    # minimum non-HOLD pairs to trust agreement rate
+_DYNAMIC_CORR_MIN_PAIRS = 20  # minimum non-HOLD pairs to trust agreement rate
 
 
 def _compute_agreement_rate(votes_a, votes_b):
@@ -1914,6 +2183,7 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
         from datetime import datetime, timedelta
 
         from portfolio.accuracy_stats import load_entries
+
         entries = load_entries()
         cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         recent = [e for e in entries if e.get("ts", "") >= cutoff]
@@ -1923,13 +2193,16 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
         # Build signal vote matrix: each row is a (entry, ticker) pair
         vote_map = {"BUY": 1, "SELL": -1, "HOLD": 0}
         from portfolio.tickers import SIGNAL_NAMES as _SN
+
         active_signals = [s for s in _SN if s not in DISABLED_SIGNALS]
 
         rows = []
         for entry in recent:
             for _tk, tdata in entry.get("tickers", {}).items():
                 signals = tdata.get("signals", {})
-                row = {s: vote_map.get(signals.get(s, "HOLD"), 0) for s in active_signals}
+                row = {
+                    s: vote_map.get(signals.get(s, "HOLD"), 0) for s in active_signals
+                }
                 rows.append(row)
 
         if len(rows) < _DYNAMIC_CORR_MIN_SAMPLES:
@@ -1943,6 +2216,7 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
 
         # Compute pairwise agreement rate (non-HOLD pairs only)
         from collections import defaultdict
+
         signal_to_group: dict[str, int] = {}
         groups: dict[int, set[str]] = defaultdict(set)
         next_group = 0
@@ -1952,7 +2226,8 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
             for j in range(i + 1, len(sig_list)):
                 s2 = sig_list[j]
                 agree_rate, n_pairs = _compute_agreement_rate(
-                    df[s1].values, df[s2].values,
+                    df[s1].values,
+                    df[s2].values,
                 )
                 if n_pairs < _DYNAMIC_CORR_MIN_PAIRS:
                     continue
@@ -1992,7 +2267,9 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
         return result if result else _STATIC_CORRELATION_GROUPS
 
     except Exception:
-        logger.debug("Dynamic correlation groups unavailable, using static", exc_info=True)
+        logger.debug(
+            "Dynamic correlation groups unavailable, using static", exc_info=True
+        )
         return _STATIC_CORRELATION_GROUPS
 
 
@@ -2005,8 +2282,9 @@ def _get_correlation_groups() -> dict[str, frozenset[str]]:
     the actual return type. Treat empty/None as "no dynamic groups
     available" so the type matches reality.
     """
-    groups = _cached("dynamic_corr_groups", _DYNAMIC_CORR_TTL,
-                     _compute_dynamic_correlation_groups)
+    groups = _cached(
+        "dynamic_corr_groups", _DYNAMIC_CORR_TTL, _compute_dynamic_correlation_groups
+    )
     return cast(dict[str, frozenset[str]], groups) if groups else {}
 
 
@@ -2048,10 +2326,15 @@ _STATIC_CORRELATION_GROUPS = {
     # being fear_greed (BUY-only), news_event (SELL-dominant), econ_calendar
     # (mixed), grouping them suppresses econ_calendar (0.15x) unfairly.
     # fear_greed now votes independently at full weight.
-    "macro_external": frozenset({
-        "sentiment", "news_event",
-        "calendar", "econ_calendar", "funding",
-    }),
+    "macro_external": frozenset(
+        {
+            "sentiment",
+            "news_event",
+            "calendar",
+            "econ_calendar",
+            "funding",
+        }
+    ),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
     # fibonacci disabled 2026-04-29 (43.6%, 17K sam). Group dissolved —
     # candlestick now votes unclustered at full weight.
@@ -2066,16 +2349,25 @@ _STATIC_CORRELATION_GROUPS = {
     # 2026-05-29: Added connors_rsi2, sentiment_extremity_gate, williams_vix_fix.
     # Correlation audit (500 snapshots): all three agree 100% with rsi/bb/mean_reversion
     # on both BTC-USD and XAG-USD. Were voting at full 1.0x weight — pure redundancy.
-    "momentum_cluster": frozenset({
-        "mean_reversion", "rsi", "momentum", "bb",
-        "connors_rsi2", "sentiment_extremity_gate", "williams_vix_fix",
-    }),
+    "momentum_cluster": frozenset(
+        {
+            "mean_reversion",
+            "rsi",
+            "momentum",
+            "bb",
+            "connors_rsi2",
+            "sentiment_extremity_gate",
+            "williams_vix_fix",
+        }
+    ),
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
     # 2026-05-18: Added credit_spread_risk. Signal correlation analysis shows 100%
     # agreement with crypto_macro (226 sam) and econ_calendar (226 sam). Without
     # grouping, it voted at full 1.0x weight while being identical to crypto_macro.
-    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro", "credit_spread_risk"}),
+    "fundamental_cluster": frozenset(
+        {"claude_fundamental", "crypto_macro", "credit_spread_risk"}
+    ),
     # 2026-04-19: Measured correlation (50 snapshots): credit_spread_risk
     # agrees 100% with macro_regime in ETH/XAU, 100% with news_event in BTC.
     # futures_flow agrees 100% with credit_spread_risk + macro_regime in ETH.
@@ -2132,6 +2424,7 @@ def _safe_accuracy(value, default):
     held NaN (every comparison with NaN is False). This helper normalizes.
     """
     import math
+
     if value is None:
         return default
     try:
@@ -2143,9 +2436,40 @@ def _safe_accuracy(value, default):
     return f
 
 
+def _group_leader_key(sig, accuracy_data, macro_active):
+    """Sort key for picking the leader of a correlation group. Total order.
+
+    Returns ``(accuracy, sample_count, name)``. The trailing elements matter:
+    ``active_in_group`` is a **set**, so a key that can tie leaves ``max()``
+    returning the first maximal element in *set iteration order* — which Python
+    randomizes per process. The follower penalty then lands on a
+    hash-order-dependent signal, and when tied signals vote in opposite
+    directions the consensus itself flips.
+
+    Measured 2026-08-20 with bb=BUY / rsi=SELL, both 0.60 in momentum_cluster:
+    PYTHONHASHSEED=0 chose rsi and returned SELL 0.8415; seeds 1-5 chose bb and
+    returned BUY 0.7638. The live loop was not reproducible across restarts.
+
+    Tie-breaks, in order:
+      1. accuracy — the actual signal-quality criterion.
+      2. sample count — on equal accuracy, trust the estimate measured on more
+         data rather than a lucky small sample.
+      3. name — guarantees a total order so the outcome is never hash-dependent.
+
+    The sibling ``_topn_accuracy_key`` already returned ``(base, s)`` for this
+    same reason; this is the pattern it was missing.
+    """
+    stats = accuracy_data.get(sig) or {}
+    base = _safe_accuracy(stats.get("accuracy"), 0.5)
+    if macro_active and sig in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
+        base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
+    return (base, float(_safe_sample_count(stats.get("total"))), sig)
+
+
 def _safe_sample_count(value):
     """Coerce a sample count to a non-negative int; None/NaN/negative -> 0."""
     import math
+
     if value is None:
         return 0
     try:
@@ -2157,8 +2481,9 @@ def _safe_sample_count(value):
     return int(f)
 
 
-def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
-                                  base_gate, relaxation):
+def _count_active_voters_at_gate(
+    votes, accuracy_data, excluded, group_gated, base_gate, relaxation
+):
     """Count how many signals would pass gating at gate=(base_gate - relaxation).
 
     Counts only voters that survive the full gate cascade:
@@ -2206,7 +2531,10 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
         else:
             dir_acc = _safe_accuracy(stats.get("sell_accuracy"), default=acc)
             dir_n = _safe_sample_count(stats.get("total_sell"))
-        if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
+        if (
+            dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES
+            and dir_acc < _DIRECTIONAL_GATE_THRESHOLD
+        ):
             continue
         active += 1
     return active
@@ -2271,8 +2599,9 @@ def _dynamic_min_voters_for_regime(regime, ticker=None):
     return base
 
 
-def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate,
-                              regime=None, ticker=None):
+def _compute_gate_relaxation(
+    votes, accuracy_data, excluded, group_gated, base_gate, regime=None, ticker=None
+):
     """Compute circuit-breaker relaxation to preserve voter diversity.
 
     Progressively tests relaxation values 0, step, 2*step, ..., up to
@@ -2347,21 +2676,31 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     else:
         slate_floor = _POST_EXCLUSION_MIN
     post_exclusion_candidates = sum(
-        1 for sn, v in votes.items()
+        1
+        for sn, v in votes.items()
         if v != "HOLD" and sn not in excluded and sn not in group_gated
     )
     if post_exclusion_candidates < slate_floor:
         return 0.0
 
     baseline = _count_active_voters_at_gate(
-        votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
+        votes,
+        accuracy_data,
+        excluded,
+        group_gated,
+        base_gate,
+        0.0,
     )
     if baseline >= _MIN_ACTIVE_VOTERS_SOFT:
         return 0.0
 
     best_possible = _count_active_voters_at_gate(
-        votes, accuracy_data, excluded, group_gated,
-        base_gate, _GATE_RELAXATION_MAX,
+        votes,
+        accuracy_data,
+        excluded,
+        group_gated,
+        base_gate,
+        _GATE_RELAXATION_MAX,
     )
 
     # Lone-signal escape guard. Even when raw candidates meet the downstream
@@ -2391,7 +2730,12 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     for i in range(1, n_steps + 1):
         candidate_rel = round(i * _GATE_RELAXATION_STEP, 6)
         active = _count_active_voters_at_gate(
-            votes, accuracy_data, excluded, group_gated, base_gate, candidate_rel,
+            votes,
+            accuracy_data,
+            excluded,
+            group_gated,
+            base_gate,
+            candidate_rel,
         )
         if active >= _MIN_ACTIVE_VOTERS_SOFT:
             return candidate_rel
@@ -2406,6 +2750,7 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
 # ---------------------------------------------------------------------------
 # IC-based weight multiplier (2026-04-18)
 # ---------------------------------------------------------------------------
+
 
 def _compute_ic_mult(ic: float, icir: float, samples: int) -> float:
     """Compute IC-based weight multiplier for a signal.
@@ -2450,6 +2795,7 @@ def _get_ic_data(horizon: str) -> dict | None:
 
     try:
         from portfolio.ic_computation import compute_and_cache_ic, load_cached_ic
+
         cache = load_cached_ic(horizon)
         if cache is None:
             cache = compute_and_cache_ic(horizon)
@@ -2459,7 +2805,10 @@ def _get_ic_data(horizon: str) -> dict | None:
                 _ic_data_cache[horizon] = cache
             return cast(dict[Any, Any], cache)
     except Exception:
-        logger.info("IC data unavailable for horizon=%s — signals will use default 1.0x weight", horizon)
+        logger.info(
+            "IC data unavailable for horizon=%s — signals will use default 1.0x weight",
+            horizon,
+        )
     return None
 
 
@@ -2481,6 +2830,7 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
     we entered/exited a macro window without spamming every cycle.
     """
     import time as _time
+
     if now_ts is None:
         now_ts = _time.time()
     with _macro_window_cache_lock:
@@ -2488,9 +2838,12 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
             return bool(_macro_window_cache["value"])
         try:
             from portfolio.econ_dates import is_macro_window
+
             active = bool(is_macro_window())
         except Exception as e:
-            logger.warning("macro window detection failed (treating as inactive): %s", e)
+            logger.warning(
+                "macro window detection failed (treating as inactive): %s", e
+            )
             active = False
         _macro_window_cache["value"] = active
         _macro_window_cache["ts"] = now_ts
@@ -2507,10 +2860,19 @@ def _is_macro_window_cached(now_ts: float | None = None) -> bool:
         return active
 
 
-def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
-                        accuracy_gate=None, max_signals=None, horizon=None,
-                        regime_gated_override=None, ticker=None,
-                        soft_confidences=None, horizon_disabled_override=None):
+def _weighted_consensus(
+    votes,
+    accuracy_data,
+    regime,
+    activation_rates=None,
+    accuracy_gate=None,
+    max_signals=None,
+    horizon=None,
+    regime_gated_override=None,
+    ticker=None,
+    soft_confidences=None,
+    horizon_disabled_override=None,
+):
     """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
@@ -2644,7 +3006,11 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # BUG-149: now horizon-aware — e.g., trend works at 3h in ranging (61.6%)
     # SC-I-001: when caller provides regime_gated_override (with BUG-158 per-ticker
     # exemptions already applied), use it instead of recomputing from scratch.
-    regime_gated = regime_gated_override if regime_gated_override is not None else _get_regime_gated(regime, horizon)
+    regime_gated = (
+        regime_gated_override
+        if regime_gated_override is not None
+        else _get_regime_gated(regime, horizon)
+    )
     votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
 
     # Horizon-specific per-ticker blacklist (2026-04-16, Batch 4). Extends the
@@ -2652,7 +3018,8 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # can't see horizon (one vote reused across 3h/4h/12h/1d/3d/5d/10d consensus),
     # so per-horizon gating must happen here.
     horizon_disabled = (
-        horizon_disabled_override if horizon_disabled_override is not None
+        horizon_disabled_override
+        if horizon_disabled_override is not None
         else _get_horizon_disabled_signals(ticker, horizon)
     )
     if horizon_disabled:
@@ -2704,11 +3071,12 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # window — and the 0.15x follower penalty pushes healthier peers
     # below sentiment's already-halved weight, making the overlay
     # actively reinforce the wrong signal.
-    def _leader_accuracy_key(s: str) -> float:
-        base = float(accuracy_data.get(s, {}).get("accuracy", 0.5))
-        if macro_active and s in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
-            base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
-        return base
+    # 2026-08-20: returns a TOTAL order — (accuracy, samples, name) — because
+    # `active_in_group` below is a set. A bare-float key ties, and max() then
+    # returns whichever element set iteration happens to yield first, which
+    # Python randomizes per process. See _group_leader_key for the measurement.
+    def _leader_accuracy_key(s: str) -> tuple[float, float, str]:
+        return _group_leader_key(s, accuracy_data, macro_active)
 
     group_leaders = {}
     for group_name, group_sigs in _active_corr_groups.items():
@@ -2733,11 +3101,17 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             leader_stats = accuracy_data.get(leader, {})
             leader_acc = leader_stats.get("accuracy", 0.5)
             leader_samples = leader_stats.get("total", 0)
-            if leader_samples >= ACCURACY_GATE_MIN_SAMPLES and leader_acc < _GROUP_LEADER_GATE_THRESHOLD:
+            if (
+                leader_samples >= ACCURACY_GATE_MIN_SAMPLES
+                and leader_acc < _GROUP_LEADER_GATE_THRESHOLD
+            ):
                 group_gated_signals.update(group_sigs & active_non_hold)
                 logger.debug(
                     "Correlation group %s gated: leader %s at %.1f%% < %.0f%% threshold",
-                    group_name, leader, leader_acc * 100, _GROUP_LEADER_GATE_THRESHOLD * 100,
+                    group_name,
+                    leader,
+                    leader_acc * 100,
+                    _GROUP_LEADER_GATE_THRESHOLD * 100,
                 )
 
     # Build a mapping of signal → correlation penalty (per-cluster override).
@@ -2746,7 +3120,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     for group_name, group_sigs in _active_corr_groups.items():
         leader = group_leaders.get(group_name)
         if leader:
-            penalty = _CLUSTER_CORRELATION_PENALTIES.get(group_name, _CORRELATION_PENALTY)
+            penalty = _CLUSTER_CORRELATION_PENALTIES.get(
+                group_name, _CORRELATION_PENALTY
+            )
             for s in group_sigs:
                 if s != leader and s in active_non_hold:
                     penalized_signals[s] = min(penalized_signals.get(s, 1.0), penalty)
@@ -2764,14 +3140,16 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         if len(meta_leaders) < 2:
             continue
         # Check if all leaders agree on direction
-        leader_directions = {sc: votes.get(ldr, "HOLD")
-                            for sc, ldr in meta_leaders.items()}
+        leader_directions = {
+            sc: votes.get(ldr, "HOLD") for sc, ldr in meta_leaders.items()
+        }
         active_dirs = set(leader_directions.values()) - {"HOLD"}
         if len(active_dirs) != 1:
             continue  # Leaders disagree — informative diversity, no penalty
         # All leaders agree: keep best-accuracy leader, penalize others
-        best_sc = max(meta_leaders,
-                      key=lambda sc: _leader_accuracy_key(meta_leaders[sc]))
+        best_sc = max(
+            meta_leaders, key=lambda sc: _leader_accuracy_key(meta_leaders[sc])
+        )
         for sc_name, leader in meta_leaders.items():
             if sc_name != best_sc:
                 current = penalized_signals.get(leader, 1.0)
@@ -2779,8 +3157,12 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                 logger.debug(
                     "Meta-cluster %s: %s leader %s agrees with %s leader %s "
                     "— penalized to %.0f%%",
-                    meta_name, sc_name, leader, best_sc,
-                    meta_leaders[best_sc], _META_CLUSTER_PENALTY * 100,
+                    meta_name,
+                    sc_name,
+                    leader,
+                    best_sc,
+                    meta_leaders[best_sc],
+                    _META_CLUSTER_PENALTY * 100,
                 )
 
     # Crisis mode detection: when multiple macro-external signals have degraded
@@ -2792,9 +3174,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # crisis is in the macro indicators, not in the trend — penalizing trend
     # signals that are winning is actively harmful (observed: trend 61.6%,
     # EMA 62.9% being penalized 0.6x while crisis mode was active).
-    _MACRO_CRISIS_SIGNALS = {"fear_greed", "macro_regime", "structure", "news_event", "sentiment", "econ_calendar", "crypto_macro"}
+    _MACRO_CRISIS_SIGNALS = {
+        "fear_greed",
+        "macro_regime",
+        "structure",
+        "news_event",
+        "sentiment",
+        "econ_calendar",
+        "crypto_macro",
+    }
     broken_count = sum(
-        1 for s in _MACRO_CRISIS_SIGNALS
+        1
+        for s in _MACRO_CRISIS_SIGNALS
         if accuracy_data.get(s, {}).get("total", 0) >= ACCURACY_GATE_MIN_SAMPLES
         and accuracy_data.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
     )
@@ -2819,15 +3210,19 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             logger.info(
                 "Crisis mode active (full): %d/%d macro signals broken, "
                 "trend avg %.1f%% < %.0f%% floor — penalizing trend, boosting MR",
-                broken_count, len(_MACRO_CRISIS_SIGNALS),
-                avg_trend_acc * 100, _CRISIS_TREND_ACCURACY_FLOOR * 100,
+                broken_count,
+                len(_MACRO_CRISIS_SIGNALS),
+                avg_trend_acc * 100,
+                _CRISIS_TREND_ACCURACY_FLOOR * 100,
             )
         else:
             logger.info(
                 "Crisis mode active (partial): %d/%d macro signals broken, but "
                 "trend avg %.1f%% >= %.0f%% floor — NOT penalizing trend signals",
-                broken_count, len(_MACRO_CRISIS_SIGNALS),
-                avg_trend_acc * 100, _CRISIS_TREND_ACCURACY_FLOOR * 100,
+                broken_count,
+                len(_MACRO_CRISIS_SIGNALS),
+                avg_trend_acc * 100,
+                _CRISIS_TREND_ACCURACY_FLOOR * 100,
             )
 
     # Voter-count circuit breaker (Batch 2 of 2026-04-16 accuracy gating reconfig).
@@ -2849,7 +3244,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         logger.debug(
             "Circuit breaker: relaxing accuracy gate by %.0fpp "
             "(base=%.2f -> effective=%.2f) to preserve voter diversity",
-            relaxation * 100, gate, gate - relaxation,
+            relaxation * 100,
+            gate,
+            gate - relaxation,
         )
 
     # IC-based weight multiplier (2026-04-18): load IC data once per consensus
@@ -2904,14 +3301,19 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             else:
                 rescue_acc = stats.get("sell_accuracy", 0.0)
                 rescue_n = stats.get("total_sell", 0)
-            if (rescue_n >= _DIRECTIONAL_RESCUE_MIN_SAMPLES
-                    and rescue_acc >= _DIRECTIONAL_RESCUE_THRESHOLD):
+            if (
+                rescue_n >= _DIRECTIONAL_RESCUE_MIN_SAMPLES
+                and rescue_acc >= _DIRECTIONAL_RESCUE_THRESHOLD
+            ):
                 _rescue_mult = _rescue_weight_penalty(rescue_acc)
                 logger.debug(
                     "Directional rescue: %s overall=%.1f%% (gated) but "
                     "%s=%.1f%% (%d sam) — rescued at %.0f%% weight",
-                    signal_name, acc * 100, vote,
-                    rescue_acc * 100, rescue_n,
+                    signal_name,
+                    acc * 100,
+                    vote,
+                    rescue_acc * 100,
+                    rescue_n,
                     _rescue_mult * 100,
                 )
                 _rescued = True
@@ -2929,7 +3331,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         else:
             dir_acc = stats.get("sell_accuracy", acc)
             dir_n = stats.get("total_sell", 0)
-        if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
+        if (
+            dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES
+            and dir_acc < _DIRECTIONAL_GATE_THRESHOLD
+        ):
             gated_signals.append(f"{signal_name}_{vote}")
             continue
         # BUG-182: Use direction-specific accuracy as weight when available.
@@ -3001,7 +3406,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # 1.0x because that's genuinely informative.
         signal_bias = act_data.get("bias", 0.0)
         signal_samples = act_data.get("samples", 0)
-        if signal_samples >= _BIAS_MIN_ACTIVE and signal_bias > _BIAS_MODERATE_THRESHOLD:
+        if (
+            signal_samples >= _BIAS_MIN_ACTIVE
+            and signal_bias > _BIAS_MODERATE_THRESHOLD
+        ):
             buy_rate = act_data.get("buy_rate", 0.0)
             sell_rate = act_data.get("sell_rate", 0.0)
             bias_direction = "BUY" if buy_rate >= sell_rate else "SELL"
@@ -3026,11 +3434,21 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         elif vote == "SELL":
             sell_weight += weight
     if gated_signals:
-        logger.debug("Accuracy-gated signals (<%s%%): %s", ACCURACY_GATE_THRESHOLD * 100, gated_signals)
+        logger.debug(
+            "Accuracy-gated signals (<%s%%): %s",
+            ACCURACY_GATE_THRESHOLD * 100,
+            gated_signals,
+        )
         dir_gated = [s for s in gated_signals if "_BUY" in s or "_SELL" in s]
-        overall_gated = [s for s in gated_signals if "_BUY" not in s and "_SELL" not in s]
+        overall_gated = [
+            s for s in gated_signals if "_BUY" not in s and "_SELL" not in s
+        ]
         if dir_gated:
-            logger.info("Directional gate (<%s%%): %s", _DIRECTIONAL_GATE_THRESHOLD * 100, dir_gated)
+            logger.info(
+                "Directional gate (<%s%%): %s",
+                _DIRECTIONAL_GATE_THRESHOLD * 100,
+                dir_gated,
+            )
     total_weight = buy_weight + sell_weight
     if total_weight == 0:
         return "HOLD", 0.0
@@ -3085,6 +3503,7 @@ def _time_of_day_factor(horizon=None):
     hour = datetime.now(UTC).hour
     if horizon in ("3h", "4h"):
         from portfolio.short_horizon import time_of_day_scale_3h
+
         return time_of_day_scale_3h(hour)
     # Default 1d behavior
     if 2 <= hour <= 6:
@@ -3102,7 +3521,9 @@ def _load_local_model_accuracy(signal_name, horizon="1d", days=None, cache_ttl=N
         try:
             from portfolio.accuracy_stats import accuracy_by_signal_ticker
 
-            return accuracy_by_signal_ticker(signal_name, horizon=horizon, days=lookback_days)
+            return accuracy_by_signal_ticker(
+                signal_name, horizon=horizon, days=lookback_days
+            )
         except Exception:
             logger.warning("Failed to load %s accuracy", signal_name, exc_info=True)
             return {}
@@ -3135,9 +3556,7 @@ def _build_llm_context(ticker, ind, timeframes, extra_info):
             tf_summary = " | ".join(parts)
 
     ema_gap = (
-        abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
-        if ind["ema21"] != 0
-        else 0
+        abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100 if ind["ema21"] != 0 else 0
     )
 
     return {
@@ -3262,8 +3681,16 @@ def _compute_adx(df, period=14):
         atr_smooth = tr.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
         # Use clip(lower=1e-10) instead of replace(0, np.nan) to avoid NaN propagation
         atr_clipped = atr_smooth.clip(lower=1e-10)
-        plus_di = 100 * plus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_clipped
-        minus_di = 100 * minus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_clipped
+        plus_di = (
+            100
+            * plus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+            / atr_clipped
+        )
+        minus_di = (
+            100
+            * minus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+            / atr_clipped
+        )
 
         di_sum = (plus_di + minus_di).clip(lower=1e-10)
         dx = 100 * (plus_di - minus_di).abs() / di_sum
@@ -3276,7 +3703,7 @@ def _compute_adx(df, period=14):
         with _adx_lock:
             if len(_adx_cache) >= _ADX_CACHE_MAX:
                 keys = list(_adx_cache.keys())
-                for k in keys[:len(keys) // 2]:
+                for k in keys[: len(keys) // 2]:
                     del _adx_cache[k]
             _adx_cache[df_id] = result
         return result
@@ -3287,7 +3714,9 @@ def _compute_adx(df, period=14):
         return None
 
 
-def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df, config):
+def apply_confidence_penalties(
+    action, conf, regime, ind, extra_info, ticker, df, config
+):
     """Apply an 8-stage multiplicative confidence penalty cascade.
 
     Stages:
@@ -3321,7 +3750,9 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
         trending_sell = regime == "trending-down" and action == "SELL"
         if trending_buy or trending_sell:
             conf *= 1.10
-            penalty_log.append({"stage": "regime", "regime": regime, "aligned": True, "mult": 1.10})
+            penalty_log.append(
+                {"stage": "regime", "regime": regime, "aligned": True, "mult": 1.10}
+            )
     # BUG-90: Clamp after Stage 1 so inflated confidence doesn't bypass Stage 2 gates
     conf = min(1.0, conf)
 
@@ -3333,28 +3764,42 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     if volume_ratio is not None and action != "HOLD":
         if volume_ratio < 0.5:
             # Very low volume — force HOLD
-            penalty_log.append({"stage": "volume_gate", "rvol": volume_ratio, "effect": "force_hold"})
+            penalty_log.append(
+                {"stage": "volume_gate", "rvol": volume_ratio, "effect": "force_hold"}
+            )
             action = "HOLD"
             conf = 0.0
         elif volume_ratio < 0.8 and (adx is not None and adx < 20) and conf < 0.65:
             # Low volume + weak trend + marginal confidence — force HOLD
-            penalty_log.append({
-                "stage": "volume_adx_gate", "rvol": volume_ratio,
-                "adx": round(adx, 1), "conf": round(conf, 4), "effect": "force_hold",
-            })
+            penalty_log.append(
+                {
+                    "stage": "volume_adx_gate",
+                    "rvol": volume_ratio,
+                    "adx": round(adx, 1),
+                    "conf": round(conf, 4),
+                    "effect": "force_hold",
+                }
+            )
             action = "HOLD"
             conf = 0.0
         elif volume_ratio > 1.5:
             # High volume — slight confidence boost
             conf *= 1.15
-            penalty_log.append({"stage": "volume_boost", "rvol": volume_ratio, "mult": 1.15})
+            penalty_log.append(
+                {"stage": "volume_boost", "rvol": volume_ratio, "mult": 1.15}
+            )
     # BUG-90: Clamp after Stage 2
     conf = min(1.0, conf)
 
     # --- Stage 3: Trap detection ---
     # NOTE: df must be the "Now" timeframe (15m candles, 100 bars ≈ 25h).
     # Last 5 bars = 75 minutes — appropriate for intraday trap detection.
-    if action != "HOLD" and df is not None and isinstance(df, pd.DataFrame) and len(df) >= 5:
+    if (
+        action != "HOLD"
+        and df is not None
+        and isinstance(df, pd.DataFrame)
+        and len(df) >= 5
+    ):
         try:
             recent_close = df["close"].iloc[-5:]
             recent_vol = df["volume"].iloc[-5:] if "volume" in df.columns else None
@@ -3366,10 +3811,14 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
 
                 if action == "BUY" and price_up and vol_declining:
                     conf *= 0.5
-                    penalty_log.append({"stage": "trap", "type": "bull_trap", "mult": 0.5})
+                    penalty_log.append(
+                        {"stage": "trap", "type": "bull_trap", "mult": 0.5}
+                    )
                 elif action == "SELL" and price_down and vol_declining:
                     conf *= 0.5
-                    penalty_log.append({"stage": "trap", "type": "bear_trap", "mult": 0.5})
+                    penalty_log.append(
+                        {"stage": "trap", "type": "bear_trap", "mult": 0.5}
+                    )
         except Exception:
             logger.warning("Trap detection failed for %s", ticker, exc_info=True)
     # BUG-90: Clamp after Stage 3
@@ -3380,8 +3829,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     # circuit breaker's recovery-floor logic. Same semantic as before.
     # BUG-227: Use post-persistence voter count (not pre-filter) so the gate
     # reflects the actual participating voters after debounce filtering.
-    active_voters = extra_info.get("_voters_post_filter",
-                                    extra_info.get("_voters", 0))
+    active_voters = extra_info.get("_voters_post_filter", extra_info.get("_voters", 0))
     # 2026-06-11 (B6 audit, premortem hook 11): ticker-aware quorum so the
     # MIN_VOTERS_METALS=2 floor survives Stage 4 (see helper docstring for
     # the revert trigger). Also persist the voter count on every metals
@@ -3392,10 +3840,15 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
         extra_info["min_voters_dynamic"] = dynamic_min
 
     if action != "HOLD" and active_voters < dynamic_min:
-        penalty_log.append({
-            "stage": "dynamic_min_voters", "regime": regime,
-            "required": dynamic_min, "actual": active_voters, "effect": "force_hold",
-        })
+        penalty_log.append(
+            {
+                "stage": "dynamic_min_voters",
+                "regime": regime,
+                "required": dynamic_min,
+                "actual": active_voters,
+                "effect": "force_hold",
+            }
+        )
         action = "HOLD"
         conf = 0.0
 
@@ -3410,10 +3863,22 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
             agreement_ratio = max(buy_count, sell_count) / total_voters
             if agreement_ratio >= 0.9:  # 90%+ agreement
                 conf *= 0.6
-                penalty_log.append({"stage": "unanimity", "agreement": round(agreement_ratio, 3), "mult": 0.6})
+                penalty_log.append(
+                    {
+                        "stage": "unanimity",
+                        "agreement": round(agreement_ratio, 3),
+                        "mult": 0.6,
+                    }
+                )
             elif agreement_ratio >= 0.8:  # 80-90% agreement
                 conf *= 0.75
-                penalty_log.append({"stage": "unanimity", "agreement": round(agreement_ratio, 3), "mult": 0.75})
+                penalty_log.append(
+                    {
+                        "stage": "unanimity",
+                        "agreement": round(agreement_ratio, 3),
+                        "mult": 0.75,
+                    }
+                )
 
     # --- Stage 5b: Ensemble entropy guard ---
     # High Shannon entropy across BUY/SELL/HOLD means signals genuinely disagree —
@@ -3421,6 +3886,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     _ENTROPY_MIN_APPLICABLE = 5
     if action != "HOLD" and conf > 0.0:
         import math as _math_ent
+
         _ent_buy = extra_info.get("_buy_count", 0)
         _ent_sell = extra_info.get("_sell_count", 0)
         _ent_total = extra_info.get("_total_applicable", _ent_buy + _ent_sell)
@@ -3432,10 +3898,22 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
             extra_info["_ensemble_entropy"] = round(_norm_entropy, 4)
             if _norm_entropy >= 0.9:
                 conf *= 0.6
-                penalty_log.append({"stage": "ensemble_entropy", "entropy": round(_norm_entropy, 3), "mult": 0.6})
+                penalty_log.append(
+                    {
+                        "stage": "ensemble_entropy",
+                        "entropy": round(_norm_entropy, 3),
+                        "mult": 0.6,
+                    }
+                )
             elif _norm_entropy >= 0.8:
                 conf *= 0.8
-                penalty_log.append({"stage": "ensemble_entropy", "entropy": round(_norm_entropy, 3), "mult": 0.8})
+                penalty_log.append(
+                    {
+                        "stage": "ensemble_entropy",
+                        "entropy": round(_norm_entropy, 3),
+                        "mult": 0.8,
+                    }
+                )
 
     # --- Stage 6: Per-ticker consensus accuracy penalty ---
     # RES-2026-04-17: The consensus system has below-coinflip accuracy for some
@@ -3451,17 +3929,23 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     if action != "HOLD":
         ptc_acc = extra_info.get("_ptc_accuracy")
         ptc_samples = extra_info.get("_ptc_samples", 0)
-        if ptc_acc is not None and ptc_samples >= _PTC_MIN_SAMPLES and ptc_acc < _PTC_PENALTY_THRESHOLD:
+        if (
+            ptc_acc is not None
+            and ptc_samples >= _PTC_MIN_SAMPLES
+            and ptc_acc < _PTC_PENALTY_THRESHOLD
+        ):
             # Scale penalty: 52% acc → 0.6x, 50% acc → 0.52x, 48% acc → 0.44x, 40% acc → 0.2x
             ptc_mult = max(0.2, 0.6 + (ptc_acc - _PTC_PENALTY_THRESHOLD) * 4.0)
             conf *= ptc_mult
-            penalty_log.append({
-                "stage": "per_ticker_consensus",
-                "ticker": ticker,
-                "ptc_accuracy": round(ptc_acc, 4),
-                "ptc_samples": ptc_samples,
-                "mult": round(ptc_mult, 4),
-            })
+            penalty_log.append(
+                {
+                    "stage": "per_ticker_consensus",
+                    "ticker": ticker,
+                    "ptc_accuracy": round(ptc_acc, 4),
+                    "ptc_samples": ptc_samples,
+                    "mult": round(ptc_mult, 4),
+                }
+            )
 
     # --- Stage 7: Confidence calibration compression ---
     # RES-2026-04-18: Calibration analysis shows confidence is meaningless
@@ -3474,12 +3958,17 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     _CALIBRATION_COMPRESSION = 0.3
     if action != "HOLD" and conf > _CALIBRATION_THRESHOLD:
         raw_conf = conf
-        conf = _CALIBRATION_THRESHOLD + (conf - _CALIBRATION_THRESHOLD) * _CALIBRATION_COMPRESSION
-        penalty_log.append({
-            "stage": "calibration_compression",
-            "raw_conf": round(raw_conf, 4),
-            "compressed_conf": round(conf, 4),
-        })
+        conf = (
+            _CALIBRATION_THRESHOLD
+            + (conf - _CALIBRATION_THRESHOLD) * _CALIBRATION_COMPRESSION
+        )
+        penalty_log.append(
+            {
+                "stage": "calibration_compression",
+                "raw_conf": round(raw_conf, 4),
+                "compressed_conf": round(conf, 4),
+            }
+        )
 
     # Clamp confidence to [0, 1]
     conf = max(0.0, min(1.0, conf))
@@ -3487,7 +3976,9 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     return action, conf, penalty_log
 
 
-def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, horizon=None):
+def generate_signal(
+    ind, ticker=None, config=None, timeframes=None, df=None, horizon=None
+):
     # CRITICAL-2 guard (2026-04-17 adversarial review): empty/None ticker
     # slipped through scattered `if ticker:` checks in production before.
     # All real callers (main.py:486, agent_invocation, backtester) pass a
@@ -3539,6 +4030,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # contribution, no consensus dilution (removal, not abstain).
     from portfolio.llama_server import remote_llm_available
     from portfolio.market_timing import should_skip_gpu
+
     skip_gpu = should_skip_gpu(ticker, config=config) if ticker else False
     if ticker and not skip_gpu and not remote_llm_available():
         skip_gpu = True
@@ -3627,7 +4119,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # but during sustained fear (2022), prices dropped another -40% after signal.
     votes["fear_greed"] = "HOLD"
     try:
-        from portfolio.fear_greed import get_fear_greed, get_sustained_fear_days, update_fear_streak
+        from portfolio.fear_greed import (
+            get_fear_greed,
+            get_sustained_fear_days,
+            update_fear_streak,
+        )
 
         fg_key = f"fear_greed_{ticker}" if ticker else "fear_greed"
         fg = _cached(fg_key, FEAR_GREED_TTL, get_fear_greed, ticker)
@@ -3650,7 +4146,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # by the existing 0.3x ranging regime weight).
             elif fg["value"] <= 20 and fear_days > 30:
                 votes["fear_greed"] = "BUY"
-                extra_info["fear_greed_note"] = f"sustained_fear_{fear_days}d_allowing_contrarian"
+                extra_info["fear_greed_note"] = (
+                    f"sustained_fear_{fear_days}d_allowing_contrarian"
+                )
             elif fg["value"] <= 20 and fear_days > 0:
                 extra_info["fear_greed_gated"] = f"sustained_fear_{fear_days}d"
                 votes["fear_greed"] = "HOLD"
@@ -3763,7 +4261,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         try:
             from portfolio.funding_rate import get_funding_rate
 
-            fr = _cached(f"funding_{ticker}", FUNDING_RATE_TTL, get_funding_rate, ticker)
+            fr = _cached(
+                f"funding_{ticker}", FUNDING_RATE_TTL, get_funding_rate, ticker
+            )
             if fr:
                 extra_info["funding_rate"] = fr["rate_pct"]
                 extra_info["funding_action"] = fr["action"]
@@ -3887,7 +4387,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 extra_info["ministral_gating"] = gating.get("gating", "raw")
                 if orig.get("confidence") is not None:
                     extra_info["ministral_confidence"] = orig["confidence"]
-                    if gated_action != "HOLD" and orig["confidence"] < _LLM_CONFIDENCE_GATE:
+                    if (
+                        gated_action != "HOLD"
+                        and orig["confidence"] < _LLM_CONFIDENCE_GATE
+                    ):
                         extra_info["ministral_confidence_gated"] = True
                         gated_action = "HOLD"
                 votes["ministral"] = gated_action
@@ -3902,7 +4405,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Config: config.json → local_models.qwen3 (hold_threshold, min_samples)
     # Uses batch queue: same pattern as Ministral above.
     votes["qwen3"] = "HOLD"
-    qwen3_enabled = (config or {}).get("local_models", {}).get("qwen3", {}).get("enabled", True)
+    qwen3_enabled = (
+        (config or {}).get("local_models", {}).get("qwen3", {}).get("enabled", True)
+    )
     if ticker and qwen3_enabled and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -3939,7 +4444,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 extra_info["qwen3_gating"] = gating.get("gating", "raw")
                 if q3.get("confidence") is not None:
                     extra_info["qwen3_confidence"] = q3["confidence"]
-                    if gated_action != "HOLD" and q3["confidence"] < _LLM_CONFIDENCE_GATE:
+                    if (
+                        gated_action != "HOLD"
+                        and q3["confidence"] < _LLM_CONFIDENCE_GATE
+                    ):
                         extra_info["qwen3_confidence_gated"] = True
                         gated_action = "HOLD"
                 votes["qwen3"] = gated_action
@@ -3954,10 +4462,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if df is not None and isinstance(df, pd.DataFrame) and len(df) >= 26:
         # Fetch macro context once for any signal that requires it
         macro_data = None
-        has_macro_signals = any(e.get("requires_macro") for e in _enhanced_entries.values())
+        has_macro_signals = any(
+            e.get("requires_macro") for e in _enhanced_entries.values()
+        )
         if has_macro_signals:
             try:
-                from portfolio.macro_context import get_dxy, get_fed_calendar, get_treasury
+                from portfolio.macro_context import (
+                    get_dxy,
+                    get_fed_calendar,
+                    get_treasury,
+                )
+
                 macro_data = {}
                 dxy = _cached("dxy", 3600, get_dxy)
                 if dxy:
@@ -3976,16 +4491,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         if ticker in METALS_SYMBOLS:
             try:
                 from portfolio.seasonality import get_profile
+
                 seasonality_profile = get_profile(ticker)
             except Exception:
-                logger.debug("Seasonality profile load failed for %s", ticker, exc_info=True)
+                logger.debug(
+                    "Seasonality profile load failed for %s", ticker, exc_info=True
+                )
 
         # Build context data once for signals that need it
         # BUG-144: Include regime so enhanced signals (forecast.py) can apply
         # regime-specific confidence discounts.
         context_data = {
-            "ticker": ticker, "config": config or {}, "macro": macro_data,
-            "regime": regime, "seasonality_profile": seasonality_profile,
+            "ticker": ticker,
+            "config": config or {},
+            "macro": macro_data,
+            "regime": regime,
+            "seasonality_profile": seasonality_profile,
         }
 
         _signal_failures = []
@@ -4015,10 +4536,16 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             _promoted_override = False
             try:
                 from portfolio.shadow_registry import is_promoted
+
                 _promoted_override = is_promoted(sig_name)
             except Exception:
-                logger.debug("shadow_registry import failed for %s", sig_name, exc_info=True)
-            if _sig_globally_disabled(sig_name, ticker, config) and not _promoted_override:
+                logger.debug(
+                    "shadow_registry import failed for %s", sig_name, exc_info=True
+                )
+            if (
+                _sig_globally_disabled(sig_name, ticker, config)
+                and not _promoted_override
+            ):
                 # Shadow-safe signals: compute but don't let them vote.
                 # Their predictions go into _shadow_votes for accuracy tracking.
                 if sig_name in _SHADOW_SAFE_SIGNALS:
@@ -4036,15 +4563,26 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                                 result = compute_fn(df)
                             _sig_dt = time.monotonic() - _sig_t0
                             if _sig_dt > 1.0:
-                                logger.info("[SLOW-SHADOW] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
+                                logger.info(
+                                    "[SLOW-SHADOW] %s/%s: %.1fs",
+                                    ticker,
+                                    sig_name,
+                                    _sig_dt,
+                                )
                             max_conf = entry.get("max_confidence", 1.0)
-                            validated = _validate_signal_result(result, sig_name=sig_name, max_confidence=max_conf)
+                            validated = _validate_signal_result(
+                                result, sig_name=sig_name, max_confidence=max_conf
+                            )
                             extra_info[f"{sig_name}_action"] = validated["action"]
-                            extra_info[f"{sig_name}_confidence"] = validated["confidence"]
+                            extra_info[f"{sig_name}_confidence"] = validated[
+                                "confidence"
+                            ]
                             extra_info[f"shadow_{sig_name}"] = True
                             shadow_votes[sig_name] = validated["action"]
                     except Exception as e:
-                        logger.info("Shadow signal %s failed: %s", sig_name, e, exc_info=True)
+                        logger.info(
+                            "Shadow signal %s failed: %s", sig_name, e, exc_info=True
+                        )
                 # 2026-06-01 (FGL follow-up): expensive LLM shadows. Same
                 # shadow_votes recording as the math shadows above, but gated to
                 # ONE rotating ticker per throttle-tick so the ~22s GPU call runs
@@ -4054,6 +4592,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 elif sig_name in _SHADOW_LLM_SIGNALS:
                     try:
                         from portfolio.shadow_registry import cycle_count_now
+
                         _cyc = cycle_count_now()
                     except Exception:
                         _cyc = -1
@@ -4080,7 +4619,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                                 # full form.
                                 _llm_ctx = dict(context_data)
                                 _llm_ctx.update(
-                                    _build_llm_context(ticker, ind, timeframes, extra_info)
+                                    _build_llm_context(
+                                        ticker, ind, timeframes, extra_info
+                                    )
                                 )
                                 _llm_ctx["ticker"] = ticker
                                 # LLM shadows are all requires_context=True.
@@ -4090,17 +4631,30 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                                 # >1s) — this is the premortem's lock-hold/cycle-
                                 # blowout detection hook. A 22s line here every
                                 # ~10 min is expected; a climbing count is not.
-                                logger.info("[SHADOW-LLM] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
+                                logger.info(
+                                    "[SHADOW-LLM] %s/%s: %.1fs",
+                                    ticker,
+                                    sig_name,
+                                    _sig_dt,
+                                )
                                 max_conf = entry.get("max_confidence", 1.0)
-                                validated = _validate_signal_result(result, sig_name=sig_name, max_confidence=max_conf)
+                                validated = _validate_signal_result(
+                                    result, sig_name=sig_name, max_confidence=max_conf
+                                )
                                 extra_info[f"{sig_name}_action"] = validated["action"]
-                                extra_info[f"{sig_name}_confidence"] = validated["confidence"]
+                                extra_info[f"{sig_name}_confidence"] = validated[
+                                    "confidence"
+                                ]
                                 if validated["indicators"]:
-                                    extra_info[f"{sig_name}_indicators"] = validated["indicators"]
+                                    extra_info[f"{sig_name}_indicators"] = validated[
+                                        "indicators"
+                                    ]
                                 extra_info[f"shadow_{sig_name}"] = True
                                 shadow_votes[sig_name] = validated["action"]
                         except Exception as e:
-                            logger.info("Shadow LLM %s failed: %s", sig_name, e, exc_info=True)
+                            logger.info(
+                                "Shadow LLM %s failed: %s", sig_name, e, exc_info=True
+                            )
                     else:
                         # 2026-06-11: off-rotation / off-phase ticks never
                         # computed anything, so mark them throttled — the
@@ -4145,12 +4699,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     get_status,
                     should_run_this_cycle,
                 )
+
                 _sig_status = get_status(sig_name)
                 if _sig_status == "shadow" and not _promoted_override:
                     if not should_run_this_cycle(sig_name, cycle_count_now()):
                         _throttle_skip = True
             except Exception:
-                logger.debug("shadow-throttle check failed for %s", sig_name, exc_info=True)
+                logger.debug(
+                    "shadow-throttle check failed for %s", sig_name, exc_info=True
+                )
                 # Fail-closed for known shadow signals only. We can't
                 # consult get_status() because that's what just failed,
                 # so use a static name list seeded from the registry JSON
@@ -4206,7 +4763,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 if _sig_dt > 1.0:
                     logger.info("[SLOW] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
                 max_conf = entry.get("max_confidence", 1.0)
-                validated = _validate_signal_result(result, sig_name=sig_name, max_confidence=max_conf)
+                validated = _validate_signal_result(
+                    result, sig_name=sig_name, max_confidence=max_conf
+                )
                 extra_info[f"{sig_name}_action"] = validated["action"]
                 extra_info[f"{sig_name}_confidence"] = validated["confidence"]
                 extra_info[f"{sig_name}_sub_signals"] = validated["sub_signals"]
@@ -4222,12 +4781,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             if len(_signal_failures) > 3:
                 logger.warning(
                     "%s: %d enhanced signals failed: %s",
-                    ticker, len(_signal_failures), ", ".join(_signal_failures),
+                    ticker,
+                    len(_signal_failures),
+                    ", ".join(_signal_failures),
                 )
 
         # Persist signal health (single batch write for all enhanced signals)
         try:
             from portfolio.health import update_signal_health_batch
+
             health_results = {
                 sig_name: (sig_name not in _signal_failures)
                 for sig_name in _enhanced_entries
@@ -4238,7 +4800,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
         _dispatch_dt = time.monotonic() - _dispatch_t0
         if _dispatch_dt > 5.0:
-            logger.warning("[SLOW-DISPATCH] %s: enhanced signals took %.1fs", ticker, _dispatch_dt)
+            logger.warning(
+                "[SLOW-DISPATCH] %s: enhanced signals took %.1fs", ticker, _dispatch_dt
+            )
 
         # 2026-05-11 Stage 2 Batch 2: candlestick + forecast dead-zone
         # soft directional votes. Same pattern as Batch 1 (EMA / BB /
@@ -4248,9 +4812,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         # cleanly one way. Strong votes are untouched. The soft conf is
         # written into extra_info so `_weighted_consensus` dampens the
         # vote's weight via the existing soft_confidences path.
-        if "candlestick" in votes and votes["candlestick"] == "HOLD" \
-                and not _sig_globally_disabled("candlestick", ticker, config) \
-                and "candlestick" not in _default_disabled_for_ticker:
+        if (
+            "candlestick" in votes
+            and votes["candlestick"] == "HOLD"
+            and not _sig_globally_disabled("candlestick", ticker, config)
+            and "candlestick" not in _default_disabled_for_ticker
+        ):
             cs_vote, cs_soft_conf = _candlestick_dead_zone_vote(df)
             if cs_vote != "HOLD":
                 votes["candlestick"] = cs_vote
@@ -4294,9 +4861,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 _bp_promoted = False
                 try:
                     from portfolio.shadow_registry import is_promoted
+
                     _bp_promoted = is_promoted("btc_proxy")
                 except Exception:
-                    logger.debug("shadow_registry import failed for btc_proxy", exc_info=True)
+                    logger.debug(
+                        "shadow_registry import failed for btc_proxy", exc_info=True
+                    )
                 _bp_disabled = (
                     _sig_globally_disabled("btc_proxy", ticker, config)
                     and not _bp_promoted
@@ -4339,6 +4909,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             llm_signals,
             log_vote,
         )
+
         for sig_name in llm_signals():
             action = votes.get(sig_name)
             if not action or action not in ("BUY", "HOLD", "SELL"):
@@ -4356,9 +4927,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 continue
             if sig_name == "sentiment":
                 conf = extra_info.get("sentiment_conf", 0.0)
-                indicators = {
-                    "avg_scores": extra_info.get("sentiment_avg_scores"),
-                } if extra_info.get("sentiment_avg_scores") else None
+                indicators = (
+                    {
+                        "avg_scores": extra_info.get("sentiment_avg_scores"),
+                    }
+                    if extra_info.get("sentiment_avg_scores")
+                    else None
+                )
             else:
                 conf = extra_info.get(f"{sig_name}_confidence", 0.0)
                 indicators = extra_info.get(f"{sig_name}_indicators")
@@ -4387,12 +4962,19 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     "[log_vote_skipped] signal=%s ticker=%s reason=%s conf=%s",
                     sig_name,
                     ticker or "",
-                    "feature_unavailable" if feature_unavailable else "abstain_conf_zero",
+                    (
+                        "feature_unavailable"
+                        if feature_unavailable
+                        else "abstain_conf_zero"
+                    ),
                     conf_f,
                 )
                 continue
             probs = derive_probs_from_result(
-                sig_name, action, conf, indicators=indicators,
+                sig_name,
+                action,
+                conf,
+                indicators=indicators,
             )
             if probs is None:
                 continue
@@ -4402,8 +4984,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # Default horizon to "1d" when caller passes None so the log is
             # queryable by horizon without null-handling at every join site.
             log_vote(
-                sig_name, ticker or "", probs,
-                horizon=horizon or "1d", chosen=action, confidence=conf, tier=tier,
+                sig_name,
+                ticker or "",
+                probs,
+                horizon=horizon or "1d",
+                chosen=action,
+                confidence=conf,
+                tier=tier,
             )
     except Exception:
         logger.debug("llm probability logging failed", exc_info=True)
@@ -4421,6 +5008,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # 3h horizon: gate slow signals that are noise at short timeframes
     if horizon in ("3h", "4h"):
         from portfolio.short_horizon import is_slow_signal_3h
+
         for sig_name in list(votes.keys()):
             if is_slow_signal_3h(sig_name) and votes[sig_name] != "HOLD":
                 votes[sig_name] = "HOLD"
@@ -4437,10 +5025,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     _ticker_acc_data = {}
     try:
         from portfolio.accuracy_stats import accuracy_by_ticker_signal_cached
+
         acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
-        _ticker_acc_data = (accuracy_by_ticker_signal_cached(acc_horizon) or {}).get(ticker, {})
+        _ticker_acc_data = (accuracy_by_ticker_signal_cached(acc_horizon) or {}).get(
+            ticker, {}
+        )
     except Exception:
-        logger.debug("Per-ticker accuracy unavailable for regime gating exemption", exc_info=True)
+        logger.debug(
+            "Per-ticker accuracy unavailable for regime gating exemption", exc_info=True
+        )
     _TICKER_EXEMPT_ACC = 0.60
     _TICKER_EXEMPT_MIN_SAMPLES = 50
     # RES-2026-04-21: Recent-accuracy override for regime gating. When a signal's
@@ -4453,11 +5046,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     _recent_acc_data: dict[str, Any] = {}
     try:
         from portfolio.accuracy_stats import get_or_compute_recent_accuracy
+
         # get_or_compute_recent_accuracy expects the base horizon, not the cache key
         base_hz = "3h" if horizon in ("3h", "4h") else "1d"
         _recent_acc_data = get_or_compute_recent_accuracy(base_hz) or {}
     except Exception:
-        logger.debug("Recent accuracy unavailable for regime gating override", exc_info=True)
+        logger.debug(
+            "Recent accuracy unavailable for regime gating override", exc_info=True
+        )
 
     regime_gated_effective = set(regime_gated)
     for sig_name in list(regime_gated_effective):
@@ -4469,7 +5065,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             regime_gated_effective.discard(sig_name)
             logger.debug(
                 "BUG-158: %s exempt from %s regime gating for %s (%.1f%%, %d samples)",
-                sig_name, regime, ticker, t_acc * 100, t_samples,
+                sig_name,
+                regime,
+                ticker,
+                t_acc * 100,
+                t_samples,
             )
             continue
         # Recent-accuracy override (RES-2026-04-21)
@@ -4481,7 +5081,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             logger.debug(
                 "RES-2026-04-21: %s exempt from %s regime gating — recent 7d "
                 "accuracy %.1f%% (%d sam) overrides stale gate",
-                sig_name, regime, r_acc * 100, r_samples,
+                sig_name,
+                regime,
+                r_acc * 100,
+                r_samples,
             )
     for sig_name in regime_gated_effective:
         if sig_name in votes and votes[sig_name] != "HOLD":
@@ -4606,7 +5209,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
         # ARCH-23: Use shared blend function (replaces inline logic).
         accuracy_data = blend_accuracy_data(
-            alltime, recent,
+            alltime,
+            recent,
             divergence_threshold=_RECENCY_DIVERGENCE_THRESHOLD,
             normal_weight=_RECENCY_WEIGHT_NORMAL,
             fast_weight=_RECENCY_WEIGHT_FAST,
@@ -4632,6 +5236,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if not _accuracy_failed:
         try:
             from portfolio.accuracy_stats import get_or_compute_regime_accuracy
+
             # BUG-134: Use acc_horizon (not hardcoded "1d") so regime accuracy
             # matches the prediction horizon (3h/4h/12h/1d).
             # 2026-05-04: switched from manual L2-only dance to L1+L2 wrapper.
@@ -4679,8 +5284,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 # Without these, _weighted_consensus directional gate falls back
                 # to overall per-ticker accuracy, missing direction-specific
                 # weaknesses (e.g., ministral BUY 15% on XAG even if overall 20%).
-                for field in ("correct_buy", "total_buy", "buy_accuracy",
-                              "correct_sell", "total_sell", "sell_accuracy"):
+                for field in (
+                    "correct_buy",
+                    "total_buy",
+                    "buy_accuracy",
+                    "correct_sell",
+                    "total_sell",
+                    "sell_accuracy",
+                ):
                     if field in t_stats:
                         override[field] = t_stats[field]
                 accuracy_data[sig_name] = override
@@ -4703,6 +5314,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if not _accuracy_failed:
         try:
             from portfolio.accuracy_stats import signal_utility
+
             # BUG-135: Use acc_horizon (not hardcoded "1d") so utility boost
             # reflects the actual prediction horizon's return profile.
             utility_data = signal_utility(acc_horizon)
@@ -4716,10 +5328,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                         raw_acc = accuracy_data[sig_name]["accuracy"]
                         raw_samples = accuracy_data[sig_name].get("total", 0)
                         high_sample = raw_samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN
-                        eff_gate = (_ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
-                                    if high_sample
-                                    else ACCURACY_GATE_THRESHOLD)
-                        if raw_samples < ACCURACY_GATE_MIN_SAMPLES or raw_acc >= eff_gate:
+                        eff_gate = (
+                            _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
+                            if high_sample
+                            else ACCURACY_GATE_THRESHOLD
+                        )
+                        if (
+                            raw_samples < ACCURACY_GATE_MIN_SAMPLES
+                            or raw_acc >= eff_gate
+                        ):
                             boosted_acc = min(raw_acc * boost, 0.95)
                             accuracy_data[sig_name] = {
                                 **accuracy_data[sig_name],
@@ -4738,6 +5355,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if not _accuracy_failed and sig_cfg.get("use_best_horizon", False):
         try:
             from portfolio.accuracy_stats import signal_best_horizon_accuracy
+
             best_hz = signal_best_horizon_accuracy(min_samples=50)
             for sig_name, bh_data in best_hz.items():
                 if bh_data.get("total", 0) >= 30:
@@ -4759,8 +5377,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     consensus_votes = _apply_persistence_filter(votes, ticker)
     # Track how many signals were filtered for debugging
     _filtered_count = sum(
-        1 for s in votes
-        if votes[s] != "HOLD" and consensus_votes.get(s) == "HOLD"
+        1 for s in votes if votes[s] != "HOLD" and consensus_votes.get(s) == "HOLD"
     )
     if _filtered_count > 0:
         extra_info["_persistence_filtered"] = _filtered_count
@@ -4779,7 +5396,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     )
 
     weighted_action, weighted_conf = _weighted_consensus(
-        consensus_votes, accuracy_data, regime, activation_rates,
+        consensus_votes,
+        accuracy_data,
+        regime,
+        activation_rates,
         accuracy_gate=accuracy_gate,
         max_signals=max_signals,
         horizon=horizon,
@@ -4856,13 +5476,18 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # broken FTD, etc.).  Only affects BUY; SELL and HOLD pass through.
     try:
         from portfolio.market_health import get_confidence_penalty, get_market_health
+
         mh = get_market_health()
         mh_mult = get_confidence_penalty(action, mh)
         if mh_mult != 1.0:
             conf *= mh_mult
             extra_info.setdefault("_penalty_log", []).append(
-                {"stage": "market_health", "zone": mh.get("zone") if mh else "unknown",
-                 "score": mh.get("score") if mh else None, "mult": mh_mult}
+                {
+                    "stage": "market_health",
+                    "zone": mh.get("zone") if mh else "unknown",
+                    "score": mh.get("score") if mh else None,
+                    "mult": mh_mult,
+                }
             )
     except Exception:
         logger.debug("Market health penalty failed", exc_info=True)
@@ -4872,6 +5497,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if ticker and action != "HOLD":
         try:
             from portfolio.earnings_calendar import should_gate_earnings
+
             if should_gate_earnings(ticker):
                 extra_info.setdefault("_penalty_log", []).append(
                     {"stage": "earnings_gate", "ticker": ticker, "effect": "force_hold"}
@@ -4889,6 +5515,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # 2. Provide alternative ranking in agent_summary for Layer 2 decisions
     try:
         from portfolio.linear_factor import LinearFactorModel
+
         _lf_model = LinearFactorModel()
         if _lf_model.load():
             # Convert votes to numeric: BUY=+1, SELL=-1, HOLD=0
@@ -4904,13 +5531,23 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             if lf_action == action and action != "HOLD" and lf_conf > 0.3:
                 conf *= 1.10
                 extra_info.setdefault("_penalty_log", []).append(
-                    {"stage": "linear_factor", "effect": "confirm_boost",
-                     "lf_action": lf_action, "lf_score": round(lf_score, 6)})
+                    {
+                        "stage": "linear_factor",
+                        "effect": "confirm_boost",
+                        "lf_action": lf_action,
+                        "lf_score": round(lf_score, 6),
+                    }
+                )
             elif lf_action != "HOLD" and lf_action != action and action != "HOLD":
                 conf *= 0.90
                 extra_info.setdefault("_penalty_log", []).append(
-                    {"stage": "linear_factor", "effect": "disagree_dampen",
-                     "lf_action": lf_action, "lf_score": round(lf_score, 6)})
+                    {
+                        "stage": "linear_factor",
+                        "effect": "disagree_dampen",
+                        "lf_action": lf_action,
+                        "lf_score": round(lf_score, 6),
+                    }
+                )
     except Exception:
         logger.debug("Linear factor model failed", exc_info=True)
 
@@ -4932,20 +5569,27 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 _ptc_stats = _ptc_acc.get(ticker, {})
                 _ptc_total = _ptc_stats.get("total", 0)
                 _ptc_accuracy = _ptc_stats.get("accuracy", 0.5)
-                if _ptc_total >= _PER_TICKER_CONSENSUS_MIN_SAMPLES and _ptc_accuracy < _PER_TICKER_CONSENSUS_GATE:
-                    extra_info.setdefault("_penalty_log", []).append({
-                        "stage": "per_ticker_consensus_gate",
-                        "ticker": ticker,
-                        "accuracy": round(_ptc_accuracy, 3),
-                        "samples": _ptc_total,
-                        "threshold": _PER_TICKER_CONSENSUS_GATE,
-                        "effect": "force_hold",
-                    })
+                if (
+                    _ptc_total >= _PER_TICKER_CONSENSUS_MIN_SAMPLES
+                    and _ptc_accuracy < _PER_TICKER_CONSENSUS_GATE
+                ):
+                    extra_info.setdefault("_penalty_log", []).append(
+                        {
+                            "stage": "per_ticker_consensus_gate",
+                            "ticker": ticker,
+                            "accuracy": round(_ptc_accuracy, 3),
+                            "samples": _ptc_total,
+                            "threshold": _PER_TICKER_CONSENSUS_GATE,
+                            "effect": "force_hold",
+                        }
+                    )
                     extra_info["_ticker_consensus_gated"] = True
                     action = "HOLD"
                     conf = 0.0
         except Exception:
-            logger.debug("Per-ticker consensus gate failed for %s", ticker, exc_info=True)
+            logger.debug(
+                "Per-ticker consensus gate failed for %s", ticker, exc_info=True
+            )
 
     # Seasonal confidence modifier for metals (XAG, XAU)
     # 2026-05-29: Silver seasonality analysis shows June is historically the
@@ -4960,11 +5604,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # seasonal modifier must be subject to it, not exempt from it.
     if ticker in ("XAG-USD", "XAU-USD") and action == "BUY":
         import datetime as _dt
+
         month = _dt.datetime.now(_dt.timezone.utc).month
         _SEASONAL_BUY_MULT = {
-            1: 1.15, 2: 1.15, 3: 1.15, 4: 1.10,  # Jan-Apr strong
-            5: 1.0, 6: 0.70, 7: 1.10, 8: 1.05,    # June weak, Jul-Aug recovery
-            9: 0.80, 10: 1.10, 11: 1.0, 12: 1.0,   # Sep weak, Oct strong
+            1: 1.15,
+            2: 1.15,
+            3: 1.15,
+            4: 1.10,  # Jan-Apr strong
+            5: 1.0,
+            6: 0.70,
+            7: 1.10,
+            8: 1.05,  # June weak, Jul-Aug recovery
+            9: 0.80,
+            10: 1.10,
+            11: 1.0,
+            12: 1.0,  # Sep weak, Oct strong
         }
         seasonal_mult = _SEASONAL_BUY_MULT.get(month, 1.0)
         if seasonal_mult != 1.0:
@@ -4982,6 +5636,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # 3h horizon: cap confidence to prevent overconfident short-term predictions
     if horizon in ("3h", "4h"):
         from portfolio.short_horizon import CONFIDENCE_CAP_3H
+
         conf = min(conf, CONFIDENCE_CAP_3H)
 
     if ticker:
@@ -4990,6 +5645,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Update cross-ticker consensus cache for synthetic cross-asset signals
     if ticker:
         with _cross_ticker_lock:
-            _cross_ticker_consensus[(ticker, horizon)] = {"action": action, "confidence": conf}
+            _cross_ticker_consensus[(ticker, horizon)] = {
+                "action": action,
+                "confidence": conf,
+            }
 
     return action, conf, extra_info
