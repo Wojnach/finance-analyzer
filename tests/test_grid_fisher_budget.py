@@ -6,6 +6,7 @@ tick(). Previously the cap was the static config value
 grid_fisher would happily attempt OLJAB / silver / gold placements
 even when the account only had a few thousand SEK available.
 """
+
 from __future__ import annotations
 
 import time
@@ -25,8 +26,11 @@ class _StubSession:
     assertions.
     """
 
-    def __init__(self, buying_power_return: Optional[dict] = None,
-                 buying_power_raises: bool = False) -> None:
+    def __init__(
+        self,
+        buying_power_return: Optional[dict] = None,
+        buying_power_raises: bool = False,
+    ) -> None:
         self.buying_power_return = buying_power_return
         self.buying_power_raises = buying_power_raises
         self.buying_power_calls = 0
@@ -49,13 +53,14 @@ class _StubSession:
     def get_quote(self, ob_id: str):
         # ``timeOfLast`` keeps the new Gate A (quote-staleness) from
         # short-circuiting these tests with a closed-orderbook decision.
-        return {"buy": 100.0, "sell": 100.5,
-                "timeOfLast": int(time.time() * 1000)}
+        return {"buy": 100.0, "sell": 100.5, "timeOfLast": int(time.time() * 1000)}
 
     def place_buy_order(self, ob_id: str, price: float, volume: int):
         self.place_buy_calls.append((ob_id, price, volume))
-        return {"orderRequestStatus": "SUCCESS",
-                "orderId": f"sim-{len(self.place_buy_calls)}"}
+        return {
+            "orderRequestStatus": "SUCCESS",
+            "orderId": f"sim-{len(self.place_buy_calls)}",
+        }
 
     def place_sell_order(self, ob_id: str, price: float, volume: int):
         return {"orderRequestStatus": "SUCCESS", "orderId": "sim-sell"}
@@ -90,13 +95,21 @@ def single_instrument_active(monkeypatch, grid_catalog):
     """Restrict GRID_ACTIVE_INSTRUMENTS to a single XAG/LONG slot so seeding
     is deterministic regardless of config drift."""
     monkeypatch.setattr(
-        gfc, "GRID_ACTIVE_INSTRUMENTS",
+        gfc,
+        "GRID_ACTIVE_INSTRUMENTS",
         {"XAG-USD": {"LONG": "1650161"}},
     )
 
 
 def _make_fisher(session, tmp_path, account_id: Optional[str] = "1625505"):
-    return GridFisher(
+    """Build an engine with probe mode pinned OFF.
+
+    These tests assert that real placements happen once the live cap allows
+    them, so they must not inherit GRID_FISHER_PROBE_ONLY. 2026-08-21 that flag
+    was set back to True (surveillance mode), which silently made
+    test_tick_with_ample_cash_places_orders see zero placements.
+    """
+    f = GridFisher(
         session=session,
         catalog={
             "1650161": {
@@ -113,6 +126,8 @@ def _make_fisher(session, tmp_path, account_id: Optional[str] = "1625505"):
         atr_fn=lambda *_a, **_k: 2.0,
         adx_fn=lambda *_a, **_k: 15.0,
     )
+    f._probe_only = False
+    return f
 
 
 # ---- _effective_global_cap arithmetic ------------------------------------
@@ -254,7 +269,9 @@ class TestBuyingPowerCache:
 
 class TestTickHonoursLiveCap:
     def test_tick_with_insufficient_cash_places_nothing(
-        self, tmp_path, single_instrument_active,
+        self,
+        tmp_path,
+        single_instrument_active,
     ):
         """The bug we shipped to fix: an account with ~3 097 SEK buying
         power should NOT result in 1 200-SEK ladder placements when
@@ -280,7 +297,9 @@ class TestTickHonoursLiveCap:
         assert sess.place_buy_calls == []
 
     def test_tick_with_ample_cash_places_orders(
-        self, tmp_path, single_instrument_active,
+        self,
+        tmp_path,
+        single_instrument_active,
     ):
         sess = _StubSession(buying_power_return={"buying_power": 50_000.0})
         f = _make_fisher(sess, tmp_path)
@@ -293,7 +312,9 @@ class TestTickHonoursLiveCap:
         assert len(sess.place_buy_calls) >= 1
 
     def test_tick_fail_closed_when_bp_unknown(
-        self, tmp_path, single_instrument_active,
+        self,
+        tmp_path,
+        single_instrument_active,
     ):
         """No live cash visibility, no cached fallback → no orders."""
         sess = _StubSession(buying_power_return=None)

@@ -26,7 +26,27 @@ GRID_FISHER_ENABLED = True
 
 # Probe mode: when True, the tick computes intended placements and writes
 # them to the decision log without calling Avanza.
-GRID_FISHER_PROBE_ONLY = False
+#
+# 2026-08-21: set back to True. The operator confirmed the system is in
+# SURVEILLANCE mode — nothing is meant to auto-trade at present. This config
+# was left ARMED (ENABLED=True, PROBE_ONLY=False) and was inert only by
+# accident: its host metals loop is not running, the Avanza session was
+# expired, and live buying power read 139 SEK against a config written for
+# ~7000. Funding the account or restoring the session would have started
+# placing real orders with no further approval.
+#
+# It has also never traded: data/grid_fisher_decisions.jsonl holds 3657
+# entries from 2026-06-23..07-17 and every one is an error or a skip
+# (1908 session_call_error, 258 skip_global_cap at 139 SEK). So the tier
+# geometry has never been validated against a single real fill.
+#
+# Before flipping this back to False, fix the reward:risk. Target +1.2% vs
+# stop -3.5% is 1:4 after costs and needs an 80.2% win rate; the barrier
+# geometry alone is provably negative-EV (the S*T terms cancel:
+# EV*(T+S) = -(S*Cw + T*Cl) < 0 for any positive target/stop), so the only
+# edge is half-spread capture at fill. Break-even spread is ~0.538% and the
+# flagship BULL_SILVER_X5_AVA_3 sits at 0.50% — the wrong side.
+GRID_FISHER_PROBE_ONLY = True
 
 # ---------------------------------------------------------------------------
 # Tier construction

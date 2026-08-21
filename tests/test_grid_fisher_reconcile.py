@@ -26,7 +26,6 @@ from portfolio.grid_fisher import (
     reconcile_against_live,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test doubles
 # ---------------------------------------------------------------------------
@@ -57,35 +56,58 @@ class FakeSession:
         if self.reject_buy:
             return {"orderRequestStatus": "ERROR", "message": "rejected"}
         order_id = self._next_id("BUY")
-        self.placed_buys.append({"ob_id": orderbook_id, "price": price,
-                                 "qty": volume, "order_id": order_id})
-        self.open_orders.append({"orderId": order_id, "orderbookId": orderbook_id,
-                                 "side": "BUY", "price": price, "volume": volume})
+        self.placed_buys.append(
+            {"ob_id": orderbook_id, "price": price, "qty": volume, "order_id": order_id}
+        )
+        self.open_orders.append(
+            {
+                "orderId": order_id,
+                "orderbookId": orderbook_id,
+                "side": "BUY",
+                "price": price,
+                "volume": volume,
+            }
+        )
         return {"orderRequestStatus": "SUCCESS", "orderId": order_id}
 
     def place_sell_order(self, orderbook_id: str, price: float, volume: int):
         order_id = self._next_id("SELL")
-        self.placed_sells.append({"ob_id": orderbook_id, "price": price,
-                                  "qty": volume, "order_id": order_id})
-        self.open_orders.append({"orderId": order_id, "orderbookId": orderbook_id,
-                                 "side": "SELL", "price": price, "volume": volume})
+        self.placed_sells.append(
+            {"ob_id": orderbook_id, "price": price, "qty": volume, "order_id": order_id}
+        )
+        self.open_orders.append(
+            {
+                "orderId": order_id,
+                "orderbookId": orderbook_id,
+                "side": "SELL",
+                "price": price,
+                "volume": volume,
+            }
+        )
         return {"orderRequestStatus": "SUCCESS", "orderId": order_id}
 
-    def place_stop_loss(self, orderbook_id: str, trigger_price: float,
-                        sell_price: float, volume: int):
+    def place_stop_loss(
+        self, orderbook_id: str, trigger_price: float, sell_price: float, volume: int
+    ):
         order_id = self._next_id("STOP")
-        self.placed_stops.append({"ob_id": orderbook_id,
-                                  "trigger": trigger_price,
-                                  "sell": sell_price, "qty": volume,
-                                  "order_id": order_id})
+        self.placed_stops.append(
+            {
+                "ob_id": orderbook_id,
+                "trigger": trigger_price,
+                "sell": sell_price,
+                "qty": volume,
+                "order_id": order_id,
+            }
+        )
         # Avanza returns {status, stoplossOrderId} — NOT the
         # orderRequestStatus/orderId shape regular orders use.
         return {"status": "SUCCESS", "stoplossOrderId": order_id}
 
     def cancel_order(self, order_id: str):
         self.cancelled.append(order_id)
-        self.open_orders = [o for o in self.open_orders
-                            if str(o.get("orderId")) != str(order_id)]
+        self.open_orders = [
+            o for o in self.open_orders if str(o.get("orderId")) != str(order_id)
+        ]
         return {"orderRequestStatus": "SUCCESS"}
 
     def cancel_stop_loss(self, stop_id: str):
@@ -106,17 +128,23 @@ class FakeSession:
         # — return a fresh trade so existing placement tests aren't
         # short-circuited by the new gate. Override in a subclass if a
         # specific test wants to model a closed orderbook.
-        return {"buy": 42.50, "sell": 42.55, "last": 42.52,
-                "timeOfLast": int(time.time() * 1000)}
+        return {
+            "buy": 42.50,
+            "sell": 42.55,
+            "last": 42.52,
+            "timeOfLast": int(time.time() * 1000),
+        }
 
     # -- helpers for tests to model fills ----------------------------------
 
-    def fill_order(self, order_id: str, *, position_delta: int = 0,
-                   ob_id: str = "") -> None:
+    def fill_order(
+        self, order_id: str, *, position_delta: int = 0, ob_id: str = ""
+    ) -> None:
         """Simulate Avanza filling an order: remove from open_orders and
         adjust position volume."""
-        self.open_orders = [o for o in self.open_orders
-                            if str(o.get("orderId")) != str(order_id)]
+        self.open_orders = [
+            o for o in self.open_orders if str(o.get("orderId")) != str(order_id)
+        ]
         if position_delta == 0:
             return
         for p in self.positions:
@@ -124,8 +152,7 @@ class FakeSession:
                 p["volume"] = int(p["volume"]) + position_delta
                 return
         if position_delta > 0:
-            self.positions.append({"orderbook_id": ob_id,
-                                   "volume": position_delta})
+            self.positions.append({"orderbook_id": ob_id, "volume": position_delta})
 
 
 CATALOG = {
@@ -175,6 +202,12 @@ def fisher(fake_session, tmp_path, monkeypatch):
     # Separate tests assert on the production defaults explicitly.
     f._n_tiers = 3
     f._spacing = (0.3, 0.8, 1.5)
+    # These are live-placement mechanics tests, so pin probe mode OFF rather
+    # than inheriting GRID_FISHER_PROBE_ONLY. 2026-08-21: the production flag
+    # was set back to True (surveillance mode — nothing is meant to auto-trade),
+    # which silently short-circuited every placement path here. A test of order
+    # placement must not depend on a production safety switch.
+    f._probe_only = False
     return f
 
 
@@ -186,82 +219,112 @@ def fisher(fake_session, tmp_path, monkeypatch):
 class TestReconcileFills:
     def test_buy_marked_filled_when_position_increases(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         positions = [{"orderbook_id": "1650161", "volume": 24}]
-        res = reconcile_against_live(state, open_order_ids=set(),
-                                     positions=positions)
+        res = reconcile_against_live(state, open_order_ids=set(), positions=positions)
         assert res.filled_buys == [("1650161", 0, 42.50)]
         assert inst.buy_ladder[0].status == ORDER_FILLED
         assert inst.inventory_units == 24
 
     def test_buy_marked_cancelled_when_position_unchanged(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         positions = []
-        res = reconcile_against_live(state, open_order_ids=set(),
-                                     positions=positions)
+        res = reconcile_against_live(state, open_order_ids=set(), positions=positions)
         assert res.cancelled_buys == [("1650161", 0)]
         assert inst.buy_ladder[0].status == ORDER_CANCELLED
         assert inst.inventory_units == 0
 
     def test_armed_buy_in_live_kept_armed(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
-        res = reconcile_against_live(state, open_order_ids={"BUY1"},
-                                     positions=[])
+        res = reconcile_against_live(state, open_order_ids={"BUY1"}, positions=[])
         assert res.filled_buys == []
         assert res.cancelled_buys == []
         assert inst.buy_ladder[0].status == ORDER_ARMED
 
     def test_sell_marked_filled_when_position_drops(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
         inst.inventory_units = 24
         inst.avg_entry_price = 42.50
-        inst.sell_ladder.append(TierOrder(
-            tier=0, order_id="SELL1", price=43.30, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst.sell_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="SELL1",
+                price=43.30,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         positions = [{"orderbook_id": "1650161", "volume": 0}]
-        res = reconcile_against_live(state, open_order_ids=set(),
-                                     positions=positions)
+        res = reconcile_against_live(state, open_order_ids=set(), positions=positions)
         assert res.filled_sells == [("1650161", 0, 43.30)]
         assert inst.inventory_units == 0
         assert inst.session_pnl_sek == pytest.approx(24 * (43.30 - 42.50))
 
     def test_buy_partial_fill_records_actual_delta(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         # Only 10 units arrived in position (broker partial then cancel)
         positions = [{"orderbook_id": "1650161", "volume": 10}]
-        res = reconcile_against_live(state, open_order_ids=set(),
-                                     positions=positions)
+        res = reconcile_against_live(state, open_order_ids=set(), positions=positions)
         assert res.filled_buys == [("1650161", 0, 42.50)]
         assert inst.inventory_units == 10
         # Inventory drift logged: original 24 → actual 10
@@ -269,19 +332,25 @@ class TestReconcileFills:
 
     def test_sell_partial_fill_records_actual_delta(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
         inst.inventory_units = 24
         inst.avg_entry_price = 42.50
-        inst.sell_ladder.append(TierOrder(
-            tier=0, order_id="SELL1", price=43.30, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst.sell_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="SELL1",
+                price=43.30,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         # Live volume dropped by 6 (partial)
         positions = [{"orderbook_id": "1650161", "volume": 18}]
-        res = reconcile_against_live(state, open_order_ids=set(),
-                                     positions=positions)
+        res = reconcile_against_live(state, open_order_ids=set(), positions=positions)
         assert res.filled_sells == [("1650161", 0, 43.30)]
         assert inst.inventory_units == 18
         assert inst.session_pnl_sek == pytest.approx(6 * (43.30 - 42.50))
@@ -289,21 +358,35 @@ class TestReconcileFills:
 
     def test_partial_fill_only_filled_tier_transitions(self):
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
-        inst.buy_ladder.append(TierOrder(
-            tier=1, order_id="BUY2", price=42.20, qty=28,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=1,
+                order_id="BUY2",
+                price=42.20,
+                qty=28,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         # Only tier 0 filled (24 units now in position); tier 1 still resting
         positions = [{"orderbook_id": "1650161", "volume": 24}]
-        res = reconcile_against_live(state, open_order_ids={"BUY2"},
-                                     positions=positions)
+        res = reconcile_against_live(
+            state, open_order_ids={"BUY2"}, positions=positions
+        )
         assert res.filled_buys == [("1650161", 0, 42.50)]
         assert inst.buy_ladder[1].status == ORDER_ARMED
 
@@ -314,20 +397,28 @@ class TestReconcileFills:
         must detect the live-vs-recorded surplus, align inventory up, and flag
         a stop rearm so the tick protects those units."""
         state = gf.GridFisherState(session_id="2026-05-11")
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL", active_direction="LONG")
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst = InstrumentState(
+            ob_id="1650161", ticker="XAG-USD", cert_name="BULL", active_direction="LONG"
+        )
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         state.by_instrument["1650161"] = inst
         # Order BUY1 still resting (in open_order_ids) but 10 units already
         # arrived in the live position; inventory_units is still 0.
         positions = [{"orderbook_id": "1650161", "volume": 10}]
-        res = reconcile_against_live(state, open_order_ids={"BUY1"},
-                                     positions=positions)
-        assert inst.inventory_units == 10          # aligned up to live
-        assert inst.stop_needs_rearm is True        # flagged for protection
+        res = reconcile_against_live(
+            state, open_order_ids={"BUY1"}, positions=positions
+        )
+        assert inst.inventory_units == 10  # aligned up to live
+        assert inst.stop_needs_rearm is True  # flagged for protection
         assert inst.avg_entry_price == pytest.approx(42.50)  # estimated from tier
         assert ("1650161", 10) in res.under_protected
         assert inst.buy_ladder[0].status == ORDER_ARMED  # remainder still resting
@@ -379,25 +470,32 @@ class TestPlacement:
     def test_skips_existing_armed_tiers(self, fisher, fake_session):
         inst = fisher.state.by_instrument["1650161"]
         inst.active_direction = "LONG"
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="prev", price=42.37, qty=24,
-            placed_ts="t", status=ORDER_ARMED,
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="prev",
+                price=42.37,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_ARMED,
+            )
+        )
         placed = fisher.place_buy_ladder(inst, bid=42.50)
         assert placed == 2
         assert len(fake_session.placed_buys) == 2
 
     def test_skips_below_min_order(self, fisher, fake_session, monkeypatch):
         # Use a tiny per-leg budget so all tiers fail min-order
-        monkeypatch.setattr("portfolio.grid_tiers.GRID_LEG_SEK", 100,
-                            raising=False)
+        monkeypatch.setattr("portfolio.grid_tiers.GRID_LEG_SEK", 100, raising=False)
         # Need to also patch the imported reference
         import portfolio.grid_tiers as gt
+
         monkeypatch.setattr(gt, "GRID_LEG_SEK", 100)
         inst = fisher.state.by_instrument["1650161"]
         inst.active_direction = "LONG"
         # Manually re-import after patch — direct call path
         from portfolio.grid_tiers import build_buy_ladder
+
         tiers = build_buy_ladder(bid=42.50, leg_sek=100)
         assert all(not t.is_active for t in tiers)
 
@@ -418,7 +516,9 @@ class TestPlacement:
         placed = fisher.place_buy_ladder(inst, bid=42.50)
         assert placed == 0
 
-    def test_per_instrument_cap_enforced_per_tier(self, fisher, fake_session, monkeypatch):
+    def test_per_instrument_cap_enforced_per_tier(
+        self, fisher, fake_session, monkeypatch
+    ):
         """2026-05-28 fix #7: held inventory below the cap passes the entry
         gate, but the per-tier check must stop placing once accumulated
         notional (inventory + armed legs) would breach the cap — it cannot
@@ -477,10 +577,17 @@ class TestRotation:
         inst = fisher.state.by_instrument["1650161"]
         inst.active_direction = "LONG"
         # Simulate: buy placed, then filled
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_FILLED, fill_price=42.50,
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_FILLED,
+                fill_price=42.50,
+            )
+        )
         inst.inventory_units = 24
         inst.avg_entry_price = 42.50
         fisher.rotate_on_buy_fill(inst, filled_tier=0)
@@ -500,10 +607,17 @@ class TestRotation:
         inst = fisher.state.by_instrument["1650161"]
         inst.active_direction = "LONG"
         inst.stop_loss_id = "OLD_STOP"
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY1", price=42.50, qty=24,
-            placed_ts="t", status=ORDER_FILLED, fill_price=42.50,
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY1",
+                price=42.50,
+                qty=24,
+                placed_ts="t",
+                status=ORDER_FILLED,
+                fill_price=42.50,
+            )
+        )
         inst.inventory_units = 24
         inst.avg_entry_price = 42.50
         fisher.rotate_on_buy_fill(inst, filled_tier=0)
@@ -551,8 +665,7 @@ class TestDirectionFlip:
 
 
 class TestProbeOnly:
-    def test_probe_records_decisions_without_avanza_calls(self, fisher,
-                                                          fake_session):
+    def test_probe_records_decisions_without_avanza_calls(self, fisher, fake_session):
         fisher._probe_only = True
         inst = fisher.state.by_instrument["1650161"]
         inst.active_direction = "LONG"
@@ -579,14 +692,15 @@ class TestCancelArmedBuys:
         assert len(fake_session.cancelled) == 3
         assert all(t.status == ORDER_CANCELLED for t in inst.buy_ladder)
 
-    def test_cancel_rejection_keeps_buy_armed(self, fisher, fake_session,
-                                              monkeypatch):
+    def test_cancel_rejection_keeps_buy_armed(self, fisher, fake_session, monkeypatch):
         inst = fisher.state.by_instrument["1650161"]
         inst.active_direction = "LONG"
         fisher.place_buy_ladder(inst, bid=42.50)
+
         # Broker now rejects every cancel — no exception, just non-SUCCESS
         def _reject(_order_id):
             return {"orderRequestStatus": "ERROR", "message": "denied"}
+
         monkeypatch.setattr(fake_session, "cancel_order", _reject)
         n = fisher.cancel_armed_buys(inst)
         # Zero successful cancellations
@@ -604,35 +718,43 @@ class TestCancelArmedBuys:
 class TestTick:
     def test_skips_when_disabled(self, fisher, fake_session):
         fisher._enabled = False
-        report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
-                                                       "confidence": 0.7}})
+        report = fisher.tick(
+            signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.7}}
+        )
         assert report.get("skipped_reason") == "disabled"
         assert fake_session.placed_buys == []
 
     def test_skips_instrument_without_signal(self, fisher, fake_session):
         # XAU-USD direction missing entirely
-        report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
-                                                       "confidence": 0.7}})
+        report = fisher.tick(
+            signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.7}}
+        )
         # XAG BULL placed (default tier count); others skipped
         assert report["placements"] == fisher._n_tiers
         # Check the instrument reports include no_direction for XAU-USD
         # (and OIL-USD when in catalog).
-        all_skips = [v.get("skip") for v in report["instruments"].values()
-                     if v.get("ticker") != "XAG-USD"]
+        all_skips = [
+            v.get("skip")
+            for v in report["instruments"].values()
+            if v.get("ticker") != "XAG-USD"
+        ]
         assert any(s == "no_direction" for s in all_skips)
 
     def test_below_min_confidence_skipped(self, fisher, fake_session):
-        report = fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
-                                                       "confidence": 0.3}})
+        report = fisher.tick(
+            signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.3}}
+        )
         assert report["placements"] == 0
-        skip = next(v["skip"] for v in report["instruments"].values()
-                    if v.get("ticker") == "XAG-USD")
+        skip = next(
+            v["skip"]
+            for v in report["instruments"].values()
+            if v.get("ticker") == "XAG-USD"
+        )
         assert "low_conf" in skip
 
     def test_signal_long_arms_bull_only(self, fisher, fake_session):
         # LONG signal → BULL_SILVER armed; BEAR_SILVER skipped
-        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
-                                              "confidence": 0.7}})
+        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.7}})
         bull = fisher.state.by_instrument["1650161"]
         bear = fisher.state.by_instrument["2286417"]
         assert bull.active_direction == "LONG"
@@ -642,15 +764,13 @@ class TestTick:
 
     def test_signal_flip_cancels_old_side(self, fisher, fake_session):
         # First tick: LONG → BULL fills its ladder
-        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
-                                              "confidence": 0.7}})
+        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.7}})
         bull = fisher.state.by_instrument["1650161"]
         assert len(bull.armed_buy_tiers()) == 3
         n_cancels_before = len(fake_session.cancelled)
         # Second tick: signal flips SHORT → BULL's armed buys cancelled,
         # BEAR starts placing.
-        fisher.tick(signal_data={"XAG-USD": {"direction": "SHORT",
-                                              "confidence": 0.7}})
+        fisher.tick(signal_data={"XAG-USD": {"direction": "SHORT", "confidence": 0.7}})
         # BULL's buys cancelled — 3 new cancellations against Avanza.
         assert len(fake_session.cancelled) >= n_cancels_before + 3
         # BEAR is now placing.
@@ -679,14 +799,13 @@ class TestTick:
         # Buys all cancelled via session
         assert len(fake_session.cancelled) == 3
 
-    def test_global_cap_blocks_placement_after_threshold(self, fisher,
-                                                          fake_session,
-                                                          monkeypatch):
+    def test_global_cap_blocks_placement_after_threshold(
+        self, fisher, fake_session, monkeypatch
+    ):
         # Shrink global cap so the first instrument's first ladder
         # already pushes us over.
         monkeypatch.setattr(gf, "GRID_GLOBAL_MAX_SEK", 100)
-        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG",
-                                              "confidence": 0.7}})
+        fisher.tick(signal_data={"XAG-USD": {"direction": "LONG", "confidence": 0.7}})
         # Either zero placements (cap hit instantly) or placements
         # halted mid-loop — either way, far fewer than the 3 tiers
         # the default would allow.
@@ -699,8 +818,7 @@ class TestTick:
         inst.avg_entry_price = 42.50
         fisher.tick(signal_data={}, eod_minutes_remaining=2.0)
         # Aggressive sell placed for inventory
-        sell_calls = [s for s in fake_session.placed_sells
-                      if s["ob_id"] == "1650161"]
+        sell_calls = [s for s in fake_session.placed_sells if s["ob_id"] == "1650161"]
         assert len(sell_calls) >= 1
         # The placed sell's order id is recorded on the instrument so a
         # follow-up tick inside the same EOD window won't stack a duplicate
@@ -708,7 +826,9 @@ class TestTick:
         assert inst.eod_sell_order_id is not None
 
     def test_eod_market_flat_idempotent_within_window(
-        self, fisher, fake_session,
+        self,
+        fisher,
+        fake_session,
     ):
         """Two ticks inside the EOD market-sell window should place ONE
         sell, not two. This is the regression test for the duplicate-sell
@@ -731,7 +851,10 @@ class TestTick:
         assert len(fake_session.placed_sells) == first_count
 
     def test_eod_market_flat_retries_on_session_failure(
-        self, fisher, fake_session, monkeypatch,
+        self,
+        fisher,
+        fake_session,
+        monkeypatch,
     ):
         """If place_sell_order returns None (transient Avanza error), the
         eod_sell_order_id stays unset so the next tick can retry the
@@ -767,6 +890,7 @@ class TestTick:
 class TestMinutesUntilEod:
     def test_returns_finite_minutes(self):
         import datetime as _dt
+
         now = _dt.datetime(2026, 5, 11, 12, 0, 0, tzinfo=_dt.timezone.utc)
         mins = gf.minutes_until_eod(now)
         # 14:00 Stockholm in May (DST = CEST = UTC+2), cutoff at 21:55.
@@ -775,6 +899,7 @@ class TestMinutesUntilEod:
 
     def test_after_cutoff_rolls_to_next_day(self):
         import datetime as _dt
+
         # 22:00 Stockholm CEST = 20:00 UTC. Cutoff already passed.
         now = _dt.datetime(2026, 5, 11, 20, 30, 0, tzinfo=_dt.timezone.utc)
         mins = gf.minutes_until_eod(now)
@@ -794,9 +919,12 @@ class TestEodFlatStopSafety:
 
     @staticmethod
     def _stocked_inst():
-        inst = InstrumentState(ob_id="1650161", ticker="XAG-USD",
-                               cert_name="BULL_SILVER_X5_AVA_4",
-                               active_direction="LONG")
+        inst = InstrumentState(
+            ob_id="1650161",
+            ticker="XAG-USD",
+            cert_name="BULL_SILVER_X5_AVA_4",
+            active_direction="LONG",
+        )
         inst.inventory_units = 24
         inst.avg_entry_price = 42.50
         inst.stop_loss_id = "STOP-existing"
@@ -808,15 +936,16 @@ class TestEodFlatStopSafety:
         fisher.state.by_instrument["1650161"] = inst
         monkeypatch.setattr(fake_session, "place_sell_order", lambda *a, **k: None)
         fisher.eod_market_flat()
-        assert inst.stop_loss_id is None          # cancelled at EOD
-        assert inst.stop_needs_rearm is True       # P0: not left naked
-        assert inst.inventory_units == 24          # still held
+        assert inst.stop_loss_id is None  # cancelled at EOD
+        assert inst.stop_needs_rearm is True  # P0: not left naked
+        assert inst.inventory_units == 24  # still held
 
     def test_sell_rejected_flags_rearm(self, fisher, fake_session, monkeypatch):
         inst = self._stocked_inst()
         fisher.state.by_instrument["1650161"] = inst
         monkeypatch.setattr(
-            fake_session, "place_sell_order",
+            fake_session,
+            "place_sell_order",
             lambda *a, **k: {"orderRequestStatus": "ERROR", "message": "halt"},
         )
         fisher.eod_market_flat()
@@ -842,19 +971,31 @@ class TestReconcileAmbiguity:
         gf._ambiguous_streak.clear()
         state = gf.GridFisherState(session_id="2026-06-12")
         inst = InstrumentState(
-            ob_id="1650161", ticker="XAG-USD", cert_name="bull",
+            ob_id="1650161",
+            ticker="XAG-USD",
+            cert_name="bull",
             active_direction="LONG",
         )
         inst.inventory_units = 74
         inst.avg_entry_price = 40.0
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="B1", price=39.0, qty=74,
-            placed_ts="2026-06-12T08:00:00Z",
-        ))
-        inst.sell_ladder.append(TierOrder(
-            tier=0, order_id="S1", price=41.0, qty=74,
-            placed_ts="2026-06-12T08:00:00Z",
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="B1",
+                price=39.0,
+                qty=74,
+                placed_ts="2026-06-12T08:00:00Z",
+            )
+        )
+        inst.sell_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="S1",
+                price=41.0,
+                qty=74,
+                placed_ts="2026-06-12T08:00:00Z",
+            )
+        )
         state.by_instrument["1650161"] = inst
         return state, inst
 
@@ -864,7 +1005,9 @@ class TestReconcileAmbiguity:
         # nets back to 74 — the volume heuristic would misclassify both
         # legs as CANCELLED.
         res = reconcile_against_live(
-            state, set(), [{"orderbook_id": "1650161", "volume": 74}],
+            state,
+            set(),
+            [{"orderbook_id": "1650161", "volume": 74}],
         )
         assert res.ambiguous == [("1650161", 1, 1)]
         assert res.filled_buys == [] and res.filled_sells == []
@@ -893,7 +1036,9 @@ class TestReconcileAmbiguity:
         state, inst = self._state_with_offsetting_orders()
         # Sell still resting in the live book — only the buy vanished.
         res = reconcile_against_live(
-            state, {"S1"}, [{"orderbook_id": "1650161", "volume": 148}],
+            state,
+            {"S1"},
+            [{"orderbook_id": "1650161", "volume": 148}],
         )
         assert res.ambiguous == []
         assert res.filled_buys == [("1650161", 0, 39.0)]
@@ -912,20 +1057,28 @@ class TestEodMarketFlatVerifiedCancels:
         inst.inventory_units = 30
         inst.avg_entry_price = 40.0
         inst.stop_loss_id = "STOP1"
-        inst.sell_ladder.append(TierOrder(
-            tier=0, order_id="SELL9", price=41.0, qty=30,
-            placed_ts="2026-06-12T08:00:00Z",
-        ))
+        inst.sell_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="SELL9",
+                price=41.0,
+                qty=30,
+                placed_ts="2026-06-12T08:00:00Z",
+            )
+        )
         return inst
 
     def test_unconfirmed_sell_cancel_skips_eod_sell(
-        self, fisher, fake_session, monkeypatch,
+        self,
+        fisher,
+        fake_session,
+        monkeypatch,
     ):
         inst = self._inst_with_inventory_and_sell(fisher)
         monkeypatch.setattr(
-            fake_session, "cancel_order",
-            lambda order_id: {"orderRequestStatus": "ERROR",
-                              "message": "rejected"},
+            fake_session,
+            "cancel_order",
+            lambda order_id: {"orderRequestStatus": "ERROR", "message": "rejected"},
         )
         touched = fisher.eod_market_flat()
         assert touched == 0
@@ -960,7 +1113,9 @@ class TestGlobalHaltLifecycle:
         state = gf.GridFisherState(session_id="2026-06-12")
         for i in range(6):  # threshold must NOT scale with instrument count
             state.by_instrument[str(i)] = InstrumentState(
-                ob_id=str(i), ticker="XAG-USD", cert_name=f"c{i}",
+                ob_id=str(i),
+                ticker="XAG-USD",
+                cert_name=f"c{i}",
             )
         state.global_session_pnl_sek = -1100.0
         assert gf.should_halt_global(state) is None
@@ -969,10 +1124,15 @@ class TestGlobalHaltLifecycle:
 
     def test_halt_cancels_armed_buys(self, fisher, fake_session):
         inst = fisher.state.by_instrument["1650161"]
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY9", price=39.0, qty=30,
-            placed_ts="2026-06-12T08:00:00Z",
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY9",
+                price=39.0,
+                qty=30,
+                placed_ts="2026-06-12T08:00:00Z",
+            )
+        )
         fake_session.open_orders.append({"orderId": "BUY9"})
         inst.session_pnl_sek = -1300.0
         report = fisher.tick(signal_data={}, prices={})
@@ -990,7 +1150,9 @@ class TestGlobalHaltLifecycle:
             {"orderbook_id": "1650161", "volume": 50},
         )
         report = fisher.tick(
-            signal_data={}, prices={}, eod_minutes_remaining=3.0,
+            signal_data={},
+            prices={},
+            eod_minutes_remaining=3.0,
         )
         assert report["halted"] is True
         assert report["eod_swept"] is True
@@ -999,7 +1161,9 @@ class TestGlobalHaltLifecycle:
         assert fake_session.placed_sells[0]["qty"] == 50
 
     def test_halted_flag_blocks_placement_without_rederiving(
-        self, fisher, fake_session,
+        self,
+        fisher,
+        fake_session,
     ):
         fisher.state.halted = True
         fisher.state.halt_reason = "test_halt"
@@ -1030,10 +1194,15 @@ class TestGlobalHaltLifecycle:
 class TestHaltAndRollReviewFixes:
     def test_halted_tick_retries_failed_cancels(self, fisher, fake_session):
         inst = fisher.state.by_instrument["1650161"]
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY9", price=39.0, qty=30,
-            placed_ts="2026-06-12T08:00:00Z",
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY9",
+                price=39.0,
+                qty=30,
+                placed_ts="2026-06-12T08:00:00Z",
+            )
+        )
         fake_session.open_orders.append({"orderId": "BUY9"})
         # Already-halted session (e.g. the cancel timed out during the
         # halt transition and the tier stayed ARMED at the broker).
@@ -1048,20 +1217,29 @@ class TestHaltAndRollReviewFixes:
         assert "halt_cancel_retry" in log_text
 
     def test_halted_retry_throttled_between_attempts(
-        self, fisher, fake_session, monkeypatch,
+        self,
+        fisher,
+        fake_session,
+        monkeypatch,
     ):
         inst = fisher.state.by_instrument["1650161"]
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="BUY9", price=39.0, qty=30,
-            placed_ts="2026-06-12T08:00:00Z",
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="BUY9",
+                price=39.0,
+                qty=30,
+                placed_ts="2026-06-12T08:00:00Z",
+            )
+        )
         fake_session.open_orders.append({"orderId": "BUY9"})
         fisher.state.halted = True
         fisher.state.halt_reason = "test_halt"
         # Cancel keeps failing — tier must stay ARMED, and the retry must
         # NOT fire again on the immediately following tick.
         monkeypatch.setattr(
-            fake_session, "cancel_order",
+            fake_session,
+            "cancel_order",
             lambda order_id: {"orderRequestStatus": "ERROR"},
         )
         fisher.tick(signal_data={}, prices={})
@@ -1073,17 +1251,29 @@ class TestHaltAndRollReviewFixes:
         assert log_text.count("halt_cancel_retry") == 1
 
     def test_session_roll_cancels_stale_armed_carryover(
-        self, fisher, fake_session,
+        self,
+        fisher,
+        fake_session,
     ):
         inst = fisher.state.by_instrument["1650161"]
-        inst.buy_ladder.append(TierOrder(
-            tier=0, order_id="OLD1", price=39.0, qty=30,
-            placed_ts="2020-01-01T08:00:00Z",
-        ))
-        inst.sell_ladder.append(TierOrder(
-            tier=0, order_id="OLDSELL1", price=41.0, qty=30,
-            placed_ts="2020-01-01T08:00:00Z",
-        ))
+        inst.buy_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="OLD1",
+                price=39.0,
+                qty=30,
+                placed_ts="2020-01-01T08:00:00Z",
+            )
+        )
+        inst.sell_ladder.append(
+            TierOrder(
+                tier=0,
+                order_id="OLDSELL1",
+                price=41.0,
+                qty=30,
+                placed_ts="2020-01-01T08:00:00Z",
+            )
+        )
         fisher.state.session_id = "2020-01-01"  # force a roll
         fisher.tick(signal_data={}, prices={})
         # Carried BUY cancelled via the verified path; sell only logged.
