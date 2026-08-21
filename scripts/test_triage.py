@@ -71,7 +71,29 @@ _RULES = (
 )
 _UNKNOWN = "unknown"
 
-_FAIL_RE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE)
+# 2026-08-21: was `^(?:FAILED|ERROR)\s+(\S+)`, which matched pytest's captured
+# LOGGING at ERROR level —
+#   ERROR    portfolio.http_retry:http_retry.py:103 HTTP 429 from ...
+# — as a node id. That string was then handed to pytest as a path, pytest died
+# with "no tests ran", the serial confirm returned zero failures, and all 75
+# real failures were reported as flakes. REAL=0 on a red suite.
+#
+# A node id is a path ending in .py, optionally ::-suffixed. Colons are excluded
+# from the path half, which is what rejects `logger:file.py:line`.
+_FAIL_RE = re.compile(
+    r"^(?:FAILED|ERROR)[ \t]+([\w./\\-]+\.py(?:::[^\s]+)?)(?=[\s]|$)",
+    re.MULTILINE,
+)
+
+# Markers meaning the serial re-run never actually executed tests. An empty or
+# aborted confirm is NOT evidence that anything passed.
+_UNUSABLE_SERIAL = (
+    "no tests ran",
+    "file or directory not found",
+    "INTERNALERROR",
+    "unrecognized arguments",
+    "usage: python -m pytest",
+)
 _SUMMARY_RE = re.compile(
     r"(?:(?P<failed>\d+) failed)?[,\s]*"
     r"(?P<passed>\d+) passed"
@@ -142,15 +164,43 @@ def files_to_recheck(nodeids) -> list[str]:
     return out
 
 
-def split_flakes(parallel, serial) -> dict:
-    """Real = failed both ways. Anything that recovers serially is an xdist
-    isolation artifact, per the clusters documented in docs/TESTING.md."""
-    p, s = list(parallel), set(serial)
-    real = [n for n in p if n in s]
+def serial_run_ok(text: str) -> bool:
+    """Did the serial confirm actually execute tests?
+
+    Guards the 2026-08-21 failure: a bogus path aborted the re-run, and the
+    resulting empty output was read as "everything passed serially". Fail
+    closed — no summary line, or any abort marker, means unusable.
+    """
+    if not (text or "").strip():
+        return False
+    low = text.lower()
+    if any(m.lower() in low for m in _UNUSABLE_SERIAL):
+        return False
+    return bool(parse_summary(text))
+
+
+def split_flakes(parallel, serial, serial_ok: bool = True) -> dict:
+    """Real = failed both ways. Anything that recovers serially is an isolation
+    or environment artifact, per the clusters documented in docs/TESTING.md.
+
+    ``serial_ok=False`` means the confirm never ran, in which case every
+    parallel failure stays REAL. Clearing failures on the strength of a run
+    that did not happen is the one outcome this tool must never produce.
+    """
+    p = list(parallel)
+    if not serial_ok:
+        return {
+            "real": p,
+            "xdist_flake": [],
+            "serial_only": [],
+            "confirm_failed": True,
+        }
+    s = set(serial)
     return {
-        "real": real,
+        "real": [n for n in p if n in s],
         "xdist_flake": [n for n in p if n not in s],
         "serial_only": [n for n in serial if n not in set(p)],
+        "confirm_failed": False,
     }
 
 
@@ -262,6 +312,8 @@ def _print_report(summary, buckets, split):
             print(f"  {bucket:18} {len(items)}")
     if split is not None:
         print("-" * 66)
+        if split.get("confirm_failed"):
+            print("  !! serial confirm DID NOT RUN — nothing cleared, all REAL")
         print(f"  REAL (fail serially too) : {len(split['real'])}")
         for n in split["real"]:
             print(f"      {n}")
@@ -330,7 +382,14 @@ def main(argv=None):
     if args.confirm:
         serial_text = run_serial(files_to_recheck(failures))
         _save("serial", serial_text)
-        split = split_flakes(failures, parse_failures(serial_text))
+        ok = serial_run_ok(serial_text)
+        if not ok:
+            print(
+                "[triage] WARNING: the serial confirm did not execute tests — "
+                "treating every failure as REAL. Inspect the saved raw output.",
+                file=sys.stderr,
+            )
+        split = split_flakes(failures, parse_failures(serial_text), serial_ok=ok)
 
     _print_report(summary, buckets, split)
 

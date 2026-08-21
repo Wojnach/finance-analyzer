@@ -55,6 +55,89 @@ def test_parse_failures_is_empty_on_a_clean_run():
     assert tt.parse_failures("1234 passed in 10s\n") == []
 
 
+# ---------------------------------------------------------------------------
+# 2026-08-21 regression: a captured LOG line at ERROR level was parsed as a
+# node id, fed to pytest as a path, pytest died with "no tests ran", the serial
+# confirm came back with zero failures, and every real failure was therefore
+# classified as "passes serially" — REAL=0 on a suite with 75 failures.
+# One bad regex match inverted the entire verdict into a false all-clear.
+# ---------------------------------------------------------------------------
+
+_LOG_NOISE = """\
+ERROR    portfolio.http_retry:http_retry.py:103 HTTP 429 from https://x/v1/mvrv/last after 0 retries
+ERROR: file or directory not found: portfolio.http_retry:http_retry.py:103
+ERROR    root:module.py:12 something exploded
+FAILED tests/real.py::test_actually_failed - AssertionError
+"""
+
+
+def test_captured_log_lines_are_not_mistaken_for_node_ids():
+    got = tt.parse_failures(_LOG_NOISE)
+    assert got == ["tests/real.py::test_actually_failed"]
+
+
+def test_pytest_usage_error_line_is_not_a_node_id():
+    assert tt.parse_failures("ERROR: file or directory not found: foo.py:103\n") == []
+
+
+def test_collection_error_without_a_test_name_is_still_captured():
+    """`ERROR tests/foo.py - ImportError` is a real collection failure."""
+    assert tt.parse_failures("ERROR tests/foo.py - ImportError: no module\n") == [
+        "tests/foo.py"
+    ]
+
+
+def test_every_parsed_nodeid_points_at_a_python_file():
+    for nodeid in tt.parse_failures(_SAMPLE + _LOG_NOISE):
+        assert ".py" in nodeid, nodeid
+        assert ":" not in nodeid.split("::", 1)[0], f"path half has a colon: {nodeid}"
+
+
+# ---------------------------------------------------------------------------
+# An unrunnable serial confirm must never be read as "everything passed"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "no tests ran in 0.11s\nERROR: file or directory not found: bogus\n",
+        "ERROR: file or directory not found: bogus\n",
+        "",
+        "INTERNALERROR> something\n",
+    ],
+)
+def test_serial_run_ok_rejects_unusable_output(text):
+    assert tt.serial_run_ok(text) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "5 failed, 20 passed in 30s\n",
+        "50 passed in 12s\n",
+        "1 failed, 1 passed, 2 skipped in 3.00s\n",
+    ],
+)
+def test_serial_run_ok_accepts_a_real_run(text):
+    assert tt.serial_run_ok(text) is True
+
+
+def test_split_flakes_refuses_to_clear_failures_when_serial_never_ran():
+    """The exact 2026-08-21 shape: real failures, empty serial output."""
+    parallel = ["tests/a.py::t1", "tests/b.py::t2"]
+    split = tt.split_flakes(parallel, [], serial_ok=False)
+    assert split["real"] == parallel, "unrunnable confirm must not clear anything"
+    assert split["xdist_flake"] == []
+    assert split["confirm_failed"] is True
+
+
+def test_split_flakes_marks_confirm_succeeded_when_serial_ran():
+    split = tt.split_flakes(["tests/a.py::t1"], ["tests/a.py::t1"], serial_ok=True)
+    assert split["confirm_failed"] is False
+    assert split["real"] == ["tests/a.py::t1"]
+
+
 def test_parses_the_summary_counts():
     s = tt.parse_summary(_SAMPLE)
     assert s["failed"] == 72
