@@ -1,5 +1,103 @@
 # Testing Guide
 
+<!-- TRIAGE-BASELINE:START -->
+### Measured baseline — 2026-08-21, host `steamdeck`
+
+Regenerate with `.venv/bin/python scripts/test_triage.py --run --confirm --update-baseline` (herc2: `.venv/Scripts/python.exe`). Do not hand-edit.
+
+| metric | value |
+|---|---|
+| collected | 11747 |
+| passed | 11680 |
+| failed (`-n auto`) | 67 |
+| skipped | 30 |
+| parallel runtime | 238s |
+| **real failures** (fail serially too) | **66** |
+| xdist isolation flakes (pass serially) | 1 |
+| serial-only failures | 0 |
+
+Failures by bucket:
+
+| bucket | count |
+|---|---|
+| applicable-count | 0 |
+| llm-infra | 52 |
+| metals-loop | 10 |
+| unknown | 5 |
+
+**Real failures (66):**
+
+- `tests/test_fish_engine.py::TestLayer2Staleness::test_exactly_4h_old_accepted`
+- `tests/test_signal_engine_core.py::TestHorizonWeights::test_3h_boosts_news_event`
+- `tests/test_signal_engine_core.py::TestBuildLlmContext::test_returns_all_expected_keys`
+- `tests/test_metals_loop_autonomous.py::TestAutonomousDecision::test_decision_has_source_autonomous`
+- `tests/test_metals_loop_autonomous.py::TestAutonomousDecision::test_decision_includes_positions_data`
+- `tests/test_metals_loop_autonomous.py::TestAutonomousDecision::test_decision_includes_signal_data`
+- `tests/test_metals_swing_trader.py::TestEntryLogic::test_entry_on_valid_signal`
+- `tests/test_metals_swing_trader.py::TestIntegration::test_full_cycle_with_buy_signal`
+- `tests/test_portfolio.py::TestMinistralSignalWrapper::test_uses_repo_managed_script_path`
+- `tests/test_portfolio.py::TestMinistralSignalWrapper::test_parses_json_output`
+- `tests/test_portfolio.py::TestMinistralSignalWrapper::test_extracts_json_with_prefix_output`
+- `tests/test_portfolio.py::TestMinistralSignalWrapper::test_raises_on_failure`
+- `tests/test_metals_loop_pre_sell_cancel.py::TestEnsureStopsCancelledBeforeSell::test_server_exception_blocks_sell`
+- `tests/test_metals_swing_sizing.py::test_macd_improving_gate_passes_on_fine_grained_drift`
+- `tests/test_forecast_circuit_breaker.py::TestKronosCircuitBreaker::test_skips_when_tripped`
+- `tests/test_forecast_circuit_breaker.py::TestKronosCircuitBreaker::test_does_not_trip_on_success`
+- `tests/test_forecast_circuit_breaker.py::TestChronosCircuitBreaker::test_trips_on_exception`
+- `tests/test_model_upgrades.py::TestChronosUpgrade::test_forecast_chronos_dispatches_v2`
+- `tests/test_model_upgrades.py::TestChronosUpgrade::test_forecast_chronos_dispatches_v1`
+- `tests/test_model_upgrades.py::TestQwen3Signal::test_get_qwen3_signal_success`
+- `tests/test_model_upgrades.py::TestQwen3Signal::test_get_qwen3_signal_failure`
+- `tests/test_model_upgrades.py::TestQwen3Signal::test_get_qwen3_signal_invalid_json`
+- `tests/test_llama_server.py::TestQueryLlamaServer::test_successful_query`
+- `tests/test_llama_server.py::TestQueryLlamaServer::test_model_ensure_failure_returns_none`
+- `tests/test_llama_server.py::TestBUG165RaceCondition::test_lock_held_during_query`
+- `tests/test_llama_server.py::TestBUG165RaceCondition::test_lock_released_on_query_exception`
+- `tests/test_llama_server.py::TestBUG165RaceCondition::test_serialized_queries_prevent_race`
+- `tests/test_bert_sentiment.py::test_lazy_load_happens_once`
+- `tests/test_bert_sentiment.py::test_different_models_load_independently`
+- `tests/test_bert_sentiment.py::test_default_stays_on_cpu_even_with_cuda`
+- `tests/test_bert_sentiment.py::test_env_var_opt_in_moves_to_gpu`
+- `tests/test_bert_sentiment.py::test_cuda_unavailable_falls_back_to_cpu`
+- `tests/test_bert_sentiment.py::test_cryptobert_label_mapping`
+- `tests/test_bert_sentiment.py::test_trading_hero_label_mapping`
+- `tests/test_bert_sentiment.py::test_finbert_label_mapping`
+- `tests/test_bert_sentiment.py::test_unknown_model_raises`
+- `tests/test_bert_sentiment.py::test_per_text_fallback_handles_single_failure`
+- `tests/test_bert_sentiment.py::TestMetaTensorRecovery::test_clean_load_does_not_retry`
+- `tests/test_bert_sentiment.py::TestMetaTensorRecovery::test_load_with_meta_tensors_retries_with_eager_init`
+- `tests/test_bert_sentiment.py::TestMetaTensorRecovery::test_load_with_persistent_meta_tensors_raises`
+- `tests/test_bert_sentiment.py::TestMetaTensorRecovery::test_meta_buffer_also_triggers_retry`
+- `tests/test_bert_sentiment.py::TestMetaTensorRecovery::test_finbert_retry_uses_snapshot_path`
+- `tests/test_llm_prewarmer.py::test_prewarm_next_model_queries_next_slot_when_cold`
+- `tests/test_llm_prewarmer.py::test_prewarm_after_qwen3_targets_fingpt`
+- `tests/test_llm_prewarmer.py::test_prewarm_after_fingpt_wraps_to_ministral`
+- `tests/test_llm_prewarmer.py::test_prewarm_next_model_returns_false_when_slot_already_loaded`
+- `tests/test_llm_prewarmer.py::test_prewarm_next_model_swallows_pid_read_exceptions`
+- `tests/test_llm_prewarmer.py::test_prewarm_returns_false_when_query_returns_none`
+- `tests/test_llm_prewarmer.py::test_state_jsonl_written_after_prewarm`
+- `tests/test_llm_prewarmer.py::test_state_jsonl_different_counter_does_not_skip`
+- `tests/test_llm_prewarmer.py::test_state_corruption_does_not_crash`
+- `tests/test_llm_prewarmer.py::test_restart_with_stale_state_and_different_loaded_model_forces_prewarm`
+- `tests/test_consensus.py::TestCryptoConsensus::test_crypto_buy_with_3_voters`
+- `tests/test_local_llm_gate.py::TestLlamaServerChokePoints::test_query_stops_resident_server_when_paused`
+- `tests/test_b6_signal_core.py::TestApplicableCountMinistral::test_skip_gpu_still_drops_ministral_for_stocks`
+- `tests/test_metals_swing_momentum.py::test_evaluate_entry_uses_relaxed_gates_with_momentum`
+- `tests/test_chronos_gpu_gate.py::TestNoFallbackOnGateTimeout::test_run_chronos_metals_falls_through_on_bare_none`
+- `tests/test_trigger_pruning.py::test_bug38_empty_set_prunes_all`
+- `tests/test_forecast_timeout.py::TestChronosTimeout::test_timeout_returns_none`
+- `tests/test_forecast_timeout.py::TestChronosTimeout::test_fast_chronos_succeeds`
+- `tests/test_forecast_timeout.py::TestChronosTimeout::test_timeout_parameter_used`
+- `tests/test_llama_server_plex_aware.py::TestModelLoadSafe::test_safe_when_plex_idle`
+- `tests/test_llama_server_plex_aware.py::TestModelLoadSafe::test_safe_when_plex_busy_but_vram_ok`
+- `tests/test_llama_server_plex_aware.py::TestModelLoadSafe::test_safe_when_nvidia_smi_broken`
+- `tests/test_llama_server_plex_aware.py::TestModelLoadSafe::test_threshold_is_inclusive`
+- `tests/test_3h_integration.py::TestGenerate3HSignal::test_1d_not_capped`
+
+`unknown` is the bucket that matters — a new entry there is either a regression or a gap in the classifier in `scripts/test_triage.py`.
+<!-- TRIAGE-BASELINE:END -->
+
+
 ## Quick Reference
 
 ```bash
