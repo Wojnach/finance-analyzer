@@ -52,10 +52,16 @@ from portfolio.file_utils import atomic_write_json, load_json  # noqa: E402
 # CWE-706 -- dynamic importlib.import_module with untrusted input.)
 from scripts.pickups import call_journal_resolve as _call_journal_resolve  # noqa: E402
 from scripts.pickups import llm_cryptotrader_72h as _llm_cryptotrader_72h  # noqa: E402
+from scripts.pickups import manual_reminder as _manual_reminder  # noqa: E402
 
 _HANDLERS = {
     "llm_cryptotrader_72h": _llm_cryptotrader_72h,
     "call_journal_resolve": _call_journal_resolve,
+    # 2026-08-21: three pickups have named this handler since 2026-07-31
+    # without it existing, so every 08:42 run errored and pf-pickups.service
+    # sat in `failed`. It automates nothing — it re-states a human-only
+    # reminder and returns verdict=defer to stay pending.
+    "manual_reminder": _manual_reminder,
 }
 
 _PICKUPS_PATH = _REPO_ROOT / "data" / "pending_pickups.json"
