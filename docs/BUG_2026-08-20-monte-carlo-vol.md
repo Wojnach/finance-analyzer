@@ -133,11 +133,11 @@ mean 1.21).
 **Why the interval had to change too.** The measured ATR-to-realized-vol ratio
 is stable on daily bars but not intraday:
 
-| bars | BTC | ETH | XAU | XAG |
-|---|---|---|---|---|
+| bars  | BTC  | ETH  | XAU  | XAG  |
+| ----- | ---- | ---- | ---- | ---- |
 | daily | 1.24 | 1.02 | 1.25 | 1.33 |
-| 1h | 2.79 | 2.98 | 1.14 | 1.33 |
-| 15m | 3.20 | 2.06 | 0.97 | 1.13 |
+| 1h    | 2.79 | 2.98 | 1.14 | 1.33 |
+| 15m   | 3.20 | 2.06 | 0.97 | 1.13 |
 
 So rescaling the 15m input was not an option — microstructure and 24/7 trading
 break sqrt-of-time intraday. Instead the daily ATR is lifted from the **"7d"
@@ -153,16 +153,16 @@ value — falling back to that would silently reinstate the bug.
 
 ### Live before/after, verified in agent_summary.json
 
-| | before | after | realized |
-|---|---|---|---|
-| BTC `volatility_annual` | 0.05 (floor) | **0.429** | ~0.34 |
-| ETH | 0.05 (floor) | **0.618** | 0.626 |
-| XAU | 0.05 | **0.285** | 0.287 |
-| XAG | 0.05 | **0.515** | 0.433 |
-| `drawdown_1pct_prob` | **0.0** | **0.665** | — |
-| `drawdown_5pct_prob` | **0.0** | **0.135** | — |
-| VaR95 as % of exposure | 0.27% | **6.3%** | — |
-| 2xATR stop distance | ~1.1% | **3.6-7.8%** | — |
+|                         | before       | after        | realized |
+| ----------------------- | ------------ | ------------ | -------- |
+| BTC `volatility_annual` | 0.05 (floor) | **0.429**    | ~0.34    |
+| ETH                     | 0.05 (floor) | **0.618**    | 0.626    |
+| XAU                     | 0.05         | **0.285**    | 0.287    |
+| XAG                     | 0.05         | **0.515**    | 0.433    |
+| `drawdown_1pct_prob`    | **0.0**      | **0.665**    | —        |
+| `drawdown_5pct_prob`    | **0.0**      | **0.135**    | —        |
+| VaR95 as % of exposure  | 0.27%        | **6.3%**     | —        |
+| 2xATR stop distance     | ~1.1%        | **3.6-7.8%** | —        |
 
 ETH and XAU land within 2% of realized. XAG runs ~19% high and BTC ~26% high
 because ATR's 14-day window weights the recent shock differently than a 30-day
@@ -201,14 +201,14 @@ order POSTs in the journal.
 
 ### Migrated
 
-| call site | was | now |
-|---|---|---|
-| `price_targets.compute_targets` | `volatility_from_atr(15m)` | `annualized_vol_from_atr(daily)` |
-| `price_targets.compute_all_targets` | `extra.atr_pct` | `daily_atr_pct` |
-| `fin_fish._compute_vol_and_drift` | `volatility_from_atr(15m)` | `annualized_vol_from_atr(daily)` |
-| `fin_fish.load_signal_data` | — | surfaces `daily_atr_pct` |
-| `metals_ladder` (x2) | `atr_pct`, default 0.3 | `_daily_atr_pct()`, default 3.0 |
-| `metals_execution_engine` (2 atr sources, 2 drift calls, `_warrant_vol_from_underlying`) | 15m | daily |
+| call site                                                                                | was                        | now                              |
+| ---------------------------------------------------------------------------------------- | -------------------------- | -------------------------------- |
+| `price_targets.compute_targets`                                                          | `volatility_from_atr(15m)` | `annualized_vol_from_atr(daily)` |
+| `price_targets.compute_all_targets`                                                      | `extra.atr_pct`            | `daily_atr_pct`                  |
+| `fin_fish._compute_vol_and_drift`                                                        | `volatility_from_atr(15m)` | `annualized_vol_from_atr(daily)` |
+| `fin_fish.load_signal_data`                                                              | —                          | surfaces `daily_atr_pct`         |
+| `metals_ladder` (x2)                                                                     | `atr_pct`, default 0.3     | `_daily_atr_pct()`, default 3.0  |
+| `metals_execution_engine` (2 atr sources, 2 drift calls, `_warrant_vol_from_underlying`) | 15m                        | daily                            |
 
 `swedbank/signals.py` needed **no change**: it builds indicators from
 `("one_year", "day")` bars, so its `atr_pct` was already daily and simply became
@@ -221,9 +221,9 @@ wrong for daily data and used it anyway.
 
 ### Measured effect on the live XAG ladder (5x warrant, 6h to close)
 
-| | buy rung | exit target |
-|---|---|---|
-| before (15m ATR) | −0.140% | +0.078% |
+|                   | buy rung    | exit target |
+| ----------------- | ----------- | ----------- |
+| before (15m ATR)  | −0.140%     | +0.078%     |
 | after (daily ATR) | **−1.605%** | **+0.909%** |
 
 **The exit target is the material finding.** +0.078% underlying x5 leverage is
@@ -250,11 +250,11 @@ rung must clear the working rung by `_FLASH_MIN_EDGE_PCT` (0.15%) or it is
 disabled. It arms at daily ATR <=2% and disarms above ~3%.
 
 **2. A regime-dependent test assumption.** `test_metals_execution_engine`
-asserted a positive Chronos drift always *raises* `expected_close_underlying`.
+asserted a positive Chronos drift always _raises_ `expected_close_underlying`.
 That held only while vol was floored: `drift_from_probability` scales with vol,
 so at the old 0.22 vol the signal drift was ~2.3 against a Chronos drift of
 ~2.86 (Chronos pulled up). At the corrected ~0.70 vol the signal drift is ~7.3,
-making +18%/24h the *less* bullish view, which correctly tempers the expectation
+making +18%/24h the _less_ bullish view, which correctly tempers the expectation
 downward. Rewritten to the durable invariant: the 0.7/0.3 blend must land
 strictly between the signal-only and chronos-only expectations — a form that
 also passes under the old vol.
@@ -276,9 +276,9 @@ whichever element set iteration yielded first — randomized per process by
 PYTHONHASHSEED. The loser eats the follower penalty (0.15x-0.35x), so when tied
 signals voted in opposite directions the **consensus direction flipped**:
 
-| | before | after |
-|---|---|---|
-| PYTHONHASHSEED=0 | SELL 0.8415 | SELL 0.8415 |
+|                    | before         | after       |
+| ------------------ | -------------- | ----------- |
+| PYTHONHASHSEED=0   | SELL 0.8415    | SELL 0.8415 |
 | PYTHONHASHSEED=1-5 | **BUY 0.7638** | SELL 0.8415 |
 
 (bb=BUY vs rsi=SELL, both 0.60 accuracy, both in `momentum_cluster`.)
@@ -299,11 +299,40 @@ blackout, when accuracy data was frozen and `1d_recent` was all zeros.
 It fixed **three** flaky tests, not one. The two `metals_swing` failures were
 hash-order victims as well; an earlier note in this session wrongly grouped them
 with the herc2-reachability family, because the stash test only proved they were
-not caused by the *ladder* change, not that herc2 was the cause.
+not caused by the _ladder_ change, not that herc2 was the cause.
 
 ### Still not migrated
 
-Nothing. `grid_fisher.py` consumes `price_targets` / `metals_ladder` output
-rather than calling the vol function directly, so it inherits the correction.
-Re-tune its ladder spacing against the new, wider rungs before the metals loop
-is restarted.
+Nothing.
+
+**CORRECTION (2026-08-21).** An earlier version of this section claimed
+`grid_fisher.py` "consumes price_targets / metals_ladder output ... so it
+inherits the correction" and needed its spacing re-tuned. **That was wrong.**
+grid_fisher imports neither module and never consumed volatility at all — its
+`GRID_TIER_SPACING_PCT` / `GRID_TARGET_PCT` / `GRID_STOP_PCT` are fixed
+percentages of the certificate price. The vol fix does not change its behaviour,
+and there is nothing to re-tune as a consequence of it.
+
+Separately measured while checking that claim, and worth recording:
+
+- **grid_fisher has never placed an order.** `data/grid_fisher_decisions.jsonl`
+  holds 3657 entries from 2026-06-23..07-17 and every one is an error or skip:
+  1908 `session_call_error`, 1218 `tick_fetch_degraded`, 258 `skip_global_cap`
+  (live buying power 139 SEK vs a config written for ~7000), 191
+  `skip_quote_stale`. Zero fills, zero rotations. So its tier geometry has
+  never been validated against a single real fill.
+- **The barrier geometry is provably negative-EV on its own.** With target `T`,
+  stop `S`, win-side cost `Cw` and loss-side cost `Cl`, the `S*T` terms cancel:
+  `EV*(T+S) = S*(T-Cw) - T*(S+Cl) = -(S*Cw + T*Cl) < 0`. No target/stop pair can
+  profit on a driftless price. The only edge is half-spread capture at fill
+  (a resting buy below the bid fills when price comes _down_ to it, so the edge
+  is half the spread — the tier depth adds none). Break-even spread is ~0.538%;
+  the flagship `BULL_SILVER_X5_AVA_3` sits at 0.50%. At config values the
+  reward:risk is 1:4.0 and the required win rate is 80.2%.
+- At XAG's measured vol (5x cert ~278% annualized) `GRID_STOP_PCT = 3.5` is
+  0.83 sigma of a 2-hour move. The config justifies it as "outside the typical
+  15-minute band" — true at 15 minutes, but the stated hold profile is
+  "minutes to hours", where the stop sits inside noise.
+
+Fix the reward:risk before arming it. See `GRID_FISHER_PROBE_ONLY` in
+`portfolio/grid_fisher_config.py`, now `True`.
