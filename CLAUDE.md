@@ -130,6 +130,8 @@ Adding a new pickup (so a future session picks up some work for you):
    single daily run forever** and reds `pf-pickups.service` — this is exactly
    what `manual_reminder` did from 2026-07-31 to 2026-08-21.
    `tests/test_pickup_manual_reminder.py` now asserts the two stay in sync.
+4. The dashboard tile at More → Pickups (`/api/pickups`) surfaces
+   pending + completed pickups for visual review.
 
 Handler verdicts and what the dispatcher does with them:
 
@@ -138,9 +140,6 @@ Handler verdicts and what the dispatcher does with them:
 | `defer`                   | stays `pending`                          | retries next run; use for human-only reminders |
 | anything else non-`error` | `completed`                              | one-shot; there is no recurrence mechanism     |
 | `error`                   | `pending`, `attempts+1`; `error` after 3 | exits 1, writes `critical_errors.jsonl`        |
-
-4. The dashboard tile at More → Pickups (`/api/pickups`) surfaces
-   pending + completed pickups for visual review.
 
 Dispatcher source: `scripts/process_pending_pickups.py`. Cron install
 (admin, one-time): `scripts/win/install-pending-pickups-task.ps1`.
