@@ -265,7 +265,9 @@ def _print_report(summary, buckets, split):
         print(f"  REAL (fail serially too) : {len(split['real'])}")
         for n in split["real"]:
             print(f"      {n}")
-        print(f"  xdist flake (pass alone) : {len(split['xdist_flake'])}")
+        print(f"  order/env dependent (pass alone) : {len(split['xdist_flake'])}")
+        for n in split["xdist_flake"]:
+            print(f"      {n}")
         if split["serial_only"]:
             print(f"  serial-only              : {len(split['serial_only'])}")
             for n in split["serial_only"]:
@@ -292,10 +294,29 @@ def main(argv=None):
         action="store_true",
         help=f"rewrite the managed block in {_TESTING_DOC.name}",
     )
+    ap.add_argument(
+        "--save-raw",
+        default="/tmp/test_triage_raw",
+        help="prefix for the raw pytest output files (default: %(default)s). "
+        "Kept so a run can be re-triaged without re-executing the suite.",
+    )
     args = ap.parse_args(argv)
+
+    def _save(suffix, body):
+        """Persist raw pytest output. Without this the printed report is all you
+        get, and re-triage means burning another full run — hit on 2026-08-21."""
+        if not (args.save_raw and body):
+            return
+        p = Path(f"{args.save_raw}_{suffix}.txt")
+        try:
+            p.write_text(body, encoding="utf-8")
+            print(f"[triage] raw {suffix} output -> {p}")
+        except OSError as e:
+            print(f"[triage] could not save raw {suffix} output: {e}")
 
     if args.run:
         text = run_parallel()
+        _save("parallel", text)
     elif args.input:
         text = Path(args.input).read_text(encoding="utf-8", errors="replace")
     else:
@@ -308,6 +329,7 @@ def main(argv=None):
     split = None
     if args.confirm:
         serial_text = run_serial(files_to_recheck(failures))
+        _save("serial", serial_text)
         split = split_flakes(failures, parse_failures(serial_text))
 
     _print_report(summary, buckets, split)

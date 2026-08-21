@@ -23,6 +23,7 @@ from portfolio.main import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _null_cached(key, ttl, func, *args):
     """Mock _cached that blocks all external calls, returning None."""
     return None
@@ -38,6 +39,7 @@ def make_indicators(**overrides):
 # ---------------------------------------------------------------------------
 # Test: generate_signal returns valid structure
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateSignalStructure:
     """Verify generate_signal returns the expected structure for all ticker types."""
@@ -86,6 +88,7 @@ class TestGenerateSignalStructure:
 # Test: Vote counts add up
 # ---------------------------------------------------------------------------
 
+
 class TestVoteCountIntegrity:
     """Verify _buy_count + _sell_count + holds = _total_applicable."""
 
@@ -127,13 +130,10 @@ class TestVoteCountIntegrity:
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
-        # 2026-05-28: 10 → 15 after enabling 5 regime signals (adx_regime_switch,
-        # amihud_illiquidity_regime, choppiness_regime_gate, bocpd_regime_switch,
-        # vol_ratio_regime).
-        # 2026-06-11 (B6 audit + June disable wave): 15 → 12. ministral now
-        # counts on all tickers (special-case removed); June disables trimmed
-        # the MSTR set. GPU pinned on via should_skip_gpu=False above.
-        assert extra["_total_applicable"] == 12
+        # 2026-08-21: 12 → 10. a953f63b (2026-07-17) benched ministral + qwen3,
+        # both of which counted on MSTR. Re-derive after ANY roster change:
+        #   python -c "from portfolio.signal_engine import _compute_applicable_count as C; print(C('MSTR'))"
+        assert extra["_total_applicable"] == 10
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
@@ -171,26 +171,33 @@ class TestVoteCountIntegrity:
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
-        # 2026-06-11 (B6 audit + June disable wave): 15 → 12. ministral now
-        # counts on all tickers (special-case removed); June disables trimmed
-        # the stock set. GPU pinned on via should_skip_gpu=False above.
+        # 2026-08-21: 12 → 10 (a953f63b benched ministral + qwen3). The test
+        # NAME already said 10 while the body asserted 12 — the name was right.
+        # Re-derive after ANY roster change:
+        #   python -c "from portfolio.signal_engine import _compute_applicable_count as C; print(C('MSTR'))"
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 12, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 12"
+            assert (
+                extra["_total_applicable"] == 10
+            ), f"{ticker} has {extra['_total_applicable']} total applicable, expected 10"
 
 
 # ---------------------------------------------------------------------------
 # Test: Vote count consistency
 # ---------------------------------------------------------------------------
 
+
 class TestVoteConsistency:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
         """_buy_count should exactly match number of BUY votes."""
         ind = make_indicators(
-            rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
-            ema9=70000, ema21=69000, price_vs_bb="below_lower",
+            rsi=25,
+            macd_hist=1.0,
+            macd_hist_prev=-1.0,
+            ema9=70000,
+            ema21=69000,
+            price_vs_bb="below_lower",
         )
         df = make_ohlcv_df(n=250)
         _, _, extra = generate_signal(ind, ticker="BTC-USD", df=df)
@@ -202,8 +209,12 @@ class TestVoteConsistency:
     def test_sell_count_matches_votes(self, _mock):
         """_sell_count should exactly match number of SELL votes."""
         ind = make_indicators(
-            rsi=75, macd_hist=-1.0, macd_hist_prev=1.0,
-            ema9=68000, ema21=69000, price_vs_bb="above_upper",
+            rsi=75,
+            macd_hist=-1.0,
+            macd_hist_prev=1.0,
+            ema9=68000,
+            ema21=69000,
+            price_vs_bb="above_upper",
         )
         df = make_ohlcv_df(n=250)
         _, _, extra = generate_signal(ind, ticker="BTC-USD", df=df)
@@ -225,14 +236,19 @@ class TestVoteConsistency:
 # Test: Consensus thresholds
 # ---------------------------------------------------------------------------
 
+
 class TestConsensusThresholds:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_needs_3_voters(self, _mock):
         """Crypto needs MIN_VOTERS=3 active voters to reach consensus."""
         # Only 2 voters: RSI + MACD
         ind = make_indicators(
-            rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
-            ema9=69000, ema21=69000, price_vs_bb="inside",
+            rsi=25,
+            macd_hist=1.0,
+            macd_hist_prev=-1.0,
+            ema9=69000,
+            ema21=69000,
+            price_vs_bb="inside",
         )
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
         assert extra["_voters"] == 2
@@ -252,8 +268,13 @@ class TestConsensusThresholds:
         signal.
         """
         ind = make_indicators(
-            rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
-            ema9=130, ema21=130, price_vs_bb="inside", close=130.0,
+            rsi=25,
+            macd_hist=1.0,
+            macd_hist_prev=-1.0,
+            ema9=130,
+            ema21=130,
+            price_vs_bb="inside",
+            close=130.0,
         )
         action, conf, extra = generate_signal(ind, ticker="MSTR")
         assert extra["_voters"] >= 2
@@ -268,8 +289,13 @@ class TestConsensusThresholds:
         2026-05-18 signal additions. Lower bound only.
         """
         ind = make_indicators(
-            rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
-            ema9=2000, ema21=2000, price_vs_bb="inside", close=2000.0,
+            rsi=25,
+            macd_hist=1.0,
+            macd_hist_prev=-1.0,
+            ema9=2000,
+            ema21=2000,
+            price_vs_bb="inside",
+            close=2000.0,
         )
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
         assert extra["_voters"] >= 2
@@ -279,13 +305,18 @@ class TestConsensusThresholds:
 # Test: Weighted consensus
 # ---------------------------------------------------------------------------
 
+
 class TestWeightedConsensus:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_weighted_confidence_in_range(self, _mock):
         """Weighted confidence should be between 0.0 and 1.0."""
         ind = make_indicators(
-            rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
-            ema9=70000, ema21=69000, price_vs_bb="below_lower",
+            rsi=25,
+            macd_hist=1.0,
+            macd_hist_prev=-1.0,
+            ema9=70000,
+            ema21=69000,
+            price_vs_bb="below_lower",
         )
         df = make_ohlcv_df(n=250)
         _, _, extra = generate_signal(ind, ticker="BTC-USD", df=df)
@@ -307,6 +338,7 @@ class TestWeightedConsensus:
 # Test: Enhanced signals included when df provided
 # ---------------------------------------------------------------------------
 
+
 class TestEnhancedSignals:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_enhanced_signals_present_with_df(self, _mock):
@@ -316,10 +348,20 @@ class TestEnhancedSignals:
         _, _, extra = generate_signal(ind, ticker="BTC-USD", df=df)
 
         enhanced_names = [
-            "trend", "momentum", "volume_flow", "volatility_sig",
-            "candlestick", "structure", "fibonacci", "smart_money",
-            "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-            "momentum_factors", "macro_regime",
+            "trend",
+            "momentum",
+            "volume_flow",
+            "volatility_sig",
+            "candlestick",
+            "structure",
+            "fibonacci",
+            "smart_money",
+            "oscillators",
+            "heikin_ashi",
+            "mean_reversion",
+            "calendar",
+            "momentum_factors",
+            "macro_regime",
         ]
         for name in enhanced_names:
             assert name in extra["_votes"], f"Missing enhanced signal: {name}"
@@ -332,14 +374,25 @@ class TestEnhancedSignals:
         _, _, extra = generate_signal(ind, ticker="BTC-USD", df=None)
 
         enhanced_names = [
-            "trend", "momentum", "volume_flow", "volatility_sig",
-            "candlestick", "structure", "fibonacci", "smart_money",
-            "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-            "momentum_factors", "macro_regime",
+            "trend",
+            "momentum",
+            "volume_flow",
+            "volatility_sig",
+            "candlestick",
+            "structure",
+            "fibonacci",
+            "smart_money",
+            "oscillators",
+            "heikin_ashi",
+            "mean_reversion",
+            "calendar",
+            "momentum_factors",
+            "macro_regime",
         ]
         for name in enhanced_names:
-            assert extra["_votes"][name] == "HOLD", \
-                f"{name} should be HOLD without df, got {extra['_votes'][name]}"
+            assert (
+                extra["_votes"][name] == "HOLD"
+            ), f"{name} should be HOLD without df, got {extra['_votes'][name]}"
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_enhanced_signals_hold_with_short_df(self, _mock):
@@ -356,6 +409,7 @@ class TestEnhancedSignals:
 # Test: Regime detection
 # ---------------------------------------------------------------------------
 
+
 class TestRegimeDetection:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_regime_field_present(self, _mock):
@@ -365,14 +419,19 @@ class TestRegimeDetection:
 
         assert "_regime" in extra
         assert extra["_regime"] in (
-            "trending-up", "trending-down", "ranging",
-            "high-vol", "breakout", "capitulation",
+            "trending-up",
+            "trending-down",
+            "ranging",
+            "high-vol",
+            "breakout",
+            "capitulation",
         )
 
 
 # ---------------------------------------------------------------------------
 # Test: Confluence score
 # ---------------------------------------------------------------------------
+
 
 class TestConfluenceScore:
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
@@ -390,6 +449,7 @@ class TestConfluenceScore:
 # Test: write_agent_summary produces valid output
 # ---------------------------------------------------------------------------
 
+
 class TestWriteAgentSummary:
     def test_summary_structure(self):
         """write_agent_summary should produce a dict with expected keys."""
@@ -402,10 +462,14 @@ class TestWriteAgentSummary:
                 "confidence": 0.0,
                 "indicators": make_indicators(),
                 "extra": {
-                    "_voters": 0, "_total_applicable": 26,
-                    "_buy_count": 0, "_sell_count": 0,
-                    "_votes": {}, "_regime": "range-bound",
-                    "_weighted_action": "HOLD", "_weighted_confidence": 0.0,
+                    "_voters": 0,
+                    "_total_applicable": 26,
+                    "_buy_count": 0,
+                    "_sell_count": 0,
+                    "_votes": {},
+                    "_regime": "range-bound",
+                    "_weighted_action": "HOLD",
+                    "_weighted_confidence": 0.0,
                     "_confluence_score": 0.0,
                 },
             }
@@ -425,9 +489,13 @@ class TestWriteAgentSummary:
             captured = {}
             original_write = None
             try:
+
                 def capture_write(path, data):
                     captured["data"] = data
-                with mock.patch("portfolio.reporting.atomic_write_json", side_effect=capture_write):
+
+                with mock.patch(
+                    "portfolio.reporting.atomic_write_json", side_effect=capture_write
+                ):
                     write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
             except Exception:
                 pass
@@ -450,28 +518,40 @@ class TestWriteAgentSummary:
                 "confidence": 0.0,
                 "indicators": make_indicators(),
                 "extra": {
-                    "_voters": 0, "_total_applicable": 26,
-                    "_buy_count": 0, "_sell_count": 0,
-                    "_votes": {}, "_regime": "range-bound",
-                    "_weighted_action": "HOLD", "_weighted_confidence": 0.0,
+                    "_voters": 0,
+                    "_total_applicable": 26,
+                    "_buy_count": 0,
+                    "_sell_count": 0,
+                    "_votes": {},
+                    "_regime": "range-bound",
+                    "_weighted_action": "HOLD",
+                    "_weighted_confidence": 0.0,
                     "_confluence_score": 0.0,
                 },
             }
         }
         state = {
-            "cash_sek": 500000, "holdings": {}, "transactions": [],
+            "cash_sek": 500000,
+            "holdings": {},
+            "transactions": [],
             "initial_value_sek": 500000,
         }
 
         captured = {}
+
         def capture_write(path, data):
             captured["data"] = data
 
-        with mock.patch("portfolio.reporting._cached", side_effect=_null_cached), \
-             mock.patch("portfolio.reporting.atomic_write_json", side_effect=capture_write), \
-             mock.patch("portfolio.api_utils.load_config", return_value={}):
-            write_agent_summary(signals, {"BTC-USD": 69000.0}, 10.50, state,
-                              {"BTC-USD": []})
+        with (
+            mock.patch("portfolio.reporting._cached", side_effect=_null_cached),
+            mock.patch(
+                "portfolio.reporting.atomic_write_json", side_effect=capture_write
+            ),
+            mock.patch("portfolio.api_utils.load_config", return_value={}),
+        ):
+            write_agent_summary(
+                signals, {"BTC-USD": 69000.0}, 10.50, state, {"BTC-USD": []}
+            )
 
         if "data" in captured:
             # Should not raise
