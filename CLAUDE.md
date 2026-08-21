@@ -5,7 +5,8 @@
 Before doing anything else in this session:
 
 ```
-.venv/Scripts/python.exe scripts/check_critical_errors.py
+# Steam Deck (Linux):  .venv/bin/python scripts/check_critical_errors.py
+# herc2 (Windows):     .venv/Scripts/python.exe scripts/check_critical_errors.py
 ```
 
 If the script exits non-zero, it has found unresolved critical errors in
@@ -77,7 +78,8 @@ Remove the file to re-enable. See
 Run this immediately after the critical-errors check:
 
 ```
-.venv/Scripts/python.exe scripts/session_start_bottle.py
+# Steam Deck (Linux):  .venv/bin/python scripts/session_start_bottle.py
+# herc2 (Windows):     .venv/Scripts/python.exe scripts/session_start_bottle.py
 ```
 
 The script reads `data/pending_pickups.json` and prints any scheduled
@@ -124,7 +126,7 @@ Backlog reference: `docs/IMPROVEMENT_BACKLOG.md`.
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 600s loop) collects market data, computes
-15 active signals (89 tracked names, 76 disabled, 79 modules in portfolio/signals/) across 7
+13 active signals (90 tracked names, 77 disabled, 80 modules in portfolio/signals/) across 7
 timeframes for 5 Tier-1 instruments, and detects meaningful triggers. Layer 2 (Claude CLI
 subprocess) is invoked on triggers to make trade decisions for two simulated portfolios
 (Patient & Bold, each starting
@@ -137,7 +139,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 600s cycle (bumped from 60s on 2026-04-09): fetch OHLCV → compute indicators → run 15 active signals → detect triggers → write summaries
+- 600s cycle (bumped from 60s on 2026-04-09): fetch OHLCV → compute indicators → run 13 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -243,43 +245,55 @@ references and any `api_post`/`api_delete`.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (89 Tracked · 15 Active · 76 Disabled)
+## Signal System (90 Tracked · 13 Active · 77 Disabled)
 
-> Counts reconciled to code 2026-06-11: `SIGNAL_NAMES`=89, `DISABLED_SIGNALS`=76,
-> active=15, 79 files in `portfolio/signals/`, 70 `register_enhanced()` calls in
+> Counts reconciled to code 2026-08-21: `SIGNAL_NAMES`=90, `DISABLED_SIGNALS`=77,
+> active=13, 80 files in `portfolio/signals/`, 69 `register_enhanced()` calls in
 > `signal_registry.py`. Derive the live active set with:
 > `python -c "from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS; print([s for s in SIGNAL_NAMES if s not in DISABLED_SIGNALS])"`
 
-### Active (15 globally + per-ticker overrides)
-1. RSI(14) — Oversold <30 BUY, overbought >70 SELL (52.4% 1d, 34K sam)
-2. BB(20,2) — Bollinger Band breakout (54.9% 1d, 9K sam)
-3. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL) (58.6% 1d, 10K sam)
-4. Ministral-8B — Local LLM reasoning via llama-cpp-python (58.0% 1d, 6K sam)
-5. Qwen3-8B — Local LLM reasoning (59.7% 1d, 4K sam, 1.2% activation)
-6. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO (52.9% 1d)
-7. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B (52.6% 1d, 28K sam)
-8. News Event — Headline velocity, keyword severity, source credibility (50.6% 1d)
-9. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY (57.2% 1d)
-10. Crypto Macro — DeFi TVL, staking yields, protocol revenue (54.5% 1d, crypto only)
-11. COT Positioning — CFTC speculative/commercial positioning (100% 1d, 5 sam)
-12. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (60.0% 1d, BTC-only)
-13. Statistical Jump Regime — Jump detection for regime changes (54.3% 1d, 3K sam)
-14. Drift Regime Gate — Regime detection via drift analysis (58.1% 1d, 1.5K sam, 68.1% recent)
-15. Amihud Illiquidity Regime — Illiquidity ratio regime detection (68.0% 1d, 225 sam)
+### Active (13 globally + per-ticker overrides)
 
-Per-ticker overrides (globally disabled, re-enabled for one ticker via
+Accuracy figures below are as-documented and go stale; the live source of truth
+is `data/accuracy_cache.json` via `python -m portfolio.main --accuracy`.
+
+1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
+2. BB(20,2) — Bollinger Band breakout
+3. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL)
+4. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO
+5. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B
+6. News Event — Headline velocity, keyword severity, source credibility
+7. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY
+8. Crypto Macro — DeFi TVL, staking yields, protocol revenue (crypto only)
+9. COT Positioning — CFTC speculative/commercial positioning
+10. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow (BTC-only)
+11. Statistical Jump Regime — Jump detection for regime changes
+12. Drift Regime Gate — Regime detection via drift analysis
+13. Amihud Illiquidity Regime — Illiquidity ratio regime detection
+
+**NO local-LLM signal is globally active.** Ministral-8B and Qwen3-8B were
+listed here as #4 and #5 until 2026-08-21 but were globally disabled on
+2026-07-17 (`a953f63b`, "Bench ministral + qwen3 — focus on phi4_mini"). The
+only LLM voter is `phi4_mini`, and only via the per-ticker overrides below.
+
+Per-ticker overrides (globally disabled, re-enabled for specific tickers via
 `_DISABLED_SIGNAL_OVERRIDES` in signal_engine.py):
-- Realized Skewness → XAU (60.3%, 572 sam)
-- ML Classifier → ETH (55.1% 3h, 1206 sam)
+- `phi4_mini` → BTC-USD, ETH-USD, XAU-USD, XAG-USD (promoted 2026-07-13,
+  `5c654545`; deliberately NOT on MSTR — untested there). Runs via **remote**
+  inference on herc2, so it votes even though `data/local_llm.disabled` is in
+  place — that flag gates LOCAL inference only.
+- `realized_skewness` → XAU-USD (60.3%, 572 sam)
+- `ml` → ETH-USD (55.1% 3h, 1206 sam)
 
 (Williams VIX Fix override removed 2026-05-31 — recent accuracy collapsed to
 30.5%; Credit Spread Risk override removed 2026-05-26 — was re-enabling a
 broken signal.)
 
-### Disabled (76 — force-HOLD via DISABLED_SIGNALS)
+### Disabled (77 — force-HOLD via DISABLED_SIGNALS)
 Core disabled: ML Classifier, MACD, EMA, Volume Confirmation, Funding Rate,
 Sentiment, Forecast (Chronos — fully disabled 2026-05-12), Kronos (retired
-2026-04-21), Claude Fundamental, Fibonacci
+2026-04-21), Claude Fundamental, Fibonacci, Ministral-8B + Qwen3-8B (both
+benched 2026-07-17), phi4_mini (globally off; per-ticker override only)
 
 Recently disabled (collapsed accuracy, 2026-05/06): Metals Cross-Asset
 (disabled 2026-06-06), Crypto EVRP (re-disabled 2026-05-26), ADX Regime
@@ -306,11 +320,16 @@ Inflation Momentum, Trend Slope Momentum
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
 - **Volume/ADX gates**: RVOL <0.5 forces HOLD
 - **Accuracy tier boost**: 1.25x for 65%+ accuracy, 1.15x for 60%+, 1.05x for 55%+
-- **Applicable signals** (via `_compute_applicable_count`, reconciled 2026-06-11): crypto=15 (BTC-USD), stocks=12 (MSTR), metals=12 (XAU-USD)
+- **Applicable signals** (via `_compute_applicable_count`, reconciled 2026-08-21):
+  crypto=**14** (BTC-USD, ETH-USD), stocks=**10** (MSTR), metals=**12** (XAU-USD, XAG-USD).
+  NOTE: this count is not constant. `GPU_SIGNALS` (ministral, qwen3, forecast,
+  phi4_mini) are dropped when remote inference is unreachable, so crypto and
+  metals fall by 1 (crypto 14→13) whenever herc2 is asleep. If an applicable-count
+  test fails, check herc2 reachability before assuming a code change.
 
 ## Instruments
 
-### Tier 1: Full signals (15 active × 7 timeframes)
+### Tier 1: Full signals (13 active × 7 timeframes, +per-ticker overrides)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
@@ -333,8 +352,8 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (consensus voting, 15 active), `signal_registry.py` (plugin discovery),
-`signals/*.py` (79 enhanced modules, 70 register_enhanced calls), `accuracy_stats.py` (hit rates),
+`signal_engine.py` (consensus voting, 13 active), `signal_registry.py` (plugin discovery),
+`signals/*.py` (80 enhanced modules, 69 register_enhanced calls), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
 ### Data & External
@@ -374,9 +393,14 @@ GGUF/llama-server, BERT sentiment, Chronos, metals fallbacks.
 **Pause:** `touch data/local_llm.disabled` (or config `local_llm.enabled=false`).
 **Resume:** `rm data/local_llm.disabled` (and/or set config key back to true).
 Live-togglable, no loop restart needed. Flag file wins over config.
-**Status: PAUSED since 2026-07-02** — flag file is in place at user request.)
+**Status: PAUSED since 2026-07-02** — flag file is in place at user request.
+**This does NOT mean no LLM signal votes.** The gate covers LOCAL inference
+only; `phi4_mini` runs via REMOTE inference on herc2 and still votes on
+BTC/ETH/XAU/XAG through `_DISABLED_SIGNAL_OVERRIDES`. It also means the
+per-asset applicable-signal count silently drops by 1 whenever herc2 is
+unreachable.)
 
-Full module map (167 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/SYSTEM_OVERVIEW.md`
+Full module map (173 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/SYSTEM_OVERVIEW.md`
 
 ## Key Data Files
 
@@ -429,7 +453,7 @@ Full module map (167 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/S
 ## Testing
 
 ```bash
-# All tests (~11,100 tests across ~446 files; reconciled 2026-06-11 via pytest --collect-only -q)
+# All tests (~11,700 tests across 478 files; reconciled 2026-08-21 via pytest --collect-only -q)
 .venv/Scripts/python.exe -m pytest tests/
 
 # Parallel (~5.5 min, 8 workers)
@@ -445,15 +469,48 @@ for the current count and triage.
 
 ## Environment
 
-- **OS**: Windows 11 Pro. Shell is Git Bash (set via `CLAUDE_CODE_GIT_BASH_PATH`).
-- **Python**: `.venv/Scripts/python.exe` — always use forward slashes, full path
-- **GPU**: RTX 3080 10GB, CUDA 13.1. LLM inference (Ministral-8B, Chronos-2, Qwen3-8B) runs
-  in separate venv at `Q:/models/.venv-llm`. GPU lock: `Q:/models/gpu_lock.py`.
-- **Config**: Symlink `config.json` → `C:\Users\Herc2\.config\finance-analyzer\config.json`
-  (OUTSIDE repo). **NEVER commit config.json** — exposed API keys on Mar 15, 2026.
-- **Timezone**: User is CET (UTC+1). Market hours are DST-dependent (see `memory/market_hours.md`).
-- **Scheduled Tasks**: PF-DataLoop (main loop, logon + auto-restart), PF-Dashboard (logon),
-  PF-OutcomeCheck (daily 18:00), PF-MLRetrain (weekly).
+**Two hosts run this repo. Check which one you are on before running anything —
+the Python path differs and the wrong one fails immediately.**
+
+```bash
+uname -s   # Linux => Steam Deck    MINGW*/MSYS* => herc2 (Windows)
+```
+
+### Steam Deck (Linux) — where the loop runs today
+- **Python**: `.venv/bin/python` (3.13.5). Every command in this file written as
+  `.venv/Scripts/python.exe` is the herc2 form — substitute `.venv/bin/python`.
+- **Config**: symlink `config.json` → `/home/deck/.config/finance-analyzer/config.json`
+- **Process management is systemd --user, NOT Windows scheduled tasks.**
+  Enabled: `pf-loop` (Layer 1), `pf-dashboard`, `pf-swedbank`, plus timers
+  `pf-databackup`, `pf-outcomecheck` (01:00), `pf-pickups` (08:00).
+  Inspect with `systemctl --user list-units 'pf-*'` / `journalctl --user -u pf-loop`.
+  Installed-but-disabled: `pf-metalsloop`, `pf-cryptoloop`, `pf-oilloop`,
+  `pf-mstrloop`, `pf-golddigger`.
+- **No GPU.** All local model inference is unavailable here; `phi4_mini` votes
+  via *remote* inference on herc2.
+- **This host suspends often** — roughly half of wall-clock uptime. Wall-clock
+  file staleness is therefore meaningless on its own; see the loop-health
+  readers, which anchor on awake time (CLOCK_MONOTONIC) plus a boot id.
+
+### herc2 (Windows 11 Pro) — GPU / LLM host
+- Shell is Git Bash (set via `CLAUDE_CODE_GIT_BASH_PATH`).
+- **Python**: `.venv/Scripts/python.exe` — forward slashes, full path.
+- **GPU**: RTX 3080 10GB, CUDA 13.1. LLM inference runs in a separate venv at
+  `Q:/models/.venv-llm`. GPU lock: `Q:/models/gpu_lock.py`.
+- **Config**: symlink `config.json` → `C:\Users\Herc2\.config\finance-analyzer\config.json`
+- **Scheduled Tasks**: PF-DataLoop, PF-Dashboard, PF-OutcomeCheck, PF-MLRetrain.
+
+### Both
+- **NEVER commit config.json** — it is a symlink to a file outside the repo and
+  holds live API keys. Exposed on Mar 15 2026; those credentials are still
+  unrotated and the blob is still publicly fetchable. Verify with
+  `python scripts/check_leaked_creds_rotated.py` (exits 0 when clean).
+- **Timezone**: operator is CET (UTC+1, CEST in summer). Market hours are
+  DST-dependent (see `memory/market_hours.md`).
+- **Live trading is gated off.** `portfolio/trading_gate.py` is the master kill
+  switch and it fails CLOSED. Re-arming deliberately needs BOTH
+  `rm data/trading.disabled` AND `trading.live_enabled=true` in config.json.
+  The operator places every order by hand.
 
 ## Critical Rules
 
