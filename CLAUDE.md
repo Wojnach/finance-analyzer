@@ -42,7 +42,16 @@ steps when unresolved errors exist:
 To resolve an entry, append a follow-up line to `data/critical_errors.jsonl`:
 
 ```json
-{"ts":"<now>","level":"info","category":"resolution","caller":"<same>","resolution":"<what you did>","resolves_ts":"<original ts>","message":"<short>","context":{}}
+{
+  "ts": "<now>",
+  "level": "info",
+  "category": "resolution",
+  "caller": "<same>",
+  "resolution": "<what you did>",
+  "resolves_ts": "<original ts>",
+  "message": "<short>",
+  "context": {}
+}
 ```
 
 The journal is append-only. Never mutate earlier entries.
@@ -92,10 +101,10 @@ nothing is pending or recently completed.
 If output shows `[OVERDUE]` or `[DUE TODAY]`, surface the entry to the
 user verbatim BEFORE doing anything else, then propose either:
 
-* let the cron path run on its own schedule — `PF-PendingPickups`
+- let the cron path run on its own schedule — `PF-PendingPickups`
   daily 08:00 CET runs `scripts/process_pending_pickups.py`
   automatically; OR
-* force-run now:
+- force-run now:
   `.venv/Scripts/python.exe scripts/process_pending_pickups.py --force <ID>`
 
 If output shows recently completed pickups (last 48h), read the
@@ -112,10 +121,24 @@ Adding a new pickup (so a future session picks up some work for you):
    `due_ts`, `handler`, and a `context` block with the decision
    thresholds the handler needs.
 2. Add the handler module under `scripts/pickups/<handler>.py`
-   exposing `run(pickup, repo_root) -> dict`.
+   exposing `run(pickup, repo_root) -> dict`. For work only a human can do,
+   reuse the existing `manual_reminder` handler instead of writing a new one.
 3. Whitelist the handler in `scripts/process_pending_pickups.py`
    `_HANDLERS` dict. This whitelist is the CWE-706 guard — never
    dynamic-import handler names from JSON.
+   **A handler named in the JSON but absent from `_HANDLERS` fails every
+   single daily run forever** and reds `pf-pickups.service` — this is exactly
+   what `manual_reminder` did from 2026-07-31 to 2026-08-21.
+   `tests/test_pickup_manual_reminder.py` now asserts the two stay in sync.
+
+Handler verdicts and what the dispatcher does with them:
+
+| verdict                   | status after                             | notes                                          |
+| ------------------------- | ---------------------------------------- | ---------------------------------------------- |
+| `defer`                   | stays `pending`                          | retries next run; use for human-only reminders |
+| anything else non-`error` | `completed`                              | one-shot; there is no recurrence mechanism     |
+| `error`                   | `pending`, `attempts+1`; `error` after 3 | exits 1, writes `critical_errors.jsonl`        |
+
 4. The dashboard tile at More → Pickups (`/api/pickups`) surfaces
    pending + completed pickups for visual review.
 
@@ -139,22 +162,26 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
+
 - 600s cycle (bumped from 60s on 2026-04-09): fetch OHLCV → compute indicators → run 13 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
 
 ### Layer 2: Decision Engine (`portfolio/agent_invocation.py`)
+
 - Claude CLI subprocess (`claude -p "..."`) invoked by Layer 1 on trigger events
 - Tiered: T1 Quick (180s/15 turns), T2 Signal (600s/40 turns), T3 Full (900s/40 turns)
 - Reads signal summaries → makes trade decisions → writes journal → sends Telegram
 - Full trading playbook: **`docs/TRADING_PLAYBOOK.md`**
 
 ### Layer 3: Autonomous Fallback (`portfolio/autonomous.py`)
+
 - Replaces Layer 2 when `config.layer2.enabled = false`
 - Signal-based decision rules without LLM. Recommendations only, no execution.
 
 ### Metals Subsystem (`data/metals_loop.py`)
+
 - Separate process for XAG/XAU warrant trading via Avanza API
 - 60s cycle with embedded 10s silver fast-tick monitor
 - Local LLM inference (Ministral-8B, Chronos-2, Qwen3-8B)
@@ -169,6 +196,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
   `scripts/grid_fisher_probe.py`.
 
 ### Dashboard (`dashboard/app.py`)
+
 - Flask REST API on port 5055, dual-stack IPv4+IPv6 bind (token-cookie auth)
 - Auth: `?token=<dashboard_token>` once, then 1-year rolling cookie. Bearer
   header for CLI clients. Cloudflare Access header bypasses local auth.
@@ -194,6 +222,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
   **Other:** `/api/iskbets`, `/api/local-llm-trends`, `/api/telegrams`
 
 ### Multi-asset swing loops (paper-mode by default)
+
 - **Crypto loop** (`data/crypto_loop.py`): BTC + ETH 60s cycle, DRY_RUN=True.
   Install: `scripts/win/install-crypto-loop-task.ps1` → `PF-CryptoLoop`.
 - **MSTR loop** (`portfolio/mstr_loop/`): shadow phase. Install:
@@ -207,6 +236,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
   so it falls through to the yfinance last-resort path — reconciled 2026-06-11).
 
 ### Swedbank book (`portfolio/swedbank/`, monitoring only)
+
 Tracks three externally-custodied share accounts (26 instruments) that are NOT
 held at Avanza. **Monitoring and valuation only — it can never place an order.**
 The operator executes every trade by hand; `tests/test_swedbank_no_trading.py`
@@ -215,7 +245,7 @@ references and any `api_post`/`api_delete`.
 
 - Prices: Avanza is primary for all 26 (`get_quote` is real-time for equities,
   certificates and warrants alike via the `/stock/` path; `/_api/price-chart/
-  stock/<ob>` serves OHLCV from 1-minute to monthly). Alpaca is the automatic
+stock/<ob>` serves OHLCV from 1-minute to monthly). Alpaca is the automatic
   fallback for the 19 US names, flagged degraded since it carries no bid/ask.
   The 7 Stockholm instruments have no fallback and degrade to last-good price
   with a visible age stamp.
@@ -234,14 +264,29 @@ references and any `api_post`/`api_delete`.
 - **`data/swedbank_*.json` holds REAL positions and is gitignored — this repo is
   public.** Guarded in `.gitignore` and `.git/info/exclude`. Tests use synthetic
   books only.
-- Entry: `.venv/bin/python -m portfolio.swedbank {show,quotes}` ·
+- Entry: `.venv/bin/python -m portfolio.swedbank {show,quotes,sync}` ·
   loop `data/swedbank_loop.py --loop` · install
   `scripts/deck/install-swedbank-loop.sh` (unit `pf-swedbank`, not auto-enabled)
 - Endpoint: `/api/swedbank` (serves the loop's snapshot; never prices on demand,
   so a page refresh cannot contend for the Avanza session). Tab: More → Swedbank.
-- NOT yet wired: signals/trajectories over this universe. Data layer is ready.
+- **Signals and trajectories ARE wired** (corrected 2026-08-21 — this line read
+  "NOT yet wired" long after the fact). `portfolio/swedbank/signals.py` exposes
+  `evaluate()` / `evaluate_universe()` / `log_snapshot()`; the loop calls them
+  every `SIGNAL_EVERY_N_CYCLES` and the snapshot carries `signals` +
+  `signals_computed_at`. `_UNINFORMATIVE` drops the signal families that cannot
+  mean anything per-equity (e.g. COT positioning has no per-equity series).
+- **Stockholm-listed names mark at the 17:30 close** and the quote carries a
+  `note: "quote is <n>s old"` with `degraded=True` — that flag means _stale_
+  here, not _missing bid/ask_. Both XBT crypto trackers are in this group, so
+  the crypto sleeve (~22% of book value) is **frozen at Friday's close all
+  weekend while BTC/ETH trade 24/7**. Monday's first sweep gaps. Don't read a
+  weekend book P&L as live.
+- `data/swedbank_signal_log.jsonl` logs actions + confidence only — **no prices,
+  no values.** Book P&L history is therefore not reconstructable from it; an
+  equity curve needs the loop to start logging marks.
 
 ### Trading Bots
+
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
@@ -278,6 +323,7 @@ only LLM voter is `phi4_mini`, and only via the per-ticker overrides below.
 
 Per-ticker overrides (globally disabled, re-enabled for specific tickers via
 `_DISABLED_SIGNAL_OVERRIDES` in signal_engine.py):
+
 - `phi4_mini` → BTC-USD, ETH-USD, XAU-USD, XAG-USD (promoted 2026-07-13,
   `5c654545`; deliberately NOT on MSTR — untested there). Runs via **remote**
   inference on herc2, so it votes even though `data/local_llm.disabled` is in
@@ -290,6 +336,7 @@ Per-ticker overrides (globally disabled, re-enabled for specific tickers via
 broken signal.)
 
 ### Disabled (77 — force-HOLD via DISABLED_SIGNALS)
+
 Core disabled: ML Classifier, MACD, EMA, Volume Confirmation, Funding Rate,
 Sentiment, Forecast (Chronos — fully disabled 2026-05-12), Kronos (retired
 2026-04-21), Claude Fundamental, Fibonacci, Ministral-8B + Qwen3-8B (both
@@ -314,6 +361,7 @@ Persistence, VWAP Z-Score MR, Gold Overnight Bias, Metals VRP, Breakeven
 Inflation Momentum, Trend Slope Momentum
 
 ### Signal Mechanics
+
 - **MIN_VOTERS = 3** (crypto/stocks), **2** (metals, since 2026-05-11 — MIN_VOTERS=3 produced 0 metals trades in 20 days). Consensus = active voters (BUY+SELL), not total.
 - **Accuracy gate**: signals below 47% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash). Tiered: 50% for 7K+ sample signals.
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
@@ -330,61 +378,72 @@ Inflation Momentum, Trend Slope Momentum
 ## Instruments
 
 ### Tier 1: Full signals (13 active × 7 timeframes, +per-ticker overrides)
-| Asset Class | Tickers | Source |
-|-------------|---------|--------|
+
+| Asset Class | Tickers          | Source       |
+| ----------- | ---------------- | ------------ |
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
 | Metals 24/7 | XAU-USD, XAG-USD | Binance FAPI |
-| US Stocks | MSTR | Alpaca |
+| US Stocks   | MSTR             | Alpaca       |
 
 (Removed Mar 15: AMD, GOOGL, AMZN, AAPL, AVGO, META, SOUN, LMT)
 (Removed Apr 09: PLTR, NVDA, MU, SMCI, TSM, TTWO, VRT — cycle p50 reduction)
 
 ### Tier 2: Avanza price-only (no signals)
+
 SAAB-B, SEB-C, INVE-B
 
 ### Tier 3: Warrants (Avanza price + underlying's signals)
+
 XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 
 ## Key Modules
 
 ### Orchestration
+
 `main.py` (loop lifecycle), `agent_invocation.py` (Layer 2 subprocess),
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
+
 `signal_engine.py` (consensus voting, 13 active), `signal_registry.py` (plugin discovery),
 `signals/*.py` (80 enhanced modules, 69 register_enhanced calls), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
 ### Data & External
+
 `data_collector.py` (Binance/Alpaca/yfinance), `fear_greed.py`, `sentiment.py`,
 `alpha_vantage.py` (fundamentals), `futures_data.py` (Binance FAPI),
 `onchain_data.py` (BTC MVRV/SOPR), `fx_rates.py` (USD/SEK)
 
 ### Microstructure & Cross-Asset
+
 `metals_orderbook.py` (Binance FAPI depth+trades), `microstructure.py` (OFI/VPIN/depth imbalance),
 `microstructure_state.py` (snapshot accumulator, persisted rolling OFI),
 `metals_cross_assets.py` (copper/GVZ/SPY/G-S ratio via yfinance)
 
 ### Portfolio & Risk
+
 `portfolio_mgr.py` (atomic state I/O), `trade_guards.py` (cooldowns/escalation),
 `risk_management.py` (drawdown circuit breaker, ATR stops, concentration),
 `equity_curve.py` (Sharpe/Sortino, round-trip P&L),
 `monte_carlo.py` + `monte_carlo_risk.py` (GBM simulation, t-copula VaR/CVaR)
 
 ### Metals & Avanza
+
 `avanza_session.py` (Playwright BankID auth), `avanza_orders.py` (order flow),
 `exit_optimizer.py` (probabilistic exit), `price_targets.py` (structural levels),
 `orb_predictor.py` (Opening Range Breakout), `iskbets.py` (intraday quick-gamble),
 `fin_snipe.py` (metals bid/exit ladder)
 
 ### Reporting & Notification
+
 `reporting.py` (agent_summary generation), `journal.py` (decision JSONL),
 `prophecy.py` (macro beliefs), `telegram_notifications.py` (sending),
 `message_store.py` (logging + delivery), `digest.py` (4h periodic),
 `daily_digest.py` (morning), `telegram_poller.py` (incoming /mode commands)
 
 ### Infrastructure
+
 `file_utils.py` (atomic JSON/JSONL I/O), `http_retry.py` (backoff),
 `health.py` (heartbeat, module failures), `claude_gate.py` (CLI gate),
 `gpu_gate.py` (GPU lock), `shared_state.py` (thread-safe cache, rate limiters),
@@ -404,23 +463,23 @@ Full module map (173 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/S
 
 ## Key Data Files
 
-| File | Purpose |
-|------|---------|
-| `data/agent_summary.json` | Full signal report (all tickers, ~64K tokens) |
-| `data/agent_summary_compact.json` | Tiered compaction for Layer 2 (~1400 lines) |
-| `data/agent_context_t1.json` | Tier 1 quick-check context (~200 lines) |
-| `data/agent_context_t2.json` | Tier 2 signal context (~600 lines) |
-| `data/portfolio_state.json` | Patient strategy: cash, holdings, transactions |
-| `data/portfolio_state_bold.json` | Bold strategy: cash, holdings, transactions |
-| `data/portfolio_state_warrants.json` | Warrant holdings with leverage |
-| `data/layer2_journal.jsonl` | Layer 2 decision log |
-| `data/signal_log.jsonl` | Every signal snapshot (+ `signal_log.db` SQLite) |
-| `data/prophecy.json` | Macro beliefs (silver_bull, btc_range, eth_follows_btc) |
-| `data/trigger_state.json` | Trigger detection baseline |
-| `data/health_state.json` | System health (heartbeat, errors, module failures) |
-| `data/telegram_messages.jsonl` | All sent Telegram messages |
-| `data/fundamentals_cache.json` | Alpha Vantage stock data (daily refresh) |
-| `data/accuracy_cache.json` | Signal accuracy (1d/3d/5d/10d horizons) |
+| File                                 | Purpose                                                 |
+| ------------------------------------ | ------------------------------------------------------- |
+| `data/agent_summary.json`            | Full signal report (all tickers, ~64K tokens)           |
+| `data/agent_summary_compact.json`    | Tiered compaction for Layer 2 (~1400 lines)             |
+| `data/agent_context_t1.json`         | Tier 1 quick-check context (~200 lines)                 |
+| `data/agent_context_t2.json`         | Tier 2 signal context (~600 lines)                      |
+| `data/portfolio_state.json`          | Patient strategy: cash, holdings, transactions          |
+| `data/portfolio_state_bold.json`     | Bold strategy: cash, holdings, transactions             |
+| `data/portfolio_state_warrants.json` | Warrant holdings with leverage                          |
+| `data/layer2_journal.jsonl`          | Layer 2 decision log                                    |
+| `data/signal_log.jsonl`              | Every signal snapshot (+ `signal_log.db` SQLite)        |
+| `data/prophecy.json`                 | Macro beliefs (silver_bull, btc_range, eth_follows_btc) |
+| `data/trigger_state.json`            | Trigger detection baseline                              |
+| `data/health_state.json`             | System health (heartbeat, errors, module failures)      |
+| `data/telegram_messages.jsonl`       | All sent Telegram messages                              |
+| `data/fundamentals_cache.json`       | Alpha Vantage stock data (daily refresh)                |
+| `data/accuracy_cache.json`           | Signal accuracy (1d/3d/5d/10d horizons)                 |
 
 ## CLI Commands
 
@@ -477,6 +536,7 @@ uname -s   # Linux => Steam Deck    MINGW*/MSYS* => herc2 (Windows)
 ```
 
 ### Steam Deck (Linux) — where the loop runs today
+
 - **Python**: `.venv/bin/python` (3.13.5). Every command in this file written as
   `.venv/Scripts/python.exe` is the herc2 form — substitute `.venv/bin/python`.
 - **Config**: symlink `config.json` → `/home/deck/.config/finance-analyzer/config.json`
@@ -487,12 +547,13 @@ uname -s   # Linux => Steam Deck    MINGW*/MSYS* => herc2 (Windows)
   Installed-but-disabled: `pf-metalsloop`, `pf-cryptoloop`, `pf-oilloop`,
   `pf-mstrloop`, `pf-golddigger`.
 - **No GPU.** All local model inference is unavailable here; `phi4_mini` votes
-  via *remote* inference on herc2.
+  via _remote_ inference on herc2.
 - **This host suspends often** — roughly half of wall-clock uptime. Wall-clock
   file staleness is therefore meaningless on its own; see the loop-health
   readers, which anchor on awake time (CLOCK_MONOTONIC) plus a boot id.
 
 ### herc2 (Windows 11 Pro) — GPU / LLM host
+
 - Shell is Git Bash (set via `CLAUDE_CODE_GIT_BASH_PATH`).
 - **Python**: `.venv/Scripts/python.exe` — forward slashes, full path.
 - **GPU**: RTX 3080 10GB, CUDA 13.1. LLM inference runs in a separate venv at
@@ -501,6 +562,7 @@ uname -s   # Linux => Steam Deck    MINGW*/MSYS* => herc2 (Windows)
 - **Scheduled Tasks**: PF-DataLoop, PF-Dashboard, PF-OutcomeCheck, PF-MLRetrain.
 
 ### Both
+
 - **NEVER commit config.json** — it is a symlink to a file outside the repo and
   holds live API keys. Exposed on Mar 15 2026; those credentials are still
   unrotated and the blob is still publicly fetchable. Verify with

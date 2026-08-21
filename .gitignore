@@ -6,6 +6,12 @@ __pycache__/
 .Python
 .venv/
 venv/
+# The trailing slash above matches directories only. Every worktree symlinks
+# .venv to the main checkout's venv (the runtime needs it), and a symlink is
+# not a directory — so it showed up as untracked and one `git add -A` would
+# have committed an absolute-path symlink. Slash-less form covers both.
+# (config.json is already covered by its own rule further down.)
+.venv
 ENV/
 env/
 *.egg-info/
@@ -185,11 +191,14 @@ data/models/meta_learner_*_metrics.json
 # Scratch/debug scripts
 _*.py
 !tests/_state_reset.py
-# ...but _*.py also matches __init__.py, which silently drops the init file
-# of every NEW package (already-tracked ones are unaffected, so this only
-# bites new code and only on a fresh clone — namespace packages hide it
-# locally). Keep package inits.
-!**/__init__.py
+# ...but _*.py also matches every dunder file, which silently drops the
+# __init__.py of every NEW package (already-tracked ones are unaffected, so
+# this only bites new code and only on a fresh clone — namespace packages hide
+# it locally).
+# 2026-08-21: widened from `!**/__init__.py` to all dunders after
+# portfolio/swedbank/__main__.py hit the same rule. Negating the family beats
+# adding one line per dunder we happen to trip over next.
+!**/__*__.py
 _*.ps1
 send_telegram.py
 /test_digest.py
