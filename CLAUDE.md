@@ -530,8 +530,26 @@ Full module map (173 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/S
 ```
 
 Tests using module-level file paths must patch to `tmp_path` for xdist safety.
-Pre-existing failures (integration, config, state isolation) exist — see `docs/TESTING.md`
-for the current count and triage.
+
+**Never read a raw failure count as a regression signal.** This suite reports a
+_different_ 5-10 failures per `-n auto` run from module-level state leaking
+across xdist workers, and on the Deck ~53 more fail because there is no GPU.
+Use the triage tool, which re-runs each failing file serially and only counts a
+failure as real if it fails both ways:
+
+```bash
+# run, confirm, and rewrite the baseline block in docs/TESTING.md
+.venv/bin/python scripts/test_triage.py --run --confirm --update-baseline
+
+# triage a run you already captured, no re-execution
+.venv/bin/python scripts/test_triage.py --input /tmp/fullsuite.txt --confirm
+```
+
+It buckets failures into `llm-infra` / `metals-loop` / `applicable-count` /
+`unknown`. **`unknown` is the bucket that matters** — anything landing there is
+a regression or a gap in the classifier in `scripts/test_triage.py`. Exit code
+is 1 only on real failures, so flakes cannot red a gate. Baseline lives in the
+managed block in `docs/TESTING.md`; regenerate it, don't hand-edit.
 
 ## Environment
 
