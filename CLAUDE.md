@@ -263,6 +263,14 @@ stock/<ob>` serves OHLCV from 1-minute to monthly). Alpaca is the automatic
 - **`data/swedbank_*.json` holds REAL positions and is gitignored — this repo is
   public.** Guarded in `.gitignore` and `.git/info/exclude`. Tests use synthetic
   books only.
+  **The ignore rule only covers `data/`.** A book analysis written anywhere else
+  — `docs/`, repo root — is fully tracked and one `git add -A` from publication;
+  this nearly happened on 2026-08-21. `tests/test_no_real_positions_committed.py`
+  greps tracked content for the account labels (read from the gitignored
+  snapshot, never hardcoded) and fails the build instead. **Write book analysis
+  outside the repo — `~/finance-reports/`.** Note the instrument _names_ are not
+  the secret: `instruments.py` pins them on purpose. Quantities, cost basis and
+  account labels are.
 - Entry: `.venv/bin/python -m portfolio.swedbank {show,quotes,sync}` ·
   loop `data/swedbank_loop.py --loop` · install
   `scripts/deck/install-swedbank-loop.sh` (unit `pf-swedbank`, not auto-enabled)
