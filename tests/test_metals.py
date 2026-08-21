@@ -16,8 +16,18 @@ from portfolio.main import (
 def _make_mock_kline_row():
     """Return a single mock kline row as Binance API would return."""
     return [
-        1706000000000, "2650.5", "2655.0", "2648.0", "2652.3", "100.5",
-        1706003599999, "266500", 500, "60.2", "159600", "0",
+        1706000000000,
+        "2650.5",
+        "2655.0",
+        "2648.0",
+        "2652.3",
+        "100.5",
+        1706003599999,
+        "266500",
+        500,
+        "60.2",
+        "159600",
+        "0",
     ]
 
 
@@ -30,7 +40,9 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(30)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response) as mock_fetch:
+        with patch(
+            "portfolio.data_collector.fetch_with_retry", return_value=mock_response
+        ) as mock_fetch:
             df = binance_fapi_klines("XAUUSDT", interval="1h", limit=30)
             mock_fetch.assert_called_once()
             call_url = mock_fetch.call_args[0][0]
@@ -44,7 +56,9 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(30)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response):
+        with patch(
+            "portfolio.data_collector.fetch_with_retry", return_value=mock_response
+        ):
             df = binance_fapi_klines("XAUUSDT")
             assert df["close"].dtype == float
             assert df["volume"].dtype == float
@@ -55,7 +69,9 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(5)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response):
+        with patch(
+            "portfolio.data_collector.fetch_with_retry", return_value=mock_response
+        ):
             df = binance_fapi_klines("XAGUSDT", interval="5m", limit=5)
             assert "time" in df.columns
             assert len(df) == 5
@@ -66,7 +82,9 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(10)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response) as mock_fetch:
+        with patch(
+            "portfolio.data_collector.fetch_with_retry", return_value=mock_response
+        ) as mock_fetch:
             binance_fapi_klines("XAUUSDT", interval="4h", limit=50)
             call_kwargs = mock_fetch.call_args
             params = call_kwargs[1]["params"]
@@ -95,6 +113,7 @@ class TestFetchKlinesMetals:
     def test_fetch_klines_alpaca_still_works(self):
         """Alpaca source still works after adding binance_fapi."""
         import portfolio.shared_state as _ss
+
         _ss._current_market_state = "open"
         with patch("portfolio.data_collector.alpaca_klines") as mock_alpaca:
             mock_alpaca.return_value = pd.DataFrame({"close": [100.0]})
@@ -116,16 +135,19 @@ class TestMetalsConfig:
 
     def test_metals_not_in_crypto(self):
         from portfolio.main import CRYPTO_SYMBOLS
+
         assert "XAU-USD" not in CRYPTO_SYMBOLS
         assert "XAG-USD" not in CRYPTO_SYMBOLS
 
     def test_metals_not_in_stocks(self):
         from portfolio.main import STOCK_SYMBOLS
+
         assert "XAU-USD" not in STOCK_SYMBOLS
         assert "XAG-USD" not in STOCK_SYMBOLS
 
     def test_metals_in_symbols_dict(self):
         from portfolio.main import SYMBOLS
+
         assert "XAU-USD" in SYMBOLS
         assert "XAG-USD" in SYMBOLS
         assert "binance_fapi" in SYMBOLS["XAU-USD"]
@@ -142,6 +164,7 @@ class TestMetalsMarketState:
         from datetime import datetime
 
         from portfolio.main import get_market_state
+
         # Saturday 12:00 UTC
         with patch("portfolio.market_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 2, 21, 12, 0, tzinfo=UTC)
@@ -156,6 +179,7 @@ class TestMetalsMarketState:
         from datetime import datetime
 
         from portfolio.main import get_market_state
+
         # Wednesday 3:00 UTC (market closed)
         with patch("portfolio.market_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 2, 18, 3, 0, tzinfo=UTC)
@@ -170,6 +194,7 @@ class TestMetalsMarketState:
         from datetime import datetime
 
         from portfolio.main import get_market_state
+
         # Wednesday 14:00 UTC (market open)
         with patch("portfolio.market_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 2, 18, 14, 0, tzinfo=UTC)
@@ -186,6 +211,7 @@ class TestMetalsSignalConfig:
     def test_metals_total_applicable(self):
         """Metals should have 28 applicable signals (incl. orderbook_flow + metals_cross_asset + forecast + qwen3)."""
         from portfolio.main import generate_signal
+
         # Create minimal indicators
         ind = {
             "close": 2650.0,
@@ -222,6 +248,7 @@ class TestMetalsSignalConfig:
         from unittest.mock import patch
 
         from portfolio.main import generate_signal
+
         ind = {
             "close": 130.0,
             "rsi": 50.0,
@@ -244,15 +271,22 @@ class TestMetalsSignalConfig:
         # forecast (research session signal audit).
         # 2026-05-19: 15 → 11 after further May disables.
         # 2026-05-26: 11 → 10 after re-disabling crypto_evrp.
-        # 2026-05-28: 10 → 15 after enabling 5 proven regime signals.
-        # 2026-06-11 (B6 audit + June disable wave): 15 → 12. ministral now
-        # counts on all tickers (special-case removed); June disables trimmed
-        # the MSTR set. GPU pinned on via should_skip_gpu=False above.
-        assert extra["_total_applicable"] == 12
+        # 2026-08-21: 12 → 10. a953f63b (2026-07-17) benched ministral + qwen3
+        # into DISABLED_SIGNALS; both counted on MSTR, so the stock set lost 2.
+        # That commit's message says "133 targeted tests pass" — the full suite
+        # was never run, so this assertion sat red for 5 weeks.
+        # Re-derive after ANY roster change:
+        #   python -c "from portfolio.signal_engine import _compute_applicable_count as C; print(C('MSTR'))"
+        # MSTR is GPU-independent here (10 either way) because the remaining
+        # GPU_SIGNALS are globally disabled and phi4_mini is deliberately NOT
+        # overridden onto MSTR.
+        assert extra["_total_applicable"] == 10
 
-    def test_crypto_total_applicable(self):
-        """Crypto: 33 → 26 after April-May disable wave (2026-05-10)."""
+    @patch("portfolio.llama_server.remote_llm_available", return_value=True)
+    def test_crypto_total_applicable(self, _remote):
+        """Crypto applicable count — tripwire on the active roster."""
         from portfolio.main import generate_signal
+
         ind = {
             "close": 67000.0,
             "rsi": 50.0,
@@ -270,9 +304,13 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        # 2026-05-28: 14 → 19 after enabling 5 proven regime signals.
-        # 2026-06-11 (B6 audit + June disable wave): 19 → 15. ministral
-        # already counted on crypto (no +1 from special-case removal here),
-        # and the June disables trimmed the crypto applicable set. Crypto is
-        # 24/7 so GPU signals always count.
-        assert extra["_total_applicable"] == 15
+        # 2026-08-21: 15 → 14. a953f63b (2026-07-17) benched ministral + qwen3;
+        # only ministral had been counting on crypto, hence −1 rather than −2.
+        #
+        # remote_llm_available is PINNED above: generate_signal forces skip_gpu
+        # when herc2's llama-server is unreachable (signal_engine.py:4035),
+        # which removes GPU_SIGNALS from the count and takes crypto to 13.
+        # Unpinned, this test tracks whether herc2 is awake.
+        # Re-derive after ANY roster change:
+        #   python -c "from portfolio.signal_engine import _compute_applicable_count as C; print(C('BTC-USD'))"
+        assert extra["_total_applicable"] == 14

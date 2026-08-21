@@ -52,9 +52,12 @@ _NO_PENALTIES = {"confidence_penalties": {"enabled": False}}
 # accuracy above the gate so it exercises the voting logic, not live data.
 _HERMETIC_ACC = {
     sig: {
-        "accuracy": 0.60, "total": 500,
-        "buy_accuracy": 0.60, "total_buy": 250,
-        "sell_accuracy": 0.60, "total_sell": 250,
+        "accuracy": 0.60,
+        "total": 500,
+        "buy_accuracy": 0.60,
+        "total_buy": 250,
+        "sell_accuracy": 0.60,
+        "total_sell": 250,
     }
     for sig in ("rsi", "macd", "bb", "ema", "mean_reversion", "momentum")
 }
@@ -67,34 +70,43 @@ def _pin_accuracy():
     them (use as ``with contextlib.ExitStack()`` or via the fixture below).
     """
     import contextlib
+
     stack = contextlib.ExitStack()
     for name in (
         "get_or_compute_accuracy",
         "get_or_compute_recent_accuracy",
     ):
         stack.enter_context(
-            mock.patch(f"portfolio.accuracy_stats.{name}",
-                       return_value=dict(_HERMETIC_ACC))
+            mock.patch(
+                f"portfolio.accuracy_stats.{name}", return_value=dict(_HERMETIC_ACC)
+            )
         )
     stack.enter_context(
-        mock.patch("portfolio.accuracy_stats.get_or_compute_per_ticker_accuracy",
-                   return_value={})
+        mock.patch(
+            "portfolio.accuracy_stats.get_or_compute_per_ticker_accuracy",
+            return_value={},
+        )
     )
     # The PER-TICKER directional cache overrides the global blend inside
     # generate_signal (signal_engine.py ~4521) — including buy_accuracy used
     # by the directional gate. It's the real source of the live drift (rsi
     # BUY 41%, bb 39% on MSTR). Return {} so the pinned globals stand.
     stack.enter_context(
-        mock.patch("portfolio.accuracy_stats.accuracy_by_ticker_signal_cached",
-                   return_value={})
+        mock.patch(
+            "portfolio.accuracy_stats.accuracy_by_ticker_signal_cached", return_value={}
+        )
     )
     return stack
 
 
 # Stock-price defaults for consensus tests (conftest defaults to crypto prices)
 _STOCK_DEFAULTS = dict(
-    close=130.0, ema9=130.0, ema21=130.0,
-    bb_upper=135.0, bb_lower=125.0, bb_mid=130.0,
+    close=130.0,
+    ema9=130.0,
+    ema21=130.0,
+    bb_upper=135.0,
+    bb_lower=125.0,
+    bb_mid=130.0,
 )
 
 
@@ -160,7 +172,9 @@ class TestStockConsensus:
         # 0.44 gate so live cache drift can't direction-gate the BUY votes.
         with _pin_accuracy():
             action, conf, extra = generate_signal(
-                ind, ticker="MSTR", config=_NO_PENALTIES,
+                ind,
+                ticker="MSTR",
+                config=_NO_PENALTIES,
             )
         assert extra["_buy_count"] >= 3
         assert action == "BUY"
@@ -180,7 +194,9 @@ class TestStockConsensus:
             price_vs_bb="above_upper",  # above upper band → SELL vote
         )
         action, conf, extra = generate_signal(
-            ind, ticker="MSTR", config=_NO_PENALTIES,
+            ind,
+            ticker="MSTR",
+            config=_NO_PENALTIES,
         )
         assert extra["_sell_count"] >= 3
         assert action == "SELL"
@@ -216,7 +232,9 @@ class TestStockConsensus:
             )
             with _pin_accuracy():
                 action, conf, extra = generate_signal(
-                    ind, ticker=ticker, config=_NO_PENALTIES,
+                    ind,
+                    ticker=ticker,
+                    config=_NO_PENALTIES,
                 )
             assert action == "BUY", f"{ticker} should reach BUY consensus with 3 voters"
 
@@ -269,7 +287,9 @@ class TestCryptoConsensus:
             close=69000.0,
         )
         action, conf, extra = generate_signal(
-            ind, ticker="BTC-USD", config=_NO_PENALTIES,
+            ind,
+            ticker="BTC-USD",
+            config=_NO_PENALTIES,
         )
         assert extra["_buy_count"] >= 3
         assert action == "BUY"
@@ -400,25 +420,31 @@ class TestStockSignalVoteCounts:
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
         # 2026-05-28: 9 → 14 after enabling 5 proven regime signals.
-        # 2026-06-11 (B6 audit): 14 → 12. The "ministral only counts on
-        # crypto" special-case was removed (_compute_applicable_count now
-        # counts ministral on ALL tickers), and the June disable wave
-        # trimmed the MSTR set. Pinned should_skip_gpu=False so the GPU
-        # signals (incl. ministral) count deterministically regardless of
-        # MSTR market hours — was flaky on the unmocked path.
-        assert extra["_total_applicable"] == 12
+        # 2026-08-21: 12 → 10. a953f63b (2026-07-17) benched ministral + qwen3,
+        # both of which counted on MSTR. should_skip_gpu=False stays pinned
+        # above, though MSTR now counts 10 either way — the remaining
+        # GPU_SIGNALS are globally disabled and phi4_mini is deliberately not
+        # overridden onto MSTR. Re-derive after ANY roster change:
+        #   python -c "from portfolio.signal_engine import _compute_applicable_count as C; print(C('MSTR'))"
+        assert extra["_total_applicable"] == 10
 
+    @mock.patch("portfolio.llama_server.remote_llm_available", return_value=True)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_crypto_total_applicable(self, _mock):
+    def test_crypto_total_applicable(self, _mock, _remote):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        # 2026-05-10: 33 → 26 after the disable wave above. Same
-        # tripwire pattern as the stock counterpart.
-        # 2026-05-28: 14 → 19 after enabling 5 proven regime signals.
-        # 2026-06-11 (B6 audit + June disable wave): 19 → 15. ministral now
-        # counts on all tickers (already counted for crypto, so no +1 here),
-        # and the June signal disables trimmed the crypto applicable set.
-        assert extra["_total_applicable"] == 15
+        # 2026-08-21: 15 → 14. a953f63b (2026-07-17) benched ministral + qwen3;
+        # only ministral had been counting on crypto, hence −1 not −2.
+        #
+        # remote_llm_available is PINNED. should_skip_gpu() alone returns False
+        # for non-stock tickers, but generate_signal has a second path
+        # (signal_engine.py:4035) that forces skip_gpu when the remote
+        # llama-server on herc2 is unreachable, which REMOVES GPU_SIGNALS from
+        # the count — crypto 14 → 13. Unpinned, this test passes only while
+        # herc2 happens to be awake.
+        # Re-derive after ANY roster change:
+        #   python -c "from portfolio.signal_engine import _compute_applicable_count as C; print(C('BTC-USD'))"
+        assert extra["_total_applicable"] == 14
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):

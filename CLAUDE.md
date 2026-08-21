@@ -370,6 +370,29 @@ Inflation Momentum, Trend Slope Momentum
 ### Signal Mechanics
 
 - **MIN_VOTERS = 3** (crypto/stocks), **2** (metals, since 2026-05-11 — MIN_VOTERS=3 produced 0 metals trades in 20 days). Consensus = active voters (BUY+SELL), not total.
+- **…but MIN_VOTERS is only the floor. The binding gate is regime-dependent and
+  much stricter** (`_dynamic_min_voters_for_regime`, signal_engine.py:2565).
+  Documented as "3" here until 2026-08-21, which was misleading:
+
+  | regime                       | crypto / stocks | metals |
+  | ---------------------------- | --------------- | ------ |
+  | trending-up / trending-down  | 3               | 2      |
+  | high-vol                     | 4               | 3      |
+  | **ranging / unknown / None** | **5**           | **4**  |
+
+  Fewer active voters than the regime quorum ⇒ forced HOLD at confidence 0.0,
+  **even when the weighted consensus says BUY at confidence 1.0**. Verified live
+  2026-08-21: BTC-USD reported `action=HOLD, confidence=0.00` with 3 BUY / 1
+  SELL — 4 active voters against a ranging quorum of 5. Every Tier-1 ticker was
+  `ranging` at the time, so the effective crypto requirement was 5 of 14
+  applicable signals. If you are wondering why the system almost never emits a
+  non-HOLD crypto signal, this is why — not the accuracy gate.
+  `tests/test_consensus.py::TestCryptoConsensus::test_crypto_buy_with_3_voters`
+  encodes the old "3 voters ⇒ BUY" contract and is **currently failing on this
+  host** as a result. Left failing deliberately: reconciling it means deciding
+  whether the quorum or the documented contract is wrong, and that changes live
+  signal output.
+
 - **Accuracy gate**: signals below 47% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash). Tiered: 50% for 7K+ sample signals.
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
@@ -531,11 +554,27 @@ Full module map (173 top-level `portfolio/*.py`, 300 incl. subpackages): `docs/S
 
 Tests using module-level file paths must patch to `tmp_path` for xdist safety.
 
-**Never read a raw failure count as a regression signal.** This suite reports a
-_different_ 5-10 failures per `-n auto` run from module-level state leaking
-across xdist workers, and on the Deck ~53 more fail because there is no GPU.
-Use the triage tool, which re-runs each failing file serially and only counts a
-failure as real if it fails both ways:
+**Some tests read live production state, so the suite's result depends on the
+host and on the time of day.** Two confirmed couplings, both found 2026-08-21:
+
+- **`data/accuracy_cache.json`.** `test_crypto_buy_with_3_voters` fails in the
+  main checkout and passes in a fresh worktree — the only difference is that the
+  worktree has no accuracy cache (it is gitignored). The cache has a 1 h TTL and
+  is rebuilt from live market outcomes, so this test's verdict tracks the
+  market. This — not "module-level state leakage" — is the real cause of at
+  least part of the rotating-flake set described further down.
+- **herc2 reachability.** `generate_signal` forces `skip_gpu` when the remote
+  llama-server is unreachable (signal_engine.py:4035), which **removes**
+  GPU_SIGNALS from the applicable count: crypto 14 → 13, metals 12 → 11.
+  Measured both ways. Any test asserting an applicable count must pin
+  `portfolio.llama_server.remote_llm_available`, or it silently tracks whether
+  herc2 happens to be awake. The two crypto count tests now pin it.
+
+**Never read a raw failure count as a regression signal.** On top of the above,
+this suite reports a _different_ 5-10 failures per `-n auto` run, and on the
+Deck ~53 more fail because there is no GPU. Use the triage tool, which re-runs
+each failing file serially and only counts a failure as real if it fails both
+ways:
 
 ```bash
 # run, confirm, and rewrite the baseline block in docs/TESTING.md
